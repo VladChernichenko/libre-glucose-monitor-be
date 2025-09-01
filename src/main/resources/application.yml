@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: glucose-monitor-be
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/glucose_monitor
+    username: glucose_monitor_user
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+server:
+  port: 8080
+  error:
+    include-stacktrace: never
+
+logging:
+  level:
+    org:
+      hibernate:
+        SQL: DEBUG
+        type:
+          descriptor:
+            sql:
+              BasicBinder: TRACE
+        tool:
+          schema: DEBUG
+      springframework:
+        orm:
+          jpa: DEBUG
+
+app:
+  features:
+    backend-mode-enabled: true
+    insulin-calculator-enabled: true
+    carbs-on-board-enabled: true
+    glucose-data-enabled: false
+    user-configuration-enabled: false
+
+    # Migration percentages (0-100)
+    insulin-calculator-migration-percent: 25
+    carbs-on-board-migration-percent: 25
+    glucose-data-migration-percent: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
