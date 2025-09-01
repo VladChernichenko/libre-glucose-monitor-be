@@ -6,17 +6,11 @@ spring:
       host: localhost
       port: 6379
       timeout: 2000
-security:
-  jwt:
-    secret: "very-strong-secret-change-me-please-make-it-long-and-secure-in-production"
-    access-expiration-ms: 3600000      # 1 hour
-    refresh-expiration-ms: 86400000    # 24 hours
   datasource:
     url: jdbc:postgresql://localhost:5432/glucose_monitor
     username: glucose_monitor_user
-    password: ${DB_PASSWORD}
+    password: ${DB_PASSWORD:glucose}
     driver-class-name: org.postgresql.Driver
-
   jpa:
     hibernate:
       ddl-auto: update
@@ -25,6 +19,12 @@ security:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
+
+security:
+  jwt:
+    secret: "very-strong-secret-change-me-please-make-it-long-and-secure-in-production"
+    access-expiration-ms: 3600000      # 1 hour
+    refresh-expiration-ms: 86400000    # 24 hours
 
 server:
   port: 8080
