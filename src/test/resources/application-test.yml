@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: glucose-monitor-be-test
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.H2Dialect
+        hbm2ddl:
+          auto: create-drop
+  h2:
+    console:
+      enabled: true
+
+security:
+  jwt:
+    secret: "test-secret-key-for-integration-tests-only"
+    access-expiration-ms: 3600000      # 1 hour
+    refresh-expiration-ms: 86400000    # 24 hours
+
+logging:
+  level:
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+    che.glucosemonitorbe: DEBUG
