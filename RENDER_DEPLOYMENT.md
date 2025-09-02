@@ -13,9 +13,18 @@ This guide will help you deploy your Spring Boot application to Render with a Po
 2. Click "New +" → "PostgreSQL"
 3. Configure your database:
    - **Name**: `glucose-monitor-db`
-   - **Database**: `glucose_monitor`
+   - **Database**: `glucose_monitor` (must be lowercase with underscores only)
    - **User**: `glucose_monitor_user`
    - **Plan**: Free (or paid if you need more resources)
+
+### ⚠️ Important: Render Database Naming Requirements
+
+Render PostgreSQL databases must follow these naming rules:
+- **Database name**: Must match pattern `/(^[a-z_][a-z0-9_]*$)|(^$)/`
+- **Allowed characters**: lowercase letters (a-z), numbers (0-9), underscores (_)
+- **Must start with**: lowercase letter or underscore
+- **Examples**: ✅ `glucose_monitor`, ✅ `my_app_db`, ❌ `glucose-monitor`, ❌ `MyApp`
+
 4. Click "Create Database"
 5. **Important**: Save the connection details, especially the `DATABASE_URL`
 
@@ -71,6 +80,7 @@ Your application is configured to use this automatically.
 - Ensure your PostgreSQL service is running
 - Check that `DATABASE_URL` is correctly set
 - Verify the database name, username, and password match
+- **Important**: Database name must be lowercase with underscores only (e.g., `glucose_monitor`, not `glucose-monitor`)
 
 ### Build Failures
 - Check the build logs in Render dashboard
