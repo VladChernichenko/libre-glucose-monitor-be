@@ -1,14 +1,17 @@
-# Multi-stage build for Spring Boot app
-FROM eclipse-temurin:17-jdk AS builder
+# ---------- Builder stage ----------
+FROM openjdk:17 AS builder
 
-# Set working directory
+ENV JAVA_HOME=/usr/local/openjdk-17
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
 WORKDIR /app
 
-# Copy gradle files
+# Copy build scripts and project files
 COPY gradlew .
 COPY gradle gradle
 COPY build.gradle .
 COPY settings.gradle .
+COPY src src
 
 # Make gradlew executable
 RUN chmod +x gradlew
@@ -16,37 +19,35 @@ RUN chmod +x gradlew
 # Download dependencies
 RUN ./gradlew dependencies
 
-# Copy source code
-COPY src src
-
-# Build the application
+# Build the application (skip tests)
 RUN ./gradlew build -x test
 
-# Production stage
+
+# ---------- Production stage ----------
 FROM eclipse-temurin:17-jre
 
-# Dockerfile
+# Create non-root user
 RUN groupadd --gid 1001 appgroup && \
     useradd --uid 1001 --gid 1001 --create-home appuser
 
 # Set working directory
 WORKDIR /app
 
-# Copy built jar from builder stage
+# Copy the built JAR from the builder stage
 COPY --from=builder /app/build/libs/*.jar app.jar
 
-# Change ownership to app user
+# Set ownership
 RUN chown -R appuser:appgroup /app
 
-# Switch to app user
+# Use non-root user
 USER appuser
 
 # Expose port
 EXPOSE 8080
 
-# Health check
+# Add healthcheck
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
 
-# Start the application
+# Run the app
 ENTRYPOINT ["java", "-jar", "app.jar"]
