@@ -25,9 +25,9 @@ RUN ./gradlew build -x test
 # Production stage
 FROM eclipse-temurin:17-jre
 
-# Create app user
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
+# Dockerfile
+RUN addgroup appgroup && \
+    adduser -D -G appgroup appuser
 
 # Set working directory
 WORKDIR /app
