@@ -26,8 +26,8 @@ RUN ./gradlew build -x test
 FROM eclipse-temurin:17-jre
 
 # Dockerfile
-RUN addgroup appgroup && \
-    adduser -D -G appgroup appuser
+RUN groupadd --gid 1001 appgroup && \
+    useradd --uid 1001 --gid 1001 --create-home appuser
 
 # Set working directory
 WORKDIR /app
