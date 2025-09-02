@@ -19,6 +19,7 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns("*")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT")
                 .allowedHeaders("*")
+                .exposedHeaders("Authorization")
                 .allowCredentials(false)
                 .maxAge(3600);
     }
@@ -26,10 +27,25 @@ public class CorsConfig implements WebMvcConfigurer {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
+        
+        // Allow all origins for development
         configuration.setAllowedOriginPatterns(Arrays.asList("*"));
-        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT"));
+        
+        // Allow all common HTTP methods
+        configuration.setAllowedMethods(Arrays.asList(
+            "GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "PATCH"
+        ));
+        
+        // Allow all headers
         configuration.setAllowedHeaders(Arrays.asList("*"));
+        
+        // Expose Authorization header for JWT tokens
+        configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
+        
+        // Don't allow credentials with wildcard origins
         configuration.setAllowCredentials(false);
+        
+        // Cache preflight response for 1 hour
         configuration.setMaxAge(3600L);
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

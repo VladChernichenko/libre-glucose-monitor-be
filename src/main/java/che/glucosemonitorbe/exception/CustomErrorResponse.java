@@ -1,7 +1,14 @@
 package che.glucosemonitorbe.exception;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.time.LocalDateTime;
 
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class CustomErrorResponse {
     private int status;
     private String error;
@@ -14,7 +21,6 @@ public class CustomErrorResponse {
         this.error = error;
         this.message = message;
         this.path = path;
+        this.timestamp = LocalDateTime.now();
     }
-
-    // геттеры/сеттеры
 }
