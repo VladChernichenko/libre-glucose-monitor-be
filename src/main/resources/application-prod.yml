@@ -1,0 +1,52 @@
+spring:
+  datasource:
+    # Render provides DATABASE_URL in format: postgresql://username:password@host:port/database
+    # Spring Boot can parse this automatically
+    url: ${DATABASE_URL}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate  # Use Flyway for migrations, validate schema
+    show-sql: false  # Disable SQL logging in production
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  profiles:
+    active: prod
+
+security:
+  jwt:
+    secret: ${JWT_SECRET}
+    access-expiration-ms: 3600000      # 1 hour
+    refresh-expiration-ms: 86400000    # 24 hours
+
+server:
+  port: ${PORT:8080}  # Render sets PORT environment variable
+  error:
+    include-stacktrace: never
+
+logging:
+  level:
+    root: INFO
+    che.glucosemonitorbe: INFO
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# CORS configuration for production
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:https://your-frontend-domain.onrender.com}

@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: glucose-monitor-be
+    env: java
+    buildCommand: ./gradlew build
+    startCommand: java -Dspring.profiles.active=prod -jar build/libs/glucose-monitor-be-*.jar
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://your-frontend-domain.onrender.com
+    healthCheckPath: /actuator/health
+    plan: free
+
+  - type: pserv
+    name: glucose-monitor-db
+    env: postgresql
+    plan: free
