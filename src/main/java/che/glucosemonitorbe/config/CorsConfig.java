@@ -16,10 +16,10 @@ public class CorsConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOriginPatterns("*")
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT")
+                .allowedOriginPatterns("http://localhost:3000", "http://127.0.0.1:3000", "*")
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "PATCH")
                 .allowedHeaders("*")
-                .exposedHeaders("Authorization")
+                .exposedHeaders("Authorization", "Content-Type")
                 .allowCredentials(false)
                 .maxAge(3600);
     }
@@ -28,8 +28,12 @@ public class CorsConfig implements WebMvcConfigurer {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         
-        // Allow all origins for development
-        configuration.setAllowedOriginPatterns(Arrays.asList("*"));
+        // Allow specific origins for development (port 3000) and wildcard as fallback
+        configuration.setAllowedOriginPatterns(Arrays.asList(
+            "http://localhost:3000", 
+            "http://127.0.0.1:3000", 
+            "*"
+        ));
         
         // Allow all common HTTP methods
         configuration.setAllowedMethods(Arrays.asList(

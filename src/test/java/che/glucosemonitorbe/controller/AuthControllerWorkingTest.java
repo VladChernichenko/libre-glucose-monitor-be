@@ -1,6 +1,8 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.dto.AuthRequest;
 import che.glucosemonitorbe.dto.AuthResponse;
+import che.glucosemonitorbe.dto.RefreshTokenRequest;
 import che.glucosemonitorbe.dto.RegisterRequest;
 import che.glucosemonitorbe.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -187,5 +189,352 @@ class AuthControllerWorkingTest {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new HttpEntity<>(request, headers);
+    }
+
+    private HttpEntity<AuthRequest> createHttpEntity(AuthRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(request, headers);
+    }
+
+    private HttpEntity<RefreshTokenRequest> createHttpEntity(RefreshTokenRequest request) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(request, headers);
+    }
+
+    // ==================== LOGIN ENDPOINT TESTS ====================
+
+    @Test
+    @DisplayName("Should successfully login with valid credentials")
+    void shouldLoginSuccessfullyWithValidCredentials() {
+        // Given - First register a user
+        RegisterRequest registerRequest = createValidRegisterRequest();
+        testRestTemplate.postForEntity("/api/auth/register", createHttpEntity(registerRequest), AuthResponse.class);
+        
+        // Create login request
+        AuthRequest loginRequest = new AuthRequest();
+        loginRequest.setUsername("testuser");
+        loginRequest.setPassword("testpass123");
+        
+        // When
+        ResponseEntity<AuthResponse> response = testRestTemplate.postForEntity(
+            "/api/auth/login", 
+            createHttpEntity(loginRequest), 
+            AuthResponse.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        
+        AuthResponse authResponse = response.getBody();
+        assertNotNull(authResponse.getAccessToken());
+        assertNotNull(authResponse.getRefreshToken());
+        assertEquals("Bearer", authResponse.getTokenType());
+        assertNotNull(authResponse.getExpiresIn());
+        assertTrue(authResponse.getExpiresIn() > 0);
+    }
+
+    @Test
+    @DisplayName("Should fail to login with invalid username")
+    void shouldFailToLoginWithInvalidUsername() {
+        // Given
+        AuthRequest loginRequest = new AuthRequest();
+        loginRequest.setUsername("nonexistentuser");
+        loginRequest.setPassword("testpass123");
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/login", 
+            createHttpEntity(loginRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertNotNull(response.getBody());
+        // Check for any authentication error message
+        String responseBody = response.getBody();
+        assertTrue(responseBody.contains("Bad credentials") || 
+                  responseBody.contains("Unauthorized") || 
+                  responseBody.contains("Authentication failed") ||
+                  responseBody.contains("Invalid credentials"));
+    }
+
+    @Test
+    @DisplayName("Should fail to login with invalid password")
+    void shouldFailToLoginWithInvalidPassword() {
+        // Given - First register a user
+        RegisterRequest registerRequest = createValidRegisterRequest();
+        testRestTemplate.postForEntity("/api/auth/register", createHttpEntity(registerRequest), AuthResponse.class);
+        
+        // Create login request with wrong password
+        AuthRequest loginRequest = new AuthRequest();
+        loginRequest.setUsername("testuser");
+        loginRequest.setPassword("wrongpassword");
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/login", 
+            createHttpEntity(loginRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertNotNull(response.getBody());
+        // Check for any authentication error message
+        String responseBody = response.getBody();
+        assertTrue(responseBody.contains("Bad credentials") || 
+                  responseBody.contains("Unauthorized") || 
+                  responseBody.contains("Authentication failed") ||
+                  responseBody.contains("Invalid credentials"));
+    }
+
+    @Test
+    @DisplayName("Should fail to login with empty username")
+    void shouldFailToLoginWithEmptyUsername() {
+        // Given
+        AuthRequest loginRequest = new AuthRequest();
+        loginRequest.setUsername("");
+        loginRequest.setPassword("testpass123");
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/login", 
+            createHttpEntity(loginRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Username is required"));
+    }
+
+    @Test
+    @DisplayName("Should fail to login with empty password")
+    void shouldFailToLoginWithEmptyPassword() {
+        // Given
+        AuthRequest loginRequest = new AuthRequest();
+        loginRequest.setUsername("testuser");
+        loginRequest.setPassword("");
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/login", 
+            createHttpEntity(loginRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Password is required"));
+    }
+
+    @Test
+    @DisplayName("Should fail to login with malformed request body")
+    void shouldFailToLoginWithMalformedRequestBody() {
+        // Given - Invalid JSON
+        String invalidJson = "{ \"username\": \"testuser\", \"password\": }";
+        
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(invalidJson, headers);
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/login", 
+            entity, 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+    }
+
+    // ==================== REFRESH TOKEN ENDPOINT TESTS ====================
+
+    @Test
+    @DisplayName("Should successfully refresh token with valid refresh token")
+    void shouldRefreshTokenSuccessfullyWithValidRefreshToken() {
+        // Given - First register and login to get tokens
+        RegisterRequest registerRequest = createValidRegisterRequest();
+        ResponseEntity<AuthResponse> registerResponse = testRestTemplate.postForEntity(
+            "/api/auth/register", 
+            createHttpEntity(registerRequest), 
+            AuthResponse.class
+        );
+        
+        String refreshToken = registerResponse.getBody().getRefreshToken();
+        RefreshTokenRequest refreshRequest = new RefreshTokenRequest();
+        refreshRequest.setRefreshToken(refreshToken);
+        
+        // When
+        ResponseEntity<AuthResponse> response = testRestTemplate.postForEntity(
+            "/api/auth/refresh", 
+            createHttpEntity(refreshRequest), 
+            AuthResponse.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        
+        AuthResponse authResponse = response.getBody();
+        assertNotNull(authResponse.getAccessToken());
+        assertNotNull(authResponse.getRefreshToken());
+        assertEquals("Bearer", authResponse.getTokenType());
+        assertNotNull(authResponse.getExpiresIn());
+        assertTrue(authResponse.getExpiresIn() > 0);
+        
+        // Verify tokens are properly generated (implementation may return same or different tokens)
+        assertNotNull(authResponse.getAccessToken());
+        assertNotNull(authResponse.getRefreshToken());
+        // Note: The current implementation may return the same tokens, which is acceptable
+    }
+
+    @Test
+    @DisplayName("Should fail to refresh token with invalid refresh token")
+    void shouldFailToRefreshTokenWithInvalidRefreshToken() {
+        // Given
+        RefreshTokenRequest refreshRequest = new RefreshTokenRequest();
+        refreshRequest.setRefreshToken("invalid.refresh.token");
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/refresh", 
+            createHttpEntity(refreshRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Invalid refresh token"));
+    }
+
+    @Test
+    @DisplayName("Should fail to refresh token with access token instead of refresh token")
+    void shouldFailToRefreshTokenWithAccessToken() {
+        // Given - First register to get access token
+        RegisterRequest registerRequest = createValidRegisterRequest();
+        ResponseEntity<AuthResponse> registerResponse = testRestTemplate.postForEntity(
+            "/api/auth/register", 
+            createHttpEntity(registerRequest), 
+            AuthResponse.class
+        );
+        
+        // Use access token instead of refresh token
+        RefreshTokenRequest refreshRequest = new RefreshTokenRequest();
+        refreshRequest.setRefreshToken(registerResponse.getBody().getAccessToken());
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/refresh", 
+            createHttpEntity(refreshRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Invalid refresh token"));
+    }
+
+    @Test
+    @DisplayName("Should fail to refresh token with empty refresh token")
+    void shouldFailToRefreshTokenWithEmptyRefreshToken() {
+        // Given
+        RefreshTokenRequest refreshRequest = new RefreshTokenRequest();
+        refreshRequest.setRefreshToken("");
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/refresh", 
+            createHttpEntity(refreshRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Refresh token is required"));
+    }
+
+    @Test
+    @DisplayName("Should fail to refresh token with malformed request body")
+    void shouldFailToRefreshTokenWithMalformedRequestBody() {
+        // Given - Invalid JSON
+        String invalidJson = "{ \"refreshToken\": }";
+        
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<String> entity = new HttpEntity<>(invalidJson, headers);
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/refresh", 
+            entity, 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("Should fail to refresh token with null refresh token")
+    void shouldFailToRefreshTokenWithNullRefreshToken() {
+        // Given
+        RefreshTokenRequest refreshRequest = new RefreshTokenRequest();
+        refreshRequest.setRefreshToken(null);
+        
+        // When
+        ResponseEntity<String> response = testRestTemplate.postForEntity(
+            "/api/auth/refresh", 
+            createHttpEntity(refreshRequest), 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Refresh token is required"));
+    }
+
+    // ==================== TEST ENDPOINT TESTS ====================
+
+    @Test
+    @DisplayName("Should return test message successfully")
+    void shouldReturnTestMessageSuccessfully() {
+        // When
+        ResponseEntity<String> response = testRestTemplate.getForEntity(
+            "/api/auth/test", 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals("Auth endpoint is working!", response.getBody());
+    }
+
+    @Test
+    @DisplayName("Should return test message with correct headers")
+    void shouldReturnTestMessageWithCorrectHeaders() {
+        // When
+        ResponseEntity<String> response = testRestTemplate.getForEntity(
+            "/api/auth/test", 
+            String.class
+        );
+        
+        // Then
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getHeaders().getContentType());
+        assertTrue(response.getHeaders().getContentType().toString().contains("text/plain"));
+        assertEquals("Auth endpoint is working!", response.getBody());
     }
 }
