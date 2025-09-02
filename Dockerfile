@@ -1,7 +1,7 @@
 # ---------- Builder stage ----------
-FROM openjdk:17 AS builder
+FROM eclipse-temurin:21 AS builder
 
-ENV JAVA_HOME=/usr/local/openjdk-17
+ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
 WORKDIR /app
@@ -15,9 +15,6 @@ COPY src src
 
 # Make gradlew executable
 RUN chmod +x gradlew
-
-# Download dependencies
-RUN ./gradlew dependencies
 
 # Build the application (skip tests)
 RUN ./gradlew build -x test
