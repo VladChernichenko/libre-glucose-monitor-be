@@ -1,0 +1,50 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: glucose-monitor-postgres
+    environment:
+      POSTGRES_DB: glucose_monitor
+      POSTGRES_USER: glucose_monitor_user
+      POSTGRES_PASSWORD: glucose
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./setup_database.sql:/docker-entrypoint-initdb.d/setup_database.sql
+      - ./fix_users_table.sql:/docker-entrypoint-initdb.d/fix_users_table.sql
+    networks:
+      - glucose-monitor-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U glucose_monitor_user -d glucose_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Spring Boot Application
+  app:
+    build: .
+    container_name: glucose-monitor-app
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_PASSWORD: glucose
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - glucose-monitor-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+
+networks:
+  glucose-monitor-network:
+    driver: bridge

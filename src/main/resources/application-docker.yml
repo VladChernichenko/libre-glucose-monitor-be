@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: glucose-monitor-be
+  datasource:
+    url: jdbc:postgresql://postgres:5432/glucose_monitor
+    username: glucose_monitor_user
+    password: ${DB_PASSWORD:glucose}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+security:
+  jwt:
+    secret: "very-strong-secret-change-me-please-make-it-long-and-secure-in-production"
+    access-expiration-ms: 3600000      # 1 hour
+    refresh-expiration-ms: 86400000    # 24 hours
+
+logging:
+  level:
+    org.springframework.security: INFO
+    org.hibernate.SQL: INFO
+    org.hibernate.type.descriptor.sql.BasicBinder: INFO

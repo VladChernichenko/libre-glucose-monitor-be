@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORS Debug - Frontend Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 CORS Debug Tool</h1>
+        <p>This tool helps debug CORS issues between your frontend and the backend.</p>
+        
+        <h3>Test Registration</h3>
+        <button onclick="testRegister()">Test Register Endpoint</button>
+        <button onclick="testLogin()">Test Login Endpoint</button>
+        <button onclick="testRefresh()">Test Refresh Token</button>
+        <button onclick="clearResults()">Clear Results</button>
+        
+        <div id="result" class="result info" style="display: none;"></div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'http://localhost:8080';
+        
+        function showResult(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = `result ${type}`;
+            resultDiv.style.display = 'block';
+        }
+        
+        function clearResults() {
+            document.getElementById('result').style.display = 'none';
+        }
+        
+        async function testRegister() {
+            showResult('Testing registration endpoint...', 'info');
+            
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/auth/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: `testuser${Date.now()}`,
+                        email: `test${Date.now()}@example.com`,
+                        fullName: 'Test User',
+                        password: 'testpass123'
+                    })
+                });
+                
+                const data = await response.text();
+                
+                if (response.ok) {
+                    showResult(`✅ SUCCESS!\nStatus: ${response.status}\nResponse: ${data}`, 'success');
+                } else {
+                    showResult(`❌ ERROR!\nStatus: ${response.status}\nResponse: ${data}`, 'error');
+                }
+            } catch (error) {
+                showResult(`🚫 CORS ERROR!\nError: ${error.message}\n\nThis indicates a CORS issue. Check:\n1. Backend is running on port 8080\n2. Frontend is running on port 3000\n3. Browser console for more details`, 'error');
+            }
+        }
+        
+        async function testLogin() {
+            showResult('Testing login endpoint...', 'info');
+            
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: 'testuser',
+                        password: 'testpass123'
+                    })
+                });
+                
+                const data = await response.text();
+                
+                if (response.ok) {
+                    showResult(`✅ SUCCESS!\nStatus: ${response.status}\nResponse: ${data}`, 'success');
+                } else {
+                    showResult(`❌ ERROR!\nStatus: ${response.status}\nResponse: ${data}`, 'error');
+                }
+            } catch (error) {
+                showResult(`🚫 CORS ERROR!\nError: ${error.message}`, 'error');
+            }
+        }
+        
+        async function testRefresh() {
+            showResult('Testing refresh token endpoint...', 'info');
+            
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/auth/refresh`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        refreshToken: 'invalid.token'
+                    })
+                });
+                
+                const data = await response.text();
+                
+                if (response.ok) {
+                    showResult(`✅ SUCCESS!\nStatus: ${response.status}\nResponse: ${data}`, 'success');
+                } else {
+                    showResult(`❌ EXPECTED ERROR!\nStatus: ${response.status}\nResponse: ${data}\n\nThis is expected since we used an invalid token.`, 'info');
+                }
+            } catch (error) {
+                showResult(`🚫 CORS ERROR!\nError: ${error.message}`, 'error');
+            }
+        }
+        
+        // Show current origin info
+        window.addEventListener('load', () => {
+            showResult(`🌐 Current Origin: ${window.location.origin}\n🎯 Target Backend: ${BACKEND_URL}\n\nClick a test button to check CORS configuration.`, 'info');
+        });
+    </script>
+</body>
+</html>
