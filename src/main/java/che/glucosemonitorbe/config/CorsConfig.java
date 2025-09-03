@@ -27,7 +27,7 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "PATCH")
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization", "Content-Type")
-                .allowCredentials(false)
+                .allowCredentials(true)
                 .maxAge(3600);
     }
 
@@ -50,8 +50,8 @@ public class CorsConfig implements WebMvcConfigurer {
         // Expose Authorization header for JWT tokens
         configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
         
-        // Disable credentials for now
-        configuration.setAllowCredentials(false);
+        // Allow credentials for JWT authentication
+        configuration.setAllowCredentials(true);
         
         // Cache preflight response for 1 hour
         configuration.setMaxAge(3600L);

@@ -11,7 +11,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/cob")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*", allowCredentials = "false")
 public class CarbsOnBoardController {
     
     private final CarbsOnBoardService cobService;

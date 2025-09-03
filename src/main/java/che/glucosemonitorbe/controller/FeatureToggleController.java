@@ -9,7 +9,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/features")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*", allowCredentials = "false")
 public class FeatureToggleController {
     
     private final FeatureToggleService featureToggleService;

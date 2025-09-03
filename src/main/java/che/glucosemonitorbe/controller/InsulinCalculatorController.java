@@ -15,7 +15,6 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/insulin")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*", allowCredentials = "false")
 public class InsulinCalculatorController {
     
     private final InsulinCalculatorService insulinCalculatorService;
