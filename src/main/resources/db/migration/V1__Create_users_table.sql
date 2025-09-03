@@ -58,10 +58,12 @@ CREATE TABLE IF NOT EXISTS insulin_doses (
 CREATE TABLE IF NOT EXISTS user_configurations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID UNIQUE NOT NULL,
-    target_glucose_min FLOAT,
-    target_glucose_max FLOAT,
-    insulin_to_carb_ratio FLOAT,
-    correction_factor FLOAT,
+    carb_ratio DOUBLE PRECISION,
+    insulin_sensitivity_factor DOUBLE PRECISION,
+    carb_half_life INTEGER,
+    max_cob_duration INTEGER,
+    target_glucose DOUBLE PRECISION,
+    insulin_half_life INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

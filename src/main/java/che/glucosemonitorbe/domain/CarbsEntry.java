@@ -42,4 +42,7 @@ public class CarbsEntry {
     
     @Column(name = "original_carbs")
     private Double originalCarbs;
+    
+    @Column(name = "user_id")
+    private UUID userId;
 }

@@ -45,6 +45,9 @@ public class GlucoseReading {
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime originalTimestamp;
     
+    @Column(name = "user_id")
+    private UUID userId;
+    
     public enum TrendDirection {
         RISING_FAST, RISING, STABLE, FALLING, FALLING_FAST
     }

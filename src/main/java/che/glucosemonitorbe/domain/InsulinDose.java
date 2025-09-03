@@ -37,6 +37,9 @@ public class InsulinDose {
     @Column(name = "meal_type")
     private String mealType;
     
+    @Column(name = "user_id")
+    private UUID userId;
+    
     public enum InsulinType {
         BOLUS, CORRECTION, BASAL
     }
