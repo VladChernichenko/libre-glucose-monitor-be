@@ -10,6 +10,7 @@ spring:
     hibernate:
       ddl-auto: validate  # Use Flyway for migrations
     show-sql: true
+    open-in-view: false  # Disable to prevent lazy loading issues
     properties:
       hibernate:
         format_sql: true
