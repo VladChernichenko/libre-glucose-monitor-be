@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -101,15 +102,15 @@ public class CarbsOnBoardService {
     public static class COBCalculationRequest {
         private double carbs;
         private LocalDateTime timestamp;
-        private String userId;
+        private UUID userId;
         
         // Getters and setters
         public double getCarbs() { return carbs; }
         public void setCarbs(double carbs) { this.carbs = carbs; }
         public LocalDateTime getTimestamp() { return timestamp; }
         public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }
-        public String getUserId() { return userId; }
-        public void setUserId(String userId) { this.userId = userId; }
+        public UUID getUserId() { return userId; }
+        public void setUserId(UUID userId) { this.userId = userId; }
     }
     
     public static class COBCalculationResponse {

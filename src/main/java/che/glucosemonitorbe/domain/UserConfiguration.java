@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
+import java.util.UUID;
 
 @Entity
 @Table(name = "user_configurations")
@@ -16,10 +17,10 @@ public class UserConfiguration {
     
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    private String id;
+    private UUID id;
     
     @Column(name = "user_id")
-    private String userId;
+    private UUID userId;
     
     @Column(name = "carb_ratio")
     private Double carbRatio; // grams per unit (g/u) - default: 12

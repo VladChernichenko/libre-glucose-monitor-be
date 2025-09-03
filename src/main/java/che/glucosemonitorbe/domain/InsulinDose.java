@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "insulin_doses")
@@ -19,7 +20,7 @@ public class InsulinDose {
     
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    private String id;
+    private UUID id;
     
     @Column(nullable = false)
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
