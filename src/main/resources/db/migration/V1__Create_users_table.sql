@@ -1,6 +1,6 @@
 -- Create users table if it doesn't exist
 CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(255) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
@@ -16,38 +16,48 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Create other tables if they don't exist
 CREATE TABLE IF NOT EXISTS glucose_readings (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     value FLOAT NOT NULL,
     timestamp TIMESTAMP NOT NULL,
+    unit VARCHAR(10) NOT NULL DEFAULT 'mg/dL',
     status VARCHAR(50),
     trend VARCHAR(50),
-    user_id BIGINT,
+    data_source VARCHAR(100),
+    original_timestamp TIMESTAMP,
+    user_id UUID,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS carbs_entries (
-    id BIGSERIAL PRIMARY KEY,
-    amount INTEGER NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp TIMESTAMP NOT NULL,
-    user_id BIGINT,
+    carbs DOUBLE PRECISION NOT NULL,
+    insulin DOUBLE PRECISION NOT NULL,
+    meal_type VARCHAR(50),
+    comment TEXT,
+    glucose_value DOUBLE PRECISION,
+    original_carbs DOUBLE PRECISION,
+    user_id UUID,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS insulin_doses (
-    id BIGSERIAL PRIMARY KEY,
-    amount FLOAT NOT NULL,
-    insulin_type VARCHAR(50) NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp TIMESTAMP NOT NULL,
-    user_id BIGINT,
+    units DOUBLE PRECISION NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    note TEXT,
+    meal_type VARCHAR(50),
+    user_id UUID,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS user_configurations (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT UNIQUE NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL,
     target_glucose_min FLOAT,
     target_glucose_max FLOAT,
     insulin_to_carb_ratio FLOAT,
