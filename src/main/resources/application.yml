@@ -22,7 +22,7 @@ spring:
 
 security:
   jwt:
-    secret: ${JWT_SECRET:very-strong-secret-change-me-please-make-it-long-and-secure-in-production}
+    secret: ${JWT_SECRET:glucose-monitor-super-secure-jwt-secret-key-256-bits-minimum-required-for-hmac-sha256-algorithm-security-compliance}
     access-expiration-ms: 3600000      # 1 hour
     refresh-expiration-ms: 86400000    # 24 hours
 
