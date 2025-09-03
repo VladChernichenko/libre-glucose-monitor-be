@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
+@CrossOrigin(origins = {"https://libre-glucose-monitor-frontend.onrender.com", "https://libre-glucose-monitor.onrender.com", "http://localhost:3000", "http://127.0.0.1:3000"})
 public class AuthController {
 
     private final AuthService authService;
