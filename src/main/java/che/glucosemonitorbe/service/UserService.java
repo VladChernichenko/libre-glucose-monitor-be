@@ -41,7 +41,7 @@ public class UserService {
                 .email(user.getEmail())
                 .username(user.getUsername())
                 .fullName(user.getFullName())
-                .role(user.getRole())
+                .role(user.getRole().name())
                 .enabled(user.isEnabled())
                 .accountNonExpired(user.isAccountNonExpired())
                 .credentialsNonExpired(user.isCredentialsNonExpired())
