@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
+import java.util.Optional;
 
 @Component
 @Slf4j
@@ -52,7 +53,6 @@ public class JwtTokenProvider {
     public String generateRefreshToken(String username) {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + refreshExpirationInMs);
-
         return Jwts.builder()
                 .setSubject(username)
                 .setIssuedAt(now)
