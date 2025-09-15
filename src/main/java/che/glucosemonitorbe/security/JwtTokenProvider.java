@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 @Component
@@ -87,6 +89,7 @@ public class JwtTokenProvider {
         } catch (IllegalArgumentException ex) {
             log.error("JWT claims string is empty");
         }
+        Map<String, String> map = new HashMap<>();
         return false;
     }
 
