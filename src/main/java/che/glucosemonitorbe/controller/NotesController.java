@@ -2,6 +2,7 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.service.NotesService;
+import che.glucosemonitorbe.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -15,11 +16,13 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/notes")
-@CrossOrigin(origins = "*")
 public class NotesController {
     
     @Autowired
     private NotesService notesService;
+    
+    @Autowired
+    private UserService userService;
     
     /**
      * Get all notes for the authenticated user
@@ -160,17 +163,10 @@ public class NotesController {
      * Extract user ID from authentication context
      */
     private UUID getUserIdFromAuthentication(Authentication authentication) {
-        if (authentication == null || authentication.getPrincipal() == null) {
-            throw new RuntimeException("User not authenticated");
+        if (authentication != null && authentication.getName() != null) {
+            String username = authentication.getName();
+            return userService.getUserByUsername(username).getId();
         }
-        
-        // Assuming the principal contains the user ID
-        // This might need adjustment based on your authentication setup
-        String userIdString = authentication.getName();
-        try {
-            return UUID.fromString(userIdString);
-        } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Invalid user ID format");
-        }
+        throw new IllegalArgumentException("Invalid authentication");
     }
 }

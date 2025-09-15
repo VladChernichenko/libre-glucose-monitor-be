@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 
 public class UpdateNoteRequest {
     
-    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", timezone = "UTC")
     private LocalDateTime timestamp;
     
     private Double carbs;
