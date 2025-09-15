@@ -5,7 +5,7 @@
 | Project | Path | Type | Description |
 |---------|------|------|-------------|
 | **Backend** | `~/IdeaProjects/glucose-monitor-be` | Spring Boot | Java backend with PostgreSQL, JPA, REST APIs |
-| **Frontend** | `~/cursorai` | React + TypeScript | React frontend application |
+| **Frontend** | `~/IdeaProjects/glucose-monitor` | React + TypeScript | React frontend application |
 
 ## 🚀 **Quick Navigation Commands**
 
@@ -16,7 +16,7 @@ cd ~/IdeaProjects/glucose-monitor-be
 
 ### **Go to Frontend:**
 ```bash
-cd ~/cursorai
+cd ~/IdeaProjects/glucose-monitor
 ```
 
 ### **Check Current Location:**
