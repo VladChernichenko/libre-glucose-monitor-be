@@ -20,10 +20,8 @@ public class CorsConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        List<String> origins = Arrays.asList(allowedOrigins.split(","));
-        
         registry.addMapping("/**")
-                .allowedOrigins(origins.toArray(new String[0]))
+                .allowedOrigins(allowedOrigins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "PATCH")
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization", "Content-Type")
@@ -31,33 +29,4 @@ public class CorsConfig implements WebMvcConfigurer {
                 .maxAge(3600);
     }
 
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-        
-        // Use the same allowed origins from the property
-        List<String> origins = Arrays.asList(allowedOrigins.split(","));
-        configuration.setAllowedOrigins(origins);
-        
-        // Allow all common HTTP methods
-        configuration.setAllowedMethods(Arrays.asList(
-            "GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "PATCH"
-        ));
-        
-        // Allow all headers
-        configuration.setAllowedHeaders(Arrays.asList("*"));
-        
-        // Expose Authorization header for JWT tokens
-        configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
-        
-        // Allow credentials for JWT authentication
-        configuration.setAllowCredentials(true);
-        
-        // Cache preflight response for 1 hour
-        configuration.setMaxAge(3600L);
-        
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
-    }
 }
