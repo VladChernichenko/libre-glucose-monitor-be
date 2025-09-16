@@ -2,7 +2,6 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.dto.NightscoutDeviceStatusDto;
-import che.glucosemonitorbe.dto.NightscoutAverageDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,13 +64,6 @@ public class NightscoutController {
         log.info("User {} requesting {} device status entries", authentication.getName(), count);
         List<NightscoutDeviceStatusDto> deviceStatus = nightScoutIntegration.getDeviceStatus(count);
         return ResponseEntity.ok(deviceStatus);
-    }
-    
-    @GetMapping("/average/24h")
-    public ResponseEntity<NightscoutAverageDto> get24HourAverage(Authentication authentication) {
-        log.info("User {} requesting 24-hour average glucose", authentication.getName());
-        NightscoutAverageDto average = nightScoutIntegration.get24HourAverage();
-        return ResponseEntity.ok(average);
     }
     
     @GetMapping("/health")

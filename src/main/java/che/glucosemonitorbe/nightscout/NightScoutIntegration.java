@@ -2,7 +2,6 @@ package che.glucosemonitorbe.nightscout;
 
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.dto.NightscoutDeviceStatusDto;
-import che.glucosemonitorbe.dto.NightscoutAverageDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,57 +65,6 @@ public class NightScoutIntegration {
         } catch (Exception e) {
             log.error("Failed to fetch device status from Nightscout", e);
             throw new RuntimeException("Failed to fetch device status from Nightscout", e);
-        }
-    }
-    
-    public NightscoutAverageDto get24HourAverage() {
-        try {
-            log.info("Calculating 24-hour average glucose");
-            
-            // Get data from the last 24 hours
-            Instant endTime = Instant.now();
-            Instant startTime = endTime.minusSeconds(24 * 60 * 60); // 24 hours ago
-            
-            List<NightscoutEntryDto> entries = getGlucoseEntriesByDate(startTime, endTime);
-            
-            // Filter only glucose readings (type: 'sgv') and valid values
-            List<NightscoutEntryDto> glucoseEntries = entries.stream()
-                    .filter(entry -> "sgv".equals(entry.getType()) && entry.getSgv() != null && entry.getSgv() > 0)
-                    .toList();
-            
-            if (glucoseEntries.isEmpty()) {
-                log.warn("No glucose readings found in the last 24 hours");
-                return new NightscoutAverageDto(0.0, 0.0, 0, "24h", 
-                        startTime.toEpochMilli(), endTime.toEpochMilli(), "mg/dL");
-            }
-            
-            // Calculate average in mg/dL
-            double sum = glucoseEntries.stream()
-                    .mapToDouble(NightscoutEntryDto::getSgv)
-                    .sum();
-            double averageMgDl = sum / glucoseEntries.size();
-            
-            // Convert to mmol/L (divide by 18)
-            double averageMmolL = averageMgDl / 18.0;
-            
-            log.info("24-hour average: {} mg/dL ({} mmol/L) from {} readings", 
-                    Math.round(averageMgDl * 100.0) / 100.0, 
-                    Math.round(averageMmolL * 100.0) / 100.0, 
-                    glucoseEntries.size());
-            
-            return new NightscoutAverageDto(
-                    Math.round(averageMgDl * 100.0) / 100.0,
-                    Math.round(averageMmolL * 100.0) / 100.0,
-                    glucoseEntries.size(),
-                    "24h",
-                    startTime.toEpochMilli(),
-                    endTime.toEpochMilli(),
-                    "mg/dL"
-            );
-            
-        } catch (Exception e) {
-            log.error("Failed to calculate 24-hour average", e);
-            throw new RuntimeException("Failed to calculate 24-hour average", e);
         }
     }
     
