@@ -18,16 +18,16 @@ public class COBSettings {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
     
-    @Column(name = "carb_ratio", nullable = false)
-    private Double carbRatio = 2.0;
+    @Column(name = "carb_ratio", nullable = true)
+    private Double carbRatio;
     
-    @Column(name = "isf", nullable = false)
-    private Double isf = 1.0;
+    @Column(name = "isf", nullable = true)
+    private Double isf;
     
-    @Column(name = "carb_half_life", nullable = false)
+    @Column(name = "carb_half_life", nullable = true)
     private Integer carbHalfLife = 45;
     
-    @Column(name = "max_cob_duration", nullable = false)
+    @Column(name = "max_cob_duration", nullable = true)
     private Integer maxCOBDuration = 240;
     
     @CreationTimestamp
