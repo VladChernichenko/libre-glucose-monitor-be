@@ -18,16 +18,16 @@ public class COBSettings {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
     
-    @Column(name = "carb_ratio", nullable = true)
-    private Double carbRatio;
+    @Column(name = "carb_ratio", nullable = false)
+    private Double carbRatio = 2.0;
     
-    @Column(name = "isf", nullable = true)
-    private Double isf;
+    @Column(name = "isf", nullable = false)
+    private Double isf = 1.0;
     
-    @Column(name = "carb_half_life", nullable = true)
+    @Column(name = "carb_half_life", nullable = false)
     private Integer carbHalfLife = 45;
     
-    @Column(name = "max_cob_duration", nullable = true)
+    @Column(name = "max_cob_duration", nullable = false)
     private Integer maxCOBDuration = 240;
     
     @CreationTimestamp
@@ -39,10 +39,19 @@ public class COBSettings {
     private LocalDateTime updatedAt;
     
     // Constructors
-    public COBSettings() {}
+    public COBSettings() {
+        this.carbRatio = 2.0;
+        this.isf = 1.0;
+        this.carbHalfLife = 45;
+        this.maxCOBDuration = 240;
+    }
     
     public COBSettings(UUID userId) {
         this.userId = userId;
+        this.carbRatio = 2.0;
+        this.isf = 1.0;
+        this.carbHalfLife = 45;
+        this.maxCOBDuration = 240;
     }
     
     public COBSettings(UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
