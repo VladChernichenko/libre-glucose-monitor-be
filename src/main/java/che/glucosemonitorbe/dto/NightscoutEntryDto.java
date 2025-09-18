@@ -22,3 +22,4 @@ public class NightscoutEntryDto {
     private Integer utcOffset;
     private String sysTime;
 }
+

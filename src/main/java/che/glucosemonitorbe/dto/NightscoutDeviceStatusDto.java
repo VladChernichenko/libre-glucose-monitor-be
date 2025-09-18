@@ -42,3 +42,4 @@ public class NightscoutDeviceStatusDto {
         private String status;
     }
 }
+

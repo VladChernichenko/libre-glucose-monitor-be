@@ -42,6 +42,8 @@ dependencies {
     testImplementation 'com.h2database:h2'
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:postgresql'
+    // https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-testcontainers
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     // https://mvnrepository.com/artifact/org.mapstruct/mapstruct
     implementation 'org.mapstruct:mapstruct:1.6.3'

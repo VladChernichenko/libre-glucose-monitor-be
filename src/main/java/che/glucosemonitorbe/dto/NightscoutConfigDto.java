@@ -12,3 +12,4 @@ public class NightscoutConfigDto {
     private String apiSecret;
     private String token;
 }
+
