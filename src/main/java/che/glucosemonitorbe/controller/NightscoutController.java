@@ -49,8 +49,9 @@ public class NightscoutController {
         log.info("User {} requesting glucose entries from {} to {}", 
                 authentication.getName(), startDate, endDate);
         
-        Instant startInstant = startDate.toInstant(ZoneOffset.UTC);
-        Instant endInstant = endDate.toInstant(ZoneOffset.UTC);
+        // Use system default timezone instead of hardcoded UTC
+        Instant startInstant = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
+        Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
         
         List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
         return ResponseEntity.ok(entries);

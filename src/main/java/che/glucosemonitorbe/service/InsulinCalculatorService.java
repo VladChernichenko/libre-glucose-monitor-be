@@ -17,7 +17,6 @@ public class InsulinCalculatorService {
     
     // Fiasp insulin constants (migrated from frontend)
     private static final double HALF_LIFE_MINUTES = 42.0; // 42 minutes
-    private static final double HALF_LIFE_HOURS = 42.0 / 60.0; // 0.7 hours
     private static final double PEAK_TIME_MINUTES = 75.0; // 75 minutes (average of 60-90)
     private static final double DURATION_HOURS = 4.0; // 4 hours (conservative estimate)
     
@@ -26,8 +25,8 @@ public class InsulinCalculatorService {
      * Uses exponential decay formula: remaining = initial * (0.5)^(time/halfLife)
      */
     public double calculateRemainingInsulin(InsulinDose dose, LocalDateTime currentTime) {
-        double timeDiffMinutes = (currentTime.toEpochSecond(java.time.ZoneOffset.UTC) - 
-                                 dose.getTimestamp().toEpochSecond(java.time.ZoneOffset.UTC)) / 60.0;
+        // Calculate time difference in minutes using LocalDateTime (respects user timezone)
+        double timeDiffMinutes = java.time.Duration.between(dose.getTimestamp(), currentTime).toMinutes();
         
         // If beyond duration, no insulin remains
         if (timeDiffMinutes > DURATION_HOURS * 60) {
@@ -91,8 +90,8 @@ public class InsulinCalculatorService {
         
         if (mostRecentDose == null) return "none";
         
-        double minutesSinceDose = (currentTime.toEpochSecond(java.time.ZoneOffset.UTC) - 
-                                  mostRecentDose.getTimestamp().toEpochSecond(java.time.ZoneOffset.UTC)) / 60.0;
+        // Calculate time difference in minutes using LocalDateTime (respects user timezone)
+        double minutesSinceDose = java.time.Duration.between(mostRecentDose.getTimestamp(), currentTime).toMinutes();
         
         if (minutesSinceDose < 0) return "none";
         if (minutesSinceDose < PEAK_TIME_MINUTES - 15) return "rising";

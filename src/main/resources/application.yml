@@ -6,6 +6,9 @@ spring:
     username: ${DB_USERNAME:glucose_monitor_user}
     password: ${DB_PASSWORD:glucose}
     driver-class-name: org.postgresql.Driver
+  jackson:
+    time-zone: ${TZ:Europe/London}  # Use user's timezone, default to London
+    date-format: "yyyy-MM-dd'T'HH:mm:ss"
   jpa:
     hibernate:
       ddl-auto: validate  # Use Flyway for migrations
@@ -59,10 +62,10 @@ app:
     user-configuration-enabled: false
 
     # Migration percentages (0-100)
-    insulin-calculator-migration-percent: 25
-    carbs-on-board-migration-percent: 25
-    glucose-data-migration-percent: 0
-    glucose-calculations-migration-percent: 25
+    insulin-calculator-migration-percent: 100
+    carbs-on-board-migration-percent: 100
+    glucose-data-migration-percent: 100
+    glucose-calculations-migration-percent: 100
 
 management:
   endpoints:

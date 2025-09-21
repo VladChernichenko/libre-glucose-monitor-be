@@ -23,6 +23,7 @@ public class GlucoseCalculationsService {
     private final CarbsOnBoardService cobService;
     private final InsulinCalculatorService insulinCalculatorService;
     private final NoteRepository noteRepository;
+    private final UserService userService;
     
     // Default constants for glucose calculations
     private static final double DEFAULT_CARB_RATIO = 2.0; // mmol/L per 10g carbs
@@ -178,14 +179,16 @@ public class GlucoseCalculationsService {
      * Get recent carbs entries for a user from Notes within the last 6 hours
      * Converts Notes with carbs > 0 to CarbsEntry objects for calculation
      */
-    private List<CarbsEntry> getRecentCarbsEntries(String userId, LocalDateTime currentTime) {
+    private List<CarbsEntry> getRecentCarbsEntries(String username, LocalDateTime currentTime) {
         try {
+            // Convert username to UUID using UserService
+            UUID userId = userService.getUserByUsername(username).getId();
+            
             // Query notes from the last 6 hours to capture active carbs
             LocalDateTime startTime = currentTime.minusHours(6);
-            UUID userUuid = UUID.fromString(userId);
             
             List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(
-                userUuid, startTime, currentTime);
+                userId, startTime, currentTime);
             
             // Filter notes with carbs > 0 and convert to CarbsEntry objects
             return recentNotes.stream()
@@ -193,13 +196,9 @@ public class GlucoseCalculationsService {
                 .map(this::convertNoteToCarbsEntry)
                 .collect(Collectors.toList());
                 
-        } catch (IllegalArgumentException e) {
-            // Invalid UUID format
-            System.err.println("Invalid user ID format: " + userId);
-            return new ArrayList<>();
         } catch (Exception e) {
-            // Database error or other issues
-            System.err.println("Error fetching carbs entries for user " + userId + ": " + e.getMessage());
+            // User not found or database error
+            System.err.println("Error fetching carbs entries for user " + username + ": " + e.getMessage());
             return new ArrayList<>();
         }
     }
@@ -225,14 +224,16 @@ public class GlucoseCalculationsService {
      * Get recent insulin entries for a user from Notes within the last 6 hours
      * Converts Notes with insulin > 0 to InsulinDose objects for calculation
      */
-    private List<InsulinDose> getRecentInsulinEntries(String userId, LocalDateTime currentTime) {
+    private List<InsulinDose> getRecentInsulinEntries(String username, LocalDateTime currentTime) {
         try {
+            // Convert username to UUID using UserService
+            UUID userId = userService.getUserByUsername(username).getId();
+            
             // Query notes from the last 6 hours to capture active insulin
             LocalDateTime startTime = currentTime.minusHours(6);
-            UUID userUuid = UUID.fromString(userId);
             
             List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(
-                userUuid, startTime, currentTime);
+                userId, startTime, currentTime);
             
             // Filter notes with insulin > 0 and convert to InsulinDose objects
             return recentNotes.stream()
@@ -240,13 +241,9 @@ public class GlucoseCalculationsService {
                 .map(this::convertNoteToInsulinDose)
                 .collect(Collectors.toList());
                 
-        } catch (IllegalArgumentException e) {
-            // Invalid UUID format
-            System.err.println("Invalid user ID format: " + userId);
-            return new ArrayList<>();
         } catch (Exception e) {
-            // Database error or other issues
-            System.err.println("Error fetching insulin entries for user " + userId + ": " + e.getMessage());
+            // User not found or database error
+            System.err.println("Error fetching insulin entries for user " + username + ": " + e.getMessage());
             return new ArrayList<>();
         }
     }
