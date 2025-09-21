@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.ClientTimeInfo;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.COBSettingsService;
+import che.glucosemonitorbe.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +25,7 @@ public class PredictionTestController {
     
     private final GlucoseCalculationsService glucoseCalculationsService;
     private final COBSettingsService cobSettingsService;
+    private final UserService userService;
     
     /**
      * Test endpoint for 2-hour prediction with specific parameters
@@ -143,7 +145,8 @@ public class PredictionTestController {
             @RequestParam(defaultValue = "0.0") Double testCOB) {
         
         try {
-            UUID userUUID = UUID.fromString(userId);
+            // Convert username to UUID using UserService
+            UUID userUUID = userService.getUserByUsername(userId).getId();
             COBSettingsDTO userSettings = cobSettingsService.getCOBSettings(userUUID);
             
             // Calculate prediction using user settings

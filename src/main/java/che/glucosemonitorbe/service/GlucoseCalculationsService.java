@@ -48,13 +48,9 @@ public class GlucoseCalculationsService {
         
 
         // Get user-specific COB settings for accurate calculations
-        UUID userUUID = UUID.fromString(userId);
+        // Convert username to UUID using UserService
+        UUID userUUID = userService.getUserByUsername(userId).getId();
         COBSettingsDTO userSettings = cOBSettingsService.getCOBSettings(userUUID);
-        
-        System.out.println("🔍 Using user-specific settings:");
-        System.out.println("  - ISF: " + userSettings.getIsf() + " mmol/L per unit");
-        System.out.println("  - Carb Ratio: " + userSettings.getCarbRatio() + " mmol/L per 10g");
-        System.out.println("  - Carb Half-life: " + userSettings.getCarbHalfLife() + " minutes");
         
         // Get recent notes/entries for calculations
         List<CarbsEntry> carbsEntries = getRecentCarbsEntries(userId, currentTime);
