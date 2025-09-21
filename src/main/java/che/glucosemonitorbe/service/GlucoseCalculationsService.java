@@ -3,6 +3,7 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.dto.PredictionFactors;
+import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.entity.Note;
@@ -33,7 +34,8 @@ public class GlucoseCalculationsService {
     private static final double CONFIDENCE_HIGH = 0.9;
     private static final double CONFIDENCE_MEDIUM = 0.7;
     private static final double CONFIDENCE_LOW = 0.5;
-    
+    private final COBSettingsService cOBSettingsService;
+
     /**
      * Calculate comprehensive glucose calculations including COB, IOB, and predictions
      */
@@ -44,20 +46,22 @@ public class GlucoseCalculationsService {
             LocalDateTime.now();
         String userId = request.getUserId();
         
-        System.out.println("🔍 GlucoseCalculationsService Debug:");
-        System.out.println("  - UserId: " + userId);
-        System.out.println("  - Current Time: " + currentTime);
-        System.out.println("  - Client Time Info: " + (request.getClientTimeInfo() != null ? request.getClientTimeInfo().getTimezone() : "null"));
+
+        // Get user-specific COB settings for accurate calculations
+        UUID userUUID = UUID.fromString(userId);
+        COBSettingsDTO userSettings = cOBSettingsService.getCOBSettings(userUUID);
+        
+        System.out.println("🔍 Using user-specific settings:");
+        System.out.println("  - ISF: " + userSettings.getIsf() + " mmol/L per unit");
+        System.out.println("  - Carb Ratio: " + userSettings.getCarbRatio() + " mmol/L per 10g");
+        System.out.println("  - Carb Half-life: " + userSettings.getCarbHalfLife() + " minutes");
         
         // Get recent notes/entries for calculations
         List<CarbsEntry> carbsEntries = getRecentCarbsEntries(userId, currentTime);
         List<InsulinDose> insulinEntries = getRecentInsulinEntries(userId, currentTime);
         
-        System.out.println("  - Found " + carbsEntries.size() + " carbs entries");
-        System.out.println("  - Found " + insulinEntries.size() + " insulin entries");
-        
         // Calculate active carbs on board
-        double activeCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime);
+        double activeCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userUUID);
         
         // Calculate active insulin on board
         double activeIOB = insulinCalculatorService.calculateTotalActiveInsulin(insulinEntries, currentTime);
@@ -67,12 +71,12 @@ public class GlucoseCalculationsService {
             request.getPredictionHorizonMinutes() : PREDICTION_HORIZON_MINUTES;
         LocalDateTime predictionTime = currentTime.plusMinutes((long) predictionHorizon);
         
-        double futureCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, predictionTime);
+        double futureCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, predictionTime, UUID.fromString(userId));
         double futureIOB = insulinCalculatorService.calculateTotalActiveInsulin(insulinEntries, predictionTime);
         
-        // Calculate prediction factors
+        // Calculate prediction factors using user-specific settings
         PredictionFactors factors = calculatePredictionFactors(
-            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon);
+            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings);
         
         // Calculate predicted glucose
         double predictedGlucose = calculatePredictedGlucose(
@@ -107,19 +111,33 @@ public class GlucoseCalculationsService {
     private PredictionFactors calculatePredictionFactors(
             double currentCOB, double futureCOB, 
             double currentIOB, double futureIOB, 
-            double horizonMinutes) {
+            double horizonMinutes, COBSettingsDTO userSettings) {
+        // Use user-specific settings instead of defaults
+        double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
+        double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         
         // Carb contribution: remaining carbs will raise glucose
-        double carbContribution = (futureCOB / 10.0) * DEFAULT_CARB_RATIO;
+        double carbContribution = (futureCOB / 10.0) * userCarbRatio;
         
-        // Insulin contribution: remaining insulin will lower glucose
-        double insulinContribution = -(futureIOB * DEFAULT_ISF);
+        // Insulin contribution: Use TOTAL current insulin effect, not decayed future insulin
+        // This matches clinical expectations for 2-hour predictions
+        // User expects: "I have 2u IOB with 2.0 ISF = 4.0 mmol/L drop"
+        double insulinContribution = -(currentIOB * userISF);
         
         // Baseline contribution: assume minimal baseline drift
         double baselineContribution = 0.0;
         
         // Trend contribution: extrapolate current trend over prediction horizon
         double trendContribution = DEFAULT_GLUCOSE_TREND * (horizonMinutes / 60.0);
+        
+        System.out.println("🔍 Prediction Factors Debug:");
+        System.out.println("  - User ISF: " + userISF + " mmol/L per unit (was: " + DEFAULT_ISF + ")");
+        System.out.println("  - User Carb Ratio: " + userCarbRatio + " mmol/L per 10g (was: " + DEFAULT_CARB_RATIO + ")");
+        System.out.println("  - Current COB: " + currentCOB + "g, Future COB: " + futureCOB + "g");
+        System.out.println("  - Current IOB: " + currentIOB + "u, Future IOB: " + futureIOB + "u");
+        System.out.println("  - Carb Contribution: " + futureCOB + "g ÷ 10 × " + userCarbRatio + " = " + carbContribution + " mmol/L");
+        System.out.println("  - Insulin Contribution: " + currentIOB + "u × " + userISF + " = " + insulinContribution + " mmol/L");
+        System.out.println("  - Total Effect: " + (carbContribution + insulinContribution) + " mmol/L");
         
         return PredictionFactors.builder()
                 .carbContribution(Math.round(carbContribution * 100.0) / 100.0)

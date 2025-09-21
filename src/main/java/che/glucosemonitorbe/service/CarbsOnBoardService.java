@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
+import che.glucosemonitorbe.dto.COBSettingsDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -16,24 +17,25 @@ public class CarbsOnBoardService {
     // Default COB constants (can be overridden by user configuration)
     private static final double DEFAULT_CARB_HALF_LIFE_MINUTES = 240.0; // 4 hours
     private static final double DEFAULT_INSULIN_HALF_LIFE_MINUTES = 42.0; // Fiasp insulin
-    
+    private final COBSettingsService cOBSettingsService;
+
     /**
      * Calculate remaining carbs on board for a given time
      */
-    public double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime) {
+    public double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime, UUID userId) {
         if (entry == null || entry.getCarbs() == null || entry.getCarbs() <= 0) {
             return 0.0;
         }
-        
+        COBSettingsDTO cobSettings = cOBSettingsService.getCOBSettings(userId);
         long minutesSinceEntry = ChronoUnit.MINUTES.between(entry.getTimestamp(), currentTime);
         
         // If beyond the carb half-life, no carbs remain
-        if (minutesSinceEntry > DEFAULT_CARB_HALF_LIFE_MINUTES) {
+        if (minutesSinceEntry > cobSettings.getCarbHalfLife()) {
             return 0.0;
         }
         
         // Calculate remaining carbs using exponential decay
-        double halfLives = minutesSinceEntry / DEFAULT_CARB_HALF_LIFE_MINUTES;
+        double halfLives = (double) minutesSinceEntry / cobSettings.getCarbHalfLife();
         double remainingCarbs = entry.getCarbs() * Math.pow(0.5, halfLives);
         
         return Math.max(0.0, remainingCarbs);
@@ -42,31 +44,14 @@ public class CarbsOnBoardService {
     /**
      * Calculate total carbs on board from multiple entries
      */
-    public double calculateTotalCarbsOnBoard(List<CarbsEntry> entries, LocalDateTime currentTime) {
+    public double calculateTotalCarbsOnBoard(List<CarbsEntry> entries, LocalDateTime currentTime, UUID userId) {
         if (entries == null || entries.isEmpty()) {
             return 0.0;
         }
         
         return entries.stream()
-                .mapToDouble(entry -> calculateRemainingCarbs(entry, currentTime))
+                .mapToDouble(entry -> calculateRemainingCarbs(entry, currentTime, userId))
                 .sum();
-    }
-    
-    /**
-     * Get COB status description
-     */
-    public String getCOBStatus(List<CarbsEntry> entries, LocalDateTime currentTime) {
-        double totalCOB = calculateTotalCarbsOnBoard(entries, currentTime);
-        
-        if (totalCOB <= 0) {
-            return "No carbs on board";
-        } else if (totalCOB < 5) {
-            return "Low carbs on board";
-        } else if (totalCOB < 15) {
-            return "Moderate carbs on board";
-        } else {
-            return "High carbs on board";
-        }
     }
     
     /**
