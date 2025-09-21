@@ -112,8 +112,10 @@ public class GlucoseCalculationsService {
         double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         
-        // Carb contribution: remaining carbs will raise glucose
-        double carbContribution = (futureCOB / 10.0) * userCarbRatio;
+        // Carb contribution: Use TOTAL current carbs effect, not decayed future carbs
+        // This matches clinical expectations for 2-hour predictions
+        // User expects: "I have 10g COB with 2.0 carb ratio = 2.0 mmol/L rise"
+        double carbContribution = (currentCOB / 10.0) * userCarbRatio;
         
         // Insulin contribution: Use TOTAL current insulin effect, not decayed future insulin
         // This matches clinical expectations for 2-hour predictions
@@ -131,7 +133,7 @@ public class GlucoseCalculationsService {
         System.out.println("  - User Carb Ratio: " + userCarbRatio + " mmol/L per 10g (was: " + DEFAULT_CARB_RATIO + ")");
         System.out.println("  - Current COB: " + currentCOB + "g, Future COB: " + futureCOB + "g");
         System.out.println("  - Current IOB: " + currentIOB + "u, Future IOB: " + futureIOB + "u");
-        System.out.println("  - Carb Contribution: " + futureCOB + "g ÷ 10 × " + userCarbRatio + " = " + carbContribution + " mmol/L");
+        System.out.println("  - Carb Contribution (FIXED): " + currentCOB + "g ÷ 10 × " + userCarbRatio + " = +" + carbContribution + " mmol/L");
         System.out.println("  - Insulin Contribution: " + currentIOB + "u × " + userISF + " = " + insulinContribution + " mmol/L");
         System.out.println("  - Total Effect: " + (carbContribution + insulinContribution) + " mmol/L");
         
