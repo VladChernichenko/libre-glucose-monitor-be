@@ -39,6 +39,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
                         .requestMatchers("/api/features/**").permitAll()
+                        .requestMatchers("/api/version/**").permitAll()  // Allow version checks
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/health").permitAll()  // Allow health checks

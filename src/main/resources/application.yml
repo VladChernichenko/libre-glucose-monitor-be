@@ -53,6 +53,27 @@ logging:
           jpa: DEBUG
 
 app:
+  version:
+    version: "1.0.0"
+    api-version: "v1"
+    build-number: ${BUILD_NUMBER:dev-build}
+    git-commit: ${GIT_COMMIT:unknown}
+    build-time: ${BUILD_TIME:}
+    min-frontend-version: "1.0.0"
+    compatible-frontend-versions:
+      - "1.0.0"
+      - "1.0.1" 
+      - "1.1.0"
+    feature-versions:
+      glucose-calculations: "1.0.0"
+      insulin-calculator: "1.0.0"
+      carbs-on-board: "1.0.0"
+      notes-api: "1.0.0"
+      auth-system: "1.0.0"
+    deprecated-versions:
+      "0.9.0": "Please upgrade to 1.0.0 - contains critical security fixes"
+      "0.8.0": "Version no longer supported - upgrade required"
+  
   features:
     backend-mode-enabled: true
     insulin-calculator-enabled: true
