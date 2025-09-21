@@ -67,7 +67,7 @@ public class GlucoseCalculationsService {
             request.getPredictionHorizonMinutes() : PREDICTION_HORIZON_MINUTES;
         LocalDateTime predictionTime = currentTime.plusMinutes((long) predictionHorizon);
         
-        double futureCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, predictionTime, UUID.fromString(userId));
+        double futureCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, predictionTime, userUUID);
         double futureIOB = insulinCalculatorService.calculateTotalActiveInsulin(insulinEntries, predictionTime);
         
         // Calculate prediction factors using user-specific settings
