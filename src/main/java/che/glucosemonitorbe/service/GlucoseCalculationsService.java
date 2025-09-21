@@ -38,12 +38,23 @@ public class GlucoseCalculationsService {
      * Calculate comprehensive glucose calculations including COB, IOB, and predictions
      */
     public GlucoseCalculationsResponse calculateGlucoseData(GlucoseCalculationsRequest request) {
-        LocalDateTime currentTime = LocalDateTime.now();
+        // Use client time instead of server time
+        LocalDateTime currentTime = request.getClientTimeInfo() != null ? 
+            request.getClientTimeInfo().toLocalDateTime() : 
+            LocalDateTime.now();
         String userId = request.getUserId();
+        
+        System.out.println("🔍 GlucoseCalculationsService Debug:");
+        System.out.println("  - UserId: " + userId);
+        System.out.println("  - Current Time: " + currentTime);
+        System.out.println("  - Client Time Info: " + (request.getClientTimeInfo() != null ? request.getClientTimeInfo().getTimezone() : "null"));
         
         // Get recent notes/entries for calculations
         List<CarbsEntry> carbsEntries = getRecentCarbsEntries(userId, currentTime);
         List<InsulinDose> insulinEntries = getRecentInsulinEntries(userId, currentTime);
+        
+        System.out.println("  - Found " + carbsEntries.size() + " carbs entries");
+        System.out.println("  - Found " + insulinEntries.size() + " insulin entries");
         
         // Calculate active carbs on board
         double activeCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime);
@@ -181,24 +192,33 @@ public class GlucoseCalculationsService {
      */
     private List<CarbsEntry> getRecentCarbsEntries(String username, LocalDateTime currentTime) {
         try {
+            System.out.println("🔍 Fetching carbs entries for user: " + username);
+            
             // Convert username to UUID using UserService
             UUID userId = userService.getUserByUsername(username).getId();
+            System.out.println("  - Resolved userId: " + userId);
             
             // Query notes from the last 6 hours to capture active carbs
             LocalDateTime startTime = currentTime.minusHours(6);
+            System.out.println("  - Time range: " + startTime + " to " + currentTime);
             
             List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(
                 userId, startTime, currentTime);
+            System.out.println("  - Found " + recentNotes.size() + " total notes in time range");
             
             // Filter notes with carbs > 0 and convert to CarbsEntry objects
-            return recentNotes.stream()
+            List<CarbsEntry> carbsEntries = recentNotes.stream()
                 .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
                 .map(this::convertNoteToCarbsEntry)
                 .collect(Collectors.toList());
+            
+            System.out.println("  - Filtered to " + carbsEntries.size() + " notes with carbs > 0");
+            return carbsEntries;
                 
         } catch (Exception e) {
             // User not found or database error
             System.err.println("Error fetching carbs entries for user " + username + ": " + e.getMessage());
+            e.printStackTrace();
             return new ArrayList<>();
         }
     }

@@ -138,7 +138,7 @@ public class InsulinCalculatorService {
         
         return InsulinCalculationResponse.builder()
                 .recommendedInsulin(Math.round(recommendedInsulin * 100.0) / 100.0)
-                .calculationTime(LocalDateTime.now())
+                .calculationTime(LocalDateTime.now()) // Keep this as server time for calculation metadata
                 .build();
     }
 }

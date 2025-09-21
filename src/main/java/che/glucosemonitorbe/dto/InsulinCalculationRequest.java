@@ -16,4 +16,9 @@ public class InsulinCalculationRequest {
     private Double activeInsulin;
     private String mealType;
     private String userId;
+    
+    /**
+     * Client-side time information to replace server LocalDateTime.now()
+     */
+    private ClientTimeInfo clientTimeInfo;
 }

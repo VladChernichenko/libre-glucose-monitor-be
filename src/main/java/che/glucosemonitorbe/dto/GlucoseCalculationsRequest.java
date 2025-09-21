@@ -19,5 +19,10 @@ public class GlucoseCalculationsRequest {
     private String userId;
     private Boolean includePredictionFactors;
     private Integer predictionHorizonMinutes;
+    
+    /**
+     * Client-side time information to replace server LocalDateTime.now()
+     */
+    private ClientTimeInfo clientTimeInfo;
 }
 

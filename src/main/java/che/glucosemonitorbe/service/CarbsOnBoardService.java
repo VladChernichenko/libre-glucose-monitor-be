@@ -92,7 +92,7 @@ public class CarbsOnBoardService {
         
         return COBCalculationResponse.builder()
                 .carbsOnBoard(estimatedCOB)
-                .calculationTime(LocalDateTime.now())
+                .calculationTime(LocalDateTime.now()) // Keep this as server time for calculation metadata
                 .message("COB calculated using backend service")
                 .status("success")
                 .build();

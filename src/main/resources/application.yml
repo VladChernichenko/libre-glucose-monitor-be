@@ -75,6 +75,7 @@ app:
       "0.8.0": "Version no longer supported - upgrade required"
   
   features:
+    # Enable backend calculations with timezone support
     backend-mode-enabled: true
     insulin-calculator-enabled: true
     carbs-on-board-enabled: true
@@ -82,7 +83,7 @@ app:
     glucose-calculations-enabled: true
     user-configuration-enabled: false
 
-    # Migration percentages (0-100)
+    # Migration percentages (0-100) - 100 means all users use backend
     insulin-calculator-migration-percent: 100
     carbs-on-board-migration-percent: 100
     glucose-data-migration-percent: 100
