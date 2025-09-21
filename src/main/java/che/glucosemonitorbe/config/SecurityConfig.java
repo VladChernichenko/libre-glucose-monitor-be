@@ -41,6 +41,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/features/**").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/error").permitAll()
+                        .requestMatchers("/health").permitAll()  // Allow health checks
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
