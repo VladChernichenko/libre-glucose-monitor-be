@@ -2,7 +2,7 @@ services:
   - type: web
     name: glucose-monitor-be
     env: java
-    buildCommand: ./gradlew build
+    buildCommand: ./scripts/render-build.sh
     startCommand: java -Dspring.profiles.active=prod -jar build/libs/glucose-monitor-be-*.jar
 
     healthCheckPath: /actuator/health
