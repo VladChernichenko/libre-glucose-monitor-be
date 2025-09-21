@@ -30,6 +30,10 @@ public class FeatureToggleController {
                 "enabled", featureToggleConfig.isGlucoseDataEnabled(),
                 "migrationPercent", featureToggleConfig.getGlucoseDataMigrationPercent()
             ),
+            "glucoseCalculations", Map.of(
+                "enabled", featureToggleConfig.isGlucoseCalculationsEnabled(),
+                "migrationPercent", featureToggleConfig.getGlucoseCalculationsMigrationPercent()
+            ),
             "userConfiguration", Map.of(
                 "enabled", featureToggleConfig.isUserConfigurationEnabled(),
                 "migrationPercent", 0

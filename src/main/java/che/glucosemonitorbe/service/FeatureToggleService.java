@@ -22,6 +22,7 @@ public class FeatureToggleService {
             case "insulin-calculator" -> config.isInsulinCalculatorEnabled();
             case "carbs-on-board" -> config.isCarbsOnBoardEnabled();
             case "glucose-data" -> config.isGlucoseDataEnabled();
+            case "glucose-calculations" -> config.isGlucoseCalculationsEnabled();
             case "user-configuration" -> config.isUserConfigurationEnabled();
             default -> false;
         };
@@ -52,6 +53,7 @@ public class FeatureToggleService {
             case "insulin-calculator" -> config.getInsulinCalculatorMigrationPercent();
             case "carbs-on-board" -> config.getCarbsOnBoardMigrationPercent();
             case "glucose-data" -> config.getGlucoseDataMigrationPercent();
+            case "glucose-calculations" -> config.getGlucoseCalculationsMigrationPercent();
             default -> 0;
         };
     }

@@ -13,6 +13,7 @@ public class FeatureToggleConfig {
     private boolean insulinCalculatorEnabled = false;
     private boolean carbsOnBoardEnabled = false;
     private boolean glucoseDataEnabled = false;
+    private boolean glucoseCalculationsEnabled = false;
     private boolean userConfigurationEnabled = false;
     
     // Global toggle to switch between frontend and backend
@@ -22,4 +23,5 @@ public class FeatureToggleConfig {
     private int insulinCalculatorMigrationPercent = 0;
     private int carbsOnBoardMigrationPercent = 0;
     private int glucoseDataMigrationPercent = 0;
+    private int glucoseCalculationsMigrationPercent = 0;
 }

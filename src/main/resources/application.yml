@@ -55,12 +55,14 @@ app:
     insulin-calculator-enabled: true
     carbs-on-board-enabled: true
     glucose-data-enabled: false
+    glucose-calculations-enabled: true
     user-configuration-enabled: false
 
     # Migration percentages (0-100)
     insulin-calculator-migration-percent: 25
     carbs-on-board-migration-percent: 25
     glucose-data-migration-percent: 0
+    glucose-calculations-migration-percent: 25
 
 management:
   endpoints:
