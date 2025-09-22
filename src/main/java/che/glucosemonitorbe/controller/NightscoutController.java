@@ -4,7 +4,9 @@ import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.dto.NightscoutDeviceStatusDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.NightscoutChartDataService;
+import che.glucosemonitorbe.service.NightscoutConfigService;
 import che.glucosemonitorbe.service.UserService;
+import che.glucosemonitorbe.domain.NightscoutConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -26,6 +29,7 @@ public class NightscoutController {
     private final NightScoutIntegration nightScoutIntegration;
     private final NightscoutChartDataService chartDataService;
     private final UserService userService;
+    private final NightscoutConfigService configService;
     
     @GetMapping("/entries")
     public ResponseEntity<List<NightscoutEntryDto>> getGlucoseEntries(
@@ -45,8 +49,20 @@ public class NightscoutController {
             log.info("Returning {} stored entries for user {}", storedEntries.size(), authentication.getName());
             return ResponseEntity.ok(storedEntries);
         } else {
-            // Fetch fresh entries from Nightscout
-            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(count);
+            // Try to use user's Nightscout configuration first
+            Optional<NightscoutConfig> userConfig = configService.getConfigForApiCalls(userId);
+            List<NightscoutEntryDto> entries;
+            
+            if (userConfig.isPresent()) {
+                // Use user's Nightscout configuration
+                entries = nightScoutIntegration.getGlucoseEntries(count, userConfig.get());
+                configService.markAsUsed(userId);
+                log.info("Fetched {} entries from user's Nightscout: {}", entries.size(), userConfig.get().getNightscoutUrl());
+            } else {
+                // Fallback to default Nightscout configuration
+                entries = nightScoutIntegration.getGlucoseEntries(count);
+                log.info("Fetched {} entries from default Nightscout configuration", entries.size());
+            }
             
             // Store in database (100 fixed rows per user)
             if (!entries.isEmpty()) {
@@ -61,7 +77,25 @@ public class NightscoutController {
     @GetMapping("/entries/current")
     public ResponseEntity<NightscoutEntryDto> getCurrentGlucose(Authentication authentication) {
         log.info("User {} requesting current glucose", authentication.getName());
-        NightscoutEntryDto currentGlucose = nightScoutIntegration.getCurrentGlucose();
+        
+        // Get user UUID
+        UUID userId = userService.getUserByUsername(authentication.getName()).getId();
+        
+        // Try to use user's Nightscout configuration first
+        Optional<NightscoutConfig> userConfig = configService.getConfigForApiCalls(userId);
+        NightscoutEntryDto currentGlucose;
+        
+        if (userConfig.isPresent()) {
+            // Use user's Nightscout configuration
+            currentGlucose = nightScoutIntegration.getCurrentGlucose(userConfig.get());
+            configService.markAsUsed(userId);
+            log.info("Fetched current glucose from user's Nightscout: {}", userConfig.get().getNightscoutUrl());
+        } else {
+            // Fallback to default Nightscout configuration
+            currentGlucose = nightScoutIntegration.getCurrentGlucose();
+            log.info("Fetched current glucose from default Nightscout configuration");
+        }
+        
         return ResponseEntity.ok(currentGlucose);
     }
     
@@ -88,7 +122,20 @@ public class NightscoutController {
             Instant startInstant = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
             Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
             
-            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
+            // Try to use user's Nightscout configuration first
+            Optional<NightscoutConfig> userConfig = configService.getConfigForApiCalls(userId);
+            List<NightscoutEntryDto> entries;
+            
+            if (userConfig.isPresent()) {
+                // Use user's Nightscout configuration
+                entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant, userConfig.get());
+                configService.markAsUsed(userId);
+                log.info("Fetched {} entries from user's Nightscout: {}", entries.size(), userConfig.get().getNightscoutUrl());
+            } else {
+                // Fallback to default Nightscout configuration
+                entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
+                log.info("Fetched {} entries from default Nightscout configuration", entries.size());
+            }
             
             // Store in database (100 fixed rows per user)
             if (!entries.isEmpty()) {
