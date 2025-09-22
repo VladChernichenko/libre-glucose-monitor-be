@@ -30,23 +30,32 @@ public class NightscoutController {
     @GetMapping("/entries")
     public ResponseEntity<List<NightscoutEntryDto>> getGlucoseEntries(
             @RequestParam(value = "count", defaultValue = "100") int count,
+            @RequestParam(value = "useStored", defaultValue = "false") boolean useStored,
             Authentication authentication) {
         
-        log.info("User {} requesting {} glucose entries", authentication.getName(), count);
+        log.info("User {} requesting {} glucose entries (useStored: {})", 
+                authentication.getName(), count, useStored);
         
         // Get user UUID
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         
-        // Fetch entries from Nightscout
-        List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(count);
-        
-        // Store in database (100 fixed rows per user)
-        if (!entries.isEmpty()) {
-            chartDataService.storeChartData(userId, entries);
-            log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
+        if (useStored) {
+            // Return stored chart data from database
+            List<NightscoutEntryDto> storedEntries = chartDataService.getChartDataAsEntries(userId);
+            log.info("Returning {} stored entries for user {}", storedEntries.size(), authentication.getName());
+            return ResponseEntity.ok(storedEntries);
+        } else {
+            // Fetch fresh entries from Nightscout
+            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(count);
+            
+            // Store in database (100 fixed rows per user)
+            if (!entries.isEmpty()) {
+                chartDataService.storeChartData(userId, entries);
+                log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
+            }
+            
+            return ResponseEntity.ok(entries);
         }
-        
-        return ResponseEntity.ok(entries);
     }
     
     @GetMapping("/entries/current")
@@ -60,27 +69,35 @@ public class NightscoutController {
     public ResponseEntity<List<NightscoutEntryDto>> getGlucoseEntriesByDate(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
+            @RequestParam(value = "useStored", defaultValue = "false") boolean useStored,
             Authentication authentication) {
         
-        log.info("User {} requesting glucose entries from {} to {}", 
-                authentication.getName(), startDate, endDate);
+        log.info("User {} requesting glucose entries from {} to {} (useStored: {})", 
+                authentication.getName(), startDate, endDate, useStored);
         
         // Get user UUID
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         
-        // Use system default timezone instead of hardcoded UTC
-        Instant startInstant = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
-        Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
-        
-        List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
-        
-        // Store in database (100 fixed rows per user)
-        if (!entries.isEmpty()) {
-            chartDataService.storeChartData(userId, entries);
-            log.info("Stored {} entries from date range in database for user {}", entries.size(), authentication.getName());
+        if (useStored) {
+            // Return stored chart data from database
+            List<NightscoutEntryDto> storedEntries = chartDataService.getChartDataAsEntries(userId);
+            log.info("Returning {} stored entries for user {}", storedEntries.size(), authentication.getName());
+            return ResponseEntity.ok(storedEntries);
+        } else {
+            // Use system default timezone instead of hardcoded UTC
+            Instant startInstant = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
+            Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
+            
+            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
+            
+            // Store in database (100 fixed rows per user)
+            if (!entries.isEmpty()) {
+                chartDataService.storeChartData(userId, entries);
+                log.info("Stored {} entries from date range in database for user {}", entries.size(), authentication.getName());
+            }
+            
+            return ResponseEntity.ok(entries);
         }
-        
-        return ResponseEntity.ok(entries);
     }
     
     @GetMapping("/device-status")
@@ -94,14 +111,21 @@ public class NightscoutController {
     }
     
     @GetMapping("/chart-data")
-    public ResponseEntity<List<NightscoutEntryDto>> getStoredChartData(Authentication authentication) {
-        log.info("User {} requesting stored chart data", authentication.getName());
+    public ResponseEntity<List<NightscoutEntryDto>> getStoredChartData(
+            @RequestParam(value = "count", defaultValue = "100") int count,
+            Authentication authentication) {
+        log.info("User {} requesting {} stored chart data entries", authentication.getName(), count);
         
         // Get user UUID
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         
         // Get stored chart data
         List<NightscoutEntryDto> chartData = chartDataService.getChartDataAsEntries(userId);
+        
+        // Limit to requested count
+        if (chartData.size() > count) {
+            chartData = chartData.subList(0, count);
+        }
         
         log.info("Retrieved {} stored chart data entries for user {}", chartData.size(), authentication.getName());
         return ResponseEntity.ok(chartData);
