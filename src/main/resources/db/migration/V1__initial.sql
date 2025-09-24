@@ -1,9 +1,5 @@
--- Fix all tables ID column type from VARCHAR to UUID
--- This migration handles the case where tables were created with VARCHAR IDs
--- For H2 compatibility, we'll use a simpler approach
 
--- Drop and recreate users table if it has wrong schema
-DROP TABLE IF EXISTS users CASCADE;
+
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
@@ -19,8 +15,6 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Drop and recreate carbs_entries table if it has wrong schema
-DROP TABLE IF EXISTS carbs_entries CASCADE;
 CREATE TABLE carbs_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp TIMESTAMP NOT NULL,
@@ -35,8 +29,6 @@ CREATE TABLE carbs_entries (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Drop and recreate glucose_readings table if it has wrong schema
-DROP TABLE IF EXISTS glucose_readings CASCADE;
 CREATE TABLE glucose_readings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     value FLOAT NOT NULL,
@@ -51,8 +43,6 @@ CREATE TABLE glucose_readings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Drop and recreate insulin_doses table if it has wrong schema
-DROP TABLE IF EXISTS insulin_doses CASCADE;
 CREATE TABLE insulin_doses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp TIMESTAMP NOT NULL,
@@ -65,8 +55,6 @@ CREATE TABLE insulin_doses (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Drop and recreate user_configurations table if it has wrong schema
-DROP TABLE IF EXISTS user_configurations CASCADE;
 CREATE TABLE user_configurations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID UNIQUE NOT NULL,

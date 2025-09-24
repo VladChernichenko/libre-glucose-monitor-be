@@ -69,3 +69,4 @@ public class NightscoutChartData {
         lastUpdated = LocalDateTime.now();
     }
 }
+

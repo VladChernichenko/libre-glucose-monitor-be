@@ -85,4 +85,31 @@ public interface NightscoutChartDataRepository extends JpaRepository<NightscoutC
     @Modifying
     @Query("DELETE FROM NightscoutChartData n WHERE n.lastUpdated < :cutoffDate")
     int deleteOldChartData(@Param("cutoffDate") LocalDateTime cutoffDate);
+    
+    /**
+     * Delete chart data by date range for a specific user
+     */
+    @Modifying
+    @Query("DELETE FROM NightscoutChartData n WHERE n.userId = :userId " +
+           "AND n.dateTimestamp >= :startTimestamp AND n.dateTimestamp <= :endTimestamp")
+    int deleteByUserIdAndDateRange(@Param("userId") UUID userId, 
+                                  @Param("startTimestamp") Long startTimestamp, 
+                                  @Param("endTimestamp") Long endTimestamp);
+    
+    /**
+     * Delete chart data by specific nightscout IDs for a user
+     */
+    @Modifying
+    @Query("DELETE FROM NightscoutChartData n WHERE n.userId = :userId " +
+           "AND n.nightscoutId IN :nightscoutIds")
+    int deleteByUserIdAndNightscoutIds(@Param("userId") UUID userId, 
+                                      @Param("nightscoutIds") List<String> nightscoutIds);
+    
+    /**
+     * Delete chart data by user ID and specific row index
+     */
+    @Modifying
+    @Query("DELETE FROM NightscoutChartData n WHERE n.userId = :userId AND n.rowIndex = :rowIndex")
+    void deleteByUserIdAndRowIndex(@Param("userId") UUID userId, @Param("rowIndex") Integer rowIndex);
 }
+

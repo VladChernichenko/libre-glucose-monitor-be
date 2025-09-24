@@ -32,3 +32,4 @@ CREATE INDEX idx_nightscout_chart_data_user_row ON nightscout_chart_data(user_id
 
 -- Create index for faster lookups by last_updated (for cleanup/maintenance)
 CREATE INDEX idx_nightscout_chart_data_last_updated ON nightscout_chart_data(last_updated);
+

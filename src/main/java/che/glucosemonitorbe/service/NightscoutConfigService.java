@@ -28,36 +28,54 @@ public class NightscoutConfigService {
     @Transactional
     public NightscoutConfigResponseDto saveConfig(UUID userId, NightscoutConfigRequestDto request) {
         log.info("Saving Nightscout configuration for user {}", userId);
+        log.info("Request details - URL: {}, API Secret present: {}, API Token present: {}, IsActive: {}", 
+                request.getNightscoutUrl(), 
+                request.getApiSecret() != null && !request.getApiSecret().isEmpty(),
+                request.getApiToken() != null && !request.getApiToken().isEmpty(),
+                request.getIsActive());
         
-        // Check if user already has a configuration
-        Optional<NightscoutConfig> existingConfig = repository.findByUserId(userId);
-        
-        NightscoutConfig config;
-        if (existingConfig.isPresent()) {
-            // Update existing configuration
-            config = existingConfig.get();
-            config.setNightscoutUrl(request.getNightscoutUrl());
-            config.setApiSecret(request.getApiSecret());
-            config.setApiToken(request.getApiToken());
-            config.setIsActive(request.getIsActive() != null ? request.getIsActive() : true);
-            config.setUpdatedAt(LocalDateTime.now());
-            log.info("Updated existing Nightscout configuration for user {}", userId);
-        } else {
-            // Create new configuration
-            config = NightscoutConfig.builder()
-                    .userId(userId)
-                    .nightscoutUrl(request.getNightscoutUrl())
-                    .apiSecret(request.getApiSecret())
-                    .apiToken(request.getApiToken())
-                    .isActive(request.getIsActive() != null ? request.getIsActive() : true)
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(LocalDateTime.now())
-                    .build();
-            log.info("Created new Nightscout configuration for user {}", userId);
+        try {
+            // Check if user already has a configuration
+            Optional<NightscoutConfig> existingConfig = repository.findByUserId(userId);
+            log.info("Existing configuration found: {}", existingConfig.isPresent());
+            
+            NightscoutConfig config;
+            if (existingConfig.isPresent()) {
+                // Update existing configuration
+                config = existingConfig.get();
+                log.info("Updating existing config with ID: {}", config.getId());
+                config.setNightscoutUrl(request.getNightscoutUrl());
+                config.setApiSecret(request.getApiSecret());
+                config.setApiToken(request.getApiToken());
+                config.setIsActive(request.getIsActive() != null ? request.getIsActive() : true);
+                config.setUpdatedAt(LocalDateTime.now());
+                log.info("Updated existing Nightscout configuration for user {}", userId);
+            } else {
+                // Create new configuration
+                config = NightscoutConfig.builder()
+                        .userId(userId)
+                        .nightscoutUrl(request.getNightscoutUrl())
+                        .apiSecret(request.getApiSecret())
+                        .apiToken(request.getApiToken())
+                        .isActive(request.getIsActive() != null ? request.getIsActive() : true)
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(LocalDateTime.now())
+                        .build();
+                log.info("Created new Nightscout configuration for user {}", userId);
+            }
+            
+            log.info("About to save config to database...");
+            NightscoutConfig savedConfig = repository.save(config);
+            log.info("Successfully saved config with ID: {} for user: {}", savedConfig.getId(), userId);
+            
+            NightscoutConfigResponseDto responseDto = convertToResponseDto(savedConfig);
+            log.info("Converted to response DTO with ID: {}", responseDto.getId());
+            
+            return responseDto;
+        } catch (Exception e) {
+            log.error("Error saving Nightscout configuration for user {}: {}", userId, e.getMessage(), e);
+            throw e;
         }
-        
-        NightscoutConfig savedConfig = repository.save(config);
-        return convertToResponseDto(savedConfig);
     }
     
     /**
@@ -156,3 +174,4 @@ public class NightscoutConfigService {
         return NightscoutConfigResponseDto.maskSensitiveData(dto);
     }
 }
+

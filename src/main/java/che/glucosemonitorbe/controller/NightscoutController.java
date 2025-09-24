@@ -1,7 +1,6 @@
 package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
-import che.glucosemonitorbe.dto.NightscoutDeviceStatusDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.NightscoutChartDataService;
 import che.glucosemonitorbe.service.NightscoutConfigService;
@@ -34,21 +33,11 @@ public class NightscoutController {
     @GetMapping("/entries")
     public ResponseEntity<List<NightscoutEntryDto>> getGlucoseEntries(
             @RequestParam(value = "count", defaultValue = "100") int count,
-            @RequestParam(value = "useStored", defaultValue = "false") boolean useStored,
             Authentication authentication) {
-        
-        log.info("User {} requesting {} glucose entries (useStored: {})", 
-                authentication.getName(), count, useStored);
         
         // Get user UUID
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         
-        if (useStored) {
-            // Return stored chart data from database
-            List<NightscoutEntryDto> storedEntries = chartDataService.getChartDataAsEntries(userId);
-            log.info("Returning {} stored entries for user {}", storedEntries.size(), authentication.getName());
-            return ResponseEntity.ok(storedEntries);
-        } else {
             // Try to use user's Nightscout configuration first
             Optional<NightscoutConfig> userConfig = configService.getConfigForApiCalls(userId);
             List<NightscoutEntryDto> entries;
@@ -58,20 +47,11 @@ public class NightscoutController {
                 entries = nightScoutIntegration.getGlucoseEntries(count, userConfig.get());
                 configService.markAsUsed(userId);
                 log.info("Fetched {} entries from user's Nightscout: {}", entries.size(), userConfig.get().getNightscoutUrl());
-            } else {
-                // Fallback to default Nightscout configuration
-                entries = nightScoutIntegration.getGlucoseEntries(count);
-                log.info("Fetched {} entries from default Nightscout configuration", entries.size());
-            }
-            
-            // Store in database (100 fixed rows per user)
-            if (!entries.isEmpty()) {
-                chartDataService.storeChartData(userId, entries);
+                chartDataService.storeChartDataSmart(userId, entries);
                 log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
+                return ResponseEntity.ok(entries);
             }
-            
-            return ResponseEntity.ok(entries);
-        }
+            throw new RuntimeException("Please set NightScout data");
     }
     
     @GetMapping("/entries/current")
@@ -90,13 +70,9 @@ public class NightscoutController {
             currentGlucose = nightScoutIntegration.getCurrentGlucose(userConfig.get());
             configService.markAsUsed(userId);
             log.info("Fetched current glucose from user's Nightscout: {}", userConfig.get().getNightscoutUrl());
-        } else {
-            // Fallback to default Nightscout configuration
-            currentGlucose = nightScoutIntegration.getCurrentGlucose();
-            log.info("Fetched current glucose from default Nightscout configuration");
+            return ResponseEntity.ok(currentGlucose);
         }
-        
-        return ResponseEntity.ok(currentGlucose);
+        throw new RuntimeException("No glucose data");
     }
     
     @GetMapping("/entries/date-range")
@@ -131,30 +107,11 @@ public class NightscoutController {
                 entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant, userConfig.get());
                 configService.markAsUsed(userId);
                 log.info("Fetched {} entries from user's Nightscout: {}", entries.size(), userConfig.get().getNightscoutUrl());
-            } else {
-                // Fallback to default Nightscout configuration
-                entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
-                log.info("Fetched {} entries from default Nightscout configuration", entries.size());
+                chartDataService.storeChartDataSmart(userId, entries);
+                return ResponseEntity.ok(entries);
             }
-            
-            // Store in database (100 fixed rows per user)
-            if (!entries.isEmpty()) {
-                chartDataService.storeChartData(userId, entries);
-                log.info("Stored {} entries from date range in database for user {}", entries.size(), authentication.getName());
-            }
-            
-            return ResponseEntity.ok(entries);
+            throw new RuntimeException("No Data");
         }
-    }
-    
-    @GetMapping("/device-status")
-    public ResponseEntity<List<NightscoutDeviceStatusDto>> getDeviceStatus(
-            @RequestParam(value = "count", defaultValue = "1") int count,
-            Authentication authentication) {
-        
-        log.info("User {} requesting {} device status entries", authentication.getName(), count);
-        List<NightscoutDeviceStatusDto> deviceStatus = nightScoutIntegration.getDeviceStatus(count);
-        return ResponseEntity.ok(deviceStatus);
     }
     
     @GetMapping("/chart-data")

@@ -115,3 +115,4 @@ class NightscoutChartDataServiceTest {
         verify(repository, times(1)).deleteByUserId(testUserId);
     }
 }
+

@@ -49,3 +49,4 @@ public class NightscoutConfigResponseDto {
         return value.substring(0, 2) + "*".repeat(value.length() - 4) + value.substring(value.length() - 2);
     }
 }
+

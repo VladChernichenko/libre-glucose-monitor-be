@@ -101,9 +101,3 @@ management:
 # CORS configuration for development
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
-
-# Nightscout configuration
-nightscout:
-  base-url: ${NIGHTSCOUT_BASE_URL:https://vladchernichenko.eu.nightscoutpro.com}
-  api-secret: ${NIGHTSCOUT_API_SECRET:}
-  token: ${NIGHTSCOUT_TOKEN:}

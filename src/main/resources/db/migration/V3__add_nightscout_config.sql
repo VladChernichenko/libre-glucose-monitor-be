@@ -22,3 +22,4 @@ CREATE INDEX idx_nightscout_config_active ON nightscout_config(is_active);
 
 -- Create index for faster lookups by last_used (for cleanup/maintenance)
 CREATE INDEX idx_nightscout_config_last_used ON nightscout_config(last_used);
+
