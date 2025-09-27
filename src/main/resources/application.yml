@@ -68,11 +68,10 @@ app:
       glucose-calculations: "1.0.0"
       insulin-calculator: "1.0.0"
       carbs-on-board: "1.0.0"
-      notes-api: "1.0.0"
-      auth-system: "1.0.0"
-    deprecated-versions:
-      "0.9.0": "Please upgrade to 1.0.0 - contains critical security fixes"
-      "0.8.0": "Version no longer supported - upgrade required"
+  nightscout:
+    url: ${NIGHTSCOUT_URL:}
+    api-secret: ${NIGHTSCOUT_API_SECRET:}
+    api-token: ${NIGHTSCOUT_API_TOKEN:}
   
   features:
     # Enable backend calculations with timezone support

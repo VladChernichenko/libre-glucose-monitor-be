@@ -50,3 +50,9 @@ management:
 # CORS configuration for production
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:https://libre-glucose-monitor.onrender.com,http://localhost:3000}
+
+app:
+  nightscout:
+    url: ${NIGHTSCOUT_URL:}
+    api-secret: ${NIGHTSCOUT_API_SECRET:}
+    api-token: ${NIGHTSCOUT_API_TOKEN:}

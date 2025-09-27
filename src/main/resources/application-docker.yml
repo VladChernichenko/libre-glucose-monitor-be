@@ -26,3 +26,9 @@ logging:
     org.springframework.security: INFO
     org.hibernate.SQL: INFO
     org.hibernate.type.descriptor.sql.BasicBinder: INFO
+
+app:
+  nightscout:
+    url: ${NIGHTSCOUT_URL:}
+    api-secret: ${NIGHTSCOUT_API_SECRET:}
+    api-token: ${NIGHTSCOUT_API_TOKEN:}

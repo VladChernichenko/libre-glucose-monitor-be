@@ -1,6 +1,6 @@
 package che.glucosemonitorbe.nightscout;
 
-import che.glucosemonitorbe.domain.NightscoutConfig;
+import che.glucosemonitorbe.config.NightscoutConfig;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,17 +28,22 @@ public class NightScoutIntegration {
     
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final NightscoutConfig nightscoutConfig;
     
-    public List<NightscoutEntryDto> getGlucoseEntries(int count, NightscoutConfig userConfig) {
+    public List<NightscoutEntryDto> getGlucoseEntries(int count) {
         try {
-            log.info("Fetching {} glucose entries from user's Nightscout: {}", count, userConfig.getNightscoutUrl());
-            log.info("User config - URL: {}, API Secret present: {}, API Token present: {}", 
-                    userConfig.getNightscoutUrl(), 
-                    userConfig.getApiSecret() != null && !userConfig.getApiSecret().isEmpty(),
-                    userConfig.getApiToken() != null && !userConfig.getApiToken().isEmpty());
+            if (!nightscoutConfig.isConfigured()) {
+                throw new RuntimeException("Nightscout is not configured. Please set NIGHTSCOUT_URL and API credentials.");
+            }
+            
+            log.info("Fetching {} glucose entries from Nightscout: {}", count, nightscoutConfig.getUrl());
+            log.info("Config - URL: {}, API Secret present: {}, API Token present: {}", 
+                    nightscoutConfig.getUrl(), 
+                    nightscoutConfig.getApiSecret() != null && !nightscoutConfig.getApiSecret().isEmpty(),
+                    nightscoutConfig.getApiToken() != null && !nightscoutConfig.getApiToken().isEmpty());
             
             // Build the URL
-            String url = userConfig.getNightscoutUrl().replaceAll("/$", "") + "/api/v2/entries.json?count=" + count;
+            String url = nightscoutConfig.getUrl().replaceAll("/$", "") + "/api/v2/entries.json?count=" + count;
             log.info("Final URL: {}", url);
             
             // Create headers
@@ -47,18 +52,18 @@ public class NightScoutIntegration {
             headers.set("Accept", "application/json");
             
             // Add authentication headers
-            if (userConfig.getApiSecret() != null && !userConfig.getApiSecret().isEmpty()) {
-                String hashedSecret = hashApiSecret(userConfig.getApiSecret());
+            if (nightscoutConfig.getApiSecret() != null && !nightscoutConfig.getApiSecret().isEmpty()) {
+                String hashedSecret = hashApiSecret(nightscoutConfig.getApiSecret());
                 headers.set("api-secret", hashedSecret);
                 log.info("Added api-secret header (hashed)");
             } else {
-                log.warn("No API secret provided for user's Nightscout configuration");
+                log.warn("No API secret provided for Nightscout configuration");
             }
-            if (userConfig.getApiToken() != null && !userConfig.getApiToken().isEmpty()) {
-                headers.set("Authorization", "Bearer " + userConfig.getApiToken());
+            if (nightscoutConfig.getApiToken() != null && !nightscoutConfig.getApiToken().isEmpty()) {
+                headers.set("Authorization", "Bearer " + nightscoutConfig.getApiToken());
                 log.info("Added Authorization header");
             } else {
-                log.warn("No API token provided for user's Nightscout configuration");
+                log.warn("No API token provided for Nightscout configuration");
             }
             
             HttpEntity<String> entity = new HttpEntity<>(headers);
@@ -73,20 +78,24 @@ public class NightScoutIntegration {
             }
             
         } catch (Exception e) {
-            log.error("Failed to fetch glucose entries from user's Nightscout: {}", userConfig.getNightscoutUrl(), e);
-            throw new RuntimeException("Failed to fetch glucose data from user's Nightscout", e);
+            log.error("Failed to fetch glucose entries from Nightscout: {}", nightscoutConfig.getUrl(), e);
+            throw new RuntimeException("Failed to fetch glucose data from Nightscout", e);
         }
     }
     
-    public List<NightscoutEntryDto> getGlucoseEntriesByDate(Instant startDate, Instant endDate, NightscoutConfig userConfig) {
+    public List<NightscoutEntryDto> getGlucoseEntriesByDate(Instant startDate, Instant endDate) {
         try {
+            if (!nightscoutConfig.isConfigured()) {
+                throw new RuntimeException("Nightscout is not configured. Please set NIGHTSCOUT_URL and API credentials.");
+            }
+            
             String startDateStr = startDate.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT);
             String endDateStr = endDate.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT);
             
-            log.info("Fetching glucose entries from {} to {} from user's Nightscout: {}", startDateStr, endDateStr, userConfig.getNightscoutUrl());
+            log.info("Fetching glucose entries from {} to {} from Nightscout: {}", startDateStr, endDateStr, nightscoutConfig.getUrl());
             
             // Build the URL
-            String url = userConfig.getNightscoutUrl().replaceAll("/$", "") + 
+            String url = nightscoutConfig.getUrl().replaceAll("/$", "") + 
                         "/api/v2/entries.json?find[date][$gte]=" + startDateStr + 
                         "&find[date][$lte]=" + endDateStr;
             
@@ -96,12 +105,12 @@ public class NightScoutIntegration {
             headers.set("Accept", "application/json");
             
             // Add authentication headers
-            if (userConfig.getApiSecret() != null && !userConfig.getApiSecret().isEmpty()) {
-                String hashedSecret = hashApiSecret(userConfig.getApiSecret());
+            if (nightscoutConfig.getApiSecret() != null && !nightscoutConfig.getApiSecret().isEmpty()) {
+                String hashedSecret = hashApiSecret(nightscoutConfig.getApiSecret());
                 headers.set("api-secret", hashedSecret);
             }
-            if (userConfig.getApiToken() != null && !userConfig.getApiToken().isEmpty()) {
-                headers.set("Authorization", "Bearer " + userConfig.getApiToken());
+            if (nightscoutConfig.getApiToken() != null && !nightscoutConfig.getApiToken().isEmpty()) {
+                headers.set("Authorization", "Bearer " + nightscoutConfig.getApiToken());
             }
             
             HttpEntity<String> entity = new HttpEntity<>(headers);
@@ -116,18 +125,18 @@ public class NightScoutIntegration {
             }
             
         } catch (Exception e) {
-            log.error("Failed to fetch glucose entries by date from user's Nightscout: {}", userConfig.getNightscoutUrl(), e);
-            throw new RuntimeException("Failed to fetch glucose data from user's Nightscout", e);
+            log.error("Failed to fetch glucose entries by date from Nightscout: {}", nightscoutConfig.getUrl(), e);
+            throw new RuntimeException("Failed to fetch glucose data from Nightscout", e);
         }
     }
     
-    public NightscoutEntryDto getCurrentGlucose(NightscoutConfig userConfig) {
+    public NightscoutEntryDto getCurrentGlucose() {
         try {
-            List<NightscoutEntryDto> entries = getGlucoseEntries(1, userConfig);
+            List<NightscoutEntryDto> entries = getGlucoseEntries(1);
             return entries.isEmpty() ? null : entries.get(0);
         } catch (Exception e) {
-            log.error("Failed to fetch current glucose from user's Nightscout: {}", userConfig.getNightscoutUrl(), e);
-            throw new RuntimeException("Failed to fetch current glucose from user's Nightscout", e);
+            log.error("Failed to fetch current glucose from Nightscout: {}", nightscoutConfig.getUrl(), e);
+            throw new RuntimeException("Failed to fetch current glucose from Nightscout", e);
         }
     }
     

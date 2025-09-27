@@ -17,7 +17,6 @@ public interface NightscoutChartDataRepository extends JpaRepository<NightscoutC
     /**
      * Find all chart data for a specific user, ordered by row index
      */
-    List<NightscoutChartData> findByUserIdOrderByRowIndex(UUID userId);
     
     /**
      * Find chart data for a specific user and row index
@@ -104,12 +103,8 @@ public interface NightscoutChartDataRepository extends JpaRepository<NightscoutC
            "AND n.nightscoutId IN :nightscoutIds")
     int deleteByUserIdAndNightscoutIds(@Param("userId") UUID userId, 
                                       @Param("nightscoutIds") List<String> nightscoutIds);
-    
-    /**
-     * Delete chart data by user ID and specific row index
-     */
-    @Modifying
-    @Query("DELETE FROM NightscoutChartData n WHERE n.userId = :userId AND n.rowIndex = :rowIndex")
-    void deleteByUserIdAndRowIndex(@Param("userId") UUID userId, @Param("rowIndex") Integer rowIndex);
+
+
+    List<NightscoutChartData> findByUserIdOrderByRowIndex(UUID userId);
 }
 

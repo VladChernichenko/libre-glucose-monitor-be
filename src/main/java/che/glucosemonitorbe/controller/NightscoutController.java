@@ -3,9 +3,7 @@ package che.glucosemonitorbe.controller;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.NightscoutChartDataService;
-import che.glucosemonitorbe.service.NightscoutConfigService;
 import che.glucosemonitorbe.service.UserService;
-import che.glucosemonitorbe.domain.NightscoutConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -16,7 +14,6 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -28,51 +25,84 @@ public class NightscoutController {
     private final NightScoutIntegration nightScoutIntegration;
     private final NightscoutChartDataService chartDataService;
     private final UserService userService;
-    private final NightscoutConfigService configService;
     
     @GetMapping("/entries")
     public ResponseEntity<List<NightscoutEntryDto>> getGlucoseEntries(
             @RequestParam(value = "count", defaultValue = "100") int count,
+            @RequestHeader(value = "X-Timezone-Offset", required = false) String timezoneOffset,
+            @RequestHeader(value = "X-Timezone", required = false) String timezone,
             Authentication authentication) {
         
         // Get user UUID
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         
-            // Try to use user's Nightscout configuration first
-            Optional<NightscoutConfig> userConfig = configService.getConfigForApiCalls(userId);
-            List<NightscoutEntryDto> entries;
+        try {
+            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(count);
+            log.info("Fetched {} entries from Nightscout", entries.size());
             
-            if (userConfig.isPresent()) {
-                // Use user's Nightscout configuration
-                entries = nightScoutIntegration.getGlucoseEntries(count, userConfig.get());
-                configService.markAsUsed(userId);
-                log.info("Fetched {} entries from user's Nightscout: {}", entries.size(), userConfig.get().getNightscoutUrl());
-                chartDataService.storeChartDataSmart(userId, entries);
-                log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
-                return ResponseEntity.ok(entries);
+            // Apply timezone offset from frontend if available and entries don't have utcOffset
+            if (timezoneOffset != null) {
+                try {
+                    int offsetMinutes = Integer.parseInt(timezoneOffset);
+                    // Convert from JavaScript offset (minutes behind UTC) to standard offset (minutes ahead of UTC)
+                    int utcOffset = -offsetMinutes;
+                    log.info("Applying frontend timezone offset {} minutes (UTC offset: {}) to {} entries", 
+                            offsetMinutes, utcOffset, entries.size());
+
+                    for (NightscoutEntryDto entry : entries) {
+                        if (entry.getUtcOffset() == 0) {
+                            entry.setUtcOffset(utcOffset);
+                            log.debug("Set utcOffset to {} for entry {}", utcOffset, entry.getId());
+                        }
+                    }
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid timezone offset format: {}", timezoneOffset);
+                }
             }
-            throw new RuntimeException("Please set NightScout data");
+            
+            chartDataService.storeChartData(userId, entries);
+            log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
+            return ResponseEntity.ok(entries);
+        } catch (Exception e) {
+            log.error("Failed to fetch glucose entries: {}", e.getMessage());
+            throw new RuntimeException("Failed to fetch glucose data", e);
+        }
     }
     
     @GetMapping("/entries/current")
-    public ResponseEntity<NightscoutEntryDto> getCurrentGlucose(Authentication authentication) {
+    public ResponseEntity<NightscoutEntryDto> getCurrentGlucose(
+            @RequestHeader(value = "X-Timezone-Offset", required = false) String timezoneOffset,
+            @RequestHeader(value = "X-Timezone", required = false) String timezone,
+            Authentication authentication) {
         log.info("User {} requesting current glucose", authentication.getName());
         
-        // Get user UUID
-        UUID userId = userService.getUserByUsername(authentication.getName()).getId();
-        
-        // Try to use user's Nightscout configuration first
-        Optional<NightscoutConfig> userConfig = configService.getConfigForApiCalls(userId);
-        NightscoutEntryDto currentGlucose;
-        
-        if (userConfig.isPresent()) {
-            // Use user's Nightscout configuration
-            currentGlucose = nightScoutIntegration.getCurrentGlucose(userConfig.get());
-            configService.markAsUsed(userId);
-            log.info("Fetched current glucose from user's Nightscout: {}", userConfig.get().getNightscoutUrl());
+        try {
+            NightscoutEntryDto currentGlucose = nightScoutIntegration.getCurrentGlucose();
+            log.info("Fetched current glucose from Nightscout");
+            
+            // Apply timezone offset from frontend if available and entry doesn't have utcOffset
+            if (timezoneOffset != null && currentGlucose != null) {
+                try {
+                    int offsetMinutes = Integer.parseInt(timezoneOffset);
+                    // Convert from JavaScript offset (minutes behind UTC) to standard offset (minutes ahead of UTC)
+                    int utcOffset = -offsetMinutes;
+                    log.info("Applying frontend timezone offset {} minutes (UTC offset: {}) to current glucose entry", 
+                            offsetMinutes, utcOffset);
+                    
+                    if (currentGlucose.getUtcOffset() == null) {
+                        currentGlucose.setUtcOffset(utcOffset);
+                        log.debug("Set utcOffset to {} for current glucose entry {}", utcOffset, currentGlucose.getId());
+                    }
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid timezone offset format: {}", timezoneOffset);
+                }
+            }
+            
             return ResponseEntity.ok(currentGlucose);
+        } catch (Exception e) {
+            log.error("Failed to fetch current glucose: {}", e.getMessage());
+            throw new RuntimeException("Failed to fetch current glucose", e);
         }
-        throw new RuntimeException("No glucose data");
     }
     
     @GetMapping("/entries/date-range")
@@ -80,6 +110,8 @@ public class NightscoutController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
             @RequestParam(value = "useStored", defaultValue = "false") boolean useStored,
+            @RequestHeader(value = "X-Timezone-Offset", required = false) String timezoneOffset,
+            @RequestHeader(value = "X-Timezone", required = false) String timezone,
             Authentication authentication) {
         
         log.info("User {} requesting glucose entries from {} to {} (useStored: {})", 
@@ -98,19 +130,36 @@ public class NightscoutController {
             Instant startInstant = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
             Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
             
-            // Try to use user's Nightscout configuration first
-            Optional<NightscoutConfig> userConfig = configService.getConfigForApiCalls(userId);
-            List<NightscoutEntryDto> entries;
-            
-            if (userConfig.isPresent()) {
-                // Use user's Nightscout configuration
-                entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant, userConfig.get());
-                configService.markAsUsed(userId);
-                log.info("Fetched {} entries from user's Nightscout: {}", entries.size(), userConfig.get().getNightscoutUrl());
-                chartDataService.storeChartDataSmart(userId, entries);
+            try {
+                List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
+                log.info("Fetched {} entries from Nightscout", entries.size());
+                
+                // Apply timezone offset from frontend if available and entries don't have utcOffset
+                if (timezoneOffset != null) {
+                    try {
+                        int offsetMinutes = Integer.parseInt(timezoneOffset);
+                        // Convert from JavaScript offset (minutes behind UTC) to standard offset (minutes ahead of UTC)
+                        int utcOffset = -offsetMinutes;
+                        log.info("Applying frontend timezone offset {} minutes (UTC offset: {}) to {} entries", 
+                                offsetMinutes, utcOffset, entries.size());
+                        
+                        for (NightscoutEntryDto entry : entries) {
+                            if (entry.getUtcOffset() == null) {
+                                entry.setUtcOffset(utcOffset);
+                                log.debug("Set utcOffset to {} for entry {}", utcOffset, entry.getId());
+                            }
+                        }
+                    } catch (NumberFormatException e) {
+                        log.warn("Invalid timezone offset format: {}", timezoneOffset);
+                    }
+                }
+                
+                chartDataService.storeChartData(userId, entries);
                 return ResponseEntity.ok(entries);
+            } catch (Exception e) {
+                log.error("Failed to fetch glucose entries by date: {}", e.getMessage());
+                throw new RuntimeException("Failed to fetch glucose data", e);
             }
-            throw new RuntimeException("No Data");
         }
     }
     
