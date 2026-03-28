@@ -32,3 +32,7 @@ logging:
     org.hibernate.SQL: WARN
     org.hibernate.type.descriptor.sql.BasicBinder: WARN
     che.glucosemonitorbe: DEBUG
+
+app:
+  glucose-sync:
+    enabled: false

@@ -42,6 +42,12 @@ public interface UserDataSourceConfigRepository extends JpaRepository<UserDataSo
     List<UserDataSourceConfig> findByUserIdAndIsActiveTrueOrderByCreatedAtDesc(UUID userId);
 
     /**
+     * User IDs that have an active Nightscout configuration (for background sync).
+     */
+    @Query("SELECT DISTINCT c.user.id FROM UserDataSourceConfig c WHERE c.dataSource = :dataSource AND c.isActive = true")
+    List<UUID> findDistinctUserIdsByDataSourceAndIsActiveTrue(@Param("dataSource") UserDataSourceConfig.DataSourceType dataSource);
+
+    /**
      * Find all active Nightscout configurations for a user
      */
     @Query("SELECT c FROM UserDataSourceConfig c WHERE c.user.id = :userId AND c.dataSource = 'NIGHTSCOUT' AND c.isActive = true ORDER BY c.createdAt DESC")

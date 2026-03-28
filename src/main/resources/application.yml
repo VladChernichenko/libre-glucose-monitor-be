@@ -84,6 +84,13 @@ app:
     glucose-data-migration-percent: 100
     glucose-calculations-migration-percent: 100
 
+  # Background Nightscout → DB sync (stored chart data), every 5 minutes per user with active config
+  glucose-sync:
+    enabled: true
+    fixed-delay-ms: 300000
+    initial-delay-ms: 15000
+    entry-count: 100
+
 management:
   endpoints:
     web:

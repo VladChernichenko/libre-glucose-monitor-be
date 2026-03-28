@@ -14,58 +14,110 @@ import java.util.ArrayList;
 @Service
 @RequiredArgsConstructor
 public class InsulinCalculatorService {
-    
-    // Fiasp insulin constants (migrated from frontend)
-    private static final double HALF_LIFE_MINUTES = 42.0; // 42 minutes
-    private static final double PEAK_TIME_MINUTES = 75.0; // 75 minutes (average of 60-90)
-    private static final double DURATION_HOURS = 4.0; // 4 hours (conservative estimate)
-    
-    /**
-     * Calculate remaining insulin units at a given time
-     * Uses exponential decay formula: remaining = initial * (0.5)^(time/halfLife)
-     */
+
+    /** Defaults match catalog {@code FIASP} (user-specific curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}). */
+    public static final double DEFAULT_DIA_HOURS = 4.5;
+    public static final double DEFAULT_PEAK_MINUTES = 55.0;
+
     public double calculateRemainingInsulin(InsulinDose dose, LocalDateTime currentTime) {
-        // Calculate time difference in minutes using LocalDateTime (respects user timezone)
-        double timeDiffMinutes = java.time.Duration.between(dose.getTimestamp(), currentTime).toMinutes();
-        
-        // If beyond duration, no insulin remains
-        if (timeDiffMinutes > DURATION_HOURS * 60) {
+        return calculateRemainingInsulin(dose, currentTime, DEFAULT_DIA_HOURS, DEFAULT_PEAK_MINUTES);
+    }
+
+    /**
+     * Insulin on board (IOB) for one bolus using OpenAPS exponential curve with caller-supplied DIA / peak
+     * (from {@link che.glucosemonitorbe.entity.InsulinCatalog} for the user's rapid insulin).
+     */
+    public double calculateRemainingInsulin(
+            InsulinDose dose,
+            LocalDateTime currentTime,
+            double diaHours,
+            double peakMinutes) {
+        double units = dose.getUnits();
+        if (units <= 0 || dose.getTimestamp() == null || currentTime == null) {
             return 0.0;
         }
-        
-        // Calculate remaining using half-life formula
-        double halfLives = timeDiffMinutes / HALF_LIFE_MINUTES;
-        double remainingUnits = dose.getUnits() * Math.pow(0.5, halfLives);
-        
-        return Math.max(0.0, remainingUnits);
+        if (diaHours <= 0 || peakMinutes <= 0) {
+            return 0.0;
+        }
+
+        double minsAgo = java.time.Duration.between(dose.getTimestamp(), currentTime).toMinutes();
+        if (minsAgo < 0) {
+            return 0.0;
+        }
+
+        double endMinutes = diaHours * 60.0;
+        if (minsAgo >= endMinutes) {
+            return 0.0;
+        }
+
+        return iobOpenApsExponential(units, minsAgo, diaHours, peakMinutes);
     }
-    
+
     /**
-     * Calculate total active insulin from multiple doses
+     * Port of OpenAPS oref0 {@code iobCalcExponential} IOB term.
      */
+    static double iobOpenApsExponential(double insulinUnits, double minsAgo, double diaHours, double peakMinutes) {
+        double end = diaHours * 60.0;
+        double peak = peakMinutes;
+
+        if (minsAgo < 0 || minsAgo >= end || insulinUnits <= 0) {
+            return 0.0;
+        }
+
+        double denom = 1.0 - 2.0 * peak / end;
+        if (Math.abs(denom) < 1e-5) {
+            return insulinUnits * Math.max(0.0, 1.0 - minsAgo / end);
+        }
+
+        double tau = peak * (1.0 - peak / end) / denom;
+        double a = 2.0 * tau / end;
+        double expNegEndOverTau = Math.exp(-end / tau);
+        double s = 1.0 / (1.0 - a + (1.0 + a) * expNegEndOverTau);
+
+        double expNegTOverTau = Math.exp(-minsAgo / tau);
+        double bracket = (Math.pow(minsAgo, 2) / (tau * end * (1.0 - a)) - minsAgo / tau - 1.0) * expNegTOverTau + 1.0;
+        double iobContrib = insulinUnits * (1.0 - s * (1.0 - a) * bracket);
+
+        if (Double.isNaN(iobContrib) || Double.isInfinite(iobContrib)) {
+            return insulinUnits * Math.max(0.0, 1.0 - minsAgo / end);
+        }
+        return Math.max(0.0, Math.min(insulinUnits, iobContrib));
+    }
+
     public double calculateTotalActiveInsulin(List<InsulinDose> doses, LocalDateTime currentTime) {
+        return calculateTotalActiveInsulin(doses, currentTime, DEFAULT_DIA_HOURS, DEFAULT_PEAK_MINUTES);
+    }
+
+    public double calculateTotalActiveInsulin(
+            List<InsulinDose> doses,
+            LocalDateTime currentTime,
+            double diaHours,
+            double peakMinutes) {
         return doses.stream()
-                .mapToDouble(dose -> calculateRemainingInsulin(dose, currentTime))
+                .mapToDouble(dose -> calculateRemainingInsulin(dose, currentTime, diaHours, peakMinutes))
                 .sum();
     }
-    
-    /**
-     * Get insulin activity timeline for a dose
-     */
+
     public List<ActiveInsulinResponse> getInsulinActivityTimeline(InsulinDose dose, double durationHours) {
+        return getInsulinActivityTimeline(dose, durationHours, DEFAULT_DIA_HOURS, DEFAULT_PEAK_MINUTES);
+    }
+
+    public List<ActiveInsulinResponse> getInsulinActivityTimeline(
+            InsulinDose dose,
+            double durationHours,
+            double diaHours,
+            double peakMinutes) {
         List<ActiveInsulinResponse> timeline = new ArrayList<>();
         LocalDateTime startTime = dose.getTimestamp();
-        
-        // Generate timeline every 15 minutes for specified duration
+
         for (double hour = 0; hour <= durationHours; hour += 0.25) {
             LocalDateTime currentTime = startTime.plusMinutes((long) (hour * 60));
-            double remainingUnits = calculateRemainingInsulin(dose, currentTime);
-            double percentageRemaining = (remainingUnits / dose.getUnits()) * 100;
-            
-            // Check if this is peak time
+            double remainingUnits = calculateRemainingInsulin(dose, currentTime, diaHours, peakMinutes);
+            double percentageRemaining = dose.getUnits() > 0 ? (remainingUnits / dose.getUnits()) * 100 : 0;
+
             double minutesSinceDose = hour * 60;
-            boolean isPeak = Math.abs(minutesSinceDose - PEAK_TIME_MINUTES) <= 15;
-            
+            boolean isPeak = Math.abs(minutesSinceDose - peakMinutes) <= 15;
+
             timeline.add(ActiveInsulinResponse.builder()
                     .timestamp(currentTime)
                     .remainingUnits(remainingUnits)
@@ -73,72 +125,81 @@ public class InsulinCalculatorService {
                     .isPeak(isPeak)
                     .build());
         }
-        
+
         return timeline;
     }
-    
-    /**
-     * Get insulin activity status (rising, peak, falling)
-     */
+
     public String getInsulinActivityStatus(List<InsulinDose> doses, LocalDateTime currentTime) {
-        if (doses.isEmpty()) return "none";
-        
-        // Find the most recent dose
+        return getInsulinActivityStatus(doses, currentTime, DEFAULT_PEAK_MINUTES);
+    }
+
+    public String getInsulinActivityStatus(List<InsulinDose> doses, LocalDateTime currentTime, double peakMinutes) {
+        if (doses.isEmpty()) {
+            return "none";
+        }
+
         InsulinDose mostRecentDose = doses.stream()
                 .max((d1, d2) -> d1.getTimestamp().compareTo(d2.getTimestamp()))
                 .orElse(null);
-        
-        if (mostRecentDose == null) return "none";
-        
-        // Calculate time difference in minutes using LocalDateTime (respects user timezone)
+
+        if (mostRecentDose == null) {
+            return "none";
+        }
+
         double minutesSinceDose = java.time.Duration.between(mostRecentDose.getTimestamp(), currentTime).toMinutes();
-        
-        if (minutesSinceDose < 0) return "none";
-        if (minutesSinceDose < PEAK_TIME_MINUTES - 15) return "rising";
-        if (minutesSinceDose < PEAK_TIME_MINUTES + 15) return "peak";
+
+        if (minutesSinceDose < 0) {
+            return "none";
+        }
+        if (minutesSinceDose < peakMinutes - 15) {
+            return "rising";
+        }
+        if (minutesSinceDose < peakMinutes + 15) {
+            return "peak";
+        }
         return "falling";
     }
-    
-    /**
-     * Get insulin activity description
-     */
+
     public String getInsulinActivityDescription(List<InsulinDose> doses, LocalDateTime currentTime) {
-        String status = getInsulinActivityStatus(doses, currentTime);
-        double totalActive = calculateTotalActiveInsulin(doses, currentTime);
-        
-        if (status.equals("none") || totalActive == 0) return "No active insulin";
-        
+        return getInsulinActivityDescription(doses, currentTime, DEFAULT_DIA_HOURS, DEFAULT_PEAK_MINUTES);
+    }
+
+    public String getInsulinActivityDescription(
+            List<InsulinDose> doses,
+            LocalDateTime currentTime,
+            double diaHours,
+            double peakMinutes) {
+        String status = getInsulinActivityStatus(doses, currentTime, peakMinutes);
+        double totalActive = calculateTotalActiveInsulin(doses, currentTime, diaHours, peakMinutes);
+
+        if (status.equals("none") || totalActive == 0) {
+            return "No active insulin";
+        }
+
         String statusText = switch (status) {
             case "rising" -> "Insulin rising";
             case "peak" -> "Insulin at peak";
             case "falling" -> "Insulin falling";
             default -> "Unknown status";
         };
-        
+
         return String.format("%s - %.1fu active", statusText, totalActive);
     }
-    
-    /**
-     * Calculate recommended insulin dose for a meal
-     */
+
     public InsulinCalculationResponse calculateRecommendedInsulin(InsulinCalculationRequest request) {
-        // This would integrate with user configuration and current glucose levels
-        // For now, returning a basic calculation
-        double recommendedInsulin = request.getCarbs() / 12.0; // Default carb ratio 12g/u
-        
-        // Add correction dose if glucose is above target
+        double recommendedInsulin = request.getCarbs() / 12.0;
+
         if (request.getCurrentGlucose() != null && request.getCurrentGlucose() > request.getTargetGlucose()) {
-            double correctionDose = (request.getCurrentGlucose() - request.getTargetGlucose()) / 1.0; // Default ISF 1.0
+            double correctionDose = (request.getCurrentGlucose() - request.getTargetGlucose()) / 1.0;
             recommendedInsulin += correctionDose;
         }
-        
-        // Subtract any active insulin on board
+
         double activeInsulin = request.getActiveInsulin() != null ? request.getActiveInsulin() : 0.0;
         recommendedInsulin = Math.max(0.0, recommendedInsulin - activeInsulin);
-        
+
         return InsulinCalculationResponse.builder()
                 .recommendedInsulin(Math.round(recommendedInsulin * 100.0) / 100.0)
-                .calculationTime(LocalDateTime.now()) // Keep this as server time for calculation metadata
+                .calculationTime(LocalDateTime.now())
                 .build();
     }
 }
