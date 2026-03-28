@@ -1,9 +1,18 @@
 package che.glucosemonitorbe.service;
 
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.Set;
+import javax.crypto.SecretKey;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -11,35 +20,103 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Service to manage blacklisted JWT tokens
- * Uses in-memory storage for simplicity - in production, consider using Redis or database
+ * Uses in-memory storage with expiration tracking - in production, consider using Redis or database
+ * 
+ * FIXED: Properly tracks token expiration times and cleans up expired tokens to prevent memory leaks
  */
 @Service
 @Slf4j
 public class TokenBlacklistService {
     
-    private final Set<String> blacklistedTokens = ConcurrentHashMap.newKeySet();
+    // Map of token -> expiration timestamp (milliseconds)
+    private final Map<String, Long> blacklistedTokens = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    
+    @Value("${security.jwt.secret}")
+    private String jwtSecret;
     
     public TokenBlacklistService() {
         // Clean up expired tokens every hour
         scheduler.scheduleAtFixedRate(this::cleanupExpiredTokens, 1, 1, TimeUnit.HOURS);
+        log.info("TokenBlacklistService initialized with automatic cleanup every hour");
     }
     
     /**
-     * Add a token to the blacklist
+     * Get signing key for JWT parsing
      */
-    public void blacklistToken(String token) {
-        if (token != null && !token.trim().isEmpty()) {
-            blacklistedTokens.add(token);
-            log.debug("Token blacklisted: {}", token.substring(0, Math.min(20, token.length())) + "...");
+    private SecretKey getSigningKey() {
+        return Keys.hmacShaKeyFor(jwtSecret.getBytes());
+    }
+    
+    /**
+     * Extract expiration time from JWT token
+     */
+    private Long extractExpirationTime(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            
+            Date expiration = claims.getExpiration();
+            return expiration != null ? expiration.getTime() : null;
+        } catch (ExpiredJwtException e) {
+            // Token is already expired, get expiration from exception
+            Date expiration = e.getClaims().getExpiration();
+            return expiration != null ? expiration.getTime() : null;
+        } catch (Exception e) {
+            log.warn("Failed to parse JWT token expiration: {}", e.getMessage());
+            // Default to 24 hours from now if we can't parse
+            return System.currentTimeMillis() + TimeUnit.HOURS.toMillis(24);
         }
     }
     
     /**
-     * Check if a token is blacklisted
+     * Add a token to the blacklist with its expiration time
+     */
+    public void blacklistToken(String token) {
+        if (token != null && !token.trim().isEmpty()) {
+            Long expirationTime = extractExpirationTime(token);
+            
+            if (expirationTime != null) {
+                blacklistedTokens.put(token, expirationTime);
+                log.debug("Token blacklisted until {}: {}...", 
+                        new Date(expirationTime),
+                        token.substring(0, Math.min(20, token.length())));
+            } else {
+                // Fallback: keep for 24 hours if we can't determine expiration
+                long fallbackExpiration = System.currentTimeMillis() + TimeUnit.HOURS.toMillis(24);
+                blacklistedTokens.put(token, fallbackExpiration);
+                log.warn("Token blacklisted with fallback expiration (24h): {}...", 
+                        token.substring(0, Math.min(20, token.length())));
+            }
+        }
+    }
+    
+    /**
+     * Check if a token is blacklisted and not expired
      */
     public boolean isTokenBlacklisted(String token) {
-        return token != null && blacklistedTokens.contains(token);
+        if (token == null) {
+            return false;
+        }
+        
+        Long expirationTime = blacklistedTokens.get(token);
+        if (expirationTime == null) {
+            return false;
+        }
+        
+        // Check if the token is still valid (not expired)
+        long currentTime = System.currentTimeMillis();
+        if (currentTime > expirationTime) {
+            // Token has expired, remove it from blacklist
+            blacklistedTokens.remove(token);
+            log.debug("Removed expired token from blacklist during lookup");
+            return false;
+        }
+        
+        return true;
     }
     
     /**
@@ -48,7 +125,8 @@ public class TokenBlacklistService {
     public void removeFromBlacklist(String token) {
         if (token != null) {
             blacklistedTokens.remove(token);
-            log.debug("Token removed from blacklist: {}", token.substring(0, Math.min(20, token.length())) + "...");
+            log.debug("Token removed from blacklist: {}...", 
+                    token.substring(0, Math.min(20, token.length())));
         }
     }
     
@@ -63,22 +141,53 @@ public class TokenBlacklistService {
      * Clear all blacklisted tokens (useful for testing)
      */
     public void clearBlacklist() {
+        int sizeBefore = blacklistedTokens.size();
         blacklistedTokens.clear();
-        log.info("Token blacklist cleared");
+        log.info("Token blacklist cleared: {} tokens removed", sizeBefore);
     }
     
     /**
      * Clean up expired tokens from blacklist
-     * Note: This is a simple implementation. In production, you'd want to store
-     * token expiration times and remove only truly expired tokens
+     * This prevents memory leaks by removing tokens that have naturally expired
      */
     private void cleanupExpiredTokens() {
         int sizeBefore = blacklistedTokens.size();
-        // For now, we'll keep tokens for 24 hours after blacklisting
-        // In a real implementation, you'd parse JWT expiration times
+        long currentTime = System.currentTimeMillis();
+        int removedCount = 0;
         
-        // This is a placeholder - in production you'd implement proper cleanup
-        // based on JWT expiration times
-        log.debug("Token blacklist cleanup completed. Size: {} tokens", sizeBefore);
+        // Iterate through all blacklisted tokens and remove expired ones
+        Iterator<Map.Entry<String, Long>> iterator = blacklistedTokens.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, Long> entry = iterator.next();
+            Long expirationTime = entry.getValue();
+            
+            if (expirationTime != null && currentTime > expirationTime) {
+                iterator.remove();
+                removedCount++;
+                log.trace("Removed expired token from blacklist: {}...", 
+                        entry.getKey().substring(0, Math.min(20, entry.getKey().length())));
+            }
+        }
+        
+        int sizeAfter = blacklistedTokens.size();
+        log.info("Token blacklist cleanup completed: removed {} expired tokens, {} remaining (was {})", 
+                removedCount, sizeAfter, sizeBefore);
+    }
+    
+    /**
+     * Shutdown scheduler gracefully (called by Spring on bean destruction)
+     */
+    @PreDestroy
+    public void shutdown() {
+        log.info("Shutting down TokenBlacklistService scheduler");
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }

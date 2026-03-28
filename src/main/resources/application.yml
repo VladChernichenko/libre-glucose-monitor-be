@@ -68,10 +68,6 @@ app:
       glucose-calculations: "1.0.0"
       insulin-calculator: "1.0.0"
       carbs-on-board: "1.0.0"
-  nightscout:
-    url: ${NIGHTSCOUT_URL:}
-    api-secret: ${NIGHTSCOUT_API_SECRET:}
-    api-token: ${NIGHTSCOUT_API_TOKEN:}
   
   features:
     # Enable backend calculations with timezone support
@@ -96,6 +92,11 @@ management:
   endpoint:
     health:
       show-details: always
+
+# Libre Link Up: EU host default (France / EU LibreView accounts). Override with LIBRE_API_BASE_URL.
+libre:
+  api:
+    base-url: ${LIBRE_API_BASE_URL:https://api-eu.libreview.io}
 
 # CORS configuration for development
 cors:

@@ -37,7 +37,7 @@ public class NightscoutController {
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         
         try {
-            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(count);
+            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(userId, count);
             log.info("Fetched {} entries from Nightscout", entries.size());
             
             // Apply timezone offset from frontend if available and entries don't have utcOffset
@@ -77,7 +77,9 @@ public class NightscoutController {
         log.info("User {} requesting current glucose", authentication.getName());
         
         try {
-            NightscoutEntryDto currentGlucose = nightScoutIntegration.getCurrentGlucose();
+            // Get user UUID
+            UUID userId = userService.getUserByUsername(authentication.getName()).getId();
+            NightscoutEntryDto currentGlucose = nightScoutIntegration.getCurrentGlucose(userId);
             log.info("Fetched current glucose from Nightscout");
             
             // Apply timezone offset from frontend if available and entry doesn't have utcOffset
@@ -131,7 +133,7 @@ public class NightscoutController {
             Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
             
             try {
-                List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(startInstant, endInstant);
+                List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(userId, startInstant, endInstant);
                 log.info("Fetched {} entries from Nightscout", entries.size());
                 
                 // Apply timezone offset from frontend if available and entries don't have utcOffset
