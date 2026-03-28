@@ -3,7 +3,10 @@ package che.glucosemonitorbe.controller;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.DataSourceConfigRequestDto;
 import che.glucosemonitorbe.dto.DataSourceConfigStatusDto;
+import che.glucosemonitorbe.dto.NightscoutTestRequestDto;
+import che.glucosemonitorbe.dto.NightscoutTestResponseDto;
 import che.glucosemonitorbe.dto.UserDataSourceConfigDto;
+import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +28,7 @@ public class UserDataSourceConfigController {
 
     private final UserDataSourceConfigService configService;
     private final UserService userService;
+    private final NightScoutIntegration nightScoutIntegration;
 
     /**
      * Save or update a data source configuration
@@ -197,6 +201,22 @@ public class UserDataSourceConfigController {
             log.error("Error deleting configuration {} for user {}: {}", configId, authentication.getName(), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
+    }
+
+    /**
+     * Test Nightscout connectivity using the URL and credentials in the request body (does not save).
+     */
+    @PostMapping("/test-nightscout")
+    public ResponseEntity<NightscoutTestResponseDto> testNightscout(
+            @Valid @RequestBody NightscoutTestRequestDto request,
+            Authentication authentication) {
+
+        log.info("User {} running Nightscout connection test", authentication.getName());
+        NightscoutTestResponseDto result = nightScoutIntegration.probeNightscout(
+                request.getNightscoutUrl(),
+                request.getNightscoutApiSecret(),
+                request.getNightscoutApiToken());
+        return ResponseEntity.ok(result);
     }
 
     /**

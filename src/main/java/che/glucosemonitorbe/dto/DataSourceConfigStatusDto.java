@@ -36,15 +36,19 @@ public class DataSourceConfigStatusDto {
         return activeLibreConfig != null && activeLibreConfig.getIsActive();
     }
     
+    /**
+     * Preferred source for the app: Nightscout when it is active, otherwise Libre if active,
+     * otherwise fall back to most recently used (e.g. inactive-only edge cases).
+     */
     public UserDataSourceConfig.DataSourceType getPreferredDataSource() {
-        if (mostRecentlyUsedConfig != null) {
-            return mostRecentlyUsedConfig.getDataSource();
-        }
         if (hasActiveNightscoutConfig()) {
             return UserDataSourceConfig.DataSourceType.NIGHTSCOUT;
         }
         if (hasActiveLibreConfig()) {
             return UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP;
+        }
+        if (mostRecentlyUsedConfig != null) {
+            return mostRecentlyUsedConfig.getDataSource();
         }
         return null;
     }

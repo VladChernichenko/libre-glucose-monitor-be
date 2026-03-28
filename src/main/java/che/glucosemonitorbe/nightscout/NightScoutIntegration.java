@@ -4,6 +4,7 @@ import che.glucosemonitorbe.circuitbreaker.CircuitBreaker;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
+import che.glucosemonitorbe.dto.NightscoutTestResponseDto;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +15,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -194,6 +198,98 @@ public class NightScoutIntegration {
         } catch (Exception e) {
             log.error("Failed to fetch current glucose from Nightscout for user {}", userId, e);
             throw new RuntimeException("Failed to fetch current glucose from Nightscout", e);
+        }
+    }
+
+    /**
+     * Verify that a Nightscout base URL accepts API v2 entries with the given credentials (no DB config).
+     */
+    public NightscoutTestResponseDto probeNightscout(String baseUrl, String apiSecret, String apiToken) {
+        if (baseUrl == null || baseUrl.trim().isEmpty()) {
+            return NightscoutTestResponseDto.builder()
+                    .ok(false)
+                    .message("Nightscout URL is required.")
+                    .build();
+        }
+        String url = baseUrl.trim().replaceAll("/$", "");
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            return NightscoutTestResponseDto.builder()
+                    .ok(false)
+                    .message("URL must start with http:// or https://")
+                    .build();
+        }
+
+        String fullUrl = url + "/api/v2/entries.json?count=1";
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Accept", "application/json");
+
+        String secret = apiSecret != null ? apiSecret.trim() : "";
+        String token = apiToken != null ? apiToken.trim() : "";
+        if (!secret.isEmpty()) {
+            headers.set("api-secret", hashApiSecret(secret));
+        }
+        if (!token.isEmpty()) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+
+        HttpEntity<String> entity = new HttpEntity<>(headers);
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(fullUrl, HttpMethod.GET, entity, String.class);
+            if (!response.getStatusCode().is2xxSuccessful()) {
+                return NightscoutTestResponseDto.builder()
+                        .ok(false)
+                        .message("Nightscout returned HTTP " + response.getStatusCode().value())
+                        .build();
+            }
+            String body = response.getBody();
+            if (body == null || body.isBlank()) {
+                return NightscoutTestResponseDto.builder()
+                        .ok(false)
+                        .message("Empty response from Nightscout.")
+                        .build();
+            }
+            try {
+                objectMapper.readValue(body, new TypeReference<List<NightscoutEntryDto>>() {});
+            } catch (Exception parseEx) {
+                log.debug("Nightscout test: non-JSON or invalid entries body: {}", parseEx.getMessage());
+                return NightscoutTestResponseDto.builder()
+                        .ok(false)
+                        .message("Response was not valid Nightscout entries JSON.")
+                        .build();
+            }
+            return NightscoutTestResponseDto.builder()
+                    .ok(true)
+                    .message("Connected successfully. Nightscout API returned valid entries data.")
+                    .build();
+        } catch (HttpClientErrorException e) {
+            int code = e.getStatusCode().value();
+            if (code == 401 || code == 403) {
+                return NightscoutTestResponseDto.builder()
+                        .ok(false)
+                        .message("Authentication failed (HTTP " + code + "). Check API secret or token.")
+                        .build();
+            }
+            return NightscoutTestResponseDto.builder()
+                    .ok(false)
+                    .message("HTTP " + code + ": " + e.getStatusText())
+                    .build();
+        } catch (HttpServerErrorException e) {
+            return NightscoutTestResponseDto.builder()
+                    .ok(false)
+                    .message("Nightscout server error (HTTP " + e.getStatusCode().value() + ").")
+                    .build();
+        } catch (ResourceAccessException e) {
+            return NightscoutTestResponseDto.builder()
+                    .ok(false)
+                    .message("Could not reach Nightscout: " + e.getMessage())
+                    .build();
+        } catch (Exception e) {
+            log.warn("Nightscout connection test failed: {}", e.getMessage());
+            return NightscoutTestResponseDto.builder()
+                    .ok(false)
+                    .message("Connection test failed: " + e.getMessage())
+                    .build();
         }
     }
     

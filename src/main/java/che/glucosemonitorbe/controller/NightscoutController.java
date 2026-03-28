@@ -29,43 +29,58 @@ public class NightscoutController {
     @GetMapping("/entries")
     public ResponseEntity<List<NightscoutEntryDto>> getGlucoseEntries(
             @RequestParam(value = "count", defaultValue = "100") int count,
+            @RequestParam(value = "useStored", defaultValue = "false") boolean useStored,
             @RequestHeader(value = "X-Timezone-Offset", required = false) String timezoneOffset,
             @RequestHeader(value = "X-Timezone", required = false) String timezone,
             Authentication authentication) {
         
-        // Get user UUID
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
-        
+
+        if (useStored) {
+            List<NightscoutEntryDto> storedEntries = chartDataService.getChartDataAsEntries(userId);
+            if (storedEntries.size() > count) {
+                int from = Math.max(0, storedEntries.size() - count);
+                storedEntries = storedEntries.subList(from, storedEntries.size());
+            }
+            applyTimezoneOffsetToEntries(storedEntries, timezoneOffset);
+            log.info("Returning {} stored chart entries for user {}", storedEntries.size(), authentication.getName());
+            return ResponseEntity.ok(storedEntries);
+        }
+
         try {
             List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(userId, count);
             log.info("Fetched {} entries from Nightscout", entries.size());
-            
-            // Apply timezone offset from frontend if available and entries don't have utcOffset
-            if (timezoneOffset != null) {
-                try {
-                    int offsetMinutes = Integer.parseInt(timezoneOffset);
-                    // Convert from JavaScript offset (minutes behind UTC) to standard offset (minutes ahead of UTC)
-                    int utcOffset = -offsetMinutes;
-                    log.info("Applying frontend timezone offset {} minutes (UTC offset: {}) to {} entries", 
-                            offsetMinutes, utcOffset, entries.size());
 
-                    for (NightscoutEntryDto entry : entries) {
-                        if (entry.getUtcOffset() == 0) {
-                            entry.setUtcOffset(utcOffset);
-                            log.debug("Set utcOffset to {} for entry {}", utcOffset, entry.getId());
-                        }
-                    }
-                } catch (NumberFormatException e) {
-                    log.warn("Invalid timezone offset format: {}", timezoneOffset);
-                }
-            }
-            
+            applyTimezoneOffsetToEntries(entries, timezoneOffset);
+
             chartDataService.storeChartData(userId, entries);
             log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries: {}", e.getMessage());
             throw new RuntimeException("Failed to fetch glucose data", e);
+        }
+    }
+
+    private void applyTimezoneOffsetToEntries(List<NightscoutEntryDto> entries, String timezoneOffset) {
+        if (timezoneOffset == null || entries.isEmpty()) {
+            return;
+        }
+        try {
+            int offsetMinutes = Integer.parseInt(timezoneOffset);
+            int utcOffset = -offsetMinutes;
+            log.info("Applying frontend timezone offset {} minutes (UTC offset: {}) to {} entries",
+                    offsetMinutes, utcOffset, entries.size());
+
+            for (NightscoutEntryDto entry : entries) {
+                Integer existing = entry.getUtcOffset();
+                if (existing == null || existing == 0) {
+                    entry.setUtcOffset(utcOffset);
+                    log.debug("Set utcOffset to {} for entry {}", utcOffset, entry.getId());
+                }
+            }
+        } catch (NumberFormatException e) {
+            log.warn("Invalid timezone offset format: {}", timezoneOffset);
         }
     }
     
@@ -123,45 +138,26 @@ public class NightscoutController {
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         
         if (useStored) {
-            // Return stored chart data from database
             List<NightscoutEntryDto> storedEntries = chartDataService.getChartDataAsEntries(userId);
+            applyTimezoneOffsetToEntries(storedEntries, timezoneOffset);
             log.info("Returning {} stored entries for user {}", storedEntries.size(), authentication.getName());
             return ResponseEntity.ok(storedEntries);
-        } else {
-            // Use system default timezone instead of hardcoded UTC
-            Instant startInstant = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
-            Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
-            
-            try {
-                List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(userId, startInstant, endInstant);
-                log.info("Fetched {} entries from Nightscout", entries.size());
-                
-                // Apply timezone offset from frontend if available and entries don't have utcOffset
-                if (timezoneOffset != null) {
-                    try {
-                        int offsetMinutes = Integer.parseInt(timezoneOffset);
-                        // Convert from JavaScript offset (minutes behind UTC) to standard offset (minutes ahead of UTC)
-                        int utcOffset = -offsetMinutes;
-                        log.info("Applying frontend timezone offset {} minutes (UTC offset: {}) to {} entries", 
-                                offsetMinutes, utcOffset, entries.size());
-                        
-                        for (NightscoutEntryDto entry : entries) {
-                            if (entry.getUtcOffset() == null) {
-                                entry.setUtcOffset(utcOffset);
-                                log.debug("Set utcOffset to {} for entry {}", utcOffset, entry.getId());
-                            }
-                        }
-                    } catch (NumberFormatException e) {
-                        log.warn("Invalid timezone offset format: {}", timezoneOffset);
-                    }
-                }
-                
-                chartDataService.storeChartData(userId, entries);
-                return ResponseEntity.ok(entries);
-            } catch (Exception e) {
-                log.error("Failed to fetch glucose entries by date: {}", e.getMessage());
-                throw new RuntimeException("Failed to fetch glucose data", e);
-            }
+        }
+
+        Instant startInstant = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
+        Instant endInstant = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant();
+
+        try {
+            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntriesByDate(userId, startInstant, endInstant);
+            log.info("Fetched {} entries from Nightscout", entries.size());
+
+            applyTimezoneOffsetToEntries(entries, timezoneOffset);
+
+            chartDataService.storeChartData(userId, entries);
+            return ResponseEntity.ok(entries);
+        } catch (Exception e) {
+            log.error("Failed to fetch glucose entries by date: {}", e.getMessage());
+            throw new RuntimeException("Failed to fetch glucose data", e);
         }
     }
     
@@ -177,9 +173,10 @@ public class NightscoutController {
         // Get stored chart data
         List<NightscoutEntryDto> chartData = chartDataService.getChartDataAsEntries(userId);
         
-        // Limit to requested count
+        // Most recent `count` points (stored ascending by time)
         if (chartData.size() > count) {
-            chartData = chartData.subList(0, count);
+            int from = Math.max(0, chartData.size() - count);
+            chartData = chartData.subList(from, chartData.size());
         }
         
         log.info("Retrieved {} stored chart data entries for user {}", chartData.size(), authentication.getName());

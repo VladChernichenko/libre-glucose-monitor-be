@@ -8,8 +8,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -19,29 +21,49 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class NightscoutChartDataService {
-    
+
     private final NightscoutChartDataRepository repository;
-    private static final int MAX_ROWS_PER_USER = 100;
-    
+
     /**
-     * Store or update chart data for a user
-     * Maintains exactly 100 rows per user, replacing oldest data when full
+     * Inserts new chart points only. Skips entries we already have (same Nightscout _id or same
+     * reading time for entries without id), and skips duplicates within the same batch.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void storeChartData(UUID userId, List<NightscoutEntryDto> entries) {
-        log.info("Storing {} chart data entries for user {}", entries.size(), userId);
-        
+        if (entries == null || entries.isEmpty()) {
+            return;
+        }
 
-        // Store new data, limiting to 100 entries
-        List<NightscoutEntryDto> limitedEntries = entries.stream()
-                .limit(MAX_ROWS_PER_USER)
-                .toList();
-        repository.deleteByUserId(userId);
-        for (int i = 0; i < limitedEntries.size(); i++) {
-            NightscoutEntryDto entry = limitedEntries.get(i);
+        Set<String> seenNightscoutIds = new HashSet<>();
+        Set<Long> seenTimestamps = new HashSet<>();
+
+        int inserted = 0;
+        int skipped = 0;
+
+        for (NightscoutEntryDto entry : entries) {
+            if (StringUtils.hasText(entry.getId())) {
+                if (!seenNightscoutIds.add(entry.getId())) {
+                    skipped++;
+                    continue;
+                }
+            } else if (entry.getDate() != null) {
+                if (!seenTimestamps.add(entry.getDate())) {
+                    skipped++;
+                    continue;
+                }
+            } else {
+                skipped++;
+                log.trace("Skipping chart entry with no Nightscout id and no date for user {}", userId);
+                continue;
+            }
+
+            if (alreadyStored(userId, entry)) {
+                skipped++;
+                continue;
+            }
+
             NightscoutChartData chartData = NightscoutChartData.builder()
                     .userId(userId)
-                    .rowIndex(i)
                     .nightscoutId(entry.getId())
                     .sgv(entry.getSgv())
                     .dateTimestamp(entry.getDate())
@@ -55,70 +77,46 @@ public class NightscoutChartDataService {
                     .lastUpdated(LocalDateTime.now())
                     .build();
             repository.save(chartData);
+            inserted++;
         }
-        
-        log.info("Successfully stored {} chart data entries for user {}", limitedEntries.size(), userId);
+
+        log.info("Chart data for user {}: inserted {}, skipped {}", userId, inserted, skipped);
     }
-    
-    /**
-     * Get all chart data for a user
-     */
+
+    private boolean alreadyStored(UUID userId, NightscoutEntryDto entry) {
+        if (StringUtils.hasText(entry.getId())) {
+            return repository.findByUserIdAndNightscoutId(userId, entry.getId()).isPresent();
+        }
+        if (entry.getDate() != null) {
+            return repository.findByUserIdAndDateTimestamp(userId, entry.getDate()).isPresent();
+        }
+        return true;
+    }
+
     public List<NightscoutChartData> getChartData(UUID userId) {
         log.debug("Retrieving chart data for user {}", userId);
-        return repository.findByUserIdOrderByRowIndex(userId);
+        return repository.findByUserIdOrderByDateTimestampAsc(userId);
     }
-    
-    /**
-     * Convert stored chart data back to NightscoutEntryDto format
-     */
+
     public List<NightscoutEntryDto> getChartDataAsEntries(UUID userId) {
         List<NightscoutChartData> chartData = getChartData(userId);
         return chartData.stream()
                 .map(this::convertToEntryDto)
                 .collect(Collectors.toList());
     }
-    
-    /**
-     * Clear all chart data for a user
-     */
+
     @Transactional
     public void clearChartData(UUID userId) {
         log.info("Clearing all chart data for user {}", userId);
         repository.deleteByUserId(userId);
     }
-    
-    /**
-     * Clean up old chart data (for maintenance)
-     */
+
     @Transactional
     public int cleanupOldData(LocalDateTime cutoffDate) {
         log.info("Cleaning up chart data older than {}", cutoffDate);
         return repository.deleteOldChartData(cutoffDate);
     }
-    
-    /**
-     * Find next available row index for a user
-     */
-    private Integer findNextAvailableRowIndex(UUID userId, int preferredIndex) {
-        // First try the preferred index
-        if (repository.findByUserIdAndRowIndex(userId, preferredIndex) == null) {
-            return preferredIndex;
-        }
-        
-        // Find next available index
-        Integer nextAvailable = repository.findNextAvailableRowIndex(userId);
-        if (nextAvailable != null && nextAvailable != -1) {
-            return nextAvailable;
-        }
-        
-        // All 100 rows are occupied, replace the oldest
-        Integer oldestIndex = repository.findOldestRowIndex(userId);
-        return oldestIndex != null ? oldestIndex : preferredIndex;
-    }
-    
-    /**
-     * Convert stored chart data to NightscoutEntryDto
-     */
+
     private NightscoutEntryDto convertToEntryDto(NightscoutChartData chartData) {
         return new NightscoutEntryDto(
                 chartData.getNightscoutId(),
@@ -134,4 +132,3 @@ public class NightscoutChartDataService {
         );
     }
 }
-
