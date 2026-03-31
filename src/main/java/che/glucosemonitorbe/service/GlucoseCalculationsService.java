@@ -4,6 +4,7 @@ import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.dto.PredictionFactors;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
+import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
@@ -42,6 +43,8 @@ public class GlucoseCalculationsService {
     private static final double PRE_BOLUS_TARGET_MINUTES = 15.0;
     private static final double PRE_BOLUS_MATCH_WINDOW_MINUTES = 90.0;
     private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
+    private static final int PREDICTION_PATH_MINUTES = 240;
+    private static final int PREDICTION_PATH_STEP_MINUTES = 1;
     private final COBSettingsService cOBSettingsService;
 
     /**
@@ -104,6 +107,17 @@ public class GlucoseCalculationsService {
         // Calculate confidence based on data quality
         double confidence = calculateConfidence(carbsEntries.size(), insulinEntries.size(), 
             request.getCurrentGlucose());
+
+        List<PredictionPointDTO> predictionPath = buildPredictionPath(
+                request.getCurrentGlucose(),
+                currentTime,
+                carbsEntries,
+                insulinEntries,
+                userUUID,
+                userSettings,
+                avgBolusToMealMinutes,
+                rapidIob
+        );
         
         return GlucoseCalculationsResponse.builder()
                 .activeCarbsOnBoard(Math.round(activeCOB * 10.0) / 10.0)
@@ -118,7 +132,51 @@ public class GlucoseCalculationsService {
                 .calculatedAt(currentTime)
                 .confidence(Math.round(confidence * 100.0) / 100.0)
                 .factors(factors)
+                .predictionPath(predictionPath)
                 .build();
+    }
+
+    private List<PredictionPointDTO> buildPredictionPath(
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> carbsEntries,
+            List<InsulinDose> insulinEntries,
+            UUID userUUID,
+            COBSettingsDTO userSettings,
+            Double avgBolusToMealMinutes,
+            RapidInsulinIobParameters rapidIob
+    ) {
+        double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
+        double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
+        double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
+        double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userUUID);
+        double activeIobNow = insulinCalculatorService.calculateTotalActiveInsulin(
+                insulinEntries, currentTime, rapidIob.diaHours(), rapidIob.peakMinutes());
+        List<PredictionPointDTO> points = new ArrayList<>();
+
+        for (int minute = PREDICTION_PATH_STEP_MINUTES; minute <= PREDICTION_PATH_MINUTES; minute += PREDICTION_PATH_STEP_MINUTES) {
+            LocalDateTime t = currentTime.plusMinutes(minute);
+            double cobAtT = cobService.calculateTotalCarbsOnBoard(carbsEntries, t, userUUID);
+            double iobAtT = insulinCalculatorService.calculateTotalActiveInsulin(
+                    insulinEntries, t, rapidIob.diaHours(), rapidIob.peakMinutes());
+
+            // Dynamic path: glucose impact comes from "delivered" effect between now and t.
+            // As COB decays, absorbed carbs tend to raise glucose.
+            double carbsDeliveredEffect = ((activeCobNow - cobAtT) / 10.0) * userCarbRatio;
+            // As IOB decays, delivered insulin tends to lower glucose.
+            double insulinDeliveredEffect = -((activeIobNow - iobAtT) * userISF);
+            // Spread pre-bolus timing effect over first 2h so path stays continuous at "now".
+            double timingProgress = Math.min(1.0, minute / PREDICTION_HORIZON_MINUTES);
+            double timingEffect = preBolusTimingContribution * timingProgress;
+
+            double predicted = currentGlucose + carbsDeliveredEffect + insulinDeliveredEffect + timingEffect;
+            predicted = Math.max(1.0, Math.min(25.0, predicted));
+            points.add(PredictionPointDTO.builder()
+                    .timestamp(t)
+                    .predictedGlucose(Math.round(predicted * 10.0) / 10.0)
+                    .build());
+        }
+        return points;
     }
     
     /**
