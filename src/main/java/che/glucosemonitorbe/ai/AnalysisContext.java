@@ -27,4 +27,11 @@ public class AnalysisContext {
     private double avgGlucose;
     private double latestGlucose;
     private double deltaGlucose;
+    private Double activeCob;
+    private Double activeIob;
+    private Double predictedGlucose2h;
+    private Double estimatedCorrectionUnits;
+    private Double avgPreBolusPauseMinutes;
+    private Double latestPreBolusPauseMinutes;
+    private Double preBolusTimingContribution;
 }

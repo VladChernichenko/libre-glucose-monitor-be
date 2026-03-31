@@ -46,6 +46,12 @@ logging:
     org.springframework.orm.jpa: OFF
 
 app:
+  ai:
+    ollama:
+      enabled: ${OLLAMA_ENABLED:true}
+      url: ${OLLAMA_URL:http://localhost:11434/api/generate}
+      model: ${OLLAMA_MODEL:llama3.1:8b}
+      num-ctx: ${OLLAMA_NUM_CTX:8192}
   version:
     version: "1.0.0"
     api-version: "v1"

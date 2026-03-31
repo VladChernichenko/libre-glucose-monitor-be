@@ -50,6 +50,9 @@ public class LlmGatewayService {
     @Value("${app.ai.ollama.model:llama3.1:8b}")
     private String ollamaModel;
 
+    @Value("${app.ai.ollama.num-ctx:8192}")
+    private int ollamaNumCtx;
+
     @Value("${app.ai.remote.enabled:false}")
     private boolean remoteEnabled;
 
@@ -61,10 +64,13 @@ public class LlmGatewayService {
 
         if (ollamaEnabled) {
             try {
-                String response = callOllama(context, chunks);
+                OllamaResponse response = callOllama(context, chunks);
                 return GatewayResult.builder()
                         .modelId("ollama:" + ollamaModel)
-                        .rawOutput(response)
+                        .rawOutput(response.content())
+                        .promptTokens(response.usage().promptTokens())
+                        .completionTokens(response.usage().completionTokens())
+                        .contextWindow(ollamaNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception ignored) {
@@ -78,6 +84,7 @@ public class LlmGatewayService {
                 return GatewayResult.builder()
                         .modelId("remote")
                         .rawOutput(response)
+                        .contextWindow(ollamaNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception ignored) {
@@ -88,6 +95,7 @@ public class LlmGatewayService {
         return GatewayResult.builder()
                 .modelId("rules-only")
                 .rawOutput("{}")
+                .contextWindow(ollamaNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
     }
@@ -101,10 +109,13 @@ public class LlmGatewayService {
 
         if (ollamaEnabled) {
             try {
-                String response = callOllamaStreaming(context, chunks, tokenConsumer);
+                OllamaResponse response = callOllamaStreaming(context, chunks, tokenConsumer);
                 return GatewayResult.builder()
                         .modelId("ollama:" + ollamaModel)
-                        .rawOutput(response)
+                        .rawOutput(response.content)
+                        .promptTokens(response.usage().promptTokens())
+                        .completionTokens(response.usage().completionTokens())
+                        .contextWindow(ollamaNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception ignored) {
@@ -121,6 +132,7 @@ public class LlmGatewayService {
                 return GatewayResult.builder()
                         .modelId("remote")
                         .rawOutput(response)
+                        .contextWindow(ollamaNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception ignored) {
@@ -131,6 +143,7 @@ public class LlmGatewayService {
         return GatewayResult.builder()
                 .modelId("rules-only")
                 .rawOutput("{}")
+                .contextWindow(ollamaNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
     }
@@ -144,10 +157,13 @@ public class LlmGatewayService {
 
         if (ollamaEnabled) {
             try {
-                String response = callOllamaStreamingMarkdown(context, chunks, tokenConsumer);
+                OllamaResponse response = callOllamaStreamingMarkdown(context, chunks, tokenConsumer);
                 return GatewayResult.builder()
                         .modelId("ollama:" + ollamaModel)
-                        .rawOutput(response)
+                        .rawOutput(response.content)
+                        .promptTokens(response.usage().promptTokens())
+                        .completionTokens(response.usage().completionTokens())
+                        .contextWindow(ollamaNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception ignored) {
@@ -158,11 +174,12 @@ public class LlmGatewayService {
         return GatewayResult.builder()
                 .modelId("rules-only")
                 .rawOutput("")
+                .contextWindow(ollamaNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
     }
 
-    private String callOllama(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) throws Exception {
+    private OllamaResponse callOllama(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) throws Exception {
         String prompt = buildJsonPrompt(context, chunks);
         String json = buildOllamaPayload(prompt, false, true);
 
@@ -179,10 +196,10 @@ public class LlmGatewayService {
         if (responseNode == null) {
             throw new RestClientException("Ollama response missing `response` field");
         }
-        return extractJsonObject(responseNode.asText());
+        return new OllamaResponse(extractJsonObject(responseNode.asText()), extractUsage(root));
     }
 
-    private String callOllamaStreaming(
+    private OllamaResponse callOllamaStreaming(
             AnalysisContext context,
             List<ClinicalKnowledgeChunk> chunks,
             Consumer<String> tokenConsumer
@@ -198,6 +215,7 @@ public class LlmGatewayService {
 
         HttpResponse<java.io.InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         StringBuilder fullResponse = new StringBuilder();
+        Usage usage = new Usage(null, null);
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
             String line;
@@ -212,15 +230,16 @@ public class LlmGatewayService {
                     }
                 }
                 if (chunk.has("done") && chunk.get("done").asBoolean(false)) {
+                    usage = extractUsage(chunk);
                     break;
                 }
             }
         }
 
-        return extractJsonObject(fullResponse.toString());
+        return new OllamaResponse(extractJsonObject(fullResponse.toString()), usage);
     }
 
-    private String callOllamaStreamingMarkdown(
+    private OllamaResponse callOllamaStreamingMarkdown(
             AnalysisContext context,
             List<ClinicalKnowledgeChunk> chunks,
             Consumer<String> tokenConsumer
@@ -236,6 +255,7 @@ public class LlmGatewayService {
 
         HttpResponse<java.io.InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         StringBuilder fullResponse = new StringBuilder();
+        Usage usage = new Usage(null, null);
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
             String line;
@@ -250,12 +270,13 @@ public class LlmGatewayService {
                     }
                 }
                 if (chunk.has("done") && chunk.get("done").asBoolean(false)) {
+                    usage = extractUsage(chunk);
                     break;
                 }
             }
         }
 
-        return fullResponse.toString();
+        return new OllamaResponse(fullResponse.toString(), usage);
     }
 
     private String callRemote(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) throws Exception {
@@ -278,19 +299,30 @@ public class LlmGatewayService {
                 .map(this::toReferenceLine)
                 .collect(Collectors.joining("\n"));
         String notesBlock = formatRecentNotes(context);
+        String predictionMathBlock = formatPredictionMath(context);
 
         return "You are a glucose assistant. Return ONLY strict JSON object with keys: "
                 + "summary:string, detectedPatterns:array[{code,description,severity}], "
                 + "likelyMistakes:array[{code,description,severity}], "
                 + "recommendations:array[{code,text,priority}], confidence:number(0..1), disclaimer:string. "
                 + "You MUST analyze ALL recent notes and correlate meals, insulin doses, and pauses with glucose movement. "
+                + "You MUST use RAG references below to explain the 2h prediction method and correction/pause guidance. "
+                + "Prediction must follow the provided prediction-math block exactly; if references conflict, state uncertainty. "
+                + "For correction support, provide calculation guidance with formula and explicit safety language (never imperative dosing orders). "
                 + "Treat source=real notes as primary evidence and source=mock notes as synthetic/testing context. "
                 + "No markdown, no extra text. "
                 + "Latest=" + context.getLatestGlucose()
                 + ", avg=" + context.getAvgGlucose()
                 + ", delta=" + context.getDeltaGlucose()
+                + ", activeCOB=" + context.getActiveCob()
+                + ", activeIOB=" + context.getActiveIob()
+                + ", predicted2h=" + context.getPredictedGlucose2h()
+                + ", estimatedCorrectionUnits=" + context.getEstimatedCorrectionUnits()
+                + ", avgPreBolusPauseMin=" + context.getAvgPreBolusPauseMinutes()
+                + ", latestPreBolusPauseMin=" + context.getLatestPreBolusPauseMinutes()
                 + ", notesCount=" + context.getNotes().size()
                 + ". Recent notes:\n" + notesBlock
+                + "\nPrediction math:\n" + predictionMathBlock
                 + "\nReferences:\n" + refs;
     }
 
@@ -299,17 +331,42 @@ public class LlmGatewayService {
                 .map(this::toReferenceLine)
                 .collect(Collectors.joining("\n"));
         String notesBlock = formatRecentNotes(context);
+        String predictionMathBlock = formatPredictionMath(context);
         return "You are a glucose assistant. Write concise markdown with sections: "
                 + "## Summary, ## Detected patterns, ## Likely mistakes, ## Recommendations, ## Disclaimer. "
                 + "Analyze ALL recent notes and explicitly account for meals, insulin doses, and pauses. "
+                + "Use RAG references to explain why the 2h prediction/correction/pause guidance is chosen. "
+                + "Prediction must follow the provided prediction-math block exactly. "
+                + "Never issue imperative dosing commands; provide cautious decision-support wording. "
                 + "Treat source=real notes as primary evidence and source=mock notes as synthetic/testing context. "
                 + "Use bullet points where relevant. Do not output JSON. "
                 + "Latest=" + context.getLatestGlucose()
                 + ", avg=" + context.getAvgGlucose()
                 + ", delta=" + context.getDeltaGlucose()
+                + ", activeCOB=" + context.getActiveCob()
+                + ", activeIOB=" + context.getActiveIob()
+                + ", predicted2h=" + context.getPredictedGlucose2h()
+                + ", estimatedCorrectionUnits=" + context.getEstimatedCorrectionUnits()
+                + ", avgPreBolusPauseMin=" + context.getAvgPreBolusPauseMinutes()
+                + ", latestPreBolusPauseMin=" + context.getLatestPreBolusPauseMinutes()
                 + ", notesCount=" + context.getNotes().size()
                 + ". Recent notes:\n" + notesBlock
+                + "\nPrediction math:\n" + predictionMathBlock
                 + "\nReferences:\n" + refs;
+    }
+
+    private String formatPredictionMath(AnalysisContext context) {
+        double carb = context.getActiveCob() == null ? 0.0 : context.getActiveCob();
+        double iob = context.getActiveIob() == null ? 0.0 : context.getActiveIob();
+        double isf = context.getCobSettings() != null && context.getCobSettings().getIsf() != null
+                ? context.getCobSettings().getIsf() : 1.0;
+        double carbRatio = context.getCobSettings() != null && context.getCobSettings().getCarbRatio() != null
+                ? context.getCobSettings().getCarbRatio() : 2.0;
+        double preBolusTiming = context.getPreBolusTimingContribution() == null ? 0.0 : context.getPreBolusTimingContribution();
+        return "predicted2h = clamp(1.0..25.0, latest + carbContribution + insulinContribution + preBolusTimingContribution)\n"
+                + "carbContribution = (activeCOB/10) * carbRatio = (" + carb + "/10) * " + carbRatio + "\n"
+                + "insulinContribution = -(activeIOB * isf) = -(" + iob + " * " + isf + ")\n"
+                + "preBolusTimingContribution = " + preBolusTiming;
     }
 
     private String formatRecentNotes(AnalysisContext context) {
@@ -379,10 +436,18 @@ public class LlmGatewayService {
                 .put("model", ollamaModel)
                 .put("prompt", prompt)
                 .put("stream", stream);
+        node.putObject("options").put("num_ctx", ollamaNumCtx);
         if (jsonFormat) {
             node.put("format", "json");
         }
         return node.toString();
+    }
+
+    private Usage extractUsage(JsonNode node) {
+        if (node == null) return new Usage(null, null);
+        Integer prompt = node.has("prompt_eval_count") ? node.get("prompt_eval_count").asInt() : null;
+        Integer completion = node.has("eval_count") ? node.get("eval_count").asInt() : null;
+        return new Usage(prompt, completion);
     }
 
     private String extractJsonObject(String raw) {
@@ -405,6 +470,12 @@ public class LlmGatewayService {
     public static class GatewayResult {
         private String modelId;
         private String rawOutput;
+        private Integer promptTokens;
+        private Integer completionTokens;
+        private Integer contextWindow;
         private long latencyMs;
     }
+
+    private record Usage(Integer promptTokens, Integer completionTokens) {}
+    private record OllamaResponse(String content, Usage usage) {}
 }

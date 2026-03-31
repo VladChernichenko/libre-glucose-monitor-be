@@ -47,6 +47,29 @@ public class SafetyAndScoringService {
             patterns.add(AiPatternDTO.builder().code("FAST_RISE").description("Rapid upward glucose trend.").severity("medium").build());
             recs.add(AiRecommendationDTO.builder().code("POST_MEAL_REVIEW").text("Review meal bolus timing and carb estimate for this meal pattern.").priority("medium").build());
         }
+        if (context.getPredictedGlucose2h() != null) {
+            patterns.add(AiPatternDTO.builder()
+                    .code("PREDICTION_2H")
+                    .description("Model 2h prediction is " + context.getPredictedGlucose2h() + " mmol/L.")
+                    .severity("low")
+                    .build());
+        }
+        if (context.getAvgPreBolusPauseMinutes() != null) {
+            recs.add(AiRecommendationDTO.builder()
+                    .code("PRE_BOLUS_PAUSE")
+                    .text("Average pre-bolus pause is " + context.getAvgPreBolusPauseMinutes() + " min (latest " +
+                            context.getLatestPreBolusPauseMinutes() + " min). Compare with your target pause window.")
+                    .priority("medium")
+                    .build());
+        }
+        if (context.getEstimatedCorrectionUnits() != null && context.getEstimatedCorrectionUnits() > 0.0) {
+            recs.add(AiRecommendationDTO.builder()
+                    .code("CORRECTION_MATH_GUIDE")
+                    .text("Correction guidance estimate is ~" + context.getEstimatedCorrectionUnits() +
+                            "u using current settings and active insulin. Confirm with your personal plan before acting.")
+                    .priority("high")
+                    .build());
+        }
 
         // Attempt strict-JSON override from LLM, but keep deterministic fallback if invalid.
         if (result.getRawOutput() != null && !result.getRawOutput().isBlank() && !"{}".equals(result.getRawOutput().trim())) {
@@ -126,6 +149,17 @@ public class SafetyAndScoringService {
                         .build())
                 .toList();
 
+        Integer totalTokens = null;
+        Integer remaining = null;
+        if (result.getPromptTokens() != null || result.getCompletionTokens() != null) {
+            int prompt = result.getPromptTokens() == null ? 0 : result.getPromptTokens();
+            int completion = result.getCompletionTokens() == null ? 0 : result.getCompletionTokens();
+            totalTokens = prompt + completion;
+            if (result.getContextWindow() != null) {
+                remaining = Math.max(0, result.getContextWindow() - totalTokens);
+            }
+        }
+
         return AiAnalysisResponse.builder()
                 .summary(summary)
                 .detectedPatterns(patterns)
@@ -135,6 +169,11 @@ public class SafetyAndScoringService {
                 .confidence(confidence)
                 .disclaimer(disclaimer)
                 .modelId(result.getModelId())
+                .contextWindowTokens(result.getContextWindow())
+                .promptTokens(result.getPromptTokens())
+                .completionTokens(result.getCompletionTokens())
+                .totalTokens(totalTokens)
+                .remainingContextTokens(remaining)
                 .latencyMs(result.getLatencyMs())
                 .generatedAt(LocalDateTime.now())
                 .build();

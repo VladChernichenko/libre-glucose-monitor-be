@@ -26,6 +26,11 @@ public class RagRetrieverService {
         if (context.getDeltaGlucose() > STRONG_DELTA_THRESHOLD_MMOL) tags.add("RISING");
         if (context.getDeltaGlucose() < -STRONG_DELTA_THRESHOLD_MMOL) tags.add("FALLING");
         if (!context.getNotes().isEmpty()) tags.add("POST_MEAL");
+        if (context.getPredictedGlucose2h() != null) tags.add("PREDICTION_2H");
+        if (context.getEstimatedCorrectionUnits() != null && context.getEstimatedCorrectionUnits() > 0.0) tags.add("CORRECTION");
+        if (context.getActiveIob() != null && context.getActiveIob() > 0.0) tags.add("IOB");
+        if (context.getActiveCob() != null && context.getActiveCob() > 0.0) tags.add("COB");
+        if (context.getAvgPreBolusPauseMinutes() != null) tags.add("PRE_BOLUS");
 
         List<ClinicalKnowledgeChunk> chunks = knowledgeChunkRepository
                 .findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(new ArrayList<>(tags));

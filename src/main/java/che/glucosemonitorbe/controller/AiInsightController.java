@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.ai.AiInsightService;
+import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.dto.AiAnalysisRequest;
 import che.glucosemonitorbe.dto.AiAnalysisResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,14 +53,26 @@ public class AiInsightController {
         StreamingResponseBody body = outputStream -> {
             try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8))) {
                 try {
-                    aiInsightService.streamRetrospectiveMarkdown(userId, window, token -> {
+                    LlmGatewayService.GatewayResult usage = aiInsightService.streamRetrospectiveMarkdown(userId, window, token -> {
                         try {
                             writeEvent(writer, Map.of("type", "token", "token", token));
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
                     });
-                    writeEvent(writer, Map.of("type", "done"));
+                    Integer prompt = usage.getPromptTokens();
+                    Integer completion = usage.getCompletionTokens();
+                    Integer contextWindow = usage.getContextWindow();
+                    Integer total = (prompt == null && completion == null) ? null : (prompt == null ? 0 : prompt) + (completion == null ? 0 : completion);
+                    Integer remaining = (contextWindow == null || total == null) ? null : Math.max(0, contextWindow - total);
+                    writeEvent(writer, Map.of(
+                            "type", "done",
+                            "promptTokens", prompt == null ? 0 : prompt,
+                            "completionTokens", completion == null ? 0 : completion,
+                            "totalTokens", total == null ? 0 : total,
+                            "contextWindowTokens", contextWindow == null ? 0 : contextWindow,
+                            "remainingContextTokens", remaining == null ? 0 : remaining
+                    ));
                 } catch (Exception e) {
                     writeEvent(writer, Map.of("type", "error", "message", "AI stream failed"));
                 }

@@ -18,6 +18,11 @@ public class AiAnalysisResponse {
     private double confidence;
     private String disclaimer;
     private String modelId;
+    private Integer contextWindowTokens;
+    private Integer promptTokens;
+    private Integer completionTokens;
+    private Integer totalTokens;
+    private Integer remainingContextTokens;
     private long latencyMs;
     private LocalDateTime generatedAt;
 }

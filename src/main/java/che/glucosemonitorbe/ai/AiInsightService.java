@@ -37,9 +37,9 @@ public class AiInsightService {
         return response;
     }
 
-    public void streamRetrospectiveMarkdown(UUID userId, int windowHours, Consumer<String> tokenConsumer) {
+    public LlmGatewayService.GatewayResult streamRetrospectiveMarkdown(UUID userId, int windowHours, Consumer<String> tokenConsumer) {
         AnalysisContext context = contextAggregatorService.buildContext(userId, windowHours);
         List<ClinicalKnowledgeChunk> chunks = ragRetrieverService.retrieve(context);
-        llmGatewayService.generateStreamingMarkdown(context, chunks, tokenConsumer);
+        return llmGatewayService.generateStreamingMarkdown(context, chunks, tokenConsumer);
     }
 }
