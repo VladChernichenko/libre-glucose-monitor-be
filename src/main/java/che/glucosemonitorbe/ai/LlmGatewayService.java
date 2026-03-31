@@ -100,7 +100,7 @@ public class LlmGatewayService {
         if (responseNode == null) {
             throw new RestClientException("Ollama response missing `response` field");
         }
-        return responseNode.asText();
+        return extractJsonObject(responseNode.asText());
     }
 
     private String callRemote(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) throws Exception {
@@ -123,12 +123,30 @@ public class LlmGatewayService {
                 .map(c -> "[" + c.getConditionTag() + "] " + c.getContent())
                 .collect(Collectors.joining("\n"));
 
-        return "You are a glucose assistant. Return strict JSON with keys: summary, detectedPatterns, likelyMistakes, recommendations, confidence, disclaimer. "
+        return "You are a glucose assistant. Return ONLY strict JSON object with keys: "
+                + "summary:string, detectedPatterns:array[{code,description,severity}], "
+                + "likelyMistakes:array[{code,description,severity}], "
+                + "recommendations:array[{code,text,priority}], confidence:number(0..1), disclaimer:string. "
+                + "No markdown, no extra text. "
                 + "Latest=" + context.getLatestGlucose()
                 + ", avg=" + context.getAvgGlucose()
                 + ", delta=" + context.getDeltaGlucose()
                 + ", notesCount=" + context.getNotes().size()
                 + ". References:\n" + refs;
+    }
+
+    private String extractJsonObject(String raw) {
+        if (raw == null) return "{}";
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            return trimmed;
+        }
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1);
+        }
+        return "{}";
     }
 
     @Data

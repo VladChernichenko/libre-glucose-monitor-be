@@ -58,6 +58,45 @@ public class SafetyAndScoringService {
                 if (root.has("disclaimer") && root.get("disclaimer").isTextual()) {
                     disclaimer = root.get("disclaimer").asText();
                 }
+                if (root.has("detectedPatterns") && root.get("detectedPatterns").isArray()) {
+                    List<AiPatternDTO> llmPatterns = new ArrayList<>();
+                    for (JsonNode n : root.get("detectedPatterns")) {
+                        llmPatterns.add(AiPatternDTO.builder()
+                                .code(asTextOr(n, "code", "PATTERN"))
+                                .description(asTextOr(n, "description", ""))
+                                .severity(asTextOr(n, "severity", "low"))
+                                .build());
+                    }
+                    if (!llmPatterns.isEmpty()) {
+                        patterns = llmPatterns;
+                    }
+                }
+                if (root.has("likelyMistakes") && root.get("likelyMistakes").isArray()) {
+                    List<AiPatternDTO> llmMistakes = new ArrayList<>();
+                    for (JsonNode n : root.get("likelyMistakes")) {
+                        llmMistakes.add(AiPatternDTO.builder()
+                                .code(asTextOr(n, "code", "MISTAKE"))
+                                .description(asTextOr(n, "description", ""))
+                                .severity(asTextOr(n, "severity", "low"))
+                                .build());
+                    }
+                    if (!llmMistakes.isEmpty()) {
+                        mistakes = llmMistakes;
+                    }
+                }
+                if (root.has("recommendations") && root.get("recommendations").isArray()) {
+                    List<AiRecommendationDTO> llmRecs = new ArrayList<>();
+                    for (JsonNode n : root.get("recommendations")) {
+                        llmRecs.add(AiRecommendationDTO.builder()
+                                .code(asTextOr(n, "code", "RECOMMEND"))
+                                .text(asTextOr(n, "text", ""))
+                                .priority(asTextOr(n, "priority", "medium"))
+                                .build());
+                    }
+                    if (!llmRecs.isEmpty()) {
+                        recs = llmRecs;
+                    }
+                }
             } catch (Exception ignored) {
                 // keep deterministic output
             }
@@ -91,5 +130,9 @@ public class SafetyAndScoringService {
                 .latencyMs(result.getLatencyMs())
                 .generatedAt(LocalDateTime.now())
                 .build();
+    }
+
+    private String asTextOr(JsonNode node, String key, String fallback) {
+        return node.has(key) && node.get(key).isTextual() ? node.get(key).asText() : fallback;
     }
 }
