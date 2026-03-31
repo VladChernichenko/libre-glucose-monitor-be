@@ -10,4 +10,5 @@ import java.util.UUID;
 @Repository
 public interface ClinicalKnowledgeChunkRepository extends JpaRepository<ClinicalKnowledgeChunk, UUID> {
     List<ClinicalKnowledgeChunk> findByActiveTrueAndConditionTagInOrderByUpdatedAtDesc(List<String> conditionTags);
+    List<ClinicalKnowledgeChunk> findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(List<String> conditionTags);
 }

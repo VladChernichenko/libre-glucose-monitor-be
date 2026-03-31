@@ -49,13 +49,14 @@ public class NightscoutGlucoseSyncScheduler {
     )
     public void syncNightscoutForAllUsers() {
         LocalDateTime now = LocalDateTime.now();
+        log.info("Glucose sync tick started at {}", now);
         List<UUID> userIds = configRepository.findDistinctUserIdsByDataSourceAndIsActiveTrue(
                 UserDataSourceConfig.DataSourceType.NIGHTSCOUT);
         if (userIds.isEmpty()) {
-            log.trace("Glucose sync: no users with active Nightscout configuration");
+            log.info("Glucose sync tick finished: no users with active Nightscout configuration");
             return;
         }
-        log.debug("Glucose sync: {} user(s) with active Nightscout", userIds.size());
+        log.info("Glucose sync: {} user(s) with active Nightscout", userIds.size());
         int skippedByBackoff = 0;
         int usersWithNewData = 0;
         int usersNoChange = 0;
@@ -66,6 +67,11 @@ public class NightscoutGlucoseSyncScheduler {
                 if (state.getNextPollAt() != null && now.isBefore(state.getNextPollAt())) {
                     skippedByBackoff++;
                     syncStateService.markSkippedBackoff(userId, now);
+                    log.info(
+                            "Glucose sync user={} skipped by backoff (nextPollAt={})",
+                            userId,
+                            state.getNextPollAt()
+                    );
                     continue;
                 }
 
@@ -89,11 +95,24 @@ public class NightscoutGlucoseSyncScheduler {
                             now,
                             now.plusMinutes(fastIntervalMinutes)
                     );
+                    log.info(
+                            "Glucose sync user={} new data detected (entries={}, newestTs={}, nextPollAt={})",
+                            userId,
+                            entries.size(),
+                            newestTs.getAsLong(),
+                            now.plusMinutes(fastIntervalMinutes)
+                    );
                 } else {
                     usersNoChange++;
                     syncStateService.markNoChange(
                             userId,
                             now,
+                            now.plusMinutes(slowIntervalMinutes)
+                    );
+                    log.info(
+                            "Glucose sync user={} no new data (entries={}, nextPollAt={})",
+                            userId,
+                            entries.size(),
                             now.plusMinutes(slowIntervalMinutes)
                     );
                 }

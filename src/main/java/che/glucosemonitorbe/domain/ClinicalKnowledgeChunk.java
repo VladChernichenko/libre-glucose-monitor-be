@@ -42,4 +42,21 @@ public class ClinicalKnowledgeChunk {
 
     @Column(nullable = false)
     private LocalDateTime updatedAt;
+
+    @Column(length = 64)
+    private String sourceName;
+
+    @Column(columnDefinition = "TEXT")
+    private String sourceUrl;
+
+    @Column(length = 255)
+    private String sourceTitle;
+
+    @Column(length = 128)
+    private String sourceTopic;
+
+    private LocalDateTime sourcePublishedAt;
+
+    @Column(length = 32)
+    private String sourceType;
 }

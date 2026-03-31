@@ -41,6 +41,9 @@ public class Note {
     
     @Column(name = "insulin_dose", columnDefinition = "JSON")
     private String insulinDose;
+
+    @Column(name = "mock_data", nullable = false)
+    private boolean mockData = false;
     
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -153,6 +156,14 @@ public class Note {
     
     public void setInsulinDose(String insulinDose) {
         this.insulinDose = insulinDose;
+    }
+
+    public boolean isMockData() {
+        return mockData;
+    }
+
+    public void setMockData(boolean mockData) {
+        this.mockData = mockData;
     }
     
     public LocalDateTime getCreatedAt() {

@@ -275,7 +275,7 @@ public class LlmGatewayService {
 
     private String buildJsonPrompt(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) {
         String refs = chunks.stream()
-                .map(c -> "[" + c.getConditionTag() + "] " + c.getContent())
+                .map(this::toReferenceLine)
                 .collect(Collectors.joining("\n"));
         String notesBlock = formatRecentNotes(context);
 
@@ -284,6 +284,7 @@ public class LlmGatewayService {
                 + "likelyMistakes:array[{code,description,severity}], "
                 + "recommendations:array[{code,text,priority}], confidence:number(0..1), disclaimer:string. "
                 + "You MUST analyze ALL recent notes and correlate meals, insulin doses, and pauses with glucose movement. "
+                + "Treat source=real notes as primary evidence and source=mock notes as synthetic/testing context. "
                 + "No markdown, no extra text. "
                 + "Latest=" + context.getLatestGlucose()
                 + ", avg=" + context.getAvgGlucose()
@@ -295,12 +296,13 @@ public class LlmGatewayService {
 
     private String buildMarkdownPrompt(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) {
         String refs = chunks.stream()
-                .map(c -> "[" + c.getConditionTag() + "] " + c.getContent())
+                .map(this::toReferenceLine)
                 .collect(Collectors.joining("\n"));
         String notesBlock = formatRecentNotes(context);
         return "You are a glucose assistant. Write concise markdown with sections: "
                 + "## Summary, ## Detected patterns, ## Likely mistakes, ## Recommendations, ## Disclaimer. "
                 + "Analyze ALL recent notes and explicitly account for meals, insulin doses, and pauses. "
+                + "Treat source=real notes as primary evidence and source=mock notes as synthetic/testing context. "
                 + "Use bullet points where relevant. Do not output JSON. "
                 + "Latest=" + context.getLatestGlucose()
                 + ", avg=" + context.getAvgGlucose()
@@ -338,9 +340,23 @@ public class LlmGatewayService {
             if (!noteText.isBlank()) {
                 tags.add("text=" + noteText);
             }
+            tags.add("source=" + (n.isMockData() ? "mock" : "real"));
             lines.add("- " + formatHumanReadableTimestamp(n.getTimestamp()) + " | " + String.join("; ", tags));
         }
         return String.join("\n", lines);
+    }
+
+    private String toReferenceLine(ClinicalKnowledgeChunk chunk) {
+        String sourceTitle = chunk.getSourceTitle() == null || chunk.getSourceTitle().isBlank()
+                ? chunk.getTitle() : chunk.getSourceTitle();
+        String sourceUrl = chunk.getSourceUrl() == null ? "" : chunk.getSourceUrl();
+        String sourceName = chunk.getSourceName() == null ? "internal" : chunk.getSourceName();
+        String topic = chunk.getSourceTopic() == null ? "general" : chunk.getSourceTopic();
+        return "[" + chunk.getConditionTag() + "] "
+                + sourceTitle
+                + " | source=" + sourceName
+                + " | topic=" + topic
+                + " | url=" + sourceUrl;
     }
 
     private String formatHumanReadableTimestamp(LocalDateTime timestamp) {

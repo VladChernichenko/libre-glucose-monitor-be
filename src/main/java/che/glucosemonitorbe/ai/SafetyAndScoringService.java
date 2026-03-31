@@ -14,6 +14,9 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class SafetyAndScoringService {
+    private static final double HYPO_THRESHOLD_MMOL = 3.9;
+    private static final double HYPER_THRESHOLD_MMOL = 10.0;
+    private static final double FAST_RISE_THRESHOLD_MMOL = 2.0;
 
     private final ObjectMapper objectMapper;
 
@@ -29,18 +32,18 @@ public class SafetyAndScoringService {
         double confidence = 0.55;
         String disclaimer = "Educational support only; not a dosing instruction.";
 
-        if (context.getLatestGlucose() > 10.0) {
+        if (context.getLatestGlucose() > HYPER_THRESHOLD_MMOL) {
             patterns.add(AiPatternDTO.builder().code("HYPER_NOW").description("Current glucose is above target.").severity("medium").build());
             mistakes.add(AiPatternDTO.builder().code("POSSIBLE_LATE_CORRECTION").description("Consider if correction timing was delayed.").severity("low").build());
             recs.add(AiRecommendationDTO.builder().code("CHECK_CORRECTION_WINDOW").text("Review correction factor and avoid stacking corrections too close.").priority("high").build());
             confidence += 0.1;
         }
-        if (context.getLatestGlucose() < 3.9) {
+        if (context.getLatestGlucose() < HYPO_THRESHOLD_MMOL) {
             patterns.add(AiPatternDTO.builder().code("HYPO_NOW").description("Current glucose is below target.").severity("high").build());
             recs.add(AiRecommendationDTO.builder().code("HYPO_PROTOCOL").text("Follow your hypo protocol and recheck glucose soon.").priority("critical").build());
             confidence += 0.15;
         }
-        if (context.getDeltaGlucose() > 2.5) {
+        if (context.getDeltaGlucose() > FAST_RISE_THRESHOLD_MMOL) {
             patterns.add(AiPatternDTO.builder().code("FAST_RISE").description("Rapid upward glucose trend.").severity("medium").build());
             recs.add(AiRecommendationDTO.builder().code("POST_MEAL_REVIEW").text("Review meal bolus timing and carb estimate for this meal pattern.").priority("medium").build());
         }
@@ -115,6 +118,11 @@ public class SafetyAndScoringService {
                         .chunkId(c.getId().toString())
                         .title(c.getTitle())
                         .conditionTag(c.getConditionTag())
+                        .sourceName(c.getSourceName())
+                        .sourceUrl(c.getSourceUrl())
+                        .sourceTitle(c.getSourceTitle())
+                        .sourceTopic(c.getSourceTopic())
+                        .evidenceLevel(c.getEvidenceLevel())
                         .build())
                 .toList();
 

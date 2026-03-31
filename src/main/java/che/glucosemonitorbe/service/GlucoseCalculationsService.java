@@ -33,6 +33,8 @@ public class GlucoseCalculationsService {
     private static final double DEFAULT_ISF = 1.0; // mmol/L per unit insulin
     private static final double DEFAULT_GLUCOSE_TREND = 0.0; // mmol/L per minute (stable)
     private static final double PREDICTION_HORIZON_MINUTES = 120.0; // 2 hours
+    private static final double TREND_RISING_THRESHOLD = 0.3;
+    private static final double TREND_FALLING_THRESHOLD = -0.3;
     private static final double CONFIDENCE_HIGH = 0.9;
     private static final double CONFIDENCE_MEDIUM = 0.7;
     private static final double CONFIDENCE_LOW = 0.5;
@@ -134,15 +136,6 @@ public class GlucoseCalculationsService {
         // Trend contribution: extrapolate current trend over prediction horizon
         double trendContribution = DEFAULT_GLUCOSE_TREND * (horizonMinutes / 60.0);
         
-        System.out.println("СЂСџвЂќРЊ Prediction Factors Debug:");
-        System.out.println("  - User ISF: " + userISF + " mmol/L per unit (was: " + DEFAULT_ISF + ")");
-        System.out.println("  - User Carb Ratio: " + userCarbRatio + " mmol/L per 10g (was: " + DEFAULT_CARB_RATIO + ")");
-        System.out.println("  - Current COB: " + currentCOB + "g, Future COB: " + futureCOB + "g");
-        System.out.println("  - Current IOB: " + currentIOB + "u, Future IOB: " + futureIOB + "u");
-        System.out.println("  - Carb Contribution (FIXED): " + currentCOB + "g Р“В· 10 Р“вЂ” " + userCarbRatio + " = +" + carbContribution + " mmol/L");
-        System.out.println("  - Insulin Contribution: " + currentIOB + "u Р“вЂ” " + userISF + " = " + insulinContribution + " mmol/L");
-        System.out.println("  - Total Effect: " + (carbContribution + insulinContribution) + " mmol/L");
-        
         return PredictionFactors.builder()
                 .carbContribution(Math.round(carbContribution * 100.0) / 100.0)
                 .insulinContribution(Math.round(insulinContribution * 100.0) / 100.0)
@@ -176,9 +169,9 @@ public class GlucoseCalculationsService {
                           factors.getBaselineContribution() + 
                           factors.getTrendContribution();
         
-        if (netEffect > 0.5) {
+        if (netEffect > TREND_RISING_THRESHOLD) {
             return "rising";
-        } else if (netEffect < -0.5) {
+        } else if (netEffect < TREND_FALLING_THRESHOLD) {
             return "falling";
         } else {
             return "stable";
@@ -214,33 +207,24 @@ public class GlucoseCalculationsService {
      */
     private List<CarbsEntry> getRecentCarbsEntries(String username, LocalDateTime currentTime) {
         try {
-            System.out.println("СЂСџвЂќРЊ Fetching carbs entries for user: " + username);
-            
             // Convert username to UUID using UserService
             UUID userId = userService.getUserByUsername(username).getId();
-            System.out.println("  - Resolved userId: " + userId);
             
             // Query notes from the last 6 hours to capture active carbs
             LocalDateTime startTime = currentTime.minusHours(6);
-            System.out.println("  - Time range: " + startTime + " to " + currentTime);
             
             List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(
                 userId, startTime, currentTime);
-            System.out.println("  - Found " + recentNotes.size() + " total notes in time range");
             
             // Filter notes with carbs > 0 and convert to CarbsEntry objects
             List<CarbsEntry> carbsEntries = recentNotes.stream()
                 .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
                 .map(this::convertNoteToCarbsEntry)
                 .collect(Collectors.toList());
-            
-            System.out.println("  - Filtered to " + carbsEntries.size() + " notes with carbs > 0");
             return carbsEntries;
                 
         } catch (Exception e) {
             // User not found or database error
-            System.err.println("Error fetching carbs entries for user " + username + ": " + e.getMessage());
-            e.printStackTrace();
             return new ArrayList<>();
         }
     }
@@ -285,7 +269,6 @@ public class GlucoseCalculationsService {
                 
         } catch (Exception e) {
             // User not found or database error
-            System.err.println("Error fetching insulin entries for user " + username + ": " + e.getMessage());
             return new ArrayList<>();
         }
     }

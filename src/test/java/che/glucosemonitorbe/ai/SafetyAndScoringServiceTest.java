@@ -29,6 +29,11 @@ class SafetyAndScoringServiceTest {
                 .title("Hyper guidance")
                 .conditionTag("HYPER")
                 .content("Avoid stacking corrections")
+                .sourceName("rule15s")
+                .sourceUrl("https://rule15s.com/")
+                .sourceTitle("Rule15 reference")
+                .sourceTopic("hyperglycemia")
+                .evidenceLevel("EDUCATIONAL")
                 .active(true)
                 .build();
 
@@ -44,5 +49,7 @@ class SafetyAndScoringServiceTest {
         assertFalse(resp.getRecommendations().isEmpty());
         assertTrue(resp.getRecommendations().stream().anyMatch(r -> r.getCode().equals("CHECK_CORRECTION_WINDOW")));
         assertEquals("rules-only", resp.getModelId());
+        assertEquals("https://rule15s.com/", resp.getEvidenceRefs().get(0).getSourceUrl());
+        assertEquals("rule15s", resp.getEvidenceRefs().get(0).getSourceName());
     }
 }

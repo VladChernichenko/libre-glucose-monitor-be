@@ -14,9 +14,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CarbsOnBoardService {
     
-    // Default COB constants (can be overridden by user configuration)
-    private static final double DEFAULT_CARB_HALF_LIFE_MINUTES = 240.0; // 4 hours
-    private static final double DEFAULT_INSULIN_HALF_LIFE_MINUTES = 42.0; // Fiasp insulin
     private final COBSettingsService cOBSettingsService;
 
     /**
@@ -28,14 +25,22 @@ public class CarbsOnBoardService {
         }
         COBSettingsDTO cobSettings = cOBSettingsService.getCOBSettings(userId);
         long minutesSinceEntry = ChronoUnit.MINUTES.between(entry.getTimestamp(), currentTime);
+        if (minutesSinceEntry < 0) {
+            return 0.0;
+        }
         
-        // If beyond the carb half-life, no carbs remain
-        if (minutesSinceEntry > cobSettings.getCarbHalfLife()) {
+        // Carb half-life controls decay rate, max COB duration is the hard cutoff.
+        int maxDuration = cobSettings.getMaxCOBDuration() != null ? cobSettings.getMaxCOBDuration() : 240;
+        if (minutesSinceEntry > maxDuration) {
+            return 0.0;
+        }
+        int halfLife = cobSettings.getCarbHalfLife() != null ? cobSettings.getCarbHalfLife() : 45;
+        if (halfLife <= 0) {
             return 0.0;
         }
         
         // Calculate remaining carbs using exponential decay
-        double halfLives = (double) minutesSinceEntry / cobSettings.getCarbHalfLife();
+        double halfLives = (double) minutesSinceEntry / halfLife;
         double remainingCarbs = entry.getCarbs() * Math.pow(0.5, halfLives);
         
         return Math.max(0.0, remainingCarbs);
