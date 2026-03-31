@@ -1,0 +1,95 @@
+package che.glucosemonitorbe.ai;
+
+import che.glucosemonitorbe.domain.ClinicalKnowledgeChunk;
+import che.glucosemonitorbe.dto.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class SafetyAndScoringService {
+
+    private final ObjectMapper objectMapper;
+
+    public AiAnalysisResponse finalizeResponse(
+            AnalysisContext context,
+            List<ClinicalKnowledgeChunk> chunks,
+            LlmGatewayService.GatewayResult result
+    ) {
+        String summary = "Glucose has been relatively stable in the selected period.";
+        List<AiPatternDTO> patterns = new ArrayList<>();
+        List<AiPatternDTO> mistakes = new ArrayList<>();
+        List<AiRecommendationDTO> recs = new ArrayList<>();
+        double confidence = 0.55;
+        String disclaimer = "Educational support only; not a dosing instruction.";
+
+        if (context.getLatestGlucose() > 10.0) {
+            patterns.add(AiPatternDTO.builder().code("HYPER_NOW").description("Current glucose is above target.").severity("medium").build());
+            mistakes.add(AiPatternDTO.builder().code("POSSIBLE_LATE_CORRECTION").description("Consider if correction timing was delayed.").severity("low").build());
+            recs.add(AiRecommendationDTO.builder().code("CHECK_CORRECTION_WINDOW").text("Review correction factor and avoid stacking corrections too close.").priority("high").build());
+            confidence += 0.1;
+        }
+        if (context.getLatestGlucose() < 3.9) {
+            patterns.add(AiPatternDTO.builder().code("HYPO_NOW").description("Current glucose is below target.").severity("high").build());
+            recs.add(AiRecommendationDTO.builder().code("HYPO_PROTOCOL").text("Follow your hypo protocol and recheck glucose soon.").priority("critical").build());
+            confidence += 0.15;
+        }
+        if (context.getDeltaGlucose() > 2.5) {
+            patterns.add(AiPatternDTO.builder().code("FAST_RISE").description("Rapid upward glucose trend.").severity("medium").build());
+            recs.add(AiRecommendationDTO.builder().code("POST_MEAL_REVIEW").text("Review meal bolus timing and carb estimate for this meal pattern.").priority("medium").build());
+        }
+
+        // Attempt strict-JSON override from LLM, but keep deterministic fallback if invalid.
+        if (result.getRawOutput() != null && !result.getRawOutput().isBlank() && !"{}".equals(result.getRawOutput().trim())) {
+            try {
+                JsonNode root = objectMapper.readTree(result.getRawOutput());
+                if (root.has("summary") && root.get("summary").isTextual()) {
+                    summary = root.get("summary").asText();
+                }
+                if (root.has("confidence") && root.get("confidence").isNumber()) {
+                    confidence = Math.max(0.0, Math.min(1.0, root.get("confidence").asDouble()));
+                }
+                if (root.has("disclaimer") && root.get("disclaimer").isTextual()) {
+                    disclaimer = root.get("disclaimer").asText();
+                }
+            } catch (Exception ignored) {
+                // keep deterministic output
+            }
+        }
+
+        // Remove potentially unsafe imperative dosing language.
+        recs = recs.stream()
+                .map(r -> {
+                    String safeText = r.getText().replaceAll("(?i)take\\s+\\d+(\\.\\d+)?\\s*u", "review your correction guidance");
+                    return AiRecommendationDTO.builder().code(r.getCode()).text(safeText).priority(r.getPriority()).build();
+                })
+                .toList();
+
+        List<AiInsightEvidenceDTO> evidence = chunks.stream().limit(5)
+                .map(c -> AiInsightEvidenceDTO.builder()
+                        .chunkId(c.getId().toString())
+                        .title(c.getTitle())
+                        .conditionTag(c.getConditionTag())
+                        .build())
+                .toList();
+
+        return AiAnalysisResponse.builder()
+                .summary(summary)
+                .detectedPatterns(patterns)
+                .likelyMistakes(mistakes)
+                .recommendations(recs)
+                .evidenceRefs(evidence)
+                .confidence(confidence)
+                .disclaimer(disclaimer)
+                .modelId(result.getModelId())
+                .latencyMs(result.getLatencyMs())
+                .generatedAt(LocalDateTime.now())
+                .build();
+    }
+}
