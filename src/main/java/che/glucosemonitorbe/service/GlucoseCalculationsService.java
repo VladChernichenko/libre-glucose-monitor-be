@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -38,6 +39,9 @@ public class GlucoseCalculationsService {
     private static final double CONFIDENCE_HIGH = 0.9;
     private static final double CONFIDENCE_MEDIUM = 0.7;
     private static final double CONFIDENCE_LOW = 0.5;
+    private static final double PRE_BOLUS_TARGET_MINUTES = 15.0;
+    private static final double PRE_BOLUS_MATCH_WINDOW_MINUTES = 90.0;
+    private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
     private final COBSettingsService cOBSettingsService;
 
     /**
@@ -57,8 +61,16 @@ public class GlucoseCalculationsService {
         COBSettingsDTO userSettings = cOBSettingsService.getCOBSettings(userUUID);
         
         // Get recent notes/entries for calculations
-        List<CarbsEntry> carbsEntries = getRecentCarbsEntries(userId, currentTime);
-        List<InsulinDose> insulinEntries = getRecentInsulinEntries(userId, currentTime);
+        List<Note> recentNotes = getRecentNotes(userId, currentTime);
+        List<CarbsEntry> carbsEntries = recentNotes.stream()
+                .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
+                .map(this::convertNoteToCarbsEntry)
+                .collect(Collectors.toList());
+        List<InsulinDose> insulinEntries = recentNotes.stream()
+                .filter(note -> note.getInsulin() != null && note.getInsulin() > 0)
+                .map(this::convertNoteToInsulinDose)
+                .collect(Collectors.toList());
+        Double avgBolusToMealMinutes = calculateAverageBolusToMealMinutes(recentNotes);
 
         RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userUUID);
         
@@ -80,7 +92,7 @@ public class GlucoseCalculationsService {
         
         // Calculate prediction factors using user-specific settings
         PredictionFactors factors = calculatePredictionFactors(
-            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings);
+            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes);
         
         // Calculate predicted glucose
         double predictedGlucose = calculatePredictedGlucose(
@@ -115,7 +127,7 @@ public class GlucoseCalculationsService {
     private PredictionFactors calculatePredictionFactors(
             double currentCOB, double futureCOB, 
             double currentIOB, double futureIOB, 
-            double horizonMinutes, COBSettingsDTO userSettings) {
+            double horizonMinutes, COBSettingsDTO userSettings, Double avgBolusToMealMinutes) {
         // Use user-specific settings instead of defaults
         double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
@@ -135,12 +147,15 @@ public class GlucoseCalculationsService {
         
         // Trend contribution: extrapolate current trend over prediction horizon
         double trendContribution = DEFAULT_GLUCOSE_TREND * (horizonMinutes / 60.0);
+        double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
         
         return PredictionFactors.builder()
                 .carbContribution(Math.round(carbContribution * 100.0) / 100.0)
                 .insulinContribution(Math.round(insulinContribution * 100.0) / 100.0)
                 .baselineContribution(Math.round(baselineContribution * 100.0) / 100.0)
                 .trendContribution(Math.round(trendContribution * 100.0) / 100.0)
+                .preBolusTimingContribution(Math.round(preBolusTimingContribution * 100.0) / 100.0)
+                .avgBolusToMealMinutes(avgBolusToMealMinutes != null ? Math.round(avgBolusToMealMinutes * 10.0) / 10.0 : null)
                 .build();
     }
     
@@ -152,7 +167,8 @@ public class GlucoseCalculationsService {
         double totalEffect = factors.getCarbContribution() + 
                            factors.getInsulinContribution() + 
                            factors.getBaselineContribution() + 
-                           factors.getTrendContribution();
+                           factors.getTrendContribution() +
+                           (factors.getPreBolusTimingContribution() != null ? factors.getPreBolusTimingContribution() : 0.0);
         
         double predictedGlucose = currentGlucose + totalEffect;
         
@@ -167,7 +183,8 @@ public class GlucoseCalculationsService {
         double netEffect = factors.getCarbContribution() + 
                           factors.getInsulinContribution() + 
                           factors.getBaselineContribution() + 
-                          factors.getTrendContribution();
+                          factors.getTrendContribution() +
+                          (factors.getPreBolusTimingContribution() != null ? factors.getPreBolusTimingContribution() : 0.0);
         
         if (netEffect > TREND_RISING_THRESHOLD) {
             return "rising";
@@ -176,6 +193,64 @@ public class GlucoseCalculationsService {
         } else {
             return "stable";
         }
+    }
+
+    private double calculatePreBolusTimingContribution(Double avgBolusToMealMinutes) {
+        if (avgBolusToMealMinutes == null) {
+            return 0.0;
+        }
+
+        // If insulin is too close to meal (or after), expect more post-meal rise.
+        if (avgBolusToMealMinutes < 10.0) {
+            double delta = (10.0 - avgBolusToMealMinutes) / 10.0;
+            return Math.min(PRE_BOLUS_MAX_TIMING_EFFECT, 0.6 + delta * 0.6);
+        }
+
+        // 10-25 min pre-bolus is near target range.
+        if (avgBolusToMealMinutes <= 25.0) {
+            return 0.0;
+        }
+
+        // If bolus is much earlier than meal, model slightly stronger insulin effect at horizon.
+        double delta = (avgBolusToMealMinutes - 25.0) / 20.0;
+        return -Math.min(PRE_BOLUS_MAX_TIMING_EFFECT, delta * 0.6);
+    }
+
+    private Double calculateAverageBolusToMealMinutes(List<Note> notes) {
+        List<Note> sorted = notes.stream()
+                .filter(n -> n.getTimestamp() != null)
+                .sorted(Comparator.comparing(Note::getTimestamp))
+                .toList();
+
+        List<Double> intervals = new ArrayList<>();
+        for (Note meal : sorted) {
+            if (meal.getCarbs() == null || meal.getCarbs() <= 0) {
+                continue;
+            }
+            if ("Correction".equalsIgnoreCase(meal.getMeal())) {
+                continue;
+            }
+
+            Note bolus = sorted.stream()
+                    .filter(n -> n.getInsulin() != null && n.getInsulin() > 0)
+                    .filter(n -> n.getTimestamp().isBefore(meal.getTimestamp()) || n.getTimestamp().isEqual(meal.getTimestamp()))
+                    .filter(n -> {
+                        long minutes = java.time.Duration.between(n.getTimestamp(), meal.getTimestamp()).toMinutes();
+                        return minutes >= 0 && minutes <= (long) PRE_BOLUS_MATCH_WINDOW_MINUTES;
+                    })
+                    .max(Comparator.comparing(Note::getTimestamp))
+                    .orElse(null);
+
+            if (bolus != null) {
+                double minutes = java.time.Duration.between(bolus.getTimestamp(), meal.getTimestamp()).toMinutes();
+                intervals.add(minutes);
+            }
+        }
+
+        if (intervals.isEmpty()) {
+            return null;
+        }
+        return intervals.stream().mapToDouble(v -> v).average().orElse(PRE_BOLUS_TARGET_MINUTES);
     }
     
     /**
@@ -205,7 +280,7 @@ public class GlucoseCalculationsService {
      * Get recent carbs entries for a user from Notes within the last 6 hours
      * Converts Notes with carbs > 0 to CarbsEntry objects for calculation
      */
-    private List<CarbsEntry> getRecentCarbsEntries(String username, LocalDateTime currentTime) {
+    private List<Note> getRecentNotes(String username, LocalDateTime currentTime) {
         try {
             // Convert username to UUID using UserService
             UUID userId = userService.getUserByUsername(username).getId();
@@ -216,12 +291,7 @@ public class GlucoseCalculationsService {
             List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(
                 userId, startTime, currentTime);
             
-            // Filter notes with carbs > 0 and convert to CarbsEntry objects
-            List<CarbsEntry> carbsEntries = recentNotes.stream()
-                .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
-                .map(this::convertNoteToCarbsEntry)
-                .collect(Collectors.toList());
-            return carbsEntries;
+            return recentNotes;
                 
         } catch (Exception e) {
             // User not found or database error
@@ -244,33 +314,6 @@ public class GlucoseCalculationsService {
             .originalCarbs(note.getCarbs()) // Use same value as original
             .userId(note.getUserId())
             .build();
-    }
-    
-    /**
-     * Get recent insulin entries for a user from Notes within the last 6 hours
-     * Converts Notes with insulin > 0 to InsulinDose objects for calculation
-     */
-    private List<InsulinDose> getRecentInsulinEntries(String username, LocalDateTime currentTime) {
-        try {
-            // Convert username to UUID using UserService
-            UUID userId = userService.getUserByUsername(username).getId();
-            
-            // Query notes from the last 6 hours to capture active insulin
-            LocalDateTime startTime = currentTime.minusHours(6);
-            
-            List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(
-                userId, startTime, currentTime);
-            
-            // Filter notes with insulin > 0 and convert to InsulinDose objects
-            return recentNotes.stream()
-                .filter(note -> note.getInsulin() != null && note.getInsulin() > 0)
-                .map(this::convertNoteToInsulinDose)
-                .collect(Collectors.toList());
-                
-        } catch (Exception e) {
-            // User not found or database error
-            return new ArrayList<>();
-        }
     }
     
     /**
