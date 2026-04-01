@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
@@ -11,6 +12,9 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.UuidGenerator;
+
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -27,7 +31,12 @@ public class InsulinCatalog {
     }
 
     @Id
-    @Column(name = "code", length = 32)
+    @GeneratedValue
+    @UuidGenerator
+    @Column(name = "id")
+    private UUID id;
+
+    @Column(name = "code", length = 32, nullable = false, unique = true)
     private String code;
 
     @Enumerated(EnumType.STRING)

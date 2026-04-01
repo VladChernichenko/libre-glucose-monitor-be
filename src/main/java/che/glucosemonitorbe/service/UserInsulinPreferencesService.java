@@ -1,6 +1,5 @@
 package che.glucosemonitorbe.service;
 
-import che.glucosemonitorbe.dto.InsulinCatalogDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UpdateUserInsulinPreferencesRequest;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
@@ -25,7 +24,7 @@ public class UserInsulinPreferencesService {
 
     @Transactional(readOnly = true)
     public UserInsulinPreferencesDTO getPreferences(UUID userId) {
-        UserInsulinPreferences prefs = userInsulinPreferencesRepository.findById(userId)
+        UserInsulinPreferences prefs = userInsulinPreferencesRepository.findByUserId(userId)
                 .orElse(null);
         if (prefs == null) {
             return buildDtoWithCatalogOnly(DEFAULT_RAPID_CODE, DEFAULT_LONG_ACTING_CODE);
@@ -38,7 +37,7 @@ public class UserInsulinPreferencesService {
      */
     @Transactional(readOnly = true)
     public RapidInsulinIobParameters getRapidIobParameters(UUID userId) {
-        InsulinCatalog rapid = userInsulinPreferencesRepository.findById(userId)
+        InsulinCatalog rapid = userInsulinPreferencesRepository.findByUserId(userId)
                 .map(UserInsulinPreferences::getRapidInsulin)
                 .orElseGet(() -> insulinCatalogService.getRequiredByCode(DEFAULT_RAPID_CODE));
 
@@ -71,7 +70,7 @@ public class UserInsulinPreferencesService {
             throw new IllegalArgumentException("Long-acting insulin must be LONG_ACTING category: " + basal.getCode());
         }
 
-        UserInsulinPreferences entity = userInsulinPreferencesRepository.findById(userId)
+        UserInsulinPreferences entity = userInsulinPreferencesRepository.findByUserId(userId)
                 .orElse(UserInsulinPreferences.builder().userId(userId).build());
         entity.setUserId(userId);
         entity.setRapidInsulin(rapid);

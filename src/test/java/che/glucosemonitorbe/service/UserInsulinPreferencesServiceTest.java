@@ -36,7 +36,7 @@ class UserInsulinPreferencesServiceTest {
         UUID userId = UUID.randomUUID();
         InsulinCatalog rapid = insulin("FIASP", InsulinCatalog.Category.RAPID);
         InsulinCatalog longActing = insulin("TRESIBA", InsulinCatalog.Category.LONG_ACTING);
-        when(userInsulinPreferencesRepository.findById(userId)).thenReturn(Optional.empty());
+        when(userInsulinPreferencesRepository.findByUserId(userId)).thenReturn(Optional.empty());
         when(insulinCatalogService.getRequiredByCode("FIASP")).thenReturn(rapid);
         when(insulinCatalogService.getRequiredByCode("TRESIBA")).thenReturn(longActing);
 
@@ -74,7 +74,7 @@ class UserInsulinPreferencesServiceTest {
         InsulinCatalog longActing = insulin("TRESIBA", InsulinCatalog.Category.LONG_ACTING);
         when(insulinCatalogService.getRequiredByCode("FIASP")).thenReturn(rapid);
         when(insulinCatalogService.getRequiredByCode("TRESIBA")).thenReturn(longActing);
-        when(userInsulinPreferencesRepository.findById(userId)).thenReturn(Optional.empty());
+        when(userInsulinPreferencesRepository.findByUserId(userId)).thenReturn(Optional.empty());
 
         UserInsulinPreferences saved = UserInsulinPreferences.builder()
                 .userId(userId)

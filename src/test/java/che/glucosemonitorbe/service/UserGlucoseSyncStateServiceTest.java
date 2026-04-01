@@ -35,7 +35,7 @@ class UserGlucoseSyncStateServiceTest {
                 .consecutiveNoChangeCount(2)
                 .build();
 
-        when(repository.findById(userId)).thenReturn(Optional.of(existing));
+        when(repository.findByUserId(userId)).thenReturn(Optional.of(existing));
         when(repository.save(any(UserGlucoseSyncState.class))).thenAnswer(i -> i.getArgument(0));
 
         service.markNoChange(userId, now, next);

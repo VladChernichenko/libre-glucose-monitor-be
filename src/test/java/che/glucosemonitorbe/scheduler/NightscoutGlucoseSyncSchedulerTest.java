@@ -1,10 +1,12 @@
 package che.glucosemonitorbe.scheduler;
 
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
+import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.NightscoutChartDataService;
+import che.glucosemonitorbe.service.UserGlucoseSyncStateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@SuppressWarnings("null")
 class NightscoutGlucoseSyncSchedulerTest {
 
     @Mock
@@ -30,6 +33,8 @@ class NightscoutGlucoseSyncSchedulerTest {
     private NightScoutIntegration nightScoutIntegration;
     @Mock
     private NightscoutChartDataService nightscoutChartDataService;
+    @Mock
+    private UserGlucoseSyncStateService syncStateService;
 
     @InjectMocks
     private NightscoutGlucoseSyncScheduler scheduler;
@@ -60,6 +65,7 @@ class NightscoutGlucoseSyncSchedulerTest {
                 .thenReturn(List.of(u1, u2));
         List<NightscoutEntryDto> batch = List.of(new NightscoutEntryDto("a", 100, 1L, null, 0, "Flat", null, "sgv", 0, null));
         when(nightScoutIntegration.getGlucoseEntries(any(), eq(100))).thenReturn(batch);
+        when(syncStateService.getOrCreate(any())).thenReturn(UserGlucoseSyncState.builder().build());
 
         scheduler.syncNightscoutForAllUsers();
 
@@ -76,6 +82,7 @@ class NightscoutGlucoseSyncSchedulerTest {
         when(configRepository.findDistinctUserIdsByDataSourceAndIsActiveTrue(
                 UserDataSourceConfig.DataSourceType.NIGHTSCOUT))
                 .thenReturn(List.of(u1, u2));
+        when(syncStateService.getOrCreate(any())).thenReturn(UserGlucoseSyncState.builder().build());
         when(nightScoutIntegration.getGlucoseEntries(u1, 100)).thenThrow(new RuntimeException("down"));
         when(nightScoutIntegration.getGlucoseEntries(u2, 100)).thenReturn(List.of());
 
