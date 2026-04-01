@@ -15,6 +15,7 @@ public class FeatureToggleConfig {
     private boolean glucoseDataEnabled = false;
     private boolean glucoseCalculationsEnabled = false;
     private boolean userConfigurationEnabled = false;
+    private boolean nutritionAwarePredictionEnabled = false;
     
     // Global toggle to switch between frontend and backend
     private boolean backendModeEnabled = false;

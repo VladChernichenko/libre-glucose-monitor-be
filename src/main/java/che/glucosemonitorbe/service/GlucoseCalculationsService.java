@@ -6,9 +6,12 @@ import che.glucosemonitorbe.dto.PredictionFactors;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,6 +32,8 @@ public class GlucoseCalculationsService {
     private final NoteRepository noteRepository;
     private final UserService userService;
     private final UserInsulinPreferencesService userInsulinPreferencesService;
+    private final ObjectMapper objectMapper;
+    private final FeatureToggleConfig featureToggleConfig;
     
     // Default constants for glucose calculations
     private static final double DEFAULT_CARB_RATIO = 2.0; // mmol/L per 10g carbs
@@ -95,7 +100,7 @@ public class GlucoseCalculationsService {
         
         // Calculate prediction factors using user-specific settings
         PredictionFactors factors = calculatePredictionFactors(
-            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes);
+            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes, carbsEntries);
         
         // Calculate predicted glucose
         double predictedGlucose = calculatePredictedGlucose(
@@ -174,6 +179,9 @@ public class GlucoseCalculationsService {
             points.add(PredictionPointDTO.builder()
                     .timestamp(t)
                     .predictedGlucose(Math.round(predicted * 10.0) / 10.0)
+                    .carbAbsorptionEffect(Math.round(carbsDeliveredEffect * 100.0) / 100.0)
+                    .insulinActivityEffect(Math.round(insulinDeliveredEffect * 100.0) / 100.0)
+                    .absorptionMode(resolvePathAbsorptionMode(carbsEntries))
                     .build());
         }
         return points;
@@ -185,7 +193,8 @@ public class GlucoseCalculationsService {
     private PredictionFactors calculatePredictionFactors(
             double currentCOB, double futureCOB, 
             double currentIOB, double futureIOB, 
-            double horizonMinutes, COBSettingsDTO userSettings, Double avgBolusToMealMinutes) {
+            double horizonMinutes, COBSettingsDTO userSettings, Double avgBolusToMealMinutes,
+            List<CarbsEntry> carbsEntries) {
         // Use user-specific settings instead of defaults
         double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
@@ -201,6 +210,7 @@ public class GlucoseCalculationsService {
         // Trend contribution: extrapolate current trend over prediction horizon
         double trendContribution = DEFAULT_GLUCOSE_TREND * (horizonMinutes / 60.0);
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
+        NutritionSummary nutritionSummary = summarizeNutrition(carbsEntries);
         
         return PredictionFactors.builder()
                 .carbContribution(Math.round(carbContribution * 100.0) / 100.0)
@@ -209,6 +219,10 @@ public class GlucoseCalculationsService {
                 .trendContribution(Math.round(trendContribution * 100.0) / 100.0)
                 .preBolusTimingContribution(Math.round(preBolusTimingContribution * 100.0) / 100.0)
                 .avgBolusToMealMinutes(avgBolusToMealMinutes != null ? Math.round(avgBolusToMealMinutes * 10.0) / 10.0 : null)
+                .estimatedMealGi(nutritionSummary.avgGi)
+                .estimatedMealGl(nutritionSummary.totalGl)
+                .absorptionSpeedClass(nutritionSummary.speedClass)
+                .absorptionMode(nutritionSummary.absorptionMode)
                 .build();
     }
     
@@ -356,7 +370,7 @@ public class GlucoseCalculationsService {
      * Convert a Note with carbs data to a CarbsEntry object
      */
     private CarbsEntry convertNoteToCarbsEntry(Note note) {
-        return CarbsEntry.builder()
+        CarbsEntry entry = CarbsEntry.builder()
             .id(note.getId())
             .timestamp(note.getTimestamp())
             .carbs(note.getCarbs())
@@ -367,7 +381,73 @@ public class GlucoseCalculationsService {
             .originalCarbs(note.getCarbs()) // Use same value as original
             .userId(note.getUserId())
             .build();
+        entry.setAbsorptionMode(note.getAbsorptionMode() != null ? note.getAbsorptionMode() : "DEFAULT_DECAY");
+        if (!featureToggleConfig.isNutritionAwarePredictionEnabled()) {
+            entry.setAbsorptionMode("DEFAULT_DECAY");
+            return entry;
+        }
+        if (note.getNutritionProfile() != null && !note.getNutritionProfile().isBlank()) {
+            try {
+                NutritionSnapshot snapshot = objectMapper.readValue(note.getNutritionProfile(), NutritionSnapshot.class);
+                entry.setEstimatedGi(snapshot.getEstimatedGi());
+                entry.setGlycemicLoad(snapshot.getGlycemicLoad());
+                entry.setFiber(snapshot.getFiber());
+                entry.setProtein(snapshot.getProtein());
+                entry.setFat(snapshot.getFat());
+                entry.setAbsorptionSpeedClass(snapshot.getAbsorptionSpeedClass());
+                if (snapshot.getAbsorptionMode() != null) {
+                    entry.setAbsorptionMode(snapshot.getAbsorptionMode());
+                }
+            } catch (Exception ignored) {
+                entry.setAbsorptionMode("DEFAULT_DECAY");
+            }
+        }
+        return entry;
     }
+
+    private NutritionSummary summarizeNutrition(List<CarbsEntry> carbsEntries) {
+        if (carbsEntries == null || carbsEntries.isEmpty()) {
+            return new NutritionSummary(null, null, "DEFAULT", "DEFAULT_DECAY");
+        }
+        double giWeightedSum = 0.0;
+        double giWeight = 0.0;
+        double glTotal = 0.0;
+        boolean anyEnhanced = false;
+        int fast = 0;
+        int slow = 0;
+        for (CarbsEntry entry : carbsEntries) {
+            if ("GI_GL_ENHANCED".equalsIgnoreCase(entry.getAbsorptionMode())) {
+                anyEnhanced = true;
+            }
+            if ("FAST".equalsIgnoreCase(entry.getAbsorptionSpeedClass())) {
+                fast++;
+            } else if ("SLOW".equalsIgnoreCase(entry.getAbsorptionSpeedClass())) {
+                slow++;
+            }
+            if (entry.getEstimatedGi() != null && entry.getCarbs() != null && entry.getCarbs() > 0) {
+                giWeightedSum += entry.getEstimatedGi() * entry.getCarbs();
+                giWeight += entry.getCarbs();
+            }
+            if (entry.getGlycemicLoad() != null) {
+                glTotal += entry.getGlycemicLoad();
+            }
+        }
+        String speedClass = fast > slow ? "FAST" : (slow > fast ? "SLOW" : "MEDIUM");
+        return new NutritionSummary(
+                giWeight > 0 ? Math.round((giWeightedSum / giWeight) * 10.0) / 10.0 : null,
+                glTotal > 0 ? Math.round(glTotal * 10.0) / 10.0 : null,
+                speedClass,
+                anyEnhanced ? "GI_GL_ENHANCED" : "DEFAULT_DECAY"
+        );
+    }
+
+    private String resolvePathAbsorptionMode(List<CarbsEntry> entries) {
+        return entries.stream().anyMatch(e -> "GI_GL_ENHANCED".equalsIgnoreCase(e.getAbsorptionMode()))
+                ? "GI_GL_ENHANCED"
+                : "DEFAULT_DECAY";
+    }
+
+    private record NutritionSummary(Double avgGi, Double totalGl, String speedClass, String absorptionMode) {}
     
     /**
      * Convert a Note with insulin data to an InsulinDose object

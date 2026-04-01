@@ -14,4 +14,7 @@ import java.time.LocalDateTime;
 public class PredictionPointDTO {
     private LocalDateTime timestamp;
     private Double predictedGlucose;
+    private Double carbAbsorptionEffect;
+    private Double insulinActivityEffect;
+    private String absorptionMode;
 }

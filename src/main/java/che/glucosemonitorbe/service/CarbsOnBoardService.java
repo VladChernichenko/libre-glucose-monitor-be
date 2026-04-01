@@ -39,11 +39,47 @@ public class CarbsOnBoardService {
             return 0.0;
         }
         
-        // Calculate remaining carbs using exponential decay
+        if ("GI_GL_ENHANCED".equalsIgnoreCase(entry.getAbsorptionMode())) {
+            return calculateEnhancedRemaining(entry, minutesSinceEntry, halfLife, maxDuration);
+        }
+        return calculateDefaultRemaining(entry.getCarbs(), minutesSinceEntry, halfLife);
+    }
+
+    private double calculateDefaultRemaining(double carbs, long minutesSinceEntry, int halfLife) {
         double halfLives = (double) minutesSinceEntry / halfLife;
-        double remainingCarbs = entry.getCarbs() * Math.pow(0.5, halfLives);
-        
-        return Math.max(0.0, remainingCarbs);
+        return Math.max(0.0, carbs * Math.pow(0.5, halfLives));
+    }
+
+    private double calculateEnhancedRemaining(CarbsEntry entry, long minutesSinceEntry, int halfLife, int maxDuration) {
+        double gi = entry.getEstimatedGi() != null ? entry.getEstimatedGi() : 55.0;
+        double fiber = entry.getFiber() != null ? Math.max(0.0, entry.getFiber()) : 0.0;
+        double protein = entry.getProtein() != null ? Math.max(0.0, entry.getProtein()) : 0.0;
+        double fat = entry.getFat() != null ? Math.max(0.0, entry.getFat()) : 0.0;
+        double availableCarbs = Math.max(0.0, entry.getCarbs() - fiber);
+
+        double baseFast = clamp((gi - 40.0) / 40.0, 0.2, 0.75);
+        double slowPenalty = clamp((fiber * 0.015) + ((protein + fat) * 0.008), 0.0, 0.35);
+        double fastPhase = clamp(baseFast - slowPenalty, 0.15, 0.7);
+        double mediumPhase = 0.25;
+        double delayedPhase = clamp(1.0 - fastPhase - mediumPhase, 0.1, 0.6);
+
+        double t = minutesSinceEntry;
+        double kFast = Math.log(2.0) / Math.max(15.0, halfLife * 0.35);
+        double kMedium = Math.log(2.0) / Math.max(40.0, halfLife * 0.9);
+        double delayMinutes = clamp((fiber * 2.5) + ((protein + fat) * 1.2), 0.0, maxDuration * 0.5);
+        double kSlow = Math.log(2.0) / Math.max(70.0, halfLife * 1.8);
+
+        double remainingFast = fastPhase * Math.exp(-kFast * t);
+        double remainingMedium = mediumPhase * Math.exp(-kMedium * t);
+        double shifted = Math.max(0.0, t - delayMinutes);
+        double remainingSlow = delayedPhase * Math.exp(-kSlow * shifted);
+
+        double remainingFraction = clamp(remainingFast + remainingMedium + remainingSlow, 0.0, 1.0);
+        return availableCarbs * remainingFraction;
+    }
+
+    private double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
     
     /**

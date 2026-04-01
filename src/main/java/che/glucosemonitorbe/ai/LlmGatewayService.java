@@ -38,6 +38,13 @@ import java.util.stream.Collectors;
 public class LlmGatewayService {
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
     private static final DateTimeFormatter FULL_DATE_TIME_FORMAT = DateTimeFormatter.ofPattern("dd MMM yyyy 'at' HH:mm");
+    private static final String MARKDOWN_FALLBACK_MESSAGE =
+            "## Summary\nAI provider is currently unavailable.\n\n"
+                    + "## Detected patterns\n- Unable to generate model-backed analysis right now.\n\n"
+                    + "## Likely mistakes\n- None can be inferred without model output.\n\n"
+                    + "## Recommendations\n- Check Ollama availability and selected model.\n"
+                    + "- Retry analysis in a few seconds.\n\n"
+                    + "## Disclaimer\nThis is a fallback response due to temporary AI connectivity issues.";
 
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate = new RestTemplate();
@@ -187,9 +194,12 @@ public class LlmGatewayService {
             }
         }
 
+        if (tokenConsumer != null) {
+            tokenConsumer.accept(MARKDOWN_FALLBACK_MESSAGE);
+        }
         return GatewayResult.builder()
                 .modelId("rules-only")
-                .rawOutput("")
+                .rawOutput(MARKDOWN_FALLBACK_MESSAGE)
                 .contextWindow(effectiveNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
