@@ -1,4 +1,4 @@
-CREATE TABLE user_glucose_sync_state (
+CREATE TABLE IF NOT EXISTS user_glucose_sync_state (
     user_id                          UUID PRIMARY KEY,
     last_checked_at                  TIMESTAMP,
     last_new_data_at                 TIMESTAMP,
@@ -11,5 +11,5 @@ CREATE TABLE user_glucose_sync_state (
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_user_glucose_sync_state_next_poll
+CREATE INDEX IF NOT EXISTS idx_user_glucose_sync_state_next_poll
     ON user_glucose_sync_state (next_poll_at);

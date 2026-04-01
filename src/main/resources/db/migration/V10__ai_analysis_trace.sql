@@ -1,4 +1,4 @@
-CREATE TABLE ai_analysis_trace (
+CREATE TABLE IF NOT EXISTS ai_analysis_trace (
     id                 UUID PRIMARY KEY,
     user_id            UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     model_id           VARCHAR(128) NOT NULL,
@@ -10,5 +10,5 @@ CREATE TABLE ai_analysis_trace (
     created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_ai_analysis_trace_user_created
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_trace_user_created
     ON ai_analysis_trace (user_id, created_at DESC);

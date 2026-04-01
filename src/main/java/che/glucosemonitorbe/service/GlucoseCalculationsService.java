@@ -190,15 +190,10 @@ public class GlucoseCalculationsService {
         double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         
-        // Carb contribution: Use TOTAL current carbs effect, not decayed future carbs
-        // This matches clinical expectations for 2-hour predictions
-        // User expects: "I have 10g COB with 2.0 carb ratio = 2.0 mmol/L rise"
-        double carbContribution = (currentCOB / 10.0) * userCarbRatio;
-        
-        // Insulin contribution: Use TOTAL current insulin effect, not decayed future insulin
-        // This matches clinical expectations for 2-hour predictions
-        // User expects: "I have 2u IOB with 2.0 ISF = 4.0 mmol/L drop"
-        double insulinContribution = -(currentIOB * userISF);
+        // Use delivered effect over horizon (delta now -> horizon), same model as prediction path.
+        // This prevents overestimating both carb rise and insulin drop when part of effect is outside horizon.
+        double carbContribution = ((currentCOB - futureCOB) / 10.0) * userCarbRatio;
+        double insulinContribution = -((currentIOB - futureIOB) * userISF);
         
         // Baseline contribution: assume minimal baseline drift
         double baselineContribution = 0.0;

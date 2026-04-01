@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.ai;
 
 import che.glucosemonitorbe.domain.ClinicalKnowledgeChunk;
+import che.glucosemonitorbe.dto.AiAnalysisRequest;
 import che.glucosemonitorbe.dto.AiAnalysisResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,8 +39,28 @@ public class AiInsightService {
     }
 
     public LlmGatewayService.GatewayResult streamRetrospectiveMarkdown(UUID userId, int windowHours, Consumer<String> tokenConsumer) {
+        return streamRetrospectiveMarkdown(userId, windowHours, tokenConsumer, null, null, null, null);
+    }
+
+    public LlmGatewayService.GatewayResult streamRetrospectiveMarkdown(
+            UUID userId,
+            int windowHours,
+            Consumer<String> tokenConsumer,
+            String followUpQuestion,
+            List<AiAnalysisRequest.AiChatTurnDto> conversationTurns,
+            String modelOverride,
+            Integer numCtxOverride
+    ) {
         AnalysisContext context = contextAggregatorService.buildContext(userId, windowHours);
         List<ClinicalKnowledgeChunk> chunks = ragRetrieverService.retrieve(context);
-        return llmGatewayService.generateStreamingMarkdown(context, chunks, tokenConsumer);
+        return llmGatewayService.generateStreamingMarkdown(
+                context,
+                chunks,
+                tokenConsumer,
+                followUpQuestion,
+                conversationTurns,
+                modelOverride,
+                numCtxOverride
+        );
     }
 }

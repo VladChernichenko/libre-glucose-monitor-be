@@ -1,5 +1,5 @@
 -- Create user_data_source_config table for storing user-specific data source configurations
-CREATE TABLE user_data_source_config (
+CREATE TABLE IF NOT EXISTS user_data_source_config (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     data_source VARCHAR(50) NOT NULL CHECK (data_source IN ('NIGHTSCOUT', 'LIBRE_LINK_UP')),
@@ -21,13 +21,13 @@ CREATE TABLE user_data_source_config (
 );
 
 -- Create indexes for better performance
-CREATE INDEX idx_user_data_source_config_user_id ON user_data_source_config(user_id);
-CREATE INDEX idx_user_data_source_config_user_source ON user_data_source_config(user_id, data_source);
-CREATE INDEX idx_user_data_source_config_active ON user_data_source_config(user_id, data_source, is_active);
-CREATE INDEX idx_user_data_source_config_last_used ON user_data_source_config(last_used);
+CREATE INDEX IF NOT EXISTS idx_user_data_source_config_user_id ON user_data_source_config(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_data_source_config_user_source ON user_data_source_config(user_id, data_source);
+CREATE INDEX IF NOT EXISTS idx_user_data_source_config_active ON user_data_source_config(user_id, data_source, is_active);
+CREATE INDEX IF NOT EXISTS idx_user_data_source_config_last_used ON user_data_source_config(last_used);
 
 -- Create unique constraint to ensure only one active config per user per data source type
-CREATE UNIQUE INDEX idx_user_data_source_config_unique_active 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_data_source_config_unique_active 
 ON user_data_source_config(user_id, data_source) 
 WHERE is_active = true;
 

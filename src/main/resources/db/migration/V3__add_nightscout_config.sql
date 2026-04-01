@@ -1,5 +1,5 @@
 -- Add nightscout_config table for storing user-specific Nightscout settings
-CREATE TABLE nightscout_config (
+CREATE TABLE IF NOT EXISTS nightscout_config (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL UNIQUE,
     nightscout_url VARCHAR(500) NOT NULL,
@@ -15,11 +15,11 @@ CREATE TABLE nightscout_config (
 );
 
 -- Create index for faster lookups by user_id
-CREATE INDEX idx_nightscout_config_user_id ON nightscout_config(user_id);
+CREATE INDEX IF NOT EXISTS idx_nightscout_config_user_id ON nightscout_config(user_id);
 
 -- Create index for faster lookups by is_active
-CREATE INDEX idx_nightscout_config_active ON nightscout_config(is_active);
+CREATE INDEX IF NOT EXISTS idx_nightscout_config_active ON nightscout_config(is_active);
 
 -- Create index for faster lookups by last_used (for cleanup/maintenance)
-CREATE INDEX idx_nightscout_config_last_used ON nightscout_config(last_used);
+CREATE INDEX IF NOT EXISTS idx_nightscout_config_last_used ON nightscout_config(last_used);
 

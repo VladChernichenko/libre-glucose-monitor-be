@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -49,17 +50,22 @@ public class AiInsightController {
     ) {
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
         int window = request == null || request.getWindowHours() == null ? 12 : request.getWindowHours();
+        String followUpQuestion = request == null ? null : request.getFollowUpQuestion();
+        List<AiAnalysisRequest.AiChatTurnDto> conversationTurns = request == null ? null : request.getConversationTurns();
+        String modelOverride = request == null ? null : request.getModel();
+        Integer numCtxOverride = request == null ? null : request.getNumCtx();
 
         StreamingResponseBody body = outputStream -> {
             try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8))) {
                 try {
-                    LlmGatewayService.GatewayResult usage = aiInsightService.streamRetrospectiveMarkdown(userId, window, token -> {
+                    LlmGatewayService.GatewayResult usage = aiInsightService.streamRetrospectiveMarkdown(
+                            userId, window, token -> {
                         try {
                             writeEvent(writer, Map.of("type", "token", "token", token));
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
-                    });
+                    }, followUpQuestion, conversationTurns, modelOverride, numCtxOverride);
                     Integer prompt = usage.getPromptTokens();
                     Integer completion = usage.getCompletionTokens();
                     Integer contextWindow = usage.getContextWindow();

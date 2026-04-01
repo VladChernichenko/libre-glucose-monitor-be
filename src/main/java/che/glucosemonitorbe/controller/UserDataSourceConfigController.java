@@ -211,12 +211,21 @@ public class UserDataSourceConfigController {
             @Valid @RequestBody NightscoutTestRequestDto request,
             Authentication authentication) {
 
-        log.info("User {} running Nightscout connection test", authentication.getName());
-        NightscoutTestResponseDto result = nightScoutIntegration.probeNightscout(
-                request.getNightscoutUrl(),
-                request.getNightscoutApiSecret(),
-                request.getNightscoutApiToken());
-        return ResponseEntity.ok(result);
+        try {
+            String username = authentication != null ? authentication.getName() : "anonymous";
+            log.info("User {} running Nightscout connection test", username);
+            NightscoutTestResponseDto result = nightScoutIntegration.probeNightscout(
+                    request.getNightscoutUrl(),
+                    request.getNightscoutApiSecret(),
+                    request.getNightscoutApiToken());
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.warn("Nightscout connection test failed unexpectedly: {}", e.getMessage());
+            return ResponseEntity.ok(NightscoutTestResponseDto.builder()
+                    .ok(false)
+                    .message("Connection test failed. Please verify URL/credentials and try again.")
+                    .build());
+        }
     }
 
     /**

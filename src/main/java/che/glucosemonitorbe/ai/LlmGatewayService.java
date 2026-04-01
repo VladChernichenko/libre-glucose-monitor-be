@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.ai;
 
 import che.glucosemonitorbe.domain.ClinicalKnowledgeChunk;
+import che.glucosemonitorbe.dto.AiAnalysisRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
@@ -153,17 +154,32 @@ public class LlmGatewayService {
             List<ClinicalKnowledgeChunk> chunks,
             Consumer<String> tokenConsumer
     ) {
+        return generateStreamingMarkdown(context, chunks, tokenConsumer, null, null, null, null);
+    }
+
+    public GatewayResult generateStreamingMarkdown(
+            AnalysisContext context,
+            List<ClinicalKnowledgeChunk> chunks,
+            Consumer<String> tokenConsumer,
+            String followUpQuestion,
+            List<AiAnalysisRequest.AiChatTurnDto> conversationTurns,
+            String modelOverride,
+            Integer numCtxOverride
+    ) {
         long start = System.currentTimeMillis();
+        String effectiveModel = resolveModel(modelOverride);
+        int effectiveNumCtx = resolveNumCtx(numCtxOverride);
 
         if (ollamaEnabled) {
             try {
-                OllamaResponse response = callOllamaStreamingMarkdown(context, chunks, tokenConsumer);
+                OllamaResponse response = callOllamaStreamingMarkdown(
+                        context, chunks, tokenConsumer, followUpQuestion, conversationTurns, effectiveModel, effectiveNumCtx);
                 return GatewayResult.builder()
-                        .modelId("ollama:" + ollamaModel)
+                        .modelId("ollama:" + effectiveModel)
                         .rawOutput(response.content)
                         .promptTokens(response.usage().promptTokens())
                         .completionTokens(response.usage().completionTokens())
-                        .contextWindow(ollamaNumCtx)
+                        .contextWindow(effectiveNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception ignored) {
@@ -174,7 +190,7 @@ public class LlmGatewayService {
         return GatewayResult.builder()
                 .modelId("rules-only")
                 .rawOutput("")
-                .contextWindow(ollamaNumCtx)
+                .contextWindow(effectiveNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
     }
@@ -242,10 +258,14 @@ public class LlmGatewayService {
     private OllamaResponse callOllamaStreamingMarkdown(
             AnalysisContext context,
             List<ClinicalKnowledgeChunk> chunks,
-            Consumer<String> tokenConsumer
+            Consumer<String> tokenConsumer,
+            String followUpQuestion,
+            List<AiAnalysisRequest.AiChatTurnDto> conversationTurns,
+            String modelOverride,
+            int numCtxOverride
     ) throws Exception {
-        String prompt = buildMarkdownPrompt(context, chunks);
-        String payload = buildOllamaPayload(prompt, true, false);
+        String prompt = buildMarkdownPrompt(context, chunks, followUpQuestion, conversationTurns);
+        String payload = buildOllamaPayload(prompt, true, false, modelOverride, numCtxOverride);
 
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder(URI.create(ollamaUrl))
@@ -326,12 +346,19 @@ public class LlmGatewayService {
                 + "\nReferences:\n" + refs;
     }
 
-    private String buildMarkdownPrompt(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) {
+    private String buildMarkdownPrompt(
+            AnalysisContext context,
+            List<ClinicalKnowledgeChunk> chunks,
+            String followUpQuestion,
+            List<AiAnalysisRequest.AiChatTurnDto> conversationTurns
+    ) {
         String refs = chunks.stream()
                 .map(this::toReferenceLine)
                 .collect(Collectors.joining("\n"));
         String notesBlock = formatRecentNotes(context);
         String predictionMathBlock = formatPredictionMath(context);
+        boolean hasFollowUp = followUpQuestion != null && !followUpQuestion.isBlank();
+        String historyBlock = formatConversationTurns(conversationTurns);
         return "You are a glucose assistant. Write concise markdown with sections: "
                 + "## Summary, ## Detected patterns, ## Likely mistakes, ## Recommendations, ## Disclaimer. "
                 + "Analyze ALL recent notes and explicitly account for meals, insulin doses, and pauses. "
@@ -352,7 +379,11 @@ public class LlmGatewayService {
                 + ", notesCount=" + context.getNotes().size()
                 + ". Recent notes:\n" + notesBlock
                 + "\nPrediction math:\n" + predictionMathBlock
-                + "\nReferences:\n" + refs;
+                + "\nReferences:\n" + refs
+                + (historyBlock.isBlank() ? "" : "\nConversation history:\n" + historyBlock)
+                + (hasFollowUp
+                ? "\nUser follow-up question:\n" + followUpQuestion + "\nRespond directly to this question while using the same context and references."
+                : "\nNo direct user question provided. Provide proactive analysis.");
     }
 
     private String formatPredictionMath(AnalysisContext context) {
@@ -416,6 +447,21 @@ public class LlmGatewayService {
                 + " | url=" + sourceUrl;
     }
 
+    private String formatConversationTurns(List<AiAnalysisRequest.AiChatTurnDto> turns) {
+        if (turns == null || turns.isEmpty()) {
+            return "";
+        }
+        return turns.stream()
+                .filter(t -> t != null && t.getContent() != null && !t.getContent().isBlank())
+                .limit(12)
+                .map(t -> {
+                    String role = t.getRole() == null ? "user" : t.getRole().trim().toLowerCase();
+                    String normalizedRole = "assistant".equals(role) ? "assistant" : "user";
+                    return "- " + normalizedRole + ": " + t.getContent().trim();
+                })
+                .collect(Collectors.joining("\n"));
+    }
+
     private String formatHumanReadableTimestamp(LocalDateTime timestamp) {
         if (timestamp == null) {
             return "unknown time";
@@ -432,15 +478,33 @@ public class LlmGatewayService {
     }
 
     private String buildOllamaPayload(String prompt, boolean stream, boolean jsonFormat) {
+        return buildOllamaPayload(prompt, stream, jsonFormat, ollamaModel, ollamaNumCtx);
+    }
+
+    private String buildOllamaPayload(String prompt, boolean stream, boolean jsonFormat, String model, int numCtx) {
         var node = objectMapper.createObjectNode()
-                .put("model", ollamaModel)
+                .put("model", model)
                 .put("prompt", prompt)
                 .put("stream", stream);
-        node.putObject("options").put("num_ctx", ollamaNumCtx);
+        node.putObject("options").put("num_ctx", numCtx);
         if (jsonFormat) {
             node.put("format", "json");
         }
         return node.toString();
+    }
+
+    private String resolveModel(String modelOverride) {
+        if (modelOverride == null || modelOverride.isBlank()) {
+            return ollamaModel;
+        }
+        return modelOverride.trim();
+    }
+
+    private int resolveNumCtx(Integer numCtxOverride) {
+        if (numCtxOverride == null) {
+            return ollamaNumCtx;
+        }
+        return Math.max(512, Math.min(32768, numCtxOverride));
     }
 
     private Usage extractUsage(JsonNode node) {

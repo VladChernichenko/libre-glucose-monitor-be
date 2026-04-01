@@ -1,5 +1,5 @@
 -- Reference insulin PK parameters (literature / product summaries / common DIY pump defaults; approximate).
-CREATE TABLE insulin_catalog (
+CREATE TABLE IF NOT EXISTS insulin_catalog (
     code                 VARCHAR(32) PRIMARY KEY,
     category             VARCHAR(20)  NOT NULL CHECK (category IN ('RAPID', 'LONG_ACTING')),
     display_name         VARCHAR(128) NOT NULL,
@@ -18,9 +18,17 @@ INSERT INTO insulin_catalog (code, category, display_name, peak_minutes, dia_hou
 ('TRESIBA', 'LONG_ACTING', 'Tresiba (insulin degludec)', NULL, 42.0, 1500, 60,
  'Basal: terminal half-life ~25 h; clinical duration up to ~42 h (summary of product characteristics). Stored for profile; bolus IOB uses rapid insulin only.'),
 ('LANTUS', 'LONG_ACTING', 'Lantus (insulin glargine 100 U/mL)', NULL, 24.0, 720, 90,
- 'Basal: ~24 h effect; half-life order of magnitude ~12 h (approx.). Stored for profile; bolus IOB uses rapid insulin only.');
+ 'Basal: ~24 h effect; half-life order of magnitude ~12 h (approx.). Stored for profile; bolus IOB uses rapid insulin only.')
+ON CONFLICT (code) DO UPDATE SET
+    category = EXCLUDED.category,
+    display_name = EXCLUDED.display_name,
+    peak_minutes = EXCLUDED.peak_minutes,
+    dia_hours = EXCLUDED.dia_hours,
+    half_life_minutes = EXCLUDED.half_life_minutes,
+    onset_minutes = EXCLUDED.onset_minutes,
+    description = EXCLUDED.description;
 
-CREATE TABLE user_insulin_preferences (
+CREATE TABLE IF NOT EXISTS user_insulin_preferences (
     user_id                    UUID PRIMARY KEY,
     rapid_insulin_code         VARCHAR(32) NOT NULL REFERENCES insulin_catalog (code),
     long_acting_insulin_code   VARCHAR(32) NOT NULL REFERENCES insulin_catalog (code),
@@ -29,4 +37,4 @@ CREATE TABLE user_insulin_preferences (
     CONSTRAINT fk_user_insulin_preferences_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_user_insulin_preferences_rapid ON user_insulin_preferences (rapid_insulin_code);
+CREATE INDEX IF NOT EXISTS idx_user_insulin_preferences_rapid ON user_insulin_preferences (rapid_insulin_code);
