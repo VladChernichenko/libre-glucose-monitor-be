@@ -14,5 +14,7 @@ public class PredictionFactors {
     private Double insulinContribution;  // mmol/L glucose drop from remaining insulin
     private Double baselineContribution; // mmol/L from baseline trend
     private Double trendContribution;    // mmol/L from glucose trend
+    private Double preBolusTimingContribution; // mmol/L from bolus-to-meal timing quality
+    private Double avgBolusToMealMinutes; // Observed avg minutes from bolus to meal in recent notes
 }
 

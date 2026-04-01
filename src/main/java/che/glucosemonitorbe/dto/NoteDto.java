@@ -20,6 +20,7 @@ public class NoteDto {
     private Double glucoseValue;
     private String detailedInput;
     private String insulinDose;
+    private boolean mockData;
     
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
@@ -118,6 +119,14 @@ public class NoteDto {
     
     public void setInsulinDose(String insulinDose) {
         this.insulinDose = insulinDose;
+    }
+
+    public boolean isMockData() {
+        return mockData;
+    }
+
+    public void setMockData(boolean mockData) {
+        this.mockData = mockData;
     }
     
     public LocalDateTime getCreatedAt() {

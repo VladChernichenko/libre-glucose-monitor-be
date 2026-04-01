@@ -12,7 +12,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate  # Use Flyway for migrations
-    show-sql: true
+    show-sql: false
     open-in-view: false  # Disable to prevent lazy loading issues
     properties:
       hibernate:
@@ -39,20 +39,19 @@ server:
 
 logging:
   level:
-    org:
-      hibernate:
-        SQL: DEBUG
-        type:
-          descriptor:
-            sql:
-              BasicBinder: TRACE
-        tool:
-          schema: DEBUG
-      springframework:
-        orm:
-          jpa: DEBUG
+    root: WARN
+    che.glucosemonitorbe.scheduler: INFO
+    org.hibernate.SQL: OFF
+    org.hibernate.type.descriptor.sql.BasicBinder: OFF
+    org.springframework.orm.jpa: OFF
 
 app:
+  ai:
+    ollama:
+      enabled: ${OLLAMA_ENABLED:true}
+      url: ${OLLAMA_URL:http://localhost:11434/api/generate}
+      model: ${OLLAMA_MODEL:llama3.1:8b}
+      num-ctx: ${OLLAMA_NUM_CTX:8192}
   version:
     version: "1.0.0"
     api-version: "v1"
@@ -68,11 +67,6 @@ app:
       glucose-calculations: "1.0.0"
       insulin-calculator: "1.0.0"
       carbs-on-board: "1.0.0"
-      notes-api: "1.0.0"
-      auth-system: "1.0.0"
-    deprecated-versions:
-      "0.9.0": "Please upgrade to 1.0.0 - contains critical security fixes"
-      "0.8.0": "Version no longer supported - upgrade required"
   
   features:
     # Enable backend calculations with timezone support
@@ -89,6 +83,13 @@ app:
     glucose-data-migration-percent: 100
     glucose-calculations-migration-percent: 100
 
+  # Background Nightscout в†’ DB sync (stored chart data), every 5 minutes per user with active config
+  glucose-sync:
+    enabled: true
+    fixed-delay-ms: 300000
+    initial-delay-ms: 15000
+    entry-count: 100
+
 management:
   endpoints:
     web:
@@ -97,6 +98,11 @@ management:
   endpoint:
     health:
       show-details: always
+
+# Libre Link Up: EU host default (France / EU LibreView accounts). Override with LIBRE_API_BASE_URL.
+libre:
+  api:
+    base-url: ${LIBRE_API_BASE_URL:https://api-eu.libreview.io}
 
 # CORS configuration for development
 cors:

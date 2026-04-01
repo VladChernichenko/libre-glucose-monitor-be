@@ -16,6 +16,7 @@ public class UpdateNoteRequest {
     private Double glucoseValue;
     private String detailedInput;
     private String insulinDose;
+    private Boolean mockData;
     
     // Constructors
     public UpdateNoteRequest() {}
@@ -83,5 +84,13 @@ public class UpdateNoteRequest {
     
     public void setInsulinDose(String insulinDose) {
         this.insulinDose = insulinDose;
+    }
+
+    public Boolean getMockData() {
+        return mockData;
+    }
+
+    public void setMockData(Boolean mockData) {
+        this.mockData = mockData;
     }
 }

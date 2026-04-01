@@ -67,6 +67,7 @@ public class NotesService {
             request.getDetailedInput(),
             request.getInsulinDose()
         );
+        note.setMockData(Boolean.TRUE.equals(request.getMockData()));
         
         Note savedNote = noteRepository.save(note);
         return noteMapper.toDto(savedNote);
@@ -105,6 +106,9 @@ public class NotesService {
         }
         if (request.getInsulinDose() != null) {
             existingNote.setInsulinDose(request.getInsulinDose());
+        }
+        if (request.getMockData() != null) {
+            existingNote.setMockData(request.getMockData());
         }
         
         Note updatedNote = noteRepository.save(existingNote);

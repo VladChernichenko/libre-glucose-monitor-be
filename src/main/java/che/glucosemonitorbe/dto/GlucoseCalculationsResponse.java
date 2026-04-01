@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Builder
@@ -34,4 +35,7 @@ public class GlucoseCalculationsResponse {
     
     // Breakdown of factors contributing to prediction
     private PredictionFactors factors;
+
+    // Minute-by-minute forecast path, typically 4 hours ahead
+    private List<PredictionPointDTO> predictionPath;
 }

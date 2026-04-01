@@ -1,16 +1,17 @@
 package che.glucosemonitorbe.dto;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class NightscoutConfigDto {
-    private String baseUrl;
-    private String apiSecret;
-    private String token;
+@Builder
+public class NightscoutTestResponseDto {
+
+    private boolean ok;
+
+    private String message;
 }
-
-

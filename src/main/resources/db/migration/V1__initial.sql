@@ -1,6 +1,6 @@
 
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(255) UNIQUE NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE carbs_entries (
+CREATE TABLE IF NOT EXISTS carbs_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp TIMESTAMP NOT NULL,
     carbs DOUBLE PRECISION NOT NULL,
@@ -29,7 +29,7 @@ CREATE TABLE carbs_entries (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE glucose_readings (
+CREATE TABLE IF NOT EXISTS glucose_readings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     value FLOAT NOT NULL,
     timestamp TIMESTAMP NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE glucose_readings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE insulin_doses (
+CREATE TABLE IF NOT EXISTS insulin_doses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     timestamp TIMESTAMP NOT NULL,
     units DOUBLE PRECISION NOT NULL,
@@ -55,7 +55,7 @@ CREATE TABLE insulin_doses (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE user_configurations (
+CREATE TABLE IF NOT EXISTS user_configurations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID UNIQUE NOT NULL,
     carb_ratio DOUBLE PRECISION,
@@ -69,7 +69,7 @@ CREATE TABLE user_configurations (
 );
 
 -- Create COB settings table for user-specific carb on board configurations
-CREATE TABLE cob_settings (
+CREATE TABLE IF NOT EXISTS cob_settings (
                               id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                               user_id UUID NOT NULL,
                               carb_ratio DOUBLE PRECISION NOT NULL DEFAULT 2.0,
@@ -83,12 +83,12 @@ CREATE TABLE cob_settings (
 );
 
 -- Add indexes for better performance
-CREATE INDEX idx_cob_settings_user_id ON cob_settings(user_id);
-CREATE INDEX idx_cob_settings_created_at ON cob_settings(created_at);
+CREATE INDEX IF NOT EXISTS idx_cob_settings_user_id ON cob_settings(user_id);
+CREATE INDEX IF NOT EXISTS idx_cob_settings_created_at ON cob_settings(created_at);
 
 
 -- Create notes table for user glucose notes
-CREATE TABLE notes (
+CREATE TABLE IF NOT EXISTS notes (
                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                        user_id UUID NOT NULL,
                        timestamp TIMESTAMP NOT NULL,
@@ -105,6 +105,6 @@ CREATE TABLE notes (
 );
 
 -- Add indexes for better performance
-CREATE INDEX idx_notes_user_timestamp ON notes(user_id, timestamp);
-CREATE INDEX idx_notes_timestamp ON notes(timestamp);
-CREATE INDEX idx_notes_created_at ON notes(created_at);
+CREATE INDEX IF NOT EXISTS idx_notes_user_timestamp ON notes(user_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_notes_timestamp ON notes(timestamp);
+CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at);
