@@ -21,31 +21,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Spring Boot Application
-  app:
-    build: .
-    container_name: glucose-monitor-app
-    environment:
-      SPRING_PROFILES_ACTIVE: docker
-      DB_PASSWORD: glucose
-      APP_AI_OLLAMA_ENABLED: "true"
-      APP_AI_OLLAMA_URL: http://ollama:11434/api/generate
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      ollama:
-        condition: service_started
-    networks:
-      - glucose-monitor-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
   # Local LLM (Ollama)
   ollama:
     image: ollama/ollama:latest
@@ -71,66 +46,6 @@ services:
       ollama:
         condition: service_healthy
     command: ["pull", "llama3.1:8b"]
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - glucose-monitor-network
-    restart: "no"
-
-  ollama-model-pull-llama32-3b:
-    image: ollama/ollama:latest
-    container_name: glucose-monitor-ollama-model-pull-llama32-3b
-    depends_on:
-      ollama:
-        condition: service_healthy
-    command: ["pull", "llama3.2:3b"]
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - glucose-monitor-network
-    restart: "no"
-
-  ollama-model-pull-llama32-1b:
-    image: ollama/ollama:latest
-    container_name: glucose-monitor-ollama-model-pull-llama32-1b
-    depends_on:
-      ollama:
-        condition: service_healthy
-    command: ["pull", "llama3.2:1b"]
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - glucose-monitor-network
-    restart: "no"
-
-  ollama-model-pull-qwen25:
-    image: ollama/ollama:latest
-    container_name: glucose-monitor-ollama-model-pull-qwen25
-    depends_on:
-      ollama:
-        condition: service_healthy
-    command: ["pull", "qwen2.5:7b"]
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - glucose-monitor-network
-    restart: "no"
-
-  ollama-model-pull-mistral:
-    image: ollama/ollama:latest
-    container_name: glucose-monitor-ollama-model-pull-mistral
-    depends_on:
-      ollama:
-        condition: service_healthy
-    command: ["pull", "mistral:7b"]
     environment:
       OLLAMA_HOST: http://ollama:11434
     volumes:

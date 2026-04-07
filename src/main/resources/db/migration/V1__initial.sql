@@ -1,7 +1,7 @@
 
 
 CREATE TABLE IF NOT EXISTS users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(255) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS carbs_entries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     timestamp TIMESTAMP NOT NULL,
     carbs DOUBLE PRECISION NOT NULL,
     insulin DOUBLE PRECISION NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS carbs_entries (
 );
 
 CREATE TABLE IF NOT EXISTS glucose_readings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     value FLOAT NOT NULL,
     timestamp TIMESTAMP NOT NULL,
     unit VARCHAR(10) NOT NULL DEFAULT 'mg/dL',
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS glucose_readings (
 );
 
 CREATE TABLE IF NOT EXISTS insulin_doses (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     timestamp TIMESTAMP NOT NULL,
     units DOUBLE PRECISION NOT NULL,
     type VARCHAR(50) NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS insulin_doses (
 );
 
 CREATE TABLE IF NOT EXISTS user_configurations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID UNIQUE NOT NULL,
     carb_ratio DOUBLE PRECISION,
     insulin_sensitivity_factor DOUBLE PRECISION,
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS user_configurations (
 
 -- Create COB settings table for user-specific carb on board configurations
 CREATE TABLE IF NOT EXISTS cob_settings (
-                              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                              id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                               user_id UUID NOT NULL,
                               carb_ratio DOUBLE PRECISION NOT NULL DEFAULT 2.0,
                               isf DOUBLE PRECISION NOT NULL DEFAULT 1.0,
@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_cob_settings_created_at ON cob_settings(created_a
 
 -- Create notes table for user glucose notes
 CREATE TABLE IF NOT EXISTS notes (
-                       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                       id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                        user_id UUID NOT NULL,
                        timestamp TIMESTAMP NOT NULL,
                        carbs DOUBLE PRECISION NOT NULL,

@@ -30,7 +30,7 @@ public class InsulinCatalogService {
     }
 
     public InsulinCatalog getRequiredByCode(String code) {
-        return insulinCatalogRepository.findById(code)
+        return insulinCatalogRepository.findByCode(code)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown insulin code: " + code));
     }
 

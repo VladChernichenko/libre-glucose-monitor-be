@@ -4,6 +4,9 @@ import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
+import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +26,12 @@ public class NotesService {
     
     @Autowired
     private NoteMapper noteMapper;
+
+    @Autowired
+    private NutritionEnrichmentService nutritionEnrichmentService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
     
     /**
      * Get all notes for a user
@@ -68,6 +77,7 @@ public class NotesService {
             request.getInsulinDose()
         );
         note.setMockData(Boolean.TRUE.equals(request.getMockData()));
+        enrichNutrition(note);
         
         Note savedNote = noteRepository.save(note);
         return noteMapper.toDto(savedNote);
@@ -110,6 +120,7 @@ public class NotesService {
         if (request.getMockData() != null) {
             existingNote.setMockData(request.getMockData());
         }
+        enrichNutrition(existingNote);
         
         Note updatedNote = noteRepository.save(existingNote);
         return noteMapper.toDto(updatedNote);
@@ -175,5 +186,20 @@ public class NotesService {
      */
     public boolean noteExistsAndBelongsToUser(UUID userId, UUID noteId) {
         return noteRepository.findByIdAndUserId(noteId, userId) != null;
+    }
+
+    private void enrichNutrition(Note note) {
+        try {
+            NutritionSnapshot snapshot = nutritionEnrichmentService.enrichFromText(
+                    note.getDetailedInput(),
+                    note.getComment(),
+                    note.getCarbs()
+            );
+            note.setAbsorptionMode(snapshot.getAbsorptionMode());
+            note.setNutritionProfile(objectMapper.writeValueAsString(snapshot));
+        } catch (Exception ignored) {
+            note.setAbsorptionMode("DEFAULT_DECAY");
+            note.setNutritionProfile(null);
+        }
     }
 }

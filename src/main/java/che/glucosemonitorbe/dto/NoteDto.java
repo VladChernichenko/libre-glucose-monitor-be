@@ -20,6 +20,8 @@ public class NoteDto {
     private Double glucoseValue;
     private String detailedInput;
     private String insulinDose;
+    private String nutritionProfile;
+    private String absorptionMode;
     private boolean mockData;
     
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
@@ -127,6 +129,22 @@ public class NoteDto {
 
     public void setMockData(boolean mockData) {
         this.mockData = mockData;
+    }
+
+    public String getNutritionProfile() {
+        return nutritionProfile;
+    }
+
+    public void setNutritionProfile(String nutritionProfile) {
+        this.nutritionProfile = nutritionProfile;
+    }
+
+    public String getAbsorptionMode() {
+        return absorptionMode;
+    }
+
+    public void setAbsorptionMode(String absorptionMode) {
+        this.absorptionMode = absorptionMode;
     }
     
     public LocalDateTime getCreatedAt() {

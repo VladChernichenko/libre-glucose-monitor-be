@@ -45,4 +45,25 @@ public class CarbsEntry {
     
     @Column(name = "user_id")
     private UUID userId;
+
+    @Transient
+    private Double estimatedGi;
+
+    @Transient
+    private Double glycemicLoad;
+
+    @Transient
+    private Double fiber;
+
+    @Transient
+    private Double protein;
+
+    @Transient
+    private Double fat;
+
+    @Transient
+    private String absorptionMode;
+
+    @Transient
+    private String absorptionSpeedClass;
 }

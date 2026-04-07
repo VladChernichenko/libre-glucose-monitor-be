@@ -11,7 +11,7 @@ class GlucoseCalculationsServiceTest {
 
     @Test
     void determineTrendUsesAdjustedThresholds() throws Exception {
-        GlucoseCalculationsService service = new GlucoseCalculationsService(null, null, null, null, null, null);
+        GlucoseCalculationsService service = new GlucoseCalculationsService(null, null, null, null, null, null, null, null);
         Method method = GlucoseCalculationsService.class.getDeclaredMethod("determineTrend", PredictionFactors.class, double.class);
         method.setAccessible(true);
 

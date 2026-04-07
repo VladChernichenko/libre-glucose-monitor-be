@@ -76,6 +76,7 @@ app:
     glucose-data-enabled: false
     glucose-calculations-enabled: true
     user-configuration-enabled: false
+    nutrition-aware-prediction-enabled: ${APP_FEATURES_NUTRITION_AWARE_PREDICTION_ENABLED:true}
 
     # Migration percentages (0-100) - 100 means all users use backend
     insulin-calculator-migration-percent: 100
@@ -103,6 +104,13 @@ management:
 libre:
   api:
     base-url: ${LIBRE_API_BASE_URL:https://api-eu.libreview.io}
+
+nutrition:
+  api-ninjas:
+    enabled: ${NUTRITION_API_NINJAS_ENABLED:false}
+    base-url: ${NUTRITION_API_NINJAS_BASE_URL:https://api.api-ninjas.com/v1/nutrition}
+    api-key: ${NUTRITION_API_NINJAS_API_KEY:}
+    timeout-ms: ${NUTRITION_API_NINJAS_TIMEOUT_MS:3000}
 
 # CORS configuration for development
 cors:

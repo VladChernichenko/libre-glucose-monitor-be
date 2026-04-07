@@ -2,7 +2,9 @@ package che.glucosemonitorbe.entity;
 
 import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -41,6 +43,13 @@ public class Note {
     
     @Column(name = "insulin_dose", columnDefinition = "JSON")
     private String insulinDose;
+
+    @Column(name = "nutrition_profile", columnDefinition = "JSON")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String nutritionProfile;
+
+    @Column(name = "absorption_mode", length = 32)
+    private String absorptionMode;
 
     @Column(name = "mock_data", nullable = false)
     private boolean mockData = false;
@@ -156,6 +165,22 @@ public class Note {
     
     public void setInsulinDose(String insulinDose) {
         this.insulinDose = insulinDose;
+    }
+
+    public String getNutritionProfile() {
+        return nutritionProfile;
+    }
+
+    public void setNutritionProfile(String nutritionProfile) {
+        this.nutritionProfile = nutritionProfile;
+    }
+
+    public String getAbsorptionMode() {
+        return absorptionMode;
+    }
+
+    public void setAbsorptionMode(String absorptionMode) {
+        this.absorptionMode = absorptionMode;
     }
 
     public boolean isMockData() {

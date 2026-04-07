@@ -11,6 +11,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@SuppressWarnings("null")
 public class UserGlucoseSyncStateService {
 
     public static final String STATUS_NEW_DATA = "NEW_DATA";
@@ -22,7 +23,7 @@ public class UserGlucoseSyncStateService {
 
     @Transactional
     public UserGlucoseSyncState getOrCreate(UUID userId) {
-        return repository.findById(userId).orElseGet(() -> repository.save(
+        return repository.findByUserId(userId).orElseGet(() -> repository.save(
                 UserGlucoseSyncState.builder()
                         .userId(userId)
                         .consecutiveNoChangeCount(0)

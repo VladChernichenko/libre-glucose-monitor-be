@@ -1,6 +1,6 @@
 -- Add nightscout_config table for storing user-specific Nightscout settings
 CREATE TABLE IF NOT EXISTS nightscout_config (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID NOT NULL UNIQUE,
     nightscout_url VARCHAR(500) NOT NULL,
     api_secret VARCHAR(255),

@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS user_glucose_sync_state (
-    user_id                          UUID PRIMARY KEY,
+    id                               UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id                          UUID NOT NULL UNIQUE,
     last_checked_at                  TIMESTAMP,
     last_new_data_at                 TIMESTAMP,
     last_seen_entry_timestamp        BIGINT,

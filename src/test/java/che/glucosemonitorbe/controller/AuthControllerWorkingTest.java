@@ -22,12 +22,15 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
+@SuppressWarnings({"resource", "null"})
 class AuthControllerWorkingTest {
 
     @Container
@@ -56,39 +59,44 @@ class AuthControllerWorkingTest {
     }
 
     private RegisterRequest validRegister() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
         RegisterRequest r = new RegisterRequest();
-        r.setUsername("testuser");
-        r.setEmail("test@example.com");
+        r.setUsername("testuser_" + suffix);
+        r.setEmail("test+" + suffix + "@example.com");
         r.setFullName("Test User");
         r.setPassword("testpass123");
         return r;
     }
 
     @Test
-    @DisplayName("Register → 2xx and user persisted")
+    @DisplayName("Register в†’ 2xx and user persisted")
     void register_ok() {
-        ResponseEntity<String> resp = rest.postForEntity("/api/auth/register", json(validRegister()), String.class);
-        assertTrue(resp.getStatusCode().is2xxSuccessful());
-        assertTrue(userRepository.existsByUsername("testuser"));
+        RegisterRequest request = validRegister();
+        ResponseEntity<String> resp = rest.postForEntity("/api/auth/register", json(request), String.class);
+        assertTrue(resp.getStatusCode().is2xxSuccessful(), "register response: " + resp.getStatusCode() + " body=" + resp.getBody());
+        assertTrue(userRepository.existsByUsername(request.getUsername()));
     }
 
     @Test
-    @DisplayName("Login → returns tokens")
+    @DisplayName("Login в†’ returns tokens")
     void login_ok() {
-        rest.postForEntity("/api/auth/register", json(validRegister()), String.class);
+        RegisterRequest request = validRegister();
+        ResponseEntity<String> reg = rest.postForEntity("/api/auth/register", json(request), String.class);
+        assertTrue(reg.getStatusCode().is2xxSuccessful(), "register response: " + reg.getStatusCode() + " body=" + reg.getBody());
 
         AuthRequest login = new AuthRequest();
-        login.setUsername("testuser");
+        login.setUsername(request.getUsername());
         login.setPassword("testpass123");
 
         ResponseEntity<AuthResponse> resp =
                 rest.postForEntity("/api/auth/login", json(login), AuthResponse.class);
 
         assertEquals(HttpStatus.OK, resp.getStatusCode());
-        assertNotNull(resp.getBody());
-        assertNotNull(resp.getBody().getAccessToken());
-        assertNotNull(resp.getBody().getRefreshToken());
-        assertEquals("Bearer", resp.getBody().getTokenType());
-        assertTrue(resp.getBody().getExpiresIn() > 0);
+        AuthResponse body = resp.getBody();
+        assertNotNull(body);
+        assertNotNull(body.getAccessToken());
+        assertNotNull(body.getRefreshToken());
+        assertEquals("Bearer", body.getTokenType());
+        assertTrue(body.getExpiresIn() > 0);
     }
 }

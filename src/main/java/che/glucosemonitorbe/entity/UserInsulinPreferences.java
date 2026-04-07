@@ -3,6 +3,7 @@ package che.glucosemonitorbe.entity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -14,6 +15,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.annotations.UuidGenerator;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -28,15 +30,20 @@ import java.util.UUID;
 public class UserInsulinPreferences {
 
     @Id
-    @Column(name = "user_id")
+    @GeneratedValue
+    @UuidGenerator
+    @Column(name = "id", nullable = false)
+    private UUID id;
+
+    @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
     @ManyToOne(fetch = FetchType.EAGER, optional = false)
-    @JoinColumn(name = "rapid_insulin_code", referencedColumnName = "code", nullable = false)
+    @JoinColumn(name = "rapid_insulin_id", referencedColumnName = "id", nullable = false)
     private InsulinCatalog rapidInsulin;
 
     @ManyToOne(fetch = FetchType.EAGER, optional = false)
-    @JoinColumn(name = "long_acting_insulin_code", referencedColumnName = "code", nullable = false)
+    @JoinColumn(name = "long_acting_insulin_id", referencedColumnName = "id", nullable = false)
     private InsulinCatalog longActingInsulin;
 
     @CreationTimestamp

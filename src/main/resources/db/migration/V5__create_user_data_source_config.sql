@@ -1,6 +1,6 @@
 -- Create user_data_source_config table for storing user-specific data source configurations
 CREATE TABLE IF NOT EXISTS user_data_source_config (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     data_source VARCHAR(50) NOT NULL CHECK (data_source IN ('NIGHTSCOUT', 'LIBRE_LINK_UP')),
     

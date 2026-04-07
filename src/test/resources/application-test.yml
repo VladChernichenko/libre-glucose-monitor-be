@@ -2,27 +2,24 @@ spring:
   application:
     name: glucose-monitor-be-test
   datasource:
-    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL;NON_KEYWORDS=VALUE
     username: sa
     password: 
     driver-class-name: org.h2.Driver
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: none
     show-sql: false
     properties:
       hibernate:
         format_sql: false
-        dialect: org.hibernate.dialect.H2Dialect
-        hbm2ddl:
-          auto: create-drop
   h2:
     console:
       enabled: true
 
 security:
   jwt:
-    secret: "test-secret-key-for-integration-tests-only"
+    secret: "test-secret-key-for-integration-tests-only-please-use-at-least-sixty-four-bytes-long-value-1234567890"
     access-expiration-ms: 3600000      # 1 hour
     refresh-expiration-ms: 86400000    # 24 hours
 
@@ -36,3 +33,6 @@ logging:
 app:
   glucose-sync:
     enabled: false
+
+cors:
+  allowed-origins: http://localhost:3000
