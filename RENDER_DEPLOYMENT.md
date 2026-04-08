@@ -51,6 +51,9 @@ In your web service settings, add these environment variables:
 ### Optional Variables:
 - `CORS_ALLOWED_ORIGINS` = `https://your-frontend-domain.onrender.com` (replace with your actual frontend URL)
 - `PORT` = `8080` (Render sets this automatically, but you can override if needed)
+- `OLLAMA_URL` = `https://ollama.com/api/generate` (Ollama Cloud generate endpoint)
+- `OLLAMA_MODEL` = `glm-5:cloud`
+- `OLLAMA_API_KEY` = (API key from https://ollama.com/settings/keys)
 
 ## Step 4: Database Connection
 

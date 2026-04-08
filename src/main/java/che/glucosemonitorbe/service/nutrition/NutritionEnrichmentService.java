@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service.nutrition;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NutritionEnrichmentService {
@@ -26,6 +28,7 @@ public class NutritionEnrichmentService {
 
         // Explicit fallback for input like "20g" without recognizable foods.
         if (!hasFoodEntities) {
+            log.debug("Nutrition enrichment: no food entities detected, textLength={}", text.length());
             return NutritionSnapshot.builder()
                     .absorptionMode("DEFAULT_DECAY")
                     .source("MANUAL_CARBS")
@@ -43,6 +46,7 @@ public class NutritionEnrichmentService {
 
         List<Map<String, Object>> apiRows = nutritionApiNinjaService.lookupFoods(text);
         if (apiRows.isEmpty()) {
+            log.info("Nutrition enrichment: no Spoonacular rows, using MANUAL_CARBS (textLength={})", text.length());
             return NutritionSnapshot.builder()
                     .absorptionMode("DEFAULT_DECAY")
                     .source("MANUAL_CARBS")
@@ -80,9 +84,17 @@ public class NutritionEnrichmentService {
         double availableCarbs = Math.max(0.0, totalCarbs - totalFiber);
         double gl = (estimatedGi * availableCarbs) / 100.0;
 
+        log.info(
+                "Nutrition enrichment: SPOONACULAR rows={} foods={} totalCarbs={} estimatedGi={} gl={}",
+                apiRows.size(),
+                foods.size(),
+                round1(totalCarbs),
+                round1(estimatedGi),
+                round1(gl));
+
         return NutritionSnapshot.builder()
                 .absorptionMode("GI_GL_ENHANCED")
-                .source("API_NINJAS")
+                .source("SPOONACULAR")
                 .confidence(0.85)
                 .totalCarbs(round1(totalCarbs))
                 .fiber(round1(totalFiber))

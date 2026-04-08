@@ -55,8 +55,11 @@ public class LlmGatewayService {
     @Value("${app.ai.ollama.url:http://localhost:11434/api/generate}")
     private String ollamaUrl;
 
-    @Value("${app.ai.ollama.model:llama3.1:8b}")
+    @Value("${app.ai.ollama.model:glm-5:cloud}")
     private String ollamaModel;
+
+    @Value("${app.ai.ollama.api-key:}")
+    private String ollamaApiKey;
 
     @Value("${app.ai.ollama.num-ctx:8192}")
     private int ollamaNumCtx;
@@ -211,6 +214,7 @@ public class LlmGatewayService {
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        applyOllamaAuth(headers);
         ResponseEntity<String> resp = restTemplate.exchange(
                 ollamaUrl,
                 HttpMethod.POST,
@@ -234,8 +238,10 @@ public class LlmGatewayService {
         String payload = buildOllamaPayload(prompt, true, true);
 
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(ollamaUrl))
-                .header("Content-Type", "application/json")
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(ollamaUrl))
+                .header("Content-Type", "application/json");
+        applyOllamaAuth(requestBuilder);
+        HttpRequest request = requestBuilder
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
 
@@ -278,8 +284,10 @@ public class LlmGatewayService {
         String payload = buildOllamaPayload(prompt, true, false, modelOverride, numCtxOverride);
 
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(ollamaUrl))
-                .header("Content-Type", "application/json")
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(ollamaUrl))
+                .header("Content-Type", "application/json");
+        applyOllamaAuth(requestBuilder);
+        HttpRequest request = requestBuilder
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
 
@@ -536,6 +544,18 @@ public class LlmGatewayService {
             return trimmed.substring(start, end + 1);
         }
         return "{}";
+    }
+
+    private void applyOllamaAuth(HttpHeaders headers) {
+        if (ollamaApiKey != null && !ollamaApiKey.isBlank()) {
+            headers.setBearerAuth(ollamaApiKey.trim());
+        }
+    }
+
+    private void applyOllamaAuth(HttpRequest.Builder requestBuilder) {
+        if (ollamaApiKey != null && !ollamaApiKey.isBlank()) {
+            requestBuilder.header("Authorization", "Bearer " + ollamaApiKey.trim());
+        }
     }
 
     @Data
