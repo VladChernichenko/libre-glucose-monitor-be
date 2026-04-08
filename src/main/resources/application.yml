@@ -6,6 +6,8 @@ spring:
     username: ${DB_USERNAME:glucose_monitor_user}
     password: ${DB_PASSWORD:glucose}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
   jackson:
     time-zone: ${TZ:Europe/London}  # Use user's timezone, default to London
     date-format: "yyyy-MM-dd'T'HH:mm:ss"
