@@ -13,7 +13,7 @@ import java.util.List;
 @AllArgsConstructor
 public class NutritionSnapshot {
     private String absorptionMode; // DEFAULT_DECAY | GI_GL_ENHANCED
-    private String source; // API_NINJAS | MANUAL_CARBS
+    private String source; // SPOONACULAR | MANUAL_CARBS
     private Double confidence;
     private Double totalCarbs;
     private Double fiber;

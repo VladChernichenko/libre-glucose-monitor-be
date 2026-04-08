@@ -6,10 +6,10 @@ import org.springframework.context.annotation.Configuration;
 
 @Data
 @Configuration
-@ConfigurationProperties(prefix = "nutrition.api-ninjas")
+@ConfigurationProperties(prefix = "nutrition.spoonacular")
 public class NutritionProperties {
     private boolean enabled = false;
-    private String baseUrl = "https://api.api-ninjas.com/v1/nutrition";
+    private String baseUrl = "https://api.spoonacular.com";
     private String apiKey = "";
     private int timeoutMs = 3000;
 }

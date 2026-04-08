@@ -39,18 +39,16 @@ server:
 
 logging:
   level:
-    root: WARN
-    che.glucosemonitorbe.scheduler: INFO
-    org.hibernate.SQL: OFF
-    org.hibernate.type.descriptor.sql.BasicBinder: OFF
-    org.springframework.orm.jpa: OFF
+    root: INFO
 
 app:
   ai:
     ollama:
       enabled: ${OLLAMA_ENABLED:true}
-      url: ${OLLAMA_URL:http://localhost:11434/api/generate}
-      model: ${OLLAMA_MODEL:llama3.1:8b}
+      # Ollama Cloud default; for local Ollama use http://localhost:11434/api/generate
+      url: ${OLLAMA_URL:https://ollama.com/api/generate}
+      model: ${OLLAMA_MODEL:glm-5:cloud}
+      api-key: ${OLLAMA_API_KEY:}
       num-ctx: ${OLLAMA_NUM_CTX:8192}
   version:
     version: "1.0.0"
@@ -106,11 +104,11 @@ libre:
     base-url: ${LIBRE_API_BASE_URL:https://api-eu.libreview.io}
 
 nutrition:
-  api-ninjas:
-    enabled: ${NUTRITION_API_NINJAS_ENABLED:false}
-    base-url: ${NUTRITION_API_NINJAS_BASE_URL:https://api.api-ninjas.com/v1/nutrition}
-    api-key: ${NUTRITION_API_NINJAS_API_KEY:}
-    timeout-ms: ${NUTRITION_API_NINJAS_TIMEOUT_MS:3000}
+  spoonacular:
+    enabled: ${NUTRITION_SPOONACULAR_ENABLED:true}
+    base-url: ${NUTRITION_SPOONACULAR_BASE_URL:https://api.spoonacular.com}
+    api-key: ${NUTRITION_SPOONACULAR_API_KEY}
+    timeout-ms: ${NUTRITION_SPOONACULAR_TIMEOUT_MS:3000}
 
 # CORS configuration for development
 cors:
