@@ -63,6 +63,12 @@ app:
       - "1.0.0"
       - "1.0.1" 
       - "1.1.0"
+    min-ios-version: "1.0.0"
+    compatible-ios-versions:
+      - "1.0.0"
+      - "1.0.1"
+      - "1.1.0"
+      - "1.0"
     feature-versions:
       glucose-calculations: "1.0.0"
       insulin-calculator: "1.0.0"

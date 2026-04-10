@@ -29,6 +29,12 @@ public class VersionConfig {
     
     // Compatible frontend versions
     private List<String> compatibleFrontendVersions = List.of("1.0.0", "1.0.1", "1.1.0");
+
+    /** Minimum iOS/watchOS app semver (aligned with web client major line). */
+    private String minIosVersion = "1.0.0";
+
+    /** Explicitly tested iOS/watchOS app versions (same policy as web compatible list). */
+    private List<String> compatibleIosVersions = List.of("1.0.0", "1.0.1", "1.1.0");
     
     // Feature compatibility matrix
     private Map<String, String> featureVersions = Map.of(

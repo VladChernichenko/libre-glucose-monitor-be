@@ -1,0 +1,44 @@
+# Local development profile.
+# Run: SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
+#  or: -Dspring.profiles.active=local (IntelliJ VM options)
+#
+# Merges with application.yml; override env vars (DATABASE_URL, JWT_SECRET, etc.) as needed.
+
+spring:
+  application:
+    name: glucose-monitor-be
+  datasource:
+    url: jdbc:postgresql://localhost:5432/glucose_monitor
+    username: glucose_monitor_user
+    password: glucose
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  error:
+    include-stacktrace: always
+
+logging:
+  level:
+    root: INFO
+    che.glucosemonitorbe: DEBUG
+    org.springframework.web.servlet.DispatcherServlet: DEBUG
+    org.springframework.security: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,loggers
+
+app:
+  ai:
+    ollama:
+      # Local Ollama; override with OLLAMA_URL for cloud
+      url: ${OLLAMA_URL:http://localhost:11434/api/generate}

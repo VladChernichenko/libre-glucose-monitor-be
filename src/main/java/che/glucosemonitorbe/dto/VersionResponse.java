@@ -21,6 +21,8 @@ public class VersionResponse {
     // Compatibility information
     private String minFrontendVersion;
     private List<String> compatibleFrontendVersions;
+    private String minIosVersion;
+    private List<String> compatibleIosVersions;
     private Map<String, String> featureVersions;
     
     // System information

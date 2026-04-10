@@ -32,20 +32,36 @@ public class VersionController {
     @PostMapping("/check-compatibility")
     public ResponseEntity<Map<String, Object>> checkCompatibility(
             @RequestBody Map<String, String> request) {
-        
-        String frontendVersion = request.get("frontendVersion");
-        
-        boolean isCompatible = versionService.isCompatibleFrontendVersion(frontendVersion);
-        boolean meetsMinimum = versionService.meetsMinimumVersion(frontendVersion);
-        String deprecationWarning = versionService.getDeprecationWarning(frontendVersion);
-        
-        log.info("Frontend compatibility check: version={}, compatible={}, meetsMinimum={}", 
-            frontendVersion, isCompatible, meetsMinimum);
-        
+
+        String clientType = request.getOrDefault("clientType", "web").trim().toLowerCase();
+        String clientVersion = request.get("clientVersion");
+        if (clientVersion == null || clientVersion.isBlank()) {
+            clientVersion = request.get("frontendVersion");
+        }
+
+        boolean isCompatible;
+        boolean meetsMinimum;
+        if ("ios".equals(clientType) || "watchos".equals(clientType)) {
+            isCompatible = versionService.isCompatibleIosVersion(clientVersion);
+            meetsMinimum = versionService.meetsMinimumIosVersion(clientVersion);
+        } else {
+            isCompatible = versionService.isCompatibleFrontendVersion(clientVersion);
+            meetsMinimum = versionService.meetsMinimumVersion(clientVersion);
+        }
+
+        String deprecationWarning = versionService.getDeprecationWarning(
+                clientVersion != null ? clientVersion.trim() : "");
+
+        log.info("{} compatibility check: clientVersion={}, compatible={}, meetsMinimum={}",
+                clientType, clientVersion, isCompatible, meetsMinimum);
+
+        String cv = clientVersion != null && !clientVersion.isBlank() ? clientVersion : "unknown";
         return ResponseEntity.ok(Map.of(
             "compatible", isCompatible,
             "meetsMinimumVersion", meetsMinimum,
-            "frontendVersion", frontendVersion != null ? frontendVersion : "unknown",
+            "clientType", clientType,
+            "clientVersion", cv,
+            "frontendVersion", cv,
             "backendVersion", versionService.getVersionInfo().getVersion(),
             "deprecationWarning", deprecationWarning != null ? deprecationWarning : "",
             "recommendation", getRecommendation(isCompatible, meetsMinimum, deprecationWarning)
@@ -64,6 +80,8 @@ public class VersionController {
             "apiVersion", version.getApiVersion(),
             "minFrontendVersion", version.getMinFrontendVersion(),
             "compatibleFrontendVersions", version.getCompatibleFrontendVersions(),
+            "minIosVersion", version.getMinIosVersion(),
+            "compatibleIosVersions", version.getCompatibleIosVersions(),
             "featureVersions", version.getFeatureVersions(),
             "deprecatedVersions", version.getDeprecationWarnings()
         ));

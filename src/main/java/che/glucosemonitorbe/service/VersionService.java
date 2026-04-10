@@ -8,7 +8,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.Arrays;
 
 @Service
 @RequiredArgsConstructor
@@ -32,6 +31,8 @@ public class VersionService {
                 .buildTime(versionConfig.getBuildTime())
                 .minFrontendVersion(versionConfig.getMinFrontendVersion())
                 .compatibleFrontendVersions(versionConfig.getCompatibleFrontendVersions())
+                .minIosVersion(versionConfig.getMinIosVersion())
+                .compatibleIosVersions(versionConfig.getCompatibleIosVersions())
                 .featureVersions(versionConfig.getFeatureVersions())
                 .environment(activeProfile)
                 .serverTime(LocalDateTime.now())
@@ -52,6 +53,13 @@ public class VersionService {
         
         return versionConfig.getCompatibleFrontendVersions().contains(frontendVersion);
     }
+
+    public boolean isCompatibleIosVersion(String iosVersion) {
+        if (iosVersion == null || iosVersion.trim().isEmpty()) {
+            return false;
+        }
+        return versionConfig.getCompatibleIosVersions().contains(iosVersion.trim());
+    }
     
     /**
      * Check if a frontend version meets minimum requirements
@@ -66,6 +74,19 @@ public class VersionService {
         } catch (Exception e) {
             log.warn("Failed to compare versions: frontend={}, min={}", 
                 frontendVersion, versionConfig.getMinFrontendVersion());
+            return false;
+        }
+    }
+
+    public boolean meetsMinimumIosVersion(String iosVersion) {
+        if (iosVersion == null || iosVersion.trim().isEmpty()) {
+            return false;
+        }
+        try {
+            return compareVersions(iosVersion.trim(), versionConfig.getMinIosVersion()) >= 0;
+        } catch (Exception e) {
+            log.warn("Failed to compare versions: ios={}, min={}",
+                    iosVersion, versionConfig.getMinIosVersion());
             return false;
         }
     }

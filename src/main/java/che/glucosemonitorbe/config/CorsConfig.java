@@ -30,6 +30,9 @@ public class CorsConfig implements WebMvcConfigurer {
                         "Origin",
                         "X-Timezone",
                         "X-Timezone-Offset",
+                        "X-Client-Platform",
+                        "X-Client-Version",
+                        "X-API-Version",
                         "Access-Control-Request-Method",
                         "Access-Control-Request-Headers")
                 .exposedHeaders("Authorization", "Content-Type")

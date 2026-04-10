@@ -393,7 +393,8 @@ Nutrition data for meal analysis.
 | `BUILD_NUMBER`, `GIT_COMMIT`, `BUILD_TIME` | dev defaults | No | Version metadata (set by CI) |
 
 **Spring profiles:**
-- _(none)_ — local development, H2 or local PostgreSQL
+- _(none)_ — defaults from `application.yml` (local PostgreSQL via JDBC/env)
+- `local` — debug logging, Hibernate SQL, full error stack traces, default Ollama at `http://localhost:11434/api/generate`
 - `prod` — Render.com, Neon PostgreSQL
 - `docker` — Docker Compose with service name `postgres`
 
@@ -457,8 +458,8 @@ createdb glucose_monitor
 createuser glucose_monitor_user
 psql -c "GRANT ALL ON DATABASE glucose_monitor TO glucose_monitor_user;"
 
-# Run the app
-./gradlew bootRun
+# Run the app (optional: local profile for debug logging / SQL)
+./gradlew bootRun --args='--spring.profiles.active=local'
 ```
 
 ### Minimum environment for local dev
