@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import java.time.LocalDateTime;
@@ -13,10 +14,12 @@ public class CreateNoteRequest {
     private Double insulin;
     private String meal;
     private String comment;
+    @JsonAlias("glucoseLevel")
     private Double glucoseValue;
     private String detailedInput;
     private String insulinDose;
     private Boolean mockData;
+    private String absorptionMode;
     
     // Constructors
     public CreateNoteRequest() {}
@@ -99,5 +102,13 @@ public class CreateNoteRequest {
 
     public void setMockData(Boolean mockData) {
         this.mockData = mockData;
+    }
+
+    public String getAbsorptionMode() {
+        return absorptionMode;
+    }
+
+    public void setAbsorptionMode(String absorptionMode) {
+        this.absorptionMode = absorptionMode;
     }
 }

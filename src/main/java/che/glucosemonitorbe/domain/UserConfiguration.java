@@ -22,8 +22,11 @@ public class UserConfiguration {
     @Column(name = "user_id")
     private UUID userId;
     
+    /**
+     * Legacy column. Live COB math uses {@code cob_settings.carb_ratio}: mmol/L per 10 g carbs (no insulin).
+     */
     @Column(name = "carb_ratio")
-    private Double carbRatio; // grams per unit (g/u) - default: 12
+    private Double carbRatio;
     
     @Column(name = "insulin_sensitivity_factor")
     private Double insulinSensitivityFactor; // mmol/L per unit - default: 1.0

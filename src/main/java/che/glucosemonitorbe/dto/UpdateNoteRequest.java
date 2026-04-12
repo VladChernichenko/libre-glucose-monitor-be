@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import java.time.LocalDateTime;
@@ -13,6 +14,7 @@ public class UpdateNoteRequest {
     private Double insulin;
     private String meal;
     private String comment;
+    @JsonAlias("glucoseLevel")
     private Double glucoseValue;
     private String detailedInput;
     private String insulinDose;

@@ -77,6 +77,9 @@ public class NotesService {
             request.getInsulinDose()
         );
         note.setMockData(Boolean.TRUE.equals(request.getMockData()));
+        if (request.getAbsorptionMode() != null) {
+            note.setAbsorptionMode(request.getAbsorptionMode());
+        }
         enrichNutrition(note);
         
         Note savedNote = noteRepository.save(note);
@@ -109,7 +112,7 @@ public class NotesService {
             existingNote.setComment(request.getComment());
         }
         if (request.getGlucoseValue() != null) {
-            existingNote.setGlucoseValue(request.getGlucoseValue());
+            existingNote.setGlucoseLevel(request.getGlucoseValue());
         }
         if (request.getDetailedInput() != null) {
             existingNote.setDetailedInput(request.getDetailedInput());
@@ -198,7 +201,10 @@ public class NotesService {
             note.setAbsorptionMode(snapshot.getAbsorptionMode());
             note.setNutritionProfile(objectMapper.writeValueAsString(snapshot));
         } catch (Exception ignored) {
-            note.setAbsorptionMode("DEFAULT_DECAY");
+            // Preserve client-supplied absorptionMode when enrichment fails; fall back to DEFAULT_DECAY.
+            if (note.getAbsorptionMode() == null) {
+                note.setAbsorptionMode("DEFAULT_DECAY");
+            }
             note.setNutritionProfile(null);
         }
     }

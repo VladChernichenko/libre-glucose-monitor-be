@@ -58,7 +58,7 @@ public interface NoteRepository extends JpaRepository<Note, UUID> {
     /**
      * Calculate average glucose value for a user today
      */
-    @Query("SELECT AVG(n.glucoseValue) FROM Note n WHERE n.userId = :userId AND n.timestamp >= :startOfDay AND n.timestamp < :endOfDay AND n.glucoseValue IS NOT NULL")
+    @Query("SELECT AVG(n.glucoseLevel) FROM Note n WHERE n.userId = :userId AND n.timestamp >= :startOfDay AND n.timestamp < :endOfDay AND n.glucoseLevel IS NOT NULL")
     Double averageGlucoseTodayByUserId(@Param("userId") UUID userId, 
                                        @Param("startOfDay") LocalDateTime startOfDay, 
                                        @Param("endOfDay") LocalDateTime endOfDay);

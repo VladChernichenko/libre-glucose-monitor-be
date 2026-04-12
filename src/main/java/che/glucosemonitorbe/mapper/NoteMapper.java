@@ -23,7 +23,7 @@ public class NoteMapper {
         dto.setInsulin(note.getInsulin());
         dto.setMeal(note.getMeal());
         dto.setComment(note.getComment());
-        dto.setGlucoseValue(note.getGlucoseValue());
+        dto.setGlucoseValue(note.getGlucoseLevel());
         dto.setDetailedInput(note.getDetailedInput());
         dto.setInsulinDose(note.getInsulinDose());
         dto.setNutritionProfile(note.getNutritionProfile());
@@ -51,7 +51,7 @@ public class NoteMapper {
         note.setInsulin(dto.getInsulin());
         note.setMeal(dto.getMeal());
         note.setComment(dto.getComment());
-        note.setGlucoseValue(dto.getGlucoseValue());
+        note.setGlucoseLevel(dto.getGlucoseValue());
         note.setDetailedInput(dto.getDetailedInput());
         note.setInsulinDose(dto.getInsulinDose());
         note.setNutritionProfile(dto.getNutritionProfile());
@@ -85,7 +85,7 @@ public class NoteMapper {
             existingNote.setComment(dto.getComment());
         }
         if (dto.getGlucoseValue() != null) {
-            existingNote.setGlucoseValue(dto.getGlucoseValue());
+            existingNote.setGlucoseLevel(dto.getGlucoseValue());
         }
         if (dto.getDetailedInput() != null) {
             existingNote.setDetailedInput(dto.getDetailedInput());

@@ -23,7 +23,7 @@ security:
   jwt:
     secret: ${JWT_SECRET}
     access-expiration-ms: 3600000      # 1 hour
-    refresh-expiration-ms: 86400000    # 24 hours
+    refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:31536000000}    # default 365 days (override via env)
 
 server:
   port: ${PORT:8080}  # Render sets PORT environment variable

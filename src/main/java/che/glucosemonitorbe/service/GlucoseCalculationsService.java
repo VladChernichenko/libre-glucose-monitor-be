@@ -377,7 +377,7 @@ public class GlucoseCalculationsService {
             .insulin(note.getInsulin() != null ? note.getInsulin() : 0.0)
             .mealType(note.getMeal())
             .comment(note.getComment())
-            .glucoseValue(note.getGlucoseValue())
+            .glucoseValue(note.getGlucoseLevel())
             .originalCarbs(note.getCarbs()) // Use same value as original
             .userId(note.getUserId())
             .build();

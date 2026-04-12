@@ -12,6 +12,6 @@ security:
   jwt:
     secret: "very-strong-secret-change-me-please-make-it-long-and-secure-in-production-1234567890-abcdefghijklmnopqrstuvwxyz"
     access-expiration-ms: 3600000      # 1 hour
-    refresh-expiration-ms: 86400000
+    refresh-expiration-ms: 86400000    # short for tests
 cors:
   allowed-origins: http://localhost:3000

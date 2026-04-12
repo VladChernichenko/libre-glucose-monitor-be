@@ -57,9 +57,21 @@ public class NightscoutController {
             log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
-            log.error("Failed to fetch glucose entries: {}", e.getMessage());
-            throw new RuntimeException("Failed to fetch glucose data", e);
+            log.error("Failed to fetch glucose entries", e);
+            throw new RuntimeException("Failed to fetch glucose data: " + rootCauseMessage(e), e);
         }
+    }
+
+    private static String rootCauseMessage(Throwable e) {
+        Throwable c = e;
+        String best = e.getMessage() != null ? e.getMessage() : "";
+        while (c.getCause() != null && c.getCause() != c) {
+            c = c.getCause();
+            if (c.getMessage() != null && !c.getMessage().isBlank()) {
+                best = c.getMessage();
+            }
+        }
+        return best.isBlank() ? "Unknown error" : best;
     }
 
     private void applyTimezoneOffsetToEntries(List<NightscoutEntryDto> entries, String timezoneOffset) {
@@ -117,8 +129,8 @@ public class NightscoutController {
             
             return ResponseEntity.ok(currentGlucose);
         } catch (Exception e) {
-            log.error("Failed to fetch current glucose: {}", e.getMessage());
-            throw new RuntimeException("Failed to fetch current glucose", e);
+            log.error("Failed to fetch current glucose", e);
+            throw new RuntimeException("Failed to fetch current glucose: " + rootCauseMessage(e), e);
         }
     }
     
@@ -156,8 +168,8 @@ public class NightscoutController {
             chartDataService.storeChartData(userId, entries);
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
-            log.error("Failed to fetch glucose entries by date: {}", e.getMessage());
-            throw new RuntimeException("Failed to fetch glucose data", e);
+            log.error("Failed to fetch glucose entries by date", e);
+            throw new RuntimeException("Failed to fetch glucose data: " + rootCauseMessage(e), e);
         }
     }
     

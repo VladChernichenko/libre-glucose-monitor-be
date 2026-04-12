@@ -18,6 +18,7 @@ public class COBSettings {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
     
+    /** mmol/L blood glucose rise per 10 g carbs absorbed, assuming no insulin (used as (COB_g/10) * carbRatio). */
     @Column(name = "carb_ratio", nullable = false)
     private Double carbRatio = 2.0;
     

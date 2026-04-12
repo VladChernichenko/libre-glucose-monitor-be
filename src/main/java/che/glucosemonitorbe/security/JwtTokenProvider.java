@@ -26,10 +26,10 @@ public class JwtTokenProvider {
     private String jwtSecret;
 
     @Value("${security.jwt.access-expiration-ms}")
-    private int jwtExpirationInMs;
+    private long jwtExpirationInMs;
 
     @Value("${security.jwt.refresh-expiration-ms}")
-    private int refreshExpirationInMs;
+    private long refreshExpirationInMs;
 
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(jwtSecret.getBytes());

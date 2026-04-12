@@ -434,6 +434,9 @@ public class LlmGatewayService {
             if (n.getInsulin() != null && n.getInsulin() > 0) {
                 tags.add("insulin=" + n.getInsulin() + "U");
             }
+            if (n.getGlucoseLevel() != null) {
+                tags.add("glucose=" + n.getGlucoseLevel() + "mmol/L");
+            }
             if (n.getInsulinDose() != null && !n.getInsulinDose().isBlank()) {
                 tags.add("insulinDoseDetail=" + n.getInsulinDose());
             }

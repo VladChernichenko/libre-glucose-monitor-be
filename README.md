@@ -137,7 +137,7 @@ user_insulin_preferences >────── insulin_catalog (long-acting)
 | `UserGlucoseSyncState` | `user_glucose_sync_state` | Adaptive sync state: last sync time, backoff counter, next poll time. |
 | `Note` | `notes` | User diary entry — carbs, insulin dose, meal, comment, glucose value, and optional nutrition profile (JSON). |
 | `InsulinCatalog` | `insulin_catalog` | Reference data for insulin types (RAPID / LONG_ACTING) with PK/PD parameters. Seeded with FIASP, Apidra, Tresiba, Lantus. |
-| `COBSettings` | `cob_settings` | Per-user carb-on-board settings (carb ratio, ISF, carb half-life). |
+| `COBSettings` | `cob_settings` | Per-user COB settings: **carb ratio** (mmol/L rise per 10 g carbs, no insulin), ISF, carb half-life, max COB duration. |
 | `UserInsulinPreferences` | `user_insulin_preferences` | User's chosen rapid and long-acting insulin from the catalog. |
 | `ClinicalKnowledgeChunk` | `clinical_knowledge_chunk` | RAG knowledge base: clinical guidelines tagged by condition, insulin type, risk class. |
 | `AiAnalysisTrace` | `ai_analysis_trace` | Audit log of AI analysis runs (model, latency, confidence, context hash). |

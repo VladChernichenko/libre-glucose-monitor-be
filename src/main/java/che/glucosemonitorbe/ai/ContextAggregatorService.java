@@ -26,6 +26,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class ContextAggregatorService {
+    /** mmol/L glucose rise per 10 g carbs when no insulin is acting. */
     private static final double DEFAULT_CARB_RATIO = 2.0;
     private static final double DEFAULT_ISF = 1.0;
     private static final double CORRECTION_TARGET_MMOl = 6.5;
@@ -126,7 +127,7 @@ public class ContextAggregatorService {
                 .insulin(note.getInsulin() != null ? note.getInsulin() : 0.0)
                 .mealType(note.getMeal())
                 .comment(note.getComment())
-                .glucoseValue(note.getGlucoseValue())
+                .glucoseValue(note.getGlucoseLevel())
                 .originalCarbs(note.getCarbs())
                 .userId(note.getUserId())
                 .build();

@@ -34,9 +34,10 @@ public class Note {
     
     @Column(name = "comment", columnDefinition = "TEXT")
     private String comment;
-    
+
+    /** Glucose level at note time (mmol/L). Persisted as {@code glucose_value}. */
     @Column(name = "glucose_value")
-    private Double glucoseValue;
+    private Double glucoseLevel;
     
     @Column(name = "detailed_input", columnDefinition = "TEXT")
     private String detailedInput;
@@ -73,15 +74,15 @@ public class Note {
         this.meal = meal;
     }
     
-    public Note(UUID userId, LocalDateTime timestamp, Double carbs, Double insulin, String meal, 
-                String comment, Double glucoseValue, String detailedInput, String insulinDose) {
+    public Note(UUID userId, LocalDateTime timestamp, Double carbs, Double insulin, String meal,
+                String comment, Double glucoseLevel, String detailedInput, String insulinDose) {
         this.userId = userId;
         this.timestamp = timestamp;
         this.carbs = carbs;
         this.insulin = insulin;
         this.meal = meal;
         this.comment = comment;
-        this.glucoseValue = glucoseValue;
+        this.glucoseLevel = glucoseLevel;
         this.detailedInput = detailedInput;
         this.insulinDose = insulinDose;
     }
@@ -143,12 +144,12 @@ public class Note {
         this.comment = comment;
     }
     
-    public Double getGlucoseValue() {
-        return glucoseValue;
+    public Double getGlucoseLevel() {
+        return glucoseLevel;
     }
-    
-    public void setGlucoseValue(Double glucoseValue) {
-        this.glucoseValue = glucoseValue;
+
+    public void setGlucoseLevel(Double glucoseLevel) {
+        this.glucoseLevel = glucoseLevel;
     }
     
     public String getDetailedInput() {

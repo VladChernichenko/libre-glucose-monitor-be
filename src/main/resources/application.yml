@@ -32,7 +32,8 @@ security:
   jwt:
     secret: ${JWT_SECRET:very-strong-secret-change-me-please-make-it-long-and-secure-in-production}
     access-expiration-ms: 3600000      # 1 hour
-    refresh-expiration-ms: 86400000    # 24 hours
+    # Long-lived refresh so mobile clients stay signed in across weeks without re-login.
+    refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:31536000000}    # default 365 days
 
 server:
   port: 8080

@@ -3,9 +3,10 @@ package che.glucosemonitorbe.dto;
 import java.util.UUID;
 
 public class COBSettingsDTO {
-    
+
     private UUID id;
     private UUID userId;
+    /** mmol/L rise per 10 g carbs (no insulin); formula uses (COB grams / 10) * carbRatio. */
     private Double carbRatio;
     private Double isf;
     private Integer carbHalfLife;
