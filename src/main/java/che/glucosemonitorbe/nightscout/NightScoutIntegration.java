@@ -2,7 +2,8 @@ package che.glucosemonitorbe.nightscout;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreaker;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
-import che.glucosemonitorbe.domain.UserDataSourceConfig;
+import che.glucosemonitorbe.config.CacheConfig;
+import che.glucosemonitorbe.dto.NightscoutCredentials;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.dto.NightscoutTestResponseDto;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -40,24 +42,32 @@ public class NightScoutIntegration {
     private final UserDataSourceConfigService userDataSourceConfigService;
     private final CircuitBreakerManager circuitBreakerManager;
     
+    /**
+     * Cached for 30 s per (userId, count). At 1000 RPS this collapses thousands of identical
+     * polls into one upstream Nightscout call — the single biggest protection against DoS-ing
+     * user-hosted Nightscout instances (many of which are 1-dyno Heroku deployments).
+     *
+     * The returned list is cached by reference; callers that need to mutate entries (e.g.
+     * applying a request-specific timezone offset) MUST copy first — see the controller.
+     */
+    @Cacheable(value = CacheConfig.CACHE_NIGHTSCOUT_ENTRIES, key = "#userId + ':' + #count")
     public List<NightscoutEntryDto> getGlucoseEntries(UUID userId, int count) {
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("nightscout-entries");
-        
+
         return circuitBreaker.executeWithFallback(
             () -> {
                 try {
-                    // Get user-specific Nightscout configuration
-                    Optional<UserDataSourceConfig> nightscoutConfig = userDataSourceConfigService.getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.NIGHTSCOUT);
-                    
+                    Optional<NightscoutCredentials> nightscoutConfig = userDataSourceConfigService.getNightscoutCredentials(userId);
+
                     if (nightscoutConfig.isEmpty()) {
                         throw new RuntimeException("No active Nightscout configuration found for user. Please configure Nightscout in Data Source settings.");
                     }
-                    
-                    UserDataSourceConfig config = nightscoutConfig.get();
-                    String url = config.getNightscoutUrl();
-                    String apiSecret = config.getNightscoutApiSecret();
-                    String apiToken = config.getNightscoutApiToken();
-                    
+
+                    NightscoutCredentials config = nightscoutConfig.get();
+                    String url = config.url();
+                    String apiSecret = config.apiSecret();
+                    String apiToken = config.apiToken();
+
                     if (url == null || url.trim().isEmpty()) {
                         throw new RuntimeException("Nightscout URL is not configured. Please set the URL in Data Source settings.");
                     }
@@ -121,22 +131,21 @@ public class NightScoutIntegration {
         return circuitBreaker.executeWithFallback(
             () -> {
                 try {
-                    // Get user-specific Nightscout configuration
-                    Optional<UserDataSourceConfig> nightscoutConfig = userDataSourceConfigService.getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.NIGHTSCOUT);
-                    
+                    Optional<NightscoutCredentials> nightscoutConfig = userDataSourceConfigService.getNightscoutCredentials(userId);
+
                     if (nightscoutConfig.isEmpty()) {
                         throw new RuntimeException("No active Nightscout configuration found for user. Please configure Nightscout in Data Source settings.");
                     }
-                    
-                    UserDataSourceConfig config = nightscoutConfig.get();
-                    String url = config.getNightscoutUrl();
-                    String apiSecret = config.getNightscoutApiSecret();
-                    String apiToken = config.getNightscoutApiToken();
-                    
+
+                    NightscoutCredentials config = nightscoutConfig.get();
+                    String url = config.url();
+                    String apiSecret = config.apiSecret();
+                    String apiToken = config.apiToken();
+
                     if (url == null || url.trim().isEmpty()) {
                         throw new RuntimeException("Nightscout URL is not configured. Please set the URL in Data Source settings.");
                     }
-                    
+
                     String startDateStr = startDate.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT);
                     String endDateStr = endDate.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT);
                     

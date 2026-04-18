@@ -43,4 +43,22 @@ public interface NightscoutChartDataRepository extends JpaRepository<NightscoutC
     Optional<NightscoutChartData> findByUserIdAndNightscoutId(UUID userId, String nightscoutId);
 
     Optional<NightscoutChartData> findByUserIdAndDateTimestamp(UUID userId, Long dateTimestamp);
+
+    /**
+     * Single-round-trip existence check for a batch of Nightscout ids, scoped to one user.
+     * Replaces N individual SELECTs in {@code storeChartData}.
+     */
+    @Query("SELECT n.nightscoutId FROM NightscoutChartData n "
+            + "WHERE n.userId = :userId AND n.nightscoutId IN :ids")
+    List<String> findExistingNightscoutIds(@Param("userId") UUID userId,
+                                           @Param("ids") List<String> ids);
+
+    /**
+     * Single-round-trip existence check for a batch of reading timestamps (used when entries
+     * lack a Nightscout id).
+     */
+    @Query("SELECT n.dateTimestamp FROM NightscoutChartData n "
+            + "WHERE n.userId = :userId AND n.dateTimestamp IN :timestamps")
+    List<Long> findExistingDateTimestamps(@Param("userId") UUID userId,
+                                          @Param("timestamps") List<Long> timestamps);
 }

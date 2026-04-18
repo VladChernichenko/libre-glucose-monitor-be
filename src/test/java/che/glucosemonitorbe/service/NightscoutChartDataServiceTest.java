@@ -6,18 +6,19 @@ import che.glucosemonitorbe.repository.NightscoutChartDataRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -45,25 +46,28 @@ class NightscoutChartDataServiceTest {
 
     @Test
     void testStoreChartData_insertsOnlyNew() {
-        when(repository.findByUserIdAndNightscoutId(eq(testUserId), anyString())).thenReturn(Optional.empty());
-        when(repository.save(any(NightscoutChartData.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(repository.findExistingNightscoutIds(eq(testUserId), anyList())).thenReturn(Collections.emptyList());
+        when(repository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
         chartDataService.storeChartData(testUserId, testEntries);
 
         verify(repository, never()).deleteByUserId(any());
-        verify(repository, times(testEntries.size())).save(any(NightscoutChartData.class));
+        ArgumentCaptor<List<NightscoutChartData>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository, times(1)).saveAll(captor.capture());
+        assertEquals(testEntries.size(), captor.getValue().size());
     }
 
     @Test
     void testStoreChartData_skipsAlreadyStored() {
-        when(repository.findByUserIdAndNightscoutId(testUserId, "entry1")).thenReturn(Optional.of(new NightscoutChartData()));
-        when(repository.findByUserIdAndNightscoutId(testUserId, "entry2")).thenReturn(Optional.empty());
-        when(repository.findByUserIdAndNightscoutId(testUserId, "entry3")).thenReturn(Optional.empty());
-        when(repository.save(any(NightscoutChartData.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(repository.findExistingNightscoutIds(eq(testUserId), anyList()))
+                .thenReturn(List.of("entry1"));
+        when(repository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
         chartDataService.storeChartData(testUserId, testEntries);
 
-        verify(repository, times(2)).save(any(NightscoutChartData.class));
+        ArgumentCaptor<List<NightscoutChartData>> captor = ArgumentCaptor.forClass(List.class);
+        verify(repository, times(1)).saveAll(captor.capture());
+        assertEquals(2, captor.getValue().size());
     }
 
     @Test

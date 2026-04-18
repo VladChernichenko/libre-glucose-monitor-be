@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -48,18 +49,33 @@ public class NightscoutController {
         }
 
         try {
-            List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(userId, count);
+            // The cache in NightScoutIntegration returns a shared list — copy before mutating so
+            // per-request timezone offsets don't corrupt the cached value for the next caller.
+            List<NightscoutEntryDto> cached = nightScoutIntegration.getGlucoseEntries(userId, count);
+            List<NightscoutEntryDto> entries = copyEntries(cached);
             log.info("Fetched {} entries from Nightscout", entries.size());
 
             applyTimezoneOffsetToEntries(entries, timezoneOffset);
 
-            chartDataService.storeChartData(userId, entries);
-            log.info("Stored {} entries in database for user {}", entries.size(), authentication.getName());
+            // Offload persistence to a dedicated pool so the HTTP response returns immediately.
+            chartDataService.storeChartDataAsync(userId, entries);
+            log.debug("Queued {} entries for async persistence for user {}", entries.size(), authentication.getName());
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries", e);
             throw new RuntimeException("Failed to fetch glucose data: " + rootCauseMessage(e), e);
         }
+    }
+
+    private static List<NightscoutEntryDto> copyEntries(List<NightscoutEntryDto> source) {
+        List<NightscoutEntryDto> out = new ArrayList<>(source.size());
+        for (NightscoutEntryDto e : source) {
+            out.add(new NightscoutEntryDto(
+                    e.getId(), e.getSgv(), e.getDate(), e.getDateString(),
+                    e.getTrend(), e.getDirection(), e.getDevice(), e.getType(),
+                    e.getUtcOffset(), e.getSysTime()));
+        }
+        return out;
     }
 
     private static String rootCauseMessage(Throwable e) {
@@ -165,7 +181,7 @@ public class NightscoutController {
 
             applyTimezoneOffsetToEntries(entries, timezoneOffset);
 
-            chartDataService.storeChartData(userId, entries);
+            chartDataService.storeChartDataAsync(userId, entries);
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries by date", e);

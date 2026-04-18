@@ -1,13 +1,17 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.config.CacheConfig;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.dto.DataSourceConfigRequestDto;
 import che.glucosemonitorbe.dto.DataSourceConfigStatusDto;
+import che.glucosemonitorbe.dto.NightscoutCredentials;
 import che.glucosemonitorbe.dto.UserDataSourceConfigDto;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +33,7 @@ public class UserDataSourceConfigService {
      * Save or update a data source configuration for a user
      */
     @Transactional
+    @CacheEvict(value = CacheConfig.CACHE_NIGHTSCOUT_CREDENTIALS, key = "#userId")
     public UserDataSourceConfigDto saveConfig(UUID userId, DataSourceConfigRequestDto request) {
         log.info("Saving data source configuration for user {}: {}", userId, request.getDataSource());
         
@@ -99,6 +104,24 @@ public class UserDataSourceConfigService {
     }
 
     /**
+     * Hot-path lookup for Nightscout credentials. Returns a small immutable record rather than
+     * the JPA entity (no lazy fields to trip on outside the tx) and is cached in Caffeine for
+     * 5 minutes — eliminates a DB hit on every single Nightscout proxy call.
+     *
+     * <p>Cached per-user; evicted automatically on save/activate/deactivate/delete of configs.
+     */
+    @Cacheable(value = CacheConfig.CACHE_NIGHTSCOUT_CREDENTIALS, key = "#userId")
+    public Optional<NightscoutCredentials> getNightscoutCredentials(UUID userId) {
+        log.debug("Loading Nightscout credentials from DB for user {} (cache miss)", userId);
+        return repository
+                .findByUserIdAndDataSourceAndIsActiveTrue(userId, UserDataSourceConfig.DataSourceType.NIGHTSCOUT)
+                .map(c -> new NightscoutCredentials(
+                        c.getNightscoutUrl(),
+                        c.getNightscoutApiSecret(),
+                        c.getNightscoutApiToken()));
+    }
+
+    /**
      * Get configuration status for a user
      */
     public DataSourceConfigStatusDto getConfigStatus(UUID userId) {
@@ -125,6 +148,7 @@ public class UserDataSourceConfigService {
      * Activate a specific configuration
      */
     @Transactional
+    @CacheEvict(value = CacheConfig.CACHE_NIGHTSCOUT_CREDENTIALS, key = "#userId")
     public UserDataSourceConfigDto activateConfig(UUID userId, UUID configId) {
         log.info("Activating configuration {} for user: {}", configId, userId);
         
@@ -152,6 +176,7 @@ public class UserDataSourceConfigService {
      * Deactivate a specific configuration
      */
     @Transactional
+    @CacheEvict(value = CacheConfig.CACHE_NIGHTSCOUT_CREDENTIALS, key = "#userId")
     public void deactivateConfig(UUID userId, UUID configId) {
         log.info("Deactivating configuration {} for user: {}", configId, userId);
         
@@ -171,6 +196,7 @@ public class UserDataSourceConfigService {
      * Delete a configuration
      */
     @Transactional
+    @CacheEvict(value = CacheConfig.CACHE_NIGHTSCOUT_CREDENTIALS, key = "#userId")
     public void deleteConfig(UUID userId, UUID configId) {
         log.info("Deleting configuration {} for user: {}", configId, userId);
         

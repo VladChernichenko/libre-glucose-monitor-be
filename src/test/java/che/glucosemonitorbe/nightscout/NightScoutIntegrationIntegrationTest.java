@@ -1,7 +1,7 @@
 package che.glucosemonitorbe.nightscout;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
-import che.glucosemonitorbe.domain.UserDataSourceConfig;
+import che.glucosemonitorbe.dto.NightscoutCredentials;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.dto.NightscoutTestResponseDto;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
@@ -58,12 +58,10 @@ class NightScoutIntegrationIntegrationTest {
     @Test
     void getGlucoseEntriesShouldParseNightscoutPayload() throws Exception {
         UUID userId = UUID.randomUUID();
-        UserDataSourceConfig config = new UserDataSourceConfig();
-        config.setNightscoutUrl("https://nightscout.example.com");
-        config.setNightscoutApiSecret("my-secret");
-        config.setNightscoutApiToken("my-token");
-        when(userDataSourceConfigService.getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.NIGHTSCOUT))
-                .thenReturn(Optional.of(config));
+        NightscoutCredentials creds = new NightscoutCredentials(
+                "https://nightscout.example.com", "my-secret", "my-token");
+        when(userDataSourceConfigService.getNightscoutCredentials(userId))
+                .thenReturn(Optional.of(creds));
 
         server.expect(once(), requestTo("https://nightscout.example.com/api/v2/entries.json?count=1"))
                 .andExpect(method(HttpMethod.GET))
