@@ -2,10 +2,14 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.service.FeatureToggleService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 import lombok.RequiredArgsConstructor;
 import java.util.Map;
 
+@Tag(name = "Feature Toggles", description = "Feature flag status and per-user migration group checks")
 @RestController
 @RequestMapping("/api/features")
 @RequiredArgsConstructor
@@ -14,6 +18,8 @@ public class FeatureToggleController {
     private final FeatureToggleService featureToggleService;
     private final FeatureToggleConfig featureToggleConfig;
     
+    @Operation(summary = "Get current status of all feature flags")
+    @ApiResponse(responseCode = "200", description = "Feature flag map returned")
     @GetMapping("/status")
     public Map<String, Object> getFeatureStatus() {
         return Map.of(
@@ -52,6 +58,8 @@ public class FeatureToggleController {
         );
     }
     
+    @Operation(summary = "Check if a specific feature is enabled for a user")
+    @ApiResponse(responseCode = "200", description = "Feature check result returned")
     @GetMapping("/check/{feature}")
     public Map<String, Object> checkFeature(@PathVariable String feature, @RequestParam(required = false) String userId) {
         boolean shouldUseBackend = featureToggleService.shouldUseBackend(feature);

@@ -2,6 +2,10 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerStats;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -9,9 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
-/**
- * Controller for circuit breaker monitoring and management
- */
+@Tag(name = "Circuit Breaker", description = "Circuit breaker state monitoring and manual reset")
 @Slf4j
 @RestController
 @RequestMapping("/api/circuit-breaker")
@@ -20,9 +22,8 @@ public class CircuitBreakerController {
 
     private final CircuitBreakerManager circuitBreakerManager;
 
-    /**
-     * Get statistics for all circuit breakers
-     */
+    @Operation(summary = "Get statistics for all circuit breakers")
+    @ApiResponse(responseCode = "200", description = "Stats map returned")
     @GetMapping("/stats")
     public ResponseEntity<Map<String, CircuitBreakerStats>> getAllStats() {
         try {
@@ -53,9 +54,9 @@ public class CircuitBreakerController {
         }
     }
 
-    /**
-     * Reset a specific circuit breaker
-     */
+    @Operation(summary = "Reset a specific circuit breaker to CLOSED state")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Circuit breaker reset"),
+                    @ApiResponse(responseCode = "500", description = "Reset failed") })
     @PostMapping("/reset/{serviceName}")
     public ResponseEntity<String> resetCircuitBreaker(@PathVariable String serviceName) {
         try {

@@ -7,6 +7,9 @@ import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,9 +18,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Test controller for debugging glucose predictions
- */
+@Tag(name = "Glucose Prediction", description = "Glucose forecast debug endpoints for validating prediction accuracy")
 @RestController
 @RequestMapping("/api/test")
 @RequiredArgsConstructor
@@ -37,6 +38,8 @@ public class PredictionTestController {
      * - Current glucose: 10.9 mmol/L
      * - Expected 2h prediction: 6.9 mmol/L
      */
+    @Operation(summary = "Test 2-hour glucose prediction with given parameters")
+    @ApiResponse(responseCode = "200", description = "Prediction test result returned")
     @GetMapping("/prediction")
     public ResponseEntity<?> testPrediction(
             @RequestParam(defaultValue = "10.9") Double currentGlucose,
@@ -103,9 +106,8 @@ public class PredictionTestController {
         }
     }
     
-    /**
-     * Simple prediction calculation for comparison
-     */
+    @Operation(summary = "Simple prediction formula for quick comparison")
+    @ApiResponse(responseCode = "200", description = "Prediction value returned")
     @GetMapping("/simple-prediction")
     public ResponseEntity<?> simplePredicition(
             @RequestParam(defaultValue = "10.9") Double currentGlucose,

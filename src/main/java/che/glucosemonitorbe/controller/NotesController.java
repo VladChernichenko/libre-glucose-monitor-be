@@ -3,6 +3,10 @@ package che.glucosemonitorbe.controller;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.service.NotesService;
 import che.glucosemonitorbe.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -14,6 +18,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name = "Notes", description = "User glucose notes — CRUD, date range, summary")
 @RestController
 @RequestMapping("/api/notes")
 public class NotesController {
@@ -24,9 +29,9 @@ public class NotesController {
     @Autowired
     private UserService userService;
     
-    /**
-     * Get all notes for the authenticated user
-     */
+    @Operation(summary = "Get all notes for the authenticated user")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Notes list returned"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @GetMapping
     public ResponseEntity<List<NoteDto>> getAllNotes(Authentication authentication) {
         try {
@@ -72,9 +77,9 @@ public class NotesController {
         }
     }
     
-    /**
-     * Create a new note for the authenticated user
-     */
+    @Operation(summary = "Create a new note for the authenticated user")
+    @ApiResponses({ @ApiResponse(responseCode = "201", description = "Note created"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @PostMapping
     public ResponseEntity<NoteDto> createNote(@RequestBody CreateNoteRequest request, Authentication authentication) {
         try {
@@ -105,9 +110,9 @@ public class NotesController {
         }
     }
     
-    /**
-     * Delete a note for the authenticated user
-     */
+    @Operation(summary = "Delete a note")
+    @ApiResponses({ @ApiResponse(responseCode = "204", description = "Note deleted"),
+                    @ApiResponse(responseCode = "404", description = "Not found") })
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteNote(@PathVariable UUID id, Authentication authentication) {
         try {

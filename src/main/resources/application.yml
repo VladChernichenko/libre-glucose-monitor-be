@@ -27,7 +27,7 @@ spring:
         order_updates: true
   cache:
     type: caffeine
-    cache-names: nightscoutCredentials,nightscoutEntries
+    cache-names: nightscoutCredentials,nightscoutEntries,nutritionApiResponses,cgmReadings,llmResponses
     caffeine:
       # Per-cache specs override this default; kept as a safety net.
       spec: maximumSize=50000,expireAfterWrite=5m
@@ -54,6 +54,8 @@ server:
 logging:
   level:
     root: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId}] [%X{userId}] %logger{36} - %msg%n"
 
 app:
   ai:
@@ -95,6 +97,10 @@ app:
     glucose-calculations-enabled: true
     user-configuration-enabled: false
     nutrition-aware-prediction-enabled: ${APP_FEATURES_NUTRITION_AWARE_PREDICTION_ENABLED:true}
+    food-photo-analysis-enabled: false
+    ar-spatial-enabled: false
+    cgm-service-external: false
+    async-meal-pipeline: false
 
     # Migration percentages (0-100) - 100 means all users use backend
     insulin-calculator-migration-percent: 100
@@ -113,7 +119,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,caches
   endpoint:
     health:
       show-details: always
@@ -129,6 +135,13 @@ nutrition:
     base-url: ${NUTRITION_SPOONACULAR_BASE_URL:https://api.spoonacular.com}
     api-key: ${NUTRITION_SPOONACULAR_API_KEY}
     timeout-ms: ${NUTRITION_SPOONACULAR_TIMEOUT_MS:3000}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
 
 # CORS configuration for development
 cors:

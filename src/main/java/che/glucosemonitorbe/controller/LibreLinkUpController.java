@@ -6,6 +6,10 @@ import che.glucosemonitorbe.dto.LibreConnection;
 import che.glucosemonitorbe.dto.LibreGlucoseData;
 import che.glucosemonitorbe.dto.LibreGlucoseReading;
 import che.glucosemonitorbe.service.LibreLinkUpService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(name = "LibreLinkUp CGM", description = "FreeStyle Libre CGM integration — authentication, connections, and glucose readings")
 @RestController
 @RequestMapping("/api/libre")
 @CrossOrigin(origins = "*")
@@ -25,9 +30,9 @@ public class LibreLinkUpController {
     @Autowired
     private LibreLinkUpService libreLinkUpService;
 
-    /**
-     * Authenticate with LibreLinkUp API
-     */
+    @Operation(summary = "Authenticate with LibreLinkUp API")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Auth token returned"),
+                    @ApiResponse(responseCode = "400", description = "Authentication failed") })
     @PostMapping("/auth/login")
     public ResponseEntity<?> authenticate(@RequestBody LibreAuthRequest authRequest, Authentication authentication) {
         try {
@@ -63,9 +68,8 @@ public class LibreLinkUpController {
         }
     }
 
-    /**
-     * Get glucose data for a specific patient
-     */
+    @Operation(summary = "Get CGM glucose graph data for a patient")
+    @ApiResponse(responseCode = "200", description = "Glucose readings returned")
     @GetMapping("/connections/{patientId}/graph")
     public ResponseEntity<?> getGlucoseData(
             @PathVariable String patientId,

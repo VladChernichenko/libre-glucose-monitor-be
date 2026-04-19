@@ -9,6 +9,10 @@ import che.glucosemonitorbe.dto.UserDataSourceConfigDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -20,6 +24,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name = "Data Source Config", description = "CGM data source configuration — Nightscout and LibreLinkUp credentials")
 @Slf4j
 @RestController
 @RequestMapping("/api/user/data-source-config")
@@ -30,9 +35,10 @@ public class UserDataSourceConfigController {
     private final UserService userService;
     private final NightScoutIntegration nightScoutIntegration;
 
-    /**
-     * Save or update a data source configuration
-     */
+    @Operation(summary = "Save or update a CGM data source configuration")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Configuration saved"),
+                    @ApiResponse(responseCode = "400", description = "Invalid configuration"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @PostMapping
     public ResponseEntity<UserDataSourceConfigDto> saveConfig(
             @Valid @RequestBody DataSourceConfigRequestDto request,
@@ -203,9 +209,8 @@ public class UserDataSourceConfigController {
         }
     }
 
-    /**
-     * Test Nightscout connectivity using the URL and credentials in the request body (does not save).
-     */
+    @Operation(summary = "Test Nightscout connectivity without saving credentials")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Connection test result returned (ok=true/false)") })
     @PostMapping("/test-nightscout")
     public ResponseEntity<NightscoutTestResponseDto> testNightscout(
             @Valid @RequestBody NightscoutTestRequestDto request,

@@ -4,6 +4,10 @@ import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.NightscoutChartDataService;
 import che.glucosemonitorbe.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -17,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name = "Nightscout CGM", description = "Nightscout CGM data retrieval, stored chart data, and background sync")
 @Slf4j
 @RestController
 @RequestMapping("/api/nightscout")
@@ -27,6 +32,9 @@ public class NightscoutController {
     private final NightscoutChartDataService chartDataService;
     private final UserService userService;
     
+    @Operation(summary = "Get recent glucose entries from Nightscout or stored cache")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Glucose entries returned"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @GetMapping("/entries")
     public ResponseEntity<List<NightscoutEntryDto>> getGlucoseEntries(
             @RequestParam(value = "count", defaultValue = "100") int count,
@@ -189,6 +197,8 @@ public class NightscoutController {
         }
     }
     
+    @Operation(summary = "Get stored chart data for the authenticated user")
+    @ApiResponse(responseCode = "200", description = "Stored chart data returned")
     @GetMapping("/chart-data")
     public ResponseEntity<List<NightscoutEntryDto>> getStoredChartData(
             @RequestParam(value = "count", defaultValue = "100") int count,

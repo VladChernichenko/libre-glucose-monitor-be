@@ -64,4 +64,18 @@ public class FeatureToggleService {
     public boolean isBackendModeEnabled() {
         return config.isBackendModeEnabled();
     }
+
+    /**
+     * Check if a named Phase 2–4 integration toggle is on.
+     * Falls back to shouldUseBackend() for legacy feature names.
+     */
+    public boolean isEnabled(String featureName) {
+        return switch (featureName.toLowerCase()) {
+            case "food-photo-analysis-enabled" -> config.isFoodPhotoAnalysisEnabled();
+            case "ar-spatial-enabled"          -> config.isArSpatialEnabled();
+            case "cgm-service-external"        -> config.isCgmServiceExternal();
+            case "async-meal-pipeline"         -> config.isAsyncMealPipeline();
+            default                            -> shouldUseBackend(featureName);
+        };
+    }
 }

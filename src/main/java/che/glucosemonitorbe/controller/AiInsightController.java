@@ -6,6 +6,10 @@ import che.glucosemonitorbe.dto.AiAnalysisRequest;
 import che.glucosemonitorbe.dto.AiAnalysisResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import che.glucosemonitorbe.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -24,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+@Tag(name = "AI Insights", description = "LLM-powered glucose pattern analysis and retrospective insights")
 @RestController
 @RequestMapping("/api/ai-insights")
 @RequiredArgsConstructor
@@ -33,6 +38,9 @@ public class AiInsightController {
     private final UserService userService;
     private final ObjectMapper objectMapper;
 
+    @Operation(summary = "Run a synchronous AI retrospective analysis over the last N hours")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Analysis result returned"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @PostMapping("/retrospective")
     public ResponseEntity<AiAnalysisResponse> retrospective(
             Authentication authentication,
@@ -43,6 +51,9 @@ public class AiInsightController {
         return ResponseEntity.ok(aiInsightService.analyzeRetrospective(userId, window));
     }
 
+    @Operation(summary = "Stream AI retrospective analysis as NDJSON tokens")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Token stream started"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @PostMapping(value = "/retrospective/stream", produces = MediaType.APPLICATION_NDJSON_VALUE)
     public ResponseEntity<StreamingResponseBody> retrospectiveStream(
             Authentication authentication,

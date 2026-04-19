@@ -19,7 +19,10 @@ import java.util.concurrent.TimeUnit;
 public class CacheConfig {
 
     public static final String CACHE_NIGHTSCOUT_CREDENTIALS = "nightscoutCredentials";
-    public static final String CACHE_NIGHTSCOUT_ENTRIES = "nightscoutEntries";
+    public static final String CACHE_NIGHTSCOUT_ENTRIES     = "nightscoutEntries";
+    public static final String CACHE_NUTRITION_API          = "nutritionApiResponses";
+    public static final String CACHE_CGM_READINGS           = "cgmReadings";
+    public static final String CACHE_LLM_RESPONSES          = "llmResponses";
 
     @Bean
     public CacheManager cacheManager() {
@@ -38,6 +41,27 @@ public class CacheConfig {
                 Caffeine.newBuilder()
                         .maximumSize(50_000)
                         .expireAfterWrite(30, TimeUnit.SECONDS)
+                        .recordStats()
+                        .build());
+
+        manager.registerCustomCache(CACHE_NUTRITION_API,
+                Caffeine.newBuilder()
+                        .maximumSize(10_000)
+                        .expireAfterWrite(7, TimeUnit.DAYS)
+                        .recordStats()
+                        .build());
+
+        manager.registerCustomCache(CACHE_CGM_READINGS,
+                Caffeine.newBuilder()
+                        .maximumSize(50_000)
+                        .expireAfterWrite(6, TimeUnit.MINUTES)
+                        .recordStats()
+                        .build());
+
+        manager.registerCustomCache(CACHE_LLM_RESPONSES,
+                Caffeine.newBuilder()
+                        .maximumSize(5_000)
+                        .expireAfterWrite(24, TimeUnit.HOURS)
                         .recordStats()
                         .build());
 

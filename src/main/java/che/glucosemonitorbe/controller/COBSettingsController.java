@@ -3,6 +3,10 @@ package che.glucosemonitorbe.controller;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -10,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+@Tag(name = "COB Settings", description = "Carbs-on-board decay configuration per user")
 @RestController
 @RequestMapping("/api/cob-settings")
 public class COBSettingsController {
@@ -20,11 +25,9 @@ public class COBSettingsController {
     @Autowired
     private UserService userService;
     
-    /**
-     * Get COB settings for the authenticated user
-     * @param authentication the authentication object
-     * @return COB settings DTO
-     */
+    @Operation(summary = "Get COB settings for the authenticated user")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Settings returned"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @GetMapping
     public ResponseEntity<COBSettingsDTO> getCOBSettings(Authentication authentication) {
         try {
@@ -36,12 +39,8 @@ public class COBSettingsController {
         }
     }
     
-    /**
-     * Create or update COB settings for the authenticated user
-     * @param authentication the authentication object
-     * @param settingsDTO the settings to save
-     * @return the saved COB settings DTO
-     */
+    @Operation(summary = "Create or update COB settings")
+    @ApiResponse(responseCode = "200", description = "Settings saved")
     @PostMapping
     public ResponseEntity<COBSettingsDTO> saveCOBSettings(
             Authentication authentication,

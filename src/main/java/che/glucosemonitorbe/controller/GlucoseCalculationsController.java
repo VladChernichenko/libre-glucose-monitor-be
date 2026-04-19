@@ -4,6 +4,9 @@ import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.FeatureToggleService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +15,7 @@ import org.springframework.security.core.Authentication;
 import jakarta.validation.Valid;
 import java.util.Map;
 
+@Tag(name = "Glucose Calculations", description = "Glucose trend, delta, and 2-hour prediction calculations")
 @RestController
 @RequestMapping("/api/glucose-calculations")
 @RequiredArgsConstructor
@@ -20,9 +24,8 @@ public class GlucoseCalculationsController {
     private final GlucoseCalculationsService glucoseCalculationsService;
     private final FeatureToggleService featureToggleService;
     
-    /**
-     * Get comprehensive glucose calculations for the current user
-     */
+    @Operation(summary = "Get glucose calculations (GET variant)")
+    @ApiResponse(responseCode = "200", description = "Calculation result returned")
     @GetMapping("/")
     public ResponseEntity<?> getGlucoseCalculations(
             @RequestParam Double currentGlucose,
@@ -77,9 +80,8 @@ public class GlucoseCalculationsController {
         }
     }
     
-    /**
-     * Get glucose calculations using POST method for more complex requests
-     */
+    @Operation(summary = "Calculate glucose data (POST variant with full request body)")
+    @ApiResponse(responseCode = "200", description = "Calculation result returned")
     @PostMapping("/")
     public ResponseEntity<?> calculateGlucoseData(
             @Valid @RequestBody GlucoseCalculationsRequest request,

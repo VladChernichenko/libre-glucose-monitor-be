@@ -16,6 +16,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import che.glucosemonitorbe.service.TokenBlacklistService;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 
@@ -51,6 +52,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
+                    MDC.put("userId", username);
                     log.debug("Successfully authenticated user: {}", username);
                 } else {
                     log.warn("JWT authentication failed for {}: valid={}, refresh={}, blacklisted={}", 
@@ -65,6 +67,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+        MDC.remove("userId");
     }
 
     private String getJwtFromRequest(HttpServletRequest request) {

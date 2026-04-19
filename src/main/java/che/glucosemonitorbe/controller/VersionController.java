@@ -2,6 +2,9 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.VersionResponse;
 import che.glucosemonitorbe.service.VersionService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+@Tag(name = "Version", description = "Backend version info and iOS/frontend compatibility matrix")
 @RestController
 @RequestMapping("/api/version")
 @RequiredArgsConstructor
@@ -17,18 +21,16 @@ public class VersionController {
     
     private final VersionService versionService;
     
-    /**
-     * Get complete version information
-     */
+    @Operation(summary = "Get complete backend version information")
+    @ApiResponse(responseCode = "200", description = "Version info returned")
     @GetMapping("/")
     public ResponseEntity<VersionResponse> getVersion() {
         VersionResponse version = versionService.getVersionInfo();
         return ResponseEntity.ok(version);
     }
     
-    /**
-     * Check frontend compatibility
-     */
+    @Operation(summary = "Check if a client version is compatible with this backend")
+    @ApiResponse(responseCode = "200", description = "Compatibility result returned")
     @PostMapping("/check-compatibility")
     public ResponseEntity<Map<String, Object>> checkCompatibility(
             @RequestBody Map<String, String> request) {

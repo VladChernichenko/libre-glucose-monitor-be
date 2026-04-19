@@ -44,6 +44,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/features/**").permitAll()
                         .requestMatchers("/api/version/**").permitAll()  // Allow version checks
                         .requestMatchers("/actuator/**").permitAll()
+                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/webjars/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/health").permitAll()  // Allow health checks
                         .anyRequest().authenticated()

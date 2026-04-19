@@ -2,12 +2,16 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.service.FeatureToggleService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+@Tag(name = "Carbs on Board", description = "Real-time carbs-on-board calculation using exponential decay model")
 @RestController
 @RequestMapping("/api/cob")
 @RequiredArgsConstructor
@@ -16,9 +20,8 @@ public class CarbsOnBoardController {
     private final CarbsOnBoardService cobService;
     private final FeatureToggleService featureToggleService;
     
-    /**
-     * Calculate carbs on board
-     */
+    @Operation(summary = "Calculate active carbs on board at a given time")
+    @ApiResponse(responseCode = "200", description = "COB value returned")
     @PostMapping("/calculate")
     public ResponseEntity<?> calculateCOB(
             @RequestParam String userId,
@@ -45,9 +48,8 @@ public class CarbsOnBoardController {
         }
     }
     
-    /**
-     * Get COB status
-     */
+    @Operation(summary = "Get COB status summary")
+    @ApiResponse(responseCode = "200", description = "Status returned")
     @PostMapping("/status")
     public ResponseEntity<?> getCOBStatus(
             @RequestParam String userId,
@@ -76,9 +78,8 @@ public class CarbsOnBoardController {
         }
     }
     
-    /**
-     * Get COB timeline
-     */
+    @Operation(summary = "Get COB decay timeline for charting")
+    @ApiResponse(responseCode = "200", description = "Timeline returned")
     @PostMapping("/timeline")
     public ResponseEntity<?> getCOBTimeline(
             @RequestParam String userId,

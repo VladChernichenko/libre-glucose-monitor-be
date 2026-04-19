@@ -5,6 +5,9 @@ import che.glucosemonitorbe.dto.InsulinCalculationResponse;
 import che.glucosemonitorbe.dto.ActiveInsulinResponse;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.FeatureToggleService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 import java.util.Map;
 
+@Tag(name = "Insulin Calculator", description = "Warsaw Method bolus calculation — standard + extended bolus from carbs, fat, protein")
 @RestController
 @RequestMapping("/api/insulin")
 @RequiredArgsConstructor
@@ -20,8 +24,10 @@ public class InsulinCalculatorController {
     private final InsulinCalculatorService insulinCalculatorService;
     private final FeatureToggleService featureToggleService;
     
+    @Operation(summary = "Calculate recommended insulin dose using Warsaw Method")
+    @ApiResponse(responseCode = "200", description = "Insulin calculation result returned")
     @PostMapping("/calculate")
-    public ResponseEntity<?> calculateInsulin(@RequestBody InsulinCalculationRequest request, 
+    public ResponseEntity<?> calculateInsulin(@RequestBody InsulinCalculationRequest request,
                                            @RequestParam(required = false) String userId) {
         
         // Check if this feature should use the backend
@@ -75,6 +81,8 @@ public class InsulinCalculatorController {
         ));
     }
     
+    @Operation(summary = "Get active insulin on board (IOB) for a user")
+    @ApiResponse(responseCode = "200", description = "IOB value returned")
     @PostMapping("/active-insulin")
     public ResponseEntity<?> getActiveInsulin(@RequestBody Map<String, Object> request,
                                            @RequestParam(required = false) String userId) {
