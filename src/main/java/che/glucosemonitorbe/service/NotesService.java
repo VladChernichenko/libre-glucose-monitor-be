@@ -69,7 +69,7 @@ public class NotesService {
             userId,
             request.getTimestamp(),
             request.getCarbs(),
-            request.getInsulin(),
+            request.getInsulin() != null ? request.getInsulin() : 0.0,
             request.getMeal(),
             request.getComment(),
             request.getGlucoseValue(),
