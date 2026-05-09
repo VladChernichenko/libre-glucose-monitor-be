@@ -132,7 +132,8 @@ class NotesIntegrationTest {
                 "/api/notes",
                 HttpMethod.GET,
                 new HttpEntity<>(headers),
-                new ParameterizedTypeReference<List<NoteDto>>() {});
+                new ParameterizedTypeReference<>() {
+                });
 
         assertEquals(HttpStatus.OK, resp.getStatusCode());
         List<NoteDto> notes = resp.getBody();

@@ -92,8 +92,8 @@ public class ContextAggregatorService {
                 : 0.0;
         PauseStats pauseStats = computePauseStats(notes);
         double preBolusTimingContribution = calculatePreBolusTimingContribution(pauseStats.avgPauseMinutes);
-        double predicted2h = Math.max(1.0, Math.min(25.0,
-                latest + (activeCob / 10.0) * carbRatio - activeIob * isf + preBolusTimingContribution));
+        double predicted2h = Math.clamp(
+                latest + (activeCob / 10.0) * carbRatio - activeIob * isf + preBolusTimingContribution, 1.0, 25.0);
 
         return AnalysisContext.builder()
                 .userId(userId)
