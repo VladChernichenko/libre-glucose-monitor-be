@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -9,6 +10,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 
 import java.util.stream.Collectors;
 
@@ -94,6 +96,20 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    /**
+     * Streaming endpoints (e.g. /retrospective/stream) set Content-Type: application/x-ndjson.
+     * If the async context times out the response is already committed, so attempting to write
+     * a JSON body would throw HttpMessageNotWritableException. We handle the timeout here and
+     * let the response drain naturally — the client will see the stream close.
+     */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public void handleAsyncTimeout(AsyncRequestTimeoutException ex, HttpServletResponse response) {
+        if (!response.isCommitted()) {
+            response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
+        }
+        // If already committed (streaming), do nothing — the connection closes cleanly.
     }
 
     @ExceptionHandler(RuntimeException.class)

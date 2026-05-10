@@ -38,6 +38,9 @@ spring:
   cloud:
     compatibility-verifier:
       enabled: false
+  mvc:
+    async:
+      request-timeout: 120000
 
 security:
   jwt:
@@ -63,8 +66,8 @@ app:
     ollama:
       enabled: ${OLLAMA_ENABLED:true}
       # Ollama Cloud default; for local Ollama use http://localhost:11434/api/generate
-      url: ${OLLAMA_URL:https://ollama.com/api/generate}
-      model: ${OLLAMA_MODEL:glm-5:cloud}
+      url: ${OLLAMA_URL:http://localhost:11434/api/generate}
+      model: ${OLLAMA_MODEL:llama3.2:latest}
       api-key: ${OLLAMA_API_KEY:}
       num-ctx: ${OLLAMA_NUM_CTX:8192}
   version:
