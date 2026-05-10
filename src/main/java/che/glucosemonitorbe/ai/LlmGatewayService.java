@@ -87,7 +87,9 @@ public class LlmGatewayService {
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception e) {
-                log.warn("[Ollama] sync/json call failed, falling back. reason={}", e.getMessage());
+                log.warn("[Ollama] sync/json call failed, falling back. reason={}{}", e.getMessage(),
+                        e.getMessage() != null && e.getMessage().contains("401")
+                                ? " — hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
             }
         }
 
@@ -132,7 +134,9 @@ public class LlmGatewayService {
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception e) {
-                log.warn("[Ollama] stream/json call failed, falling back. reason={}", e.getMessage());
+                log.warn("[Ollama] stream/json call failed, falling back. reason={}{}", e.getMessage(),
+                        e.getMessage() != null && e.getMessage().contains("401")
+                                ? " — hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
             }
         }
 
@@ -195,7 +199,9 @@ public class LlmGatewayService {
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception e) {
-                log.warn("[Ollama] stream/markdown call failed, falling back. reason={}", e.getMessage());
+                log.warn("[Ollama] stream/markdown call failed, falling back. reason={}{}", e.getMessage(),
+                        e.getMessage() != null && e.getMessage().contains("401")
+                                ? " — hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
             }
         }
 
@@ -214,7 +220,8 @@ public class LlmGatewayService {
         String prompt = buildJsonPrompt(context, chunks);
         String json = buildOllamaPayload(prompt, false, true);
 
-        log.debug("[Ollama] model={} url={} numCtx={}", ollamaModel, ollamaUrl, ollamaNumCtx);
+        log.debug("[Ollama] model={} url={} numCtx={} auth={}", ollamaModel, ollamaUrl, ollamaNumCtx,
+                (ollamaApiKey != null && !ollamaApiKey.isBlank()) ? "Bearer ***" : "none");
         log.debug("[Ollama] PROMPT (sync/json):\n{}", prompt);
 
         HttpHeaders headers = new HttpHeaders();
@@ -247,7 +254,8 @@ public class LlmGatewayService {
         String prompt = buildJsonPrompt(context, chunks);
         String payload = buildOllamaPayload(prompt, true, true);
 
-        log.debug("[Ollama] model={} url={} numCtx={}", ollamaModel, ollamaUrl, ollamaNumCtx);
+        log.debug("[Ollama] model={} url={} numCtx={} auth={}", ollamaModel, ollamaUrl, ollamaNumCtx,
+                (ollamaApiKey != null && !ollamaApiKey.isBlank()) ? "Bearer ***" : "none");
         log.debug("[Ollama] PROMPT (stream/json):\n{}", prompt);
 
         HttpClient client = HttpClient.newHttpClient();
@@ -299,7 +307,8 @@ public class LlmGatewayService {
         String prompt = buildMarkdownPrompt(context, chunks, followUpQuestion, conversationTurns);
         String payload = buildOllamaPayload(prompt, true, false, modelOverride, numCtxOverride);
 
-        log.debug("[Ollama] model={} url={} numCtx={}", modelOverride, ollamaUrl, numCtxOverride);
+        log.debug("[Ollama] model={} url={} numCtx={} auth={}", modelOverride, ollamaUrl, numCtxOverride,
+                (ollamaApiKey != null && !ollamaApiKey.isBlank()) ? "Bearer ***" : "none");
         log.debug("[Ollama] PROMPT (stream/markdown):\n{}", prompt);
 
         HttpClient client = HttpClient.newHttpClient();
