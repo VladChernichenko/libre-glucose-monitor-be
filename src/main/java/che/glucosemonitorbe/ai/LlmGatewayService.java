@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -33,6 +34,7 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class LlmGatewayService {
@@ -84,8 +86,8 @@ public class LlmGatewayService {
                         .contextWindow(ollamaNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
-            } catch (Exception ignored) {
-                // fallback
+            } catch (Exception e) {
+                log.warn("[Ollama] sync/json call failed, falling back. reason={}", e.getMessage());
             }
         }
 
@@ -129,8 +131,8 @@ public class LlmGatewayService {
                         .contextWindow(ollamaNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
-            } catch (Exception ignored) {
-                // fallback
+            } catch (Exception e) {
+                log.warn("[Ollama] stream/json call failed, falling back. reason={}", e.getMessage());
             }
         }
 
@@ -192,8 +194,8 @@ public class LlmGatewayService {
                         .contextWindow(effectiveNumCtx)
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
-            } catch (Exception ignored) {
-                // fallback
+            } catch (Exception e) {
+                log.warn("[Ollama] stream/markdown call failed, falling back. reason={}", e.getMessage());
             }
         }
 
@@ -212,6 +214,9 @@ public class LlmGatewayService {
         String prompt = buildJsonPrompt(context, chunks);
         String json = buildOllamaPayload(prompt, false, true);
 
+        log.debug("[Ollama] model={} url={} numCtx={}", ollamaModel, ollamaUrl, ollamaNumCtx);
+        log.debug("[Ollama] PROMPT (sync/json):\n{}", prompt);
+
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         applyOllamaAuth(headers);
@@ -224,9 +229,14 @@ public class LlmGatewayService {
         JsonNode root = objectMapper.readTree(resp.getBody());
         JsonNode responseNode = root.get("response");
         if (responseNode == null) {
+            log.warn("[Ollama] Response body missing `response` field. Raw body: {}", resp.getBody());
             throw new RestClientException("Ollama response missing `response` field");
         }
-        return new OllamaResponse(extractJsonObject(responseNode.asText()), extractUsage(root));
+        Usage usage = extractUsage(root);
+        String extracted = extractJsonObject(responseNode.asText());
+        log.debug("[Ollama] RESPONSE (sync/json) promptTokens={} completionTokens={}:\n{}",
+                usage.promptTokens(), usage.completionTokens(), extracted);
+        return new OllamaResponse(extracted, usage);
     }
 
     private OllamaResponse callOllamaStreaming(
@@ -236,6 +246,9 @@ public class LlmGatewayService {
     ) throws Exception {
         String prompt = buildJsonPrompt(context, chunks);
         String payload = buildOllamaPayload(prompt, true, true);
+
+        log.debug("[Ollama] model={} url={} numCtx={}", ollamaModel, ollamaUrl, ollamaNumCtx);
+        log.debug("[Ollama] PROMPT (stream/json):\n{}", prompt);
 
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(ollamaUrl))
@@ -268,7 +281,10 @@ public class LlmGatewayService {
             }
         }
 
-        return new OllamaResponse(extractJsonObject(fullResponse.toString()), usage);
+        String extracted = extractJsonObject(fullResponse.toString());
+        log.debug("[Ollama] RESPONSE (stream/json) promptTokens={} completionTokens={}:\n{}",
+                usage.promptTokens(), usage.completionTokens(), extracted);
+        return new OllamaResponse(extracted, usage);
     }
 
     private OllamaResponse callOllamaStreamingMarkdown(
@@ -283,6 +299,9 @@ public class LlmGatewayService {
         String prompt = buildMarkdownPrompt(context, chunks, followUpQuestion, conversationTurns);
         String payload = buildOllamaPayload(prompt, true, false, modelOverride, numCtxOverride);
 
+        log.debug("[Ollama] model={} url={} numCtx={}", modelOverride, ollamaUrl, numCtxOverride);
+        log.debug("[Ollama] PROMPT (stream/markdown):\n{}", prompt);
+
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(ollamaUrl))
                 .header("Content-Type", "application/json");
@@ -314,6 +333,8 @@ public class LlmGatewayService {
             }
         }
 
+        log.debug("[Ollama] RESPONSE (stream/markdown) promptTokens={} completionTokens={}:\n{}",
+                usage.promptTokens(), usage.completionTokens(), fullResponse);
         return new OllamaResponse(fullResponse.toString(), usage);
     }
 
