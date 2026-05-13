@@ -46,19 +46,26 @@ public class NutritionEnrichmentService {
 
         List<Map<String, Object>> apiRows = nutritionApiNinjaService.lookupFoods(text);
         if (apiRows.isEmpty()) {
-            log.info("Nutrition enrichment: no Spoonacular rows, using MANUAL_CARBS (textLength={})", text.length());
+            // API Ninja returned nothing — still estimate GI/GL from food name keywords
+            // so LogMeal-identified foods (e.g. "whole grain bread") get GI data.
+            List<String> nameFoods = extractFoodTokens(text);
+            double fallbackGi = estimateGiFromFoods(nameFoods);
+            double availableCarbs = Math.max(0.0, carbs);
+            double fallbackGl = (fallbackGi * availableCarbs) / 100.0;
+            log.info("Nutrition enrichment: no API rows, using name-based GI estimate foods={} gi={} gl={}",
+                    nameFoods, round1(fallbackGi), round1(fallbackGl));
             return NutritionSnapshot.builder()
-                    .absorptionMode("DEFAULT_DECAY")
+                    .absorptionMode("GI_GL_ENHANCED")
                     .source("MANUAL_CARBS")
                     .confidence(0.4)
                     .totalCarbs(carbs)
                     .fiber(0.0)
                     .protein(0.0)
                     .fat(0.0)
-                    .estimatedGi(null)
-                    .glycemicLoad(null)
-                    .absorptionSpeedClass("DEFAULT")
-                    .normalizedFoods(List.of())
+                    .estimatedGi(round1(fallbackGi))
+                    .glycemicLoad(round1(fallbackGl))
+                    .absorptionSpeedClass(classify(fallbackGi, 0, 0, 0))
+                    .normalizedFoods(nameFoods)
                     .build();
         }
 
@@ -123,17 +130,47 @@ public class NutritionEnrichmentService {
         }
         double sum = 0.0;
         for (String food : foods) {
-            if (food.contains("white bread") || food.contains("rice") || food.contains("potato")) {
-                sum += 75.0;
-            } else if (food.contains("milk") || food.contains("apple") || food.contains("orange")) {
-                sum += 35.0;
-            } else if (food.contains("rye")) {
-                sum += 50.0;
-            } else {
-                sum += DEFAULT_GI;
-            }
+            sum += giForFood(food);
         }
         return sum / foods.size();
+    }
+
+    private double giForFood(String food) {
+        // High GI (70+)
+        if (food.contains("white bread") || food.contains("white rice") || food.contains("glucose")
+                || food.contains("corn flakes") || food.contains("waffle") || food.contains("pretzel")) return 75.0;
+        if (food.contains("potato") && !food.contains("sweet")) return 78.0;
+        if (food.contains("watermelon")) return 76.0;
+
+        // Medium-high GI (56–69)
+        if (food.contains("bread") && !food.contains("whole") && !food.contains("rye")
+                && !food.contains("sourdough")) return 65.0;
+        if (food.contains("rice") && !food.contains("brown")) return 64.0;
+        if (food.contains("banana") || food.contains("pineapple")) return 60.0;
+        if (food.contains("pasta") || food.contains("noodle")) return 58.0;
+
+        // Low-medium GI (40–55)
+        if (food.contains("whole grain") || food.contains("whole wheat") || food.contains("wholegrain")) return 50.0;
+        if (food.contains("brown rice")) return 50.0;
+        if (food.contains("rye") || food.contains("sourdough")) return 48.0;
+        if (food.contains("oat") || food.contains("porridge")) return 55.0;
+        if (food.contains("sweet potato")) return 44.0;
+        if (food.contains("orange") || food.contains("apple") || food.contains("pear")) return 36.0;
+        if (food.contains("milk") || food.contains("yogurt") || food.contains("yoghurt")) return 35.0;
+
+        // Low GI (<40)
+        if (food.contains("lentil") || food.contains("bean") || food.contains("chickpea")
+                || food.contains("legume")) return 30.0;
+        if (food.contains("nut") || food.contains("almond") || food.contains("walnut")) return 15.0;
+        if (food.contains("vegetable") || food.contains("broccoli") || food.contains("spinach")
+                || food.contains("salad") || food.contains("cucumber")) return 15.0;
+
+        return DEFAULT_GI;
+    }
+
+    private List<String> extractFoodTokens(String text) {
+        if (text == null || text.isBlank()) return List.of();
+        return List.of(text.toLowerCase(Locale.ROOT).split("[,;]+\\s*"));
     }
 
     private String classify(double gi, double fiber, double protein, double fat) {
