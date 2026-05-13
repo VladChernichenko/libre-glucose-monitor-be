@@ -28,6 +28,10 @@ logging:
     org.hibernate.type.descriptor.sql.BasicBinder: INFO
 
 app:
+  ai:
+    ollama:
+      url: ${OLLAMA_URL:http://ollama:11434/api/generate}
+      vision-model: ${OLLAMA_VISION_MODEL:llava:latest}
   nightscout:
     url: ${NIGHTSCOUT_URL:}
     api-secret: ${NIGHTSCOUT_API_SECRET:}

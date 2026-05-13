@@ -1,6 +1,10 @@
 spring:
   application:
     name: glucose-monitor-be
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/glucose_monitor}
     username: ${DB_USERNAME:glucose_monitor_user}
@@ -62,12 +66,17 @@ logging:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId}] [%X{userId}] %logger{36} - %msg%n"
 
 app:
+  logmeal:
+    enabled: ${LOGMEAL_ENABLED:true}
+    api-key: ${LOGMEAL_API_KEY}
+    base-url: ${LOGMEAL_BASE_URL:https://api.logmeal.com/v2}
   ai:
     ollama:
       enabled: ${OLLAMA_ENABLED:true}
       # Ollama Cloud default; for local Ollama use http://localhost:11434/api/generate
       url: ${OLLAMA_URL:http://localhost:11434/api/generate}
       model: ${OLLAMA_MODEL:llama3.2:latest}
+      vision-model: ${OLLAMA_VISION_MODEL:llava:latest}
       api-key: ${OLLAMA_API_KEY:}
       num-ctx: ${OLLAMA_NUM_CTX:8192}
   version:
