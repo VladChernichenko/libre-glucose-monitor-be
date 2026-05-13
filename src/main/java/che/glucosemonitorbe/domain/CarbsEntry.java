@@ -66,4 +66,13 @@ public class CarbsEntry {
 
     @Transient
     private String absorptionSpeedClass;
+
+    @Transient
+    private String bolusStrategy;
+
+    @Transient
+    private Double suggestedDurationHours;
+
+    @Transient
+    private String patternName;
 }

@@ -33,6 +33,7 @@ public class LogMealService {
 
     private final ObjectMapper objectMapper;
     private final NutritionEnrichmentService nutritionEnrichmentService;
+    private final GlycemicPatternMatchingService glycemicPatternMatchingService;
     private final RestTemplate restTemplate = buildRestTemplate();
 
     @Value("${app.logmeal.enabled:false}")
@@ -126,10 +127,11 @@ public class LogMealService {
                 foods, carbs, fiber, protein, fat, calories);
 
         // Use Spoonacular only for GI/GL — always keep LogMeal's own macro values
+        NutritionSnapshot snapshot;
         if (!foods.isEmpty()) {
             NutritionSnapshot enriched = nutritionEnrichmentService.enrichFromText(
                     String.join(", ", foods), "", carbs > 0 ? carbs : null);
-            return NutritionSnapshot.builder()
+            snapshot = NutritionSnapshot.builder()
                     .absorptionMode(enriched.getAbsorptionMode())
                     .source("LOGMEAL")
                     .confidence(0.9)
@@ -142,19 +144,20 @@ public class LogMealService {
                     .absorptionSpeedClass(enriched.getAbsorptionSpeedClass())
                     .normalizedFoods(foods)
                     .build();
+        } else {
+            snapshot = NutritionSnapshot.builder()
+                    .absorptionMode("DEFAULT_DECAY")
+                    .source("LOGMEAL")
+                    .confidence(0.5)
+                    .totalCarbs(round1(carbs))
+                    .fiber(round1(fiber))
+                    .protein(round1(protein))
+                    .fat(round1(fat))
+                    .absorptionSpeedClass("DEFAULT")
+                    .normalizedFoods(List.of())
+                    .build();
         }
-
-        return NutritionSnapshot.builder()
-                .absorptionMode("DEFAULT_DECAY")
-                .source("LOGMEAL")
-                .confidence(0.5)
-                .totalCarbs(round1(carbs))
-                .fiber(round1(fiber))
-                .protein(round1(protein))
-                .fat(round1(fat))
-                .absorptionSpeedClass("DEFAULT")
-                .normalizedFoods(List.of())
-                .build();
+        return glycemicPatternMatchingService.enrich(snapshot);
     }
 
     /** Read quantity from a LogMeal totalNutrients entry: {"quantity": 10.0, "unit": "g", "label": "..."} */

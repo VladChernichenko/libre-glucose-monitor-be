@@ -23,4 +23,11 @@ public class NutritionSnapshot {
     private Double glycemicLoad;
     private String absorptionSpeedClass; // FAST | MEDIUM | SLOW | DEFAULT
     private List<String> normalizedFoods;
+
+    // Glycemic response pattern fields (populated after photo analysis)
+    private String patternName;           // e.g. "Double Wave", "Fast Spike"
+    private String bolusStrategy;         // Normal | Extended | Dual Wave
+    private Double suggestedDurationHours; // expected glucose elevation window
+    private Integer mealSequencingPriority; // 1=eat first, 3=eat last
+    private String curveDescription;      // human-readable curve explanation
 }

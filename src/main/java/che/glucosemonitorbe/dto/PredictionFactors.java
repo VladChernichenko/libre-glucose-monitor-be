@@ -20,5 +20,7 @@ public class PredictionFactors {
     private Double estimatedMealGl;
     private String absorptionSpeedClass;
     private String absorptionMode;
+    private String matchedPattern;    // e.g. "Double Wave"
+    private String bolusStrategy;     // Normal | Extended | Dual Wave
 }
 

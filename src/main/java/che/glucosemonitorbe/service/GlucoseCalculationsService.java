@@ -211,7 +211,8 @@ public class GlucoseCalculationsService {
         double trendContribution = DEFAULT_GLUCOSE_TREND * (horizonMinutes / 60.0);
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
         NutritionSummary nutritionSummary = summarizeNutrition(carbsEntries);
-        
+        PatternSummary patternSummary = summarizePattern(carbsEntries);
+
         return PredictionFactors.builder()
                 .carbContribution(Math.round(carbContribution * 100.0) / 100.0)
                 .insulinContribution(Math.round(insulinContribution * 100.0) / 100.0)
@@ -223,6 +224,8 @@ public class GlucoseCalculationsService {
                 .estimatedMealGl(nutritionSummary.totalGl)
                 .absorptionSpeedClass(nutritionSummary.speedClass)
                 .absorptionMode(nutritionSummary.absorptionMode)
+                .matchedPattern(patternSummary.patternName)
+                .bolusStrategy(patternSummary.bolusStrategy)
                 .build();
     }
     
@@ -398,6 +401,9 @@ public class GlucoseCalculationsService {
                 if (snapshot.getAbsorptionMode() != null) {
                     entry.setAbsorptionMode(snapshot.getAbsorptionMode());
                 }
+                entry.setBolusStrategy(snapshot.getBolusStrategy());
+                entry.setSuggestedDurationHours(snapshot.getSuggestedDurationHours());
+                entry.setPatternName(snapshot.getPatternName());
             } catch (Exception ignored) {
                 entry.setAbsorptionMode("DEFAULT_DECAY");
             }
@@ -448,6 +454,18 @@ public class GlucoseCalculationsService {
     }
 
     private record NutritionSummary(Double avgGi, Double totalGl, String speedClass, String absorptionMode) {}
+
+    private record PatternSummary(String patternName, String bolusStrategy) {}
+
+    private PatternSummary summarizePattern(List<CarbsEntry> carbsEntries) {
+        if (carbsEntries == null || carbsEntries.isEmpty()) return new PatternSummary(null, null);
+        // Use the most recent entry that has a matched pattern
+        return carbsEntries.stream()
+                .filter(e -> e.getPatternName() != null)
+                .reduce((a, b) -> b) // last in time (stream is time-sorted)
+                .map(e -> new PatternSummary(e.getPatternName(), e.getBolusStrategy()))
+                .orElse(new PatternSummary(null, null));
+    }
     
     /**
      * Convert a Note with insulin data to an InsulinDose object

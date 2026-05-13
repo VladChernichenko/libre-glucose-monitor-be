@@ -29,8 +29,11 @@ public class CarbsOnBoardService {
             return 0.0;
         }
         
-        // Carb half-life controls decay rate, max COB duration is the hard cutoff.
-        int maxDuration = cobSettings.getMaxCOBDuration() != null ? cobSettings.getMaxCOBDuration() : 240;
+        // Pattern-matched duration overrides user default (e.g. 8h for Double Wave pizza meals).
+        int patternDuration = entry.getSuggestedDurationHours() != null
+                ? (int) (entry.getSuggestedDurationHours() * 60) : 0;
+        int defaultDuration = cobSettings.getMaxCOBDuration() != null ? cobSettings.getMaxCOBDuration() : 240;
+        int maxDuration = patternDuration > 0 ? Math.max(patternDuration, defaultDuration) : defaultDuration;
         if (minutesSinceEntry > maxDuration) {
             return 0.0;
         }
