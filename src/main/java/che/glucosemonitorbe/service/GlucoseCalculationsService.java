@@ -48,7 +48,8 @@ public class GlucoseCalculationsService {
     private static final double PRE_BOLUS_TARGET_MINUTES = 15.0;
     private static final double PRE_BOLUS_MATCH_WINDOW_MINUTES = 90.0;
     private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
-    private static final int PREDICTION_PATH_MINUTES = 240;
+    private static final int PREDICTION_PATH_MINUTES = 240;       // default 4 h
+    private static final int PREDICTION_PATH_MAX_MINUTES = 480;   // ceiling 8 h (HFHP / Dual Wave)
     private static final int PREDICTION_PATH_STEP_MINUTES = 1;
     private final COBSettingsService cOBSettingsService;
 
@@ -161,9 +162,14 @@ public class GlucoseCalculationsService {
         double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userUUID);
         double activeIobNow = insulinCalculatorService.calculateTotalActiveInsulin(
                 insulinEntries, currentTime, rapidIob.diaHours(), rapidIob.peakMinutes());
+
+        // Extend path for HFHP / Dual Wave meals — delayed glucose tail can peak 3–6 h after eating
+        // and requires 8–10 h monitoring (Warsaw Method, ADA/ISPAD guidelines).
+        int pathMinutes = resolvePathDurationMinutes(carbsEntries);
+
         List<PredictionPointDTO> points = new ArrayList<>();
 
-        for (int minute = PREDICTION_PATH_STEP_MINUTES; minute <= PREDICTION_PATH_MINUTES; minute += PREDICTION_PATH_STEP_MINUTES) {
+        for (int minute = PREDICTION_PATH_STEP_MINUTES; minute <= pathMinutes; minute += PREDICTION_PATH_STEP_MINUTES) {
             LocalDateTime t = currentTime.plusMinutes(minute);
             double cobAtT = cobService.calculateTotalCarbsOnBoard(carbsEntries, t, userUUID);
             double iobAtT = insulinCalculatorService.calculateTotalActiveInsulin(
@@ -455,6 +461,22 @@ public class GlucoseCalculationsService {
         return entries.stream().anyMatch(e -> "GI_GL_ENHANCED".equalsIgnoreCase(e.getAbsorptionMode()))
                 ? "GI_GL_ENHANCED"
                 : "DEFAULT_DECAY";
+    }
+
+    /**
+     * Determine prediction path length in minutes.
+     * For HFHP / Dual Wave meals the delayed glucose tail can persist 8–10 h
+     * (Warsaw Method, ADA/ISPAD guidelines). Use the longest suggestedDurationHours
+     * across active entries, clamped to [240, 480] minutes.
+     */
+    private int resolvePathDurationMinutes(List<CarbsEntry> entries) {
+        int maxFromPattern = entries.stream()
+                .filter(e -> e.getSuggestedDurationHours() != null)
+                .mapToInt(e -> (int) (e.getSuggestedDurationHours() * 60))
+                .max()
+                .orElse(0);
+        return Math.min(PREDICTION_PATH_MAX_MINUTES,
+                Math.max(PREDICTION_PATH_MINUTES, maxFromPattern));
     }
 
     private record NutritionSummary(Double avgGi, Double totalGl, String speedClass, String absorptionMode) {}
