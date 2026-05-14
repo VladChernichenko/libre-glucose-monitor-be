@@ -6,19 +6,21 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 
 /**
  * Matches a NutritionSnapshot against glycemic_response_patterns and enriches the snapshot
  * with bolus strategy, expected absorption duration, and meal sequencing priority.
  *
- * Matching priority (highest specificity wins):
- *   1. Fiber barrier (has_fiber_barrier) — checked first regardless of GI/GL
- *   2. Double Wave trigger (fat≥40g OR protein≥25g)
- *   3. Flat Plateau (protein≥30g, low GL)
- *   4. Fast Spike (GI≥70, GL≥20)
- *   5. Slow Climb (GI≤55)
- *   6. No match → snapshot returned unchanged
+ * Matching uses two-pass specificity ordering to avoid premature GI-only matches:
+ *   Pass 1 — fat/protein-constrained patterns (sorted by duration DESC):
+ *     Double Wave (8h, fat+protein) → Flat Plateau (5h, protein) →
+ *     Moderate FPU (4h) → Light FPU (3h)
+ *   Pass 2 — GI-only patterns (sorted by duration DESC):
+ *     Slow Climb (3.5h) → Fast Spike (2.5h)
+ *   Fiber barrier patterns (has_fiber_barrier=true) are always checked in Pass 1
+ *   before any GI pattern because they override the expected curve shape.
  */
 @Slf4j
 @Service
@@ -63,11 +65,35 @@ public class GlycemicPatternMatchingService {
         double gi      = s.getEstimatedGi()    != null ? s.getEstimatedGi()    : 0.0;
         double gl      = s.getGlycemicLoad()   != null ? s.getGlycemicLoad()   : 0.0;
 
-        for (GlycemicResponsePattern p : patterns) {
-            if (matches(p, gi, gl, fat, protein, fiber)) {
-                return p;
-            }
+        // Comparator: longer suggestedDuration first (more specific FPU tier wins).
+        Comparator<GlycemicResponsePattern> byDurationDesc =
+                Comparator.comparingDouble((GlycemicResponsePattern p) ->
+                        p.getSuggestedDurationHours().doubleValue()).reversed();
+
+        // Pass 1: fiber-barrier patterns (always override GI-based curves when fiber > threshold).
+        for (GlycemicResponsePattern p : patterns.stream()
+                .filter(GlycemicResponsePattern::isHasFiberBarrier)
+                .sorted(byDurationDesc).toList()) {
+            if (matches(p, gi, gl, fat, protein, fiber)) return p;
         }
+
+        // Pass 2: fat/protein-constrained patterns — sorted longest→shortest so Double Wave (8h)
+        // beats Moderate FPU (4h) beats Light FPU (3h) for the same meal.
+        for (GlycemicResponsePattern p : patterns.stream()
+                .filter(pat -> !pat.isHasFiberBarrier()
+                        && (pat.getMinFatGrams() != null || pat.getMinProteinGrams() != null))
+                .sorted(byDurationDesc).toList()) {
+            if (matches(p, gi, gl, fat, protein, fiber)) return p;
+        }
+
+        // Pass 3: GI-only patterns (no fat/protein constraints) — Fast Spike, Slow Climb.
+        for (GlycemicResponsePattern p : patterns.stream()
+                .filter(pat -> !pat.isHasFiberBarrier()
+                        && pat.getMinFatGrams() == null && pat.getMinProteinGrams() == null)
+                .sorted(byDurationDesc).toList()) {
+            if (matches(p, gi, gl, fat, protein, fiber)) return p;
+        }
+
         return null;
     }
 
