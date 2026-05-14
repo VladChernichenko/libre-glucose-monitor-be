@@ -74,14 +74,20 @@ public class GlycemicPatternMatchingService {
     /**
      * Recommended pre-bolus pause (minutes to wait after injection before eating).
      *
-     * Dual Wave / Extended strategies use a split or delayed bolus — no pre-meal wait needed.
-     * For Normal bolus: pause is driven by GI. High-GI food absorbs fastest so needs the
-     * longest head-start; low-GI food absorbs slowly so a short or zero pause avoids hypoglycaemia.
+     * Dual Wave: HFHP meal still contains a fast-carb component (e.g. pizza dough).
+     *   The upfront bolus portion (30–50%) must cover that spike, so inject 10–15 min
+     *   before eating. Source: ADA/ISPAD Dual-Wave guidelines, Warsaw Method.
+     *
+     * Extended: pure protein/fat dominant meal with negligible fast-carb peak (e.g. steak).
+     *   Bolus starts at or after meal → 0 min pre-bolus.
+     *
+     * Normal: GI-driven timing — high-GI food absorbs fastest and needs longest head-start.
      */
     private int computePreBolusPause(String bolusStrategy, NutritionSnapshot s) {
         if (bolusStrategy == null) return 15;
         return switch (bolusStrategy) {
-            case "Dual Wave", "Extended" -> 0;
+            case "Extended" -> 0;            // pure slow absorption — bolus at/after meal start
+            case "Dual Wave" -> 15;          // upfront portion covers fast-carb spike in mixed HFHP meal
             default -> {
                 double gi = s.getEstimatedGi() != null ? s.getEstimatedGi() : 55.0;
                 if (gi >= 70) yield 20;      // fast carbs — inject 20 min early
