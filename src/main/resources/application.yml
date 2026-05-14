@@ -142,13 +142,6 @@ libre:
   api:
     base-url: ${LIBRE_API_BASE_URL:https://api-eu.libreview.io}
 
-nutrition:
-  spoonacular:
-    enabled: ${NUTRITION_SPOONACULAR_ENABLED:true}
-    base-url: ${NUTRITION_SPOONACULAR_BASE_URL:https://api.spoonacular.com}
-    api-key: ${NUTRITION_SPOONACULAR_API_KEY}
-    timeout-ms: ${NUTRITION_SPOONACULAR_TIMEOUT_MS:3000}
-
 springdoc:
   api-docs:
     path: /v3/api-docs

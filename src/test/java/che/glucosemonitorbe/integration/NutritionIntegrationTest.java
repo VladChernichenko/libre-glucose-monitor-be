@@ -5,14 +5,12 @@ import che.glucosemonitorbe.dto.AuthResponse;
 import che.glucosemonitorbe.dto.NutritionAnalyzeRequest;
 import che.glucosemonitorbe.dto.RegisterRequest;
 import che.glucosemonitorbe.repository.UserRepository;
-import che.glucosemonitorbe.service.nutrition.NutritionApiNinjaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpEntity;
@@ -26,13 +24,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -49,13 +44,6 @@ class NutritionIntegrationTest {
                     .withUsername("test")
                     .withPassword("test");
 
-    /**
-     * Mock the external Spoonacular HTTP client to avoid real network calls.
-     * The service will return an empty list when this mock is active.
-     */
-    @MockBean
-    private NutritionApiNinjaService nutritionApiNinjaService;
-
     @Autowired
     private TestRestTemplate rest;
 
@@ -65,8 +53,6 @@ class NutritionIntegrationTest {
     @BeforeEach
     void clean() {
         userRepository.deleteAll();
-        // Default: Spoonacular returns no results (simulates disabled or no API key)
-        when(nutritionApiNinjaService.lookupFoods(anyString())).thenReturn(List.of());
     }
 
     private RegisterRequest validRegister() {
@@ -115,17 +101,9 @@ class NutritionIntegrationTest {
                 new HttpEntity<>(analyzeReq, headers),
                 Map.class);
 
-        // 200 when external API is mocked (returns empty list -> MANUAL_CARBS path)
-        // 503 would occur if circuit-breaker is open (acceptable per task spec)
-        assertTrue(
-                resp.getStatusCode() == HttpStatus.OK || resp.getStatusCode().value() == 503,
-                "Expected 200 or 503 but got: " + resp.getStatusCode());
-
-        if (resp.getStatusCode() == HttpStatus.OK) {
-            assertNotNull(resp.getBody());
-            assertTrue(resp.getBody().containsKey("source"),
-                    "NutritionSnapshot must have 'source' field");
-        }
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertNotNull(resp.getBody());
+        assertTrue(resp.getBody().containsKey("source"), "NutritionSnapshot must have 'source' field");
     }
 
     @Test

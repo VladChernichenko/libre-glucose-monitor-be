@@ -125,13 +125,13 @@ class NutritionVisionServiceTest {
     void llavaReturnsFoodsButNoCarbs_fallsBackToEnrichment() throws Exception {
         stubOllama("{\"foods\":[\"oatmeal\",\"banana\"],\"totalCarbs\":0,\"fiber\":0,\"protein\":0,\"fat\":0,\"estimatedGi\":0,\"glycemicLoad\":0,\"absorptionSpeedClass\":\"DEFAULT\"}");
         NutritionSnapshot enriched = NutritionSnapshot.builder()
-                .source("SPOONACULAR").totalCarbs(55.0).absorptionMode("GI_GL_ENHANCED").build();
+                .source("KEYWORD_GI").totalCarbs(55.0).absorptionMode("GI_GL_ENHANCED").build();
         when(enrichmentService.enrichFromText("oatmeal, banana", "", null)).thenReturn(enriched);
 
         NutritionSnapshot result = service.analyzeImage(jpegFile());
 
         verify(enrichmentService).enrichFromText("oatmeal, banana", "", null);
-        assertEquals("SPOONACULAR", result.getSource());
+        assertEquals("KEYWORD_GI", result.getSource());
         assertEquals(55.0, result.getTotalCarbs());
     }
 

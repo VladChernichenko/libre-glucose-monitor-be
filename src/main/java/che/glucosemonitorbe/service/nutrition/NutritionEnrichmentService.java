@@ -1,32 +1,25 @@
 package che.glucosemonitorbe.service.nutrition;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class NutritionEnrichmentService {
     private static final Pattern CARB_GRAM_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*g\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern LETTER_PATTERN = Pattern.compile("[a-zA-Z]{3,}");
     private static final double DEFAULT_GI = 55.0;
-
-    private final NutritionApiNinjaService nutritionApiNinjaService;
 
     public NutritionSnapshot enrichFromText(String detailedInput, String comment, Double fallbackCarbs) {
         String text = ((detailedInput != null ? detailedInput : "") + " " + (comment != null ? comment : "")).trim();
         double carbs = fallbackCarbs != null ? Math.max(0.0, fallbackCarbs) : 0.0;
         boolean hasFoodEntities = hasFoodEntities(text);
 
-        // Explicit fallback for input like "20g" without recognizable foods.
         if (!hasFoodEntities) {
             log.debug("Nutrition enrichment: no food entities detected, textLength={}", text.length());
             return NutritionSnapshot.builder()
@@ -44,72 +37,24 @@ public class NutritionEnrichmentService {
                     .build();
         }
 
-        List<Map<String, Object>> apiRows = nutritionApiNinjaService.lookupFoods(text);
-        if (apiRows.isEmpty()) {
-            // API Ninja returned nothing — still estimate GI/GL from food name keywords
-            // so LogMeal-identified foods (e.g. "whole grain bread") get GI data.
-            List<String> nameFoods = extractFoodTokens(text);
-            double fallbackGi = estimateGiFromFoods(nameFoods);
-            double availableCarbs = Math.max(0.0, carbs);
-            double fallbackGl = (fallbackGi * availableCarbs) / 100.0;
-            log.info("Nutrition enrichment: no API rows, using name-based GI estimate foods={} gi={} gl={}",
-                    nameFoods, round1(fallbackGi), round1(fallbackGl));
-            return NutritionSnapshot.builder()
-                    .absorptionMode("GI_GL_ENHANCED")
-                    .source("MANUAL_CARBS")
-                    .confidence(0.4)
-                    .totalCarbs(carbs)
-                    .fiber(0.0)
-                    .protein(0.0)
-                    .fat(0.0)
-                    .estimatedGi(round1(fallbackGi))
-                    .glycemicLoad(round1(fallbackGl))
-                    .absorptionSpeedClass(classify(fallbackGi, 0, 0, 0))
-                    .normalizedFoods(nameFoods)
-                    .build();
-        }
-
-        double totalCarbs = 0.0;
-        double totalFiber = 0.0;
-        double totalProtein = 0.0;
-        double totalFat = 0.0;
-        List<String> foods = new ArrayList<>();
-        for (Map<String, Object> row : apiRows) {
-            totalCarbs += toDouble(row.get("carbohydrates_total_g"));
-            totalFiber += toDouble(row.get("fiber_g"));
-            totalProtein += toDouble(row.get("protein_g"));
-            totalFat += toDouble(row.get("fat_total_g"));
-            Object name = row.get("name");
-            if (name != null) {
-                foods.add(name.toString().toLowerCase(Locale.ROOT));
-            }
-        }
-        if (totalCarbs <= 0.0) {
-            totalCarbs = carbs;
-        }
+        List<String> foods = extractFoodTokens(text);
         double estimatedGi = estimateGiFromFoods(foods);
-        double availableCarbs = Math.max(0.0, totalCarbs - totalFiber);
+        double availableCarbs = Math.max(0.0, carbs);
         double gl = (estimatedGi * availableCarbs) / 100.0;
 
-        log.info(
-                "Nutrition enrichment: SPOONACULAR rows={} foods={} totalCarbs={} estimatedGi={} gl={}",
-                apiRows.size(),
-                foods.size(),
-                round1(totalCarbs),
-                round1(estimatedGi),
-                round1(gl));
+        log.info("Nutrition enrichment: keyword GI estimate foods={} gi={} gl={}", foods, round1(estimatedGi), round1(gl));
 
         return NutritionSnapshot.builder()
                 .absorptionMode("GI_GL_ENHANCED")
-                .source("SPOONACULAR")
-                .confidence(0.85)
-                .totalCarbs(round1(totalCarbs))
-                .fiber(round1(totalFiber))
-                .protein(round1(totalProtein))
-                .fat(round1(totalFat))
+                .source("KEYWORD_GI")
+                .confidence(0.4)
+                .totalCarbs(carbs)
+                .fiber(0.0)
+                .protein(0.0)
+                .fat(0.0)
                 .estimatedGi(round1(estimatedGi))
                 .glycemicLoad(round1(gl))
-                .absorptionSpeedClass(classify(estimatedGi, totalFiber, totalProtein, totalFat))
+                .absorptionSpeedClass(classify(estimatedGi, 0, 0, 0))
                 .normalizedFoods(foods)
                 .build();
     }
@@ -181,20 +126,6 @@ public class NutritionEnrichmentService {
             return "FAST";
         }
         return "MEDIUM";
-    }
-
-    private double toDouble(Object value) {
-        if (value instanceof Number n) {
-            return n.doubleValue();
-        }
-        if (value == null) {
-            return 0.0;
-        }
-        try {
-            return Double.parseDouble(value.toString());
-        } catch (Exception ex) {
-            return 0.0;
-        }
     }
 
     private double round1(double value) {
