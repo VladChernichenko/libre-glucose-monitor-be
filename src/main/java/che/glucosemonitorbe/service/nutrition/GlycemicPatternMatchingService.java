@@ -52,6 +52,7 @@ public class GlycemicPatternMatchingService {
         snapshot.setSuggestedDurationHours(match.getSuggestedDurationHours().doubleValue());
         snapshot.setMealSequencingPriority((int) match.getMealSequencingPriority());
         snapshot.setCurveDescription(match.getCurveDescription());
+        snapshot.setPreBolusPauseMinutes(computePreBolusPause(match.getBolusStrategy(), snapshot));
         return snapshot;
     }
 
@@ -68,6 +69,27 @@ public class GlycemicPatternMatchingService {
             }
         }
         return null;
+    }
+
+    /**
+     * Recommended pre-bolus pause (minutes to wait after injection before eating).
+     *
+     * Dual Wave / Extended strategies use a split or delayed bolus — no pre-meal wait needed.
+     * For Normal bolus: pause is driven by GI. High-GI food absorbs fastest so needs the
+     * longest head-start; low-GI food absorbs slowly so a short or zero pause avoids hypoglycaemia.
+     */
+    private int computePreBolusPause(String bolusStrategy, NutritionSnapshot s) {
+        if (bolusStrategy == null) return 15;
+        return switch (bolusStrategy) {
+            case "Dual Wave", "Extended" -> 0;
+            default -> {
+                double gi = s.getEstimatedGi() != null ? s.getEstimatedGi() : 55.0;
+                if (gi >= 70) yield 20;      // fast carbs — inject 20 min early
+                if (gi >= 55) yield 15;      // medium GI
+                if (gi >= 40) yield 10;      // low-medium GI
+                yield 5;                     // very low GI / high-fiber — minimal pause
+            }
+        };
     }
 
     private boolean matches(GlycemicResponsePattern p,

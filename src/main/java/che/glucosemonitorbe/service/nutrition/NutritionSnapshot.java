@@ -30,4 +30,5 @@ public class NutritionSnapshot {
     private Double suggestedDurationHours; // expected glucose elevation window
     private Integer mealSequencingPriority; // 1=eat first, 3=eat last
     private String curveDescription;      // human-readable curve explanation
+    private Integer preBolusPauseMinutes; // recommended minutes to wait after injection before eating
 }

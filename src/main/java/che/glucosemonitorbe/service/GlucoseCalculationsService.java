@@ -124,12 +124,16 @@ public class GlucoseCalculationsService {
                 rapidIob
         );
         
+        Double fourHourPrediction = predictionPath.isEmpty() ? null
+                : predictionPath.get(predictionPath.size() - 1).getPredictedGlucose();
+
         return GlucoseCalculationsResponse.builder()
                 .activeCarbsOnBoard(Math.round(activeCOB * 10.0) / 10.0)
                 .activeCarbsUnit("g")
                 .activeInsulinOnBoard(Math.round(activeIOB * 100.0) / 100.0)
                 .activeInsulinUnit("units")
                 .twoHourPrediction(Math.round(predictedGlucose * 10.0) / 10.0)
+                .fourHourPrediction(fourHourPrediction)
                 .predictionTrend(trend)
                 .predictionUnit("mmol/L")
                 .currentGlucose(request.getCurrentGlucose())

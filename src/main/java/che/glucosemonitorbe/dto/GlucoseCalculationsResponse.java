@@ -22,6 +22,8 @@ public class GlucoseCalculationsResponse {
     
     // 2-Hour Prediction
     private Double twoHourPrediction;
+    // 4-Hour Prediction (end of prediction path)
+    private Double fourHourPrediction;
     private String predictionTrend; // 'rising' | 'falling' | 'stable'
     private String predictionUnit;
     
