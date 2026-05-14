@@ -32,7 +32,11 @@ public class CarbsOnBoardService {
         // Pattern-matched duration overrides user default (e.g. 8h for Double Wave pizza meals).
         int patternDuration = entry.getSuggestedDurationHours() != null
                 ? (int) (entry.getSuggestedDurationHours() * 60) : 0;
-        int defaultDuration = cobSettings.getMaxCOBDuration() != null ? cobSettings.getMaxCOBDuration() : 240;
+        // Base default from user settings; fall back to speed-class baseline when not configured.
+        // Evidence: simple carbs absorb 90% within 1–2 h (Hovorka model, 40–80 min time constant).
+        int userDefault = cobSettings.getMaxCOBDuration() != null ? cobSettings.getMaxCOBDuration() : 0;
+        int speedDefault = speedClassDurationMinutes(entry.getAbsorptionSpeedClass());
+        int defaultDuration = userDefault > 0 ? userDefault : speedDefault;
         int maxDuration = patternDuration > 0 ? Math.max(patternDuration, defaultDuration) : defaultDuration;
         if (minutesSinceEntry > maxDuration) {
             return 0.0;
@@ -79,6 +83,22 @@ public class CarbsOnBoardService {
 
         double remainingFraction = clamp(remainingFast + remainingMedium + remainingSlow, 0.0, 1.0);
         return availableCarbs * remainingFraction;
+    }
+
+    /**
+     * Default COB window by absorption speed class, aligned with clinical evidence:
+     *   FAST  — simple/high-GI carbs: 90% absorbed within 1–2 h → 120 min
+     *   MEDIUM — mixed meals peak 1.5–2 h, tail to 3 h → 180 min
+     *   SLOW / DEFAULT — high-fiber or protein-heavy meals → 240 min
+     * Pattern-matched suggestedDurationHours always overrides this value.
+     */
+    private int speedClassDurationMinutes(String speedClass) {
+        if (speedClass == null) return 240;
+        return switch (speedClass.toUpperCase()) {
+            case "FAST"   -> 120;
+            case "MEDIUM" -> 180;
+            default       -> 240; // SLOW, DEFAULT
+        };
     }
 
     private double clamp(double value, double min, double max) {
