@@ -66,6 +66,10 @@ logging:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId}] [%X{userId}] %logger{36} - %msg%n"
 
 app:
+  openfoodfacts:
+    base-url: ${OFF_BASE_URL:https://world.openfoodfacts.org}
+    user-agent: ${OFF_USER_AGENT:GlucoseMonitor/1.0 (open-source, contact via GitHub)}
+
   logmeal:
     enabled: ${LOGMEAL_ENABLED:true}
     api-key: ${LOGMEAL_API_KEY}
