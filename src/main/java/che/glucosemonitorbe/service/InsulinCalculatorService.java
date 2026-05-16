@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.InsulinCalculationResponse;
 import che.glucosemonitorbe.dto.ActiveInsulinResponse;
@@ -10,10 +11,16 @@ import lombok.RequiredArgsConstructor;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class InsulinCalculatorService {
+
+    /** Safe ISF fallback (mmol/L per unit) used when user has no configured value. */
+    private static final double DEFAULT_ISF = 2.2;
+
+    private final COBSettingsService cobSettingsService;
 
     /** Defaults match catalog {@code FIASP} (user-specific curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}). */
     public static final double DEFAULT_DIA_HOURS = 4.5;
@@ -134,6 +141,14 @@ public class InsulinCalculatorService {
     }
 
     public String getInsulinActivityStatus(List<InsulinDose> doses, LocalDateTime currentTime, double peakMinutes) {
+        return getInsulinActivityStatus(doses, currentTime, DEFAULT_DIA_HOURS, peakMinutes);
+    }
+
+    public String getInsulinActivityStatus(
+            List<InsulinDose> doses,
+            LocalDateTime currentTime,
+            double diaHours,
+            double peakMinutes) {
         if (doses.isEmpty()) {
             return "none";
         }
@@ -149,6 +164,11 @@ public class InsulinCalculatorService {
         double minutesSinceDose = java.time.Duration.between(mostRecentDose.getTimestamp(), currentTime).toMinutes();
 
         if (minutesSinceDose < 0) {
+            return "none";
+        }
+        // BE-5 fix: once the most-recent dose is past its DIA window, IOB is 0 → "none".
+        // Without this guard the status returned "falling" indefinitely.
+        if (minutesSinceDose >= diaHours * 60.0) {
             return "none";
         }
         if (minutesSinceDose < peakMinutes - 15) {
@@ -186,11 +206,32 @@ public class InsulinCalculatorService {
         return String.format("%s - %.1fu active", statusText, totalActive);
     }
 
+    /**
+     * Resolve ISF for a user: reads from COBSettings when userId is present,
+     * falls back to DEFAULT_ISF (2.2 mmol/L per unit) when not configured.
+     */
+    private double resolveIsf(String userIdStr) {
+        if (userIdStr != null && !userIdStr.isBlank()) {
+            try {
+                UUID userId = UUID.fromString(userIdStr);
+                COBSettingsDTO settings = cobSettingsService.getCOBSettings(userId);
+                if (settings != null && settings.getIsf() != null && settings.getIsf() > 0) {
+                    return settings.getIsf();
+                }
+            } catch (IllegalArgumentException ignored) {
+                // malformed userId — fall through to default
+            }
+        }
+        return DEFAULT_ISF;
+    }
+
     public InsulinCalculationResponse calculateRecommendedInsulin(InsulinCalculationRequest request) {
         double recommendedInsulin = request.getCarbs() / 12.0;
 
         if (request.getCurrentGlucose() != null && request.getCurrentGlucose() > request.getTargetGlucose()) {
-            double correctionDose = (request.getCurrentGlucose() - request.getTargetGlucose()) / 1.0;
+            // BE-4 fix: read user-configured ISF from COBSettings instead of hardcoded 1.0
+            double isf = resolveIsf(request.getUserId());
+            double correctionDose = (request.getCurrentGlucose() - request.getTargetGlucose()) / isf;
             recommendedInsulin += correctionDose;
         }
 

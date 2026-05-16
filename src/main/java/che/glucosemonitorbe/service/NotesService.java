@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
@@ -58,6 +59,11 @@ public class NotesService {
      */
     public NoteDto getNoteById(UUID userId, UUID noteId) {
         Note note = noteRepository.findByIdAndUserId(noteId, userId);
+        // BE-9 fix: null note passed to mapper produced NullPointerException → 500.
+        // Throw typed 404 instead so the client can handle "not found" correctly.
+        if (note == null) {
+            throw new ResourceNotFoundException("Note not found: " + noteId);
+        }
         return noteMapper.toDto(note);
     }
     

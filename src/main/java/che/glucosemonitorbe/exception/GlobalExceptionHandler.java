@@ -112,18 +112,36 @@ public class GlobalExceptionHandler {
         // If already committed (streaming), do nothing — the connection closes cleanly.
     }
 
+    // BE-9 fix: resource not found → HTTP 404
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<CustomErrorResponse> handleResourceNotFound(
+            ResourceNotFoundException ex,
+            HttpServletRequest request) {
+
+        CustomErrorResponse error = new CustomErrorResponse(
+                HttpStatus.NOT_FOUND.value(),
+                "Not Found",
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    }
+
+    // BE-11 fix: unexpected RuntimeExceptions are server faults → HTTP 500, not 400.
+    // Named domain exceptions (UsernameAlreadyExistsException, etc.) are handled above
+    // with their own specific status codes and are not caught here.
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<CustomErrorResponse> handleRuntimeException(
             RuntimeException ex,
             HttpServletRequest request) {
 
         CustomErrorResponse error = new CustomErrorResponse(
-                HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(),
                 ex.getMessage(),
                 request.getRequestURI()
         );
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
     }
 
     @ExceptionHandler(Exception.class)

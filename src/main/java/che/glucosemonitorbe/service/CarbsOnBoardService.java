@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
+import java.util.UUID;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -131,18 +132,34 @@ public class CarbsOnBoardService {
     }
     
     /**
-     * Simple COB calculation request/response
+     * Calculate COB using the real bi-exponential decay logic.
+     * BE-3 fix: replaces the flat carbs*0.8 stub with calculateRemainingCarbs(),
+     * which applies GI/GL-aware exponential decay and fiber blunting.
      */
     public COBCalculationResponse calculateCOB(COBCalculationRequest request) {
-        // For now, returning a simple calculation
-        // In a real implementation, this would use the actual COB logic
-        
-        double estimatedCOB = request.getCarbs() * 0.8; // Simple 80% remaining estimate
-        
+        if (request == null || request.getCarbs() <= 0) {
+            return COBCalculationResponse.builder()
+                    .carbsOnBoard(0.0)
+                    .calculationTime(LocalDateTime.now())
+                    .message("No carbs to calculate")
+                    .status("success")
+                    .build();
+        }
+
+        // Build a CarbsEntry from the request so the decay models can run
+        CarbsEntry entry = new CarbsEntry();
+        entry.setCarbs(request.getCarbs());
+        entry.setTimestamp(request.getTimestamp() != null ? request.getTimestamp() : LocalDateTime.now());
+        // Use GI_GL_ENHANCED when possible so fiber/fat/protein blunting applies
+        entry.setAbsorptionMode("GI_GL_ENHANCED");
+
+        LocalDateTime now = LocalDateTime.now();
+        double cob = calculateRemainingCarbs(entry, now, request.getUserId());
+
         return COBCalculationResponse.builder()
-                .carbsOnBoard(estimatedCOB)
-                .calculationTime(LocalDateTime.now()) // Keep this as server time for calculation metadata
-                .message("COB calculated using backend service")
+                .carbsOnBoard(cob)
+                .calculationTime(now)
+                .message("COB calculated using bi-exponential decay model")
                 .status("success")
                 .build();
     }

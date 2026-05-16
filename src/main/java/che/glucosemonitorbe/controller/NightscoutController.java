@@ -175,8 +175,18 @@ public class NightscoutController {
         
         if (useStored) {
             List<NightscoutEntryDto> storedEntries = chartDataService.getChartDataAsEntries(userId);
+            // BE-10 fix: filter by the requested date window; previously returned all stored entries.
+            // NightscoutEntryDto.date is Unix epoch-ms (Long).
+            long filterStartMs = startDate.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+            long filterEndMs   = endDate.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+            storedEntries = storedEntries.stream()
+                    .filter(e -> e.getDate() != null
+                            && e.getDate() >= filterStartMs
+                            && e.getDate() <= filterEndMs)
+                    .collect(java.util.stream.Collectors.toList());
             applyTimezoneOffsetToEntries(storedEntries, timezoneOffset);
-            log.info("Returning {} stored entries for user {}", storedEntries.size(), authentication.getName());
+            log.info("Returning {} stored entries (filtered {} to {}) for user {}",
+                    storedEntries.size(), startDate, endDate, authentication.getName());
             return ResponseEntity.ok(storedEntries);
         }
 

@@ -139,8 +139,13 @@ public class CircuitBreaker {
         log.debug("Circuit breaker {} failure count: {}/{}", name, failures, failureThreshold);
         
         if (failures >= failureThreshold) {
+            // BE-6 fix: also handle HALF_OPEN → OPEN so a failed test-call re-opens the circuit
             if (state.compareAndSet(State.CLOSED, State.OPEN)) {
-                log.warn("Circuit breaker {} transitioned to OPEN after {} failures", name, failures);
+                log.warn("Circuit breaker {} CLOSED → OPEN after {} failures", name, failures);
+            } else if (state.compareAndSet(State.HALF_OPEN, State.OPEN)) {
+                halfOpenCalls.set(0);
+                successCount.set(0);
+                log.warn("Circuit breaker {} HALF_OPEN → OPEN after test-call failure", name);
             }
         }
     }

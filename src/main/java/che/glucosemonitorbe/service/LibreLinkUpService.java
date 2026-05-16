@@ -17,6 +17,8 @@ import org.springframework.web.client.RestTemplate;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,6 +26,8 @@ import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.GZIPInputStream;
 
 @Service
@@ -43,13 +47,53 @@ public class LibreLinkUpService {
     };
 
     @Value("${libre.api.base-url:https://api-eu.libreview.io}")
-    private String baseUrl;
+    private String defaultBaseUrl;
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final CircuitBreakerManager circuitBreakerManager;
-    private String authToken;
-    private String clientVersion = "4.16.0";
+    private final String clientVersion = "4.16.0";
+
+    // BE-1 fix: per-user credential store — replaces shared authToken / baseUrl instance fields.
+    // ConcurrentHashMap ensures thread-safe concurrent access without locking the whole service.
+    private final ConcurrentHashMap<UUID, String> tokenStore       = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, String> baseUrlStore     = new ConcurrentHashMap<>();
+    // account-id fix: SHA-256(user.id) required on all authenticated LibreLinkUp requests (Nov 2024+).
+    private final ConcurrentHashMap<UUID, String> accountIdStore   = new ConcurrentHashMap<>();
+
+    /** Convenience: token for userId, or null if not authenticated. */
+    private String tokenFor(UUID userId) {
+        return userId != null ? tokenStore.get(userId) : null;
+    }
+
+    /** Resolved base URL for userId (falls back to configured default). */
+    private String baseUrlFor(UUID userId) {
+        if (userId != null) {
+            String stored = baseUrlStore.get(userId);
+            if (stored != null) return stored;
+        }
+        return normalizeLibreBaseUrl(defaultBaseUrl);
+    }
+
+    /** SHA-256(user.id) stored after login — required as account-id header (Nov 2024+). */
+    private String accountIdFor(UUID userId) {
+        return userId != null ? accountIdStore.get(userId) : null;
+    }
+
+    /** Hex-encoded SHA-256 of the given string. Never throws — SHA-256 is always available on JVM. */
+    private static String sha256Hex(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b & 0xff));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
+    }
 
     public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager) {
         this.restTemplate = new RestTemplate();
@@ -91,23 +135,44 @@ public class LibreLinkUpService {
         return url.strip().replaceAll("/+$", "");
     }
 
+    /**
+     * Canonical LibreLinkUp headers — verified against pylibrelinkup 0.10.0 and the khskekec HTTP dump.
+     * cache-control and Connection casing are required exactly as shown; deviations cause 400/430 on some CDN edges.
+     */
     private HttpHeaders buildLibreLoginHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
-        headers.set("Product", "llu.android");
-        headers.set("Version", clientVersion);
-        headers.set("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:109.0) Gecko/115.0 Firefox/115.0");
-        // Avoid "br": JDK RestTemplate often cannot decode Brotli; some edges return 430 when negotiation breaks.
-        headers.set("Accept-Encoding", "gzip");
-        headers.set("Accept-Language", "en-US,en;q=0.9");
-        headers.set("Connection", "keep-alive");
+        headers.set("accept-encoding", "gzip");           // lowercase; "br" triggers Brotli decode failure on JDK
+        headers.set("cache-control", "no-cache");         // required — omitting this causes 400
+        headers.set("connection", "Keep-Alive");          // exact casing required by CDN
+        headers.set("product", "llu.android");
+        headers.set("version", clientVersion);
+        return headers;
+    }
+
+    /**
+     * Build headers for authenticated endpoints (connections, graph, etc.).
+     * Adds Authorization and the account-id header (SHA-256 of user.id, required since Nov 2024).
+     */
+    private HttpHeaders buildAuthenticatedHeaders(UUID userId) {
+        HttpHeaders headers = buildLibreLoginHeaders();
+        String token = tokenFor(userId);
+        if (token != null) {
+            headers.set("authorization", "Bearer " + token);
+        }
+        String accountId = accountIdFor(userId);
+        if (accountId != null) {
+            headers.set("account-id", accountId);   // required: SHA-256(data.user.id from login response)
+        } else {
+            logger.warn("account-id not available for user {} — authenticated request may fail (RequiredHeaderMissing)", userId);
+        }
         return headers;
     }
 
     private ResponseEntity<byte[]> postLluAuthLogin(String apiBaseUrl, LibreAuthRequest authRequest) {
         String url = normalizeLibreBaseUrl(apiBaseUrl) + "/llu/auth/login";
         HttpEntity<LibreAuthRequest> entity = new HttpEntity<>(authRequest, buildLibreLoginHeaders());
+        logger.info("postLluAuthLogin: entity {}, : {}", entity.getBody().getPassword(), entity.getBody().getEmail());
         return restTemplate.exchange(url, HttpMethod.POST, entity, byte[].class);
     }
 
@@ -161,19 +226,20 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Authenticate with LibreLinkUp API
+     * Authenticate with LibreLinkUp API and store the resulting token per-user.
+     * BE-1 fix: credentials are keyed by userId — no more shared singleton state.
      */
-    public LibreAuthResponse authenticate(LibreAuthRequest authRequest) throws Exception {
+    public LibreAuthResponse authenticate(LibreAuthRequest authRequest, UUID userId) throws Exception {
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-auth");
         try {
             return circuitBreaker.execute(() -> {
                 try {
                     LinkedHashSet<String> bases = new LinkedHashSet<>();
-                    bases.add(normalizeLibreBaseUrl(baseUrl));
+                    bases.add(normalizeLibreBaseUrl(defaultBaseUrl));
                     bases.addAll(Arrays.asList(LIBRE_AUTH_FALLBACK_BASES));
                     List<String> baseList = new ArrayList<>(bases);
 
-                    String configuredBase = normalizeLibreBaseUrl(baseUrl);
+                    String configuredBase = normalizeLibreBaseUrl(defaultBaseUrl);
                     ResponseEntity<byte[]> response = null;
 
                     for (int i = 0; i < baseList.size(); i++) {
@@ -181,9 +247,9 @@ public class LibreLinkUpService {
                         try {
                             logger.info("Authenticating with LibreLinkUp API at {}/llu/auth/login", apiBase);
                             response = postLluAuthLogin(apiBase, authRequest);
-                            if (!apiBase.equals(configuredBase)) {
-                                this.baseUrl = apiBase;
-                                logger.info("LibreLinkUp auth succeeded using host {}", apiBase);
+                            if (!apiBase.equals(configuredBase) && userId != null) {
+                                baseUrlStore.put(userId, apiBase);
+                                logger.info("LibreLinkUp auth succeeded using host {} for user {}", apiBase, userId);
                             }
                             break;
                         } catch (HttpClientErrorException e) {
@@ -204,7 +270,10 @@ public class LibreLinkUpService {
                     logger.info("LibreLinkUp auth response: {}", jsonResponse.toString());
 
                     if (jsonResponse.has("error")) {
-                        String errorMessage = jsonResponse.get("error").asText();
+                        JsonNode errorNode = jsonResponse.get("error");
+                        String errorMessage = errorNode.isObject()
+                                ? errorNode.path("message").asText(errorNode.toString())
+                                : errorNode.asText();
                         throw new RuntimeException("LibreLinkUp authentication error: " + errorMessage);
                     }
 
@@ -212,9 +281,8 @@ public class LibreLinkUpService {
                     if (data != null && data.has("redirect") && data.get("redirect").asBoolean()) {
                         String region = data.has("region") ? data.get("region").asText() : "";
                         logger.warn("LibreLinkUp requires region-specific endpoint. Region: {}", region);
-
                         if (!region.isEmpty()) {
-                            return authenticateWithRegion(authRequest, region);
+                            return authenticateWithRegion(authRequest, region, userId);
                         }
                     }
 
@@ -231,8 +299,19 @@ public class LibreLinkUpService {
                     }
 
                     if (token != null) {
-                        this.authToken = token;
-                        logger.info("Successfully authenticated with LibreLinkUp, token expires: {}", expires);
+                        if (userId != null) {
+                            tokenStore.put(userId, token);
+                            // Extract user.id and store its SHA-256 hash as account-id (required since Nov 2024)
+                            JsonNode userNode = data != null ? data.get("user") : null;
+                            if (userNode != null && userNode.has("id")) {
+                                String libreUserId = userNode.get("id").asText();
+                                if (!libreUserId.isBlank()) {
+                                    accountIdStore.put(userId, sha256Hex(libreUserId));
+                                    logger.info("Stored account-id hash for user {}", userId);
+                                }
+                            }
+                        }
+                        logger.info("Successfully authenticated with LibreLinkUp for user {}, token expires: {}", userId, expires);
                         return new LibreAuthResponse(token, expires);
                     } else {
                         logger.error("No authentication token in response. Full response: {}", jsonResponse.toString());
@@ -254,9 +333,9 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Authenticate with region-specific endpoint
+     * Authenticate with region-specific endpoint. Stores credentials per userId.
      */
-    private LibreAuthResponse authenticateWithRegion(LibreAuthRequest authRequest, String region) throws Exception {
+    private LibreAuthResponse authenticateWithRegion(LibreAuthRequest authRequest, String region, UUID userId) throws Exception {
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-auth-region");
         try {
             return circuitBreaker.execute(() -> {
@@ -286,9 +365,20 @@ public class LibreLinkUpService {
                     }
 
                     if (token != null) {
-                        this.authToken = token;
-                        this.baseUrl = regionBaseUrl;
-                        logger.info("Successfully authenticated with region {} endpoint, token expires: {}", region, expires);
+                        if (userId != null) {
+                            tokenStore.put(userId, token);
+                            baseUrlStore.put(userId, regionBaseUrl);
+                            // Extract user.id and store its SHA-256 hash as account-id (required since Nov 2024)
+                            JsonNode userNode = data != null ? data.get("user") : null;
+                            if (userNode != null && userNode.has("id")) {
+                                String libreUserId = userNode.get("id").asText();
+                                if (!libreUserId.isBlank()) {
+                                    accountIdStore.put(userId, sha256Hex(libreUserId));
+                                    logger.info("Stored account-id hash for user {} (region {})", userId, region);
+                                }
+                            }
+                        }
+                        logger.info("Successfully authenticated with region {} endpoint for user {}, token expires: {}", region, userId, expires);
                         return new LibreAuthResponse(token, expires);
                     } else {
                         logger.error("No token in region-specific response: {}", jsonResponse.toString());
@@ -338,50 +428,48 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Get LibreLinkUp connections
+     * Get LibreLinkUp connections for a specific user.
+     * BE-1 fix: uses per-user token/baseUrl.
+     * BE-2 fix: unwraps the {"data":[...]} envelope before iterating.
      */
-    public List<LibreConnection> getConnections() throws Exception {
+    public List<LibreConnection> getConnections(UUID userId) throws Exception {
+        String authToken = tokenFor(userId);
         if (authToken == null) {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
         }
+        String baseUrl = baseUrlFor(userId);
 
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-connections");
-        
+
         return circuitBreaker.executeWithFallback(
             () -> {
                 try {
                     String url = baseUrl + "/llu/connections";
-                    
-                    HttpHeaders headers = new HttpHeaders();
-                        headers.set("Authorization", "Bearer " + authToken);
-                    headers.set("Accept", "application/json");
-                    headers.set("Product", "llu.ios");
-                    headers.set("Version", clientVersion);
-                    headers.set("User-Agent", "LibreLinkUp/" + clientVersion + " (iOS)");
 
-                    HttpEntity<String> entity = new HttpEntity<>(headers);
-                    
+                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
+
                     logger.info("Fetching LibreLinkUp connections from {}", url);
                     ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
 
                     if (response.getStatusCode() == HttpStatus.OK) {
                         JsonNode jsonResponse = objectMapper.readTree(response.getBody());
                         List<LibreConnection> connections = new ArrayList<>();
-                        
-                        // Check for error in response
+
                         if (jsonResponse.has("error")) {
-                            String errorMessage = jsonResponse.get("error").asText();
-                            throw new RuntimeException("LibreLinkUp connections error: " + errorMessage);
+                            JsonNode e = jsonResponse.get("error");
+                            throw new RuntimeException("LibreLinkUp connections error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                         }
-                        
-                        if (jsonResponse.isArray()) {
-                            for (JsonNode connection : jsonResponse) {
+
+                        // BE-2 fix: API returns {"data":[...]} — unwrap the envelope
+                        JsonNode dataNode = jsonResponse.get("data");
+                        if (dataNode != null && dataNode.isArray()) {
+                            for (JsonNode connection : dataNode) {
                                 String patientId = connection.has("patientId") ? connection.get("patientId").asText() : "";
                                 String firstName = connection.has("firstName") ? connection.get("firstName").asText() : "";
-                                String lastName = connection.has("lastName") ? connection.get("lastName").asText() : "";
-                                String status = connection.has("status") ? connection.get("status").asText() : "active";
-                                String lastSync = connection.has("lastSync") ? connection.get("lastSync").asText() : Instant.now().toString();
-                                
+                                String lastName  = connection.has("lastName")  ? connection.get("lastName").asText()  : "";
+                                String status    = connection.has("status")    ? connection.get("status").asText()    : "active";
+                                String lastSync  = connection.has("lastSync")  ? connection.get("lastSync").asText()  : Instant.now().toString();
+
                                 connections.add(new LibreConnection(
                                     patientId,
                                     firstName + " " + lastName,
@@ -390,14 +478,14 @@ public class LibreLinkUpService {
                                 ));
                             }
                         }
-                        
-                        logger.info("Successfully fetched {} LibreLinkUp connections", connections.size());
+
+                        logger.info("Successfully fetched {} LibreLinkUp connections for user {}", connections.size(), userId);
                         return connections;
                     } else {
                         throw new RuntimeException("Failed to fetch connections with status: " + response.getStatusCode());
                     }
                 } catch (Exception e) {
-                    logger.error("Failed to fetch LibreLinkUp connections: {}", e.getMessage());
+                    logger.error("Failed to fetch LibreLinkUp connections for user {}: {}", userId, e.getMessage());
                     throw new RuntimeException("Failed to fetch LibreLinkUp connections: " + e.getMessage());
                 }
             },
@@ -409,12 +497,14 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Get glucose data for a specific patient
+     * Get glucose data for a specific patient. BE-1 fix: uses per-user credentials.
      */
-    public LibreGlucoseData getGlucoseData(String patientId, int days) throws Exception {
+    public LibreGlucoseData getGlucoseData(String patientId, int days, UUID userId) throws Exception {
+        String authToken = tokenFor(userId);
         if (authToken == null) {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
         }
+        String baseUrl = baseUrlFor(userId);
 
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-data");
         
@@ -422,16 +512,9 @@ public class LibreLinkUpService {
             () -> {
                 try {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
-                    
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.set("Authorization", "Bearer " + authToken);
-                    headers.set("Accept", "application/json");
-                    headers.set("Product", "llu.android");
-                    headers.set("Version", "4.12.0");
-                    headers.set("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:109.0) Gecko/115.0 Firefox/115.0");
 
-                    HttpEntity<String> entity = new HttpEntity<>(headers);
-                    
+                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
+
                     logger.info("Fetching LibreLinkUp glucose data for patient {} from {}", patientId, url);
                     ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
 
@@ -441,8 +524,8 @@ public class LibreLinkUpService {
                         
                         // Check for error in response
                         if (jsonResponse.has("error")) {
-                            String errorMessage = jsonResponse.get("error").asText();
-                            throw new RuntimeException("LibreLinkUp glucose data error: " + errorMessage);
+                            JsonNode e = jsonResponse.get("error");
+                            throw new RuntimeException("LibreLinkUp glucose data error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                         }
                         
                         JsonNode graphData = jsonResponse.get("graphData");
@@ -519,10 +602,10 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Get current glucose reading for a specific patient
+     * Get current glucose reading for a specific patient. BE-1 fix: uses per-user credentials.
      */
-    public LibreGlucoseReading getCurrentGlucose(String patientId) throws Exception {
-        LibreGlucoseData glucoseData = getGlucoseData(patientId, 1);
+    public LibreGlucoseReading getCurrentGlucose(String patientId, UUID userId) throws Exception {
+        LibreGlucoseData glucoseData = getGlucoseData(patientId, 1, userId);
         
         if (glucoseData.getData() != null && !glucoseData.getData().isEmpty()) {
             // Return the most recent reading (first in the list)
@@ -533,28 +616,23 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Get user profile information
+     * Get user profile information. BE-1 fix: uses per-user credentials.
      */
-    public Object getUserProfile() throws Exception {
+    public Object getUserProfile(UUID userId) throws Exception {
+        String authToken = tokenFor(userId);
         if (authToken == null) {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
         }
+        String baseUrl = baseUrlFor(userId);
 
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-profile");
-        
+
         return circuitBreaker.executeWithFallback(
             () -> {
                 try {
                     String url = baseUrl + "/user/profile";
-                    
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.set("Authorization", "Bearer " + authToken);
-                    headers.set("Accept", "application/json");
-                    headers.set("Product", "llu.android");
-                    headers.set("Version", "4.12.0");
-                    headers.set("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:109.0) Gecko/115.0 Firefox/115.0");
 
-                    HttpEntity<String> entity = new HttpEntity<>(headers);
+                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
                     
                     logger.info("Fetching LibreLinkUp user profile from {}", url);
                     ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
@@ -564,8 +642,8 @@ public class LibreLinkUpService {
                         
                         // Check for error in response
                         if (jsonResponse.has("error")) {
-                            String errorMessage = jsonResponse.get("error").asText();
-                            throw new RuntimeException("LibreLinkUp user profile error: " + errorMessage);
+                            JsonNode e = jsonResponse.get("error");
+                            throw new RuntimeException("LibreLinkUp user profile error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                         }
                         
                         logger.info("Successfully fetched LibreLinkUp user profile");
@@ -628,12 +706,14 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Get historical glucose data for a specific patient
+     * Get historical glucose data for a specific patient. BE-1 fix: uses per-user credentials.
      */
-    public LibreGlucoseData getGlucoseHistory(String patientId, int days, String startDate, String endDate) throws Exception {
+    public LibreGlucoseData getGlucoseHistory(String patientId, int days, String startDate, String endDate, UUID userId) throws Exception {
+        String authToken = tokenFor(userId);
         if (authToken == null) {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
         }
+        String baseUrl = baseUrlFor(userId);
 
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-history");
         
@@ -642,15 +722,8 @@ public class LibreLinkUpService {
                 try {
                     // Use the same endpoint as getGlucoseData but with different parameters
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
-                    
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.set("Authorization", "Bearer " + authToken);
-                    headers.set("Accept", "application/json");
-                    headers.set("Product", "llu.android");
-                    headers.set("Version", "4.12.0");
-                    headers.set("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:109.0) Gecko/115.0 Firefox/115.0");
 
-                    HttpEntity<String> entity = new HttpEntity<>(headers);
+                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
                     
                     logger.info("Fetching LibreLinkUp glucose history for patient {} from {} ({} days)", patientId, url, days);
                     ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
@@ -661,8 +734,8 @@ public class LibreLinkUpService {
                         
                         // Check for error in response
                         if (jsonResponse.has("error")) {
-                            String errorMessage = jsonResponse.get("error").asText();
-                            throw new RuntimeException("LibreLinkUp glucose history error: " + errorMessage);
+                            JsonNode e = jsonResponse.get("error");
+                            throw new RuntimeException("LibreLinkUp glucose history error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                         }
                         
                         JsonNode graphData = jsonResponse.get("graphData");
@@ -739,12 +812,14 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Get raw glucose reading (unprocessed) from LibreLinkUp API
+     * Get raw glucose reading (unprocessed) from LibreLinkUp API. BE-1 fix: uses per-user credentials.
      */
-    public Object getRawGlucoseReading(String patientId) throws Exception {
+    public Object getRawGlucoseReading(String patientId, UUID userId) throws Exception {
+        String authToken = tokenFor(userId);
         if (authToken == null) {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
         }
+        String baseUrl = baseUrlFor(userId);
 
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-raw-reading");
         
@@ -752,16 +827,9 @@ public class LibreLinkUpService {
             () -> {
                 try {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
-                    
-                    HttpHeaders headers = new HttpHeaders();
-                    headers.set("Authorization", "Bearer " + authToken);
-                    headers.set("Accept", "application/json");
-                    headers.set("Product", "llu.android");
-                    headers.set("Version", "4.12.0");
-                    headers.set("User-Agent", "Mozilla/5.0 (Android; Mobile; rv:109.0) Gecko/115.0 Firefox/115.0");
 
-                    HttpEntity<String> entity = new HttpEntity<>(headers);
-                    
+                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
+
                     logger.info("Fetching raw LibreLinkUp glucose reading for patient {} from {}", patientId, url);
                     ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
 
@@ -770,8 +838,8 @@ public class LibreLinkUpService {
                         
                         // Check for error in response
                         if (jsonResponse.has("error")) {
-                            String errorMessage = jsonResponse.get("error").asText();
-                            throw new RuntimeException("LibreLinkUp raw reading error: " + errorMessage);
+                            JsonNode e = jsonResponse.get("error");
+                            throw new RuntimeException("LibreLinkUp raw reading error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                         }
                         
                         logger.info("Successfully fetched raw glucose reading for patient {}", patientId);
@@ -792,16 +860,20 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Check if currently authenticated
+     * Check if a specific user is authenticated with LibreLinkUp. BE-1 fix: per-user.
      */
-    public boolean isAuthenticated() {
-        return authToken != null;
+    public boolean isAuthenticated(UUID userId) {
+        return userId != null && tokenStore.containsKey(userId);
     }
 
     /**
-     * Clear authentication token
+     * Clear authentication token for a specific user. BE-1 fix: per-user.
      */
-    public void logout() {
-        this.authToken = null;
+    public void logout(UUID userId) {
+        if (userId != null) {
+            tokenStore.remove(userId);
+            baseUrlStore.remove(userId);
+            accountIdStore.remove(userId);
+        }
     }
 }

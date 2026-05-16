@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.LibreConnection;
 import che.glucosemonitorbe.dto.LibreGlucoseData;
 import che.glucosemonitorbe.dto.LibreGlucoseReading;
 import che.glucosemonitorbe.service.LibreLinkUpService;
+import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -18,6 +19,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @Tag(name = "LibreLinkUp CGM", description = "FreeStyle Libre CGM integration — authentication, connections, and glucose readings")
 @RestController
@@ -30,6 +32,14 @@ public class LibreLinkUpController {
     @Autowired
     private LibreLinkUpService libreLinkUpService;
 
+    @Autowired
+    private UserService userService;
+
+    /** Resolve the UUID for the currently authenticated user. */
+    private UUID userId(Authentication authentication) {
+        return userService.getUserByUsername(authentication.getName()).getId();
+    }
+
     @Operation(summary = "Authenticate with LibreLinkUp API")
     @ApiResponses({ @ApiResponse(responseCode = "200", description = "Auth token returned"),
                     @ApiResponse(responseCode = "400", description = "Authentication failed") })
@@ -39,7 +49,7 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting LibreLinkUp authentication", username);
 
-            LibreAuthResponse response = libreLinkUpService.authenticate(authRequest);
+            LibreAuthResponse response = libreLinkUpService.authenticate(authRequest, userId(authentication));
             logger.info("LibreLinkUp authentication successful for user {}", username);
 
             return ResponseEntity.ok(response);
@@ -58,7 +68,7 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting LibreLinkUp connections", username);
 
-            List<LibreConnection> connections = libreLinkUpService.getConnections();
+            List<LibreConnection> connections = libreLinkUpService.getConnections(userId(authentication));
             logger.info("Retrieved {} LibreLinkUp connections for user {}", connections.size(), username);
 
             return ResponseEntity.ok(connections);
@@ -79,7 +89,7 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting LibreLinkUp glucose data for patient {}", username, patientId);
 
-            LibreGlucoseData glucoseData = libreLinkUpService.getGlucoseData(patientId, days);
+            LibreGlucoseData glucoseData = libreLinkUpService.getGlucoseData(patientId, days, userId(authentication));
             logger.info("Retrieved {} glucose readings for patient {} and user {}", 
                        glucoseData.getData().size(), patientId, username);
 
@@ -102,7 +112,7 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting current LibreLinkUp glucose for patient {}", username, patientId);
 
-            LibreGlucoseReading currentReading = libreLinkUpService.getCurrentGlucose(patientId);
+            LibreGlucoseReading currentReading = libreLinkUpService.getCurrentGlucose(patientId, userId(authentication));
             logger.info("Retrieved current glucose reading for patient {} and user {}", patientId, username);
 
             return ResponseEntity.ok(currentReading);
@@ -122,7 +132,7 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting LibreLinkUp profile", username);
 
-            Object profile = libreLinkUpService.getUserProfile();
+            Object profile = libreLinkUpService.getUserProfile(userId(authentication));
             logger.info("Retrieved LibreLinkUp profile for user {}", username);
 
             return ResponseEntity.ok(profile);
@@ -146,7 +156,7 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting LibreLinkUp glucose history for patient {} ({} days)", username, patientId, days);
 
-            LibreGlucoseData historyData = libreLinkUpService.getGlucoseHistory(patientId, days, startDate, endDate);
+            LibreGlucoseData historyData = libreLinkUpService.getGlucoseHistory(patientId, days, startDate, endDate, userId(authentication));
             logger.info("Retrieved {} historical glucose readings for patient {} and user {}", 
                        historyData.getData().size(), patientId, username);
 
@@ -169,7 +179,7 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting raw LibreLinkUp glucose reading for patient {}", username, patientId);
 
-            Object rawReading = libreLinkUpService.getRawGlucoseReading(patientId);
+            Object rawReading = libreLinkUpService.getRawGlucoseReading(patientId, userId(authentication));
             logger.info("Retrieved raw glucose reading for patient {} and user {}", patientId, username);
 
             return ResponseEntity.ok(rawReading);

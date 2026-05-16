@@ -7,6 +7,7 @@ import che.glucosemonitorbe.dto.LogoutRequest;
 import che.glucosemonitorbe.dto.LogoutResponse;
 import che.glucosemonitorbe.dto.RefreshTokenRequest;
 import che.glucosemonitorbe.dto.RegisterRequest;
+import che.glucosemonitorbe.exception.UsernameAlreadyExistsException;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
@@ -46,11 +47,13 @@ public class AuthService {
 
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getUsername())) {
-            throw new RuntimeException("Username already exists");
+            // BE-8 fix: throw typed exception so GlobalExceptionHandler returns HTTP 409
+            throw new UsernameAlreadyExistsException("Username already exists: " + request.getUsername());
         }
 
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already exists");
+            // BE-8 fix: same — email conflict also maps to HTTP 409
+            throw new UsernameAlreadyExistsException("Email already in use: " + request.getEmail());
         }
 
         User user = User.builder()
