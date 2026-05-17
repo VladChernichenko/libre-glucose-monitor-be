@@ -20,6 +20,15 @@ public class CreateNoteRequest {
     private String insulinDose;
     private Boolean mockData;
     private String absorptionMode;
+
+    /**
+     * Pre-computed nutrition profile JSON from the iOS Nutrition analyser.
+     * When present, {@code NotesService} stores it directly and skips server-side
+     * re-enrichment — the analyser result includes GI/GL, fiber, fat, protein,
+     * pattern, bolus strategy and {@code suggestedDurationHours} which drive the
+     * 8 h HFHP prediction path.
+     */
+    private String nutritionProfile;
     
     // Constructors
     public CreateNoteRequest() {}
@@ -110,5 +119,13 @@ public class CreateNoteRequest {
 
     public void setAbsorptionMode(String absorptionMode) {
         this.absorptionMode = absorptionMode;
+    }
+
+    public String getNutritionProfile() {
+        return nutritionProfile;
+    }
+
+    public void setNutritionProfile(String nutritionProfile) {
+        this.nutritionProfile = nutritionProfile;
     }
 }

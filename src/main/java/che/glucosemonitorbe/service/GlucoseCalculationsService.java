@@ -5,6 +5,7 @@ import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.dto.PredictionFactors;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
+import che.glucosemonitorbe.dto.ProspectiveNoteDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
@@ -79,6 +80,22 @@ public class GlucoseCalculationsService {
                 .filter(note -> note.getInsulin() != null && note.getInsulin() > 0)
                 .map(this::convertNoteToInsulinDose)
                 .collect(Collectors.toList());
+
+        // Merge any prospective (un-persisted) meal/insulin events — used by the Nutrition
+        // screen to show "what-if" predictions before the user saves the note.
+        if (request.getProspectiveNotes() != null) {
+            for (ProspectiveNoteDTO pn : request.getProspectiveNotes()) {
+                int minsAgo = pn.getMinutesAgo() != null ? pn.getMinutesAgo() : 0;
+                LocalDateTime noteTime = currentTime.minusMinutes(minsAgo);
+                if (pn.getCarbs() != null && pn.getCarbs() > 0) {
+                    carbsEntries.add(buildProspectiveCarbsEntry(pn, noteTime, userUUID));
+                }
+                if (pn.getInsulin() != null && pn.getInsulin() > 0) {
+                    insulinEntries.add(buildProspectiveInsulinDose(pn, noteTime, userUUID));
+                }
+            }
+        }
+
         Double avgBolusToMealMinutes = calculateAverageBolusToMealMinutes(recentNotes);
 
         RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userUUID);
@@ -125,8 +142,20 @@ public class GlucoseCalculationsService {
                 rapidIob
         );
         
-        Double fourHourPrediction = predictionPath.isEmpty() ? null
-                : predictionPath.get(predictionPath.size() - 1).getPredictedGlucose();
+        // fourHourPrediction = point at exactly 240 min (PREDICTION_PATH_MINUTES).
+        // eightHourPrediction = last point when path extends beyond 4 h (HFHP / Dual Wave).
+        final int fourHourIndex = PREDICTION_PATH_MINUTES / PREDICTION_PATH_STEP_MINUTES - 1; // index 239
+        Double fourHourPrediction = null;
+        Double eightHourPrediction = null;
+        if (!predictionPath.isEmpty()) {
+            // Exact 4h mark — clamp to last available if path is shorter
+            int idx4h = Math.min(fourHourIndex, predictionPath.size() - 1);
+            fourHourPrediction = predictionPath.get(idx4h).getPredictedGlucose();
+            // 8h mark only when path is meaningfully longer than 4h (> 300 min)
+            if (predictionPath.size() > PREDICTION_PATH_MINUTES + 60) {
+                eightHourPrediction = predictionPath.get(predictionPath.size() - 1).getPredictedGlucose();
+            }
+        }
 
         return GlucoseCalculationsResponse.builder()
                 .activeCarbsOnBoard(Math.round(activeCOB * 10.0) / 10.0)
@@ -135,6 +164,7 @@ public class GlucoseCalculationsService {
                 .activeInsulinUnit("units")
                 .twoHourPrediction(Math.round(predictedGlucose * 10.0) / 10.0)
                 .fourHourPrediction(fourHourPrediction)
+                .eightHourPrediction(eightHourPrediction)
                 .predictionTrend(trend)
                 .predictionUnit("mmol/L")
                 .currentGlucose(request.getCurrentGlucose())
@@ -477,6 +507,65 @@ public class GlucoseCalculationsService {
                 .orElse(0);
         return Math.min(PREDICTION_PATH_MAX_MINUTES,
                 Math.max(PREDICTION_PATH_MINUTES, maxFromPattern));
+    }
+
+    // ── prospective-note builders ─────────────────────────────────────────────
+
+    /**
+     * Build a {@link CarbsEntry} from a prospective note DTO.
+     * Deserialises the nutritionProfileJson (if present) to populate GI/GL/fiber/fat/protein
+     * so COB tri-phase decay works correctly for the projected meal.
+     */
+    private CarbsEntry buildProspectiveCarbsEntry(ProspectiveNoteDTO pn, LocalDateTime noteTime, UUID userUUID) {
+        CarbsEntry entry = CarbsEntry.builder()
+                .id(UUID.randomUUID())
+                .timestamp(noteTime)
+                .carbs(pn.getCarbs())
+                .insulin(pn.getInsulin() != null ? pn.getInsulin() : 0.0)
+                .mealType(pn.getMeal())
+                .originalCarbs(pn.getCarbs())
+                .userId(userUUID)
+                .build();
+        entry.setAbsorptionMode("DEFAULT_DECAY");
+
+        if (featureToggleConfig.isNutritionAwarePredictionEnabled()
+                && pn.getNutritionProfileJson() != null
+                && !pn.getNutritionProfileJson().isBlank()) {
+            try {
+                NutritionSnapshot snapshot = objectMapper.readValue(
+                        pn.getNutritionProfileJson(), NutritionSnapshot.class);
+                entry.setEstimatedGi(snapshot.getEstimatedGi());
+                entry.setGlycemicLoad(snapshot.getGlycemicLoad());
+                entry.setFiber(snapshot.getFiber());
+                entry.setProtein(snapshot.getProtein());
+                entry.setFat(snapshot.getFat());
+                entry.setAbsorptionSpeedClass(snapshot.getAbsorptionSpeedClass());
+                if (snapshot.getAbsorptionMode() != null) {
+                    entry.setAbsorptionMode(snapshot.getAbsorptionMode());
+                }
+                entry.setBolusStrategy(snapshot.getBolusStrategy());
+                entry.setSuggestedDurationHours(snapshot.getSuggestedDurationHours());
+                entry.setPatternName(snapshot.getPatternName());
+            } catch (Exception ignored) {
+                // Keep DEFAULT_DECAY on parse failure
+            }
+        }
+        return entry;
+    }
+
+    /** Build an {@link InsulinDose} from a prospective note DTO. */
+    private InsulinDose buildProspectiveInsulinDose(ProspectiveNoteDTO pn, LocalDateTime noteTime, UUID userUUID) {
+        InsulinDose.InsulinType type = "Correction".equalsIgnoreCase(pn.getMeal())
+                ? InsulinDose.InsulinType.CORRECTION
+                : InsulinDose.InsulinType.BOLUS;
+        return InsulinDose.builder()
+                .id(UUID.randomUUID())
+                .timestamp(noteTime)
+                .units(pn.getInsulin())
+                .type(type)
+                .mealType(pn.getMeal())
+                .userId(userUUID)
+                .build();
     }
 
     private record NutritionSummary(Double avgGi, Double totalGl, String speedClass, String absorptionMode) {}

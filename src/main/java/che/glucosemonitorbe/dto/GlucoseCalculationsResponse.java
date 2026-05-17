@@ -22,8 +22,10 @@ public class GlucoseCalculationsResponse {
     
     // 2-Hour Prediction
     private Double twoHourPrediction;
-    // 4-Hour Prediction (end of prediction path)
+    // 4-Hour Prediction — always the point at exactly 240 min (null if path shorter)
     private Double fourHourPrediction;
+    // 8-Hour Prediction — populated only when the HFHP/Dual-Wave path extends beyond 4 h
+    private Double eightHourPrediction;
     private String predictionTrend; // 'rising' | 'falling' | 'stable'
     private String predictionUnit;
     

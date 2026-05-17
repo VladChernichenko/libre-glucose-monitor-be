@@ -104,7 +104,11 @@ app:
       glucose-calculations: "1.0.0"
       insulin-calculator: "1.0.0"
       carbs-on-board: "1.0.0"
-  
+  # Glucose observer — anomaly detection & alert scheduling
+  observer:
+    # How often the anomaly detector scans all users (matches CGM sync cadence).
+    # Override via env var OBSERVER_INTERVAL_MS. Set to a large value in tests.
+    interval-ms: ${OBSERVER_INTERVAL_MS:300000}   # 5 minutes default
   features:
     # Enable backend calculations with timezone support
     backend-mode-enabled: true
@@ -156,3 +160,6 @@ springdoc:
 # CORS configuration for development
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
+
+
+

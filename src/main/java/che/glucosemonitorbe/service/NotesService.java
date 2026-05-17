@@ -7,6 +7,7 @@ import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -21,10 +22,10 @@ import java.util.stream.Collectors;
 @Service
 @Transactional
 public class NotesService {
-    
+
     @Autowired
     private NoteRepository noteRepository;
-    
+
     @Autowired
     private NoteMapper noteMapper;
 
@@ -33,6 +34,12 @@ public class NotesService {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private GlucoseAlertService glucoseAlertService;
+
+    @Autowired
+    private UserService userService;
     
     /**
      * Get all notes for a user
@@ -86,12 +93,46 @@ public class NotesService {
         if (request.getAbsorptionMode() != null) {
             note.setAbsorptionMode(request.getAbsorptionMode());
         }
-        enrichNutrition(note);
+        // If the client already has a fully-computed nutrition profile (e.g. from the
+        // iOS Nutrition analyser), store it directly and skip server-side re-enrichment.
+        // This preserves suggestedDurationHours, patternName, bolusStrategy, etc. so
+        // the prediction pipeline can produce the correct 4h or 8h forecast.
+        if (request.getNutritionProfile() != null && !request.getNutritionProfile().isBlank()) {
+            note.setNutritionProfile(request.getNutritionProfile());
+            // absorptionMode may already be set above; only override from profile if not.
+            if (note.getAbsorptionMode() == null || "DEFAULT_DECAY".equals(note.getAbsorptionMode())) {
+                try {
+                    com.fasterxml.jackson.databind.JsonNode profileNode =
+                            objectMapper.readTree(request.getNutritionProfile());
+                    String mode = profileNode.path("absorptionMode").asText(null);
+                    if (mode != null && !mode.isBlank()) {
+                        note.setAbsorptionMode(mode);
+                    }
+                } catch (Exception ignored) {}
+            }
+        } else {
+            enrichNutrition(note);
+        }
         
         Note savedNote = noteRepository.save(note);
+
+        // Fire over-injection check asynchronously — does not block the response.
+        // Condition: note has insulin AND we have a current glucose reading to anchor the prediction.
+        double insulinUnits = savedNote.getInsulin() != null ? savedNote.getInsulin() : 0.0;
+        if (insulinUnits > 0) {
+            // Resolve the username from the userId for the calculations service
+            try {
+                String username = userService.getUserById(userId).getUsername();
+                glucoseAlertService.checkOverInjection(
+                        userId, username, insulinUnits, savedNote.getGlucoseLevel());
+            } catch (Exception ignored) {
+                // Username lookup failure must never prevent the note from being saved
+            }
+        }
+
         return noteMapper.toDto(savedNote);
     }
-    
+
     /**
      * Update an existing note for a user
      */
