@@ -2,6 +2,8 @@ package che.glucosemonitorbe.service.nutrition;
 
 import che.glucosemonitorbe.config.CacheConfig;
 import che.glucosemonitorbe.dto.OFFProductDto;
+import che.glucosemonitorbe.entity.OFFProductDocument;
+import che.glucosemonitorbe.repository.OFFProductRepository;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
@@ -9,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -46,6 +49,7 @@ import java.util.Optional;
 public class OpenFoodFactsService {
 
     private final RestTemplate restTemplate;
+    private final OFFProductRepository offProductRepository;
 
     @Value("${app.openfoodfacts.base-url:https://world.openfoodfacts.org}")
     private String baseUrl;
@@ -63,11 +67,17 @@ public class OpenFoodFactsService {
 
     /**
      * Fetch a single product by barcode (EAN-13, UPC-A, etc.).
-     * Returns {@code Optional.empty()} when the barcode is not in the database
-     * or the remote call fails.
+     * Checks the local MongoDB dump first; falls back to the remote OFF API.
+     * Returns {@code Optional.empty()} when not found in either source.
      */
     @Cacheable(value = CacheConfig.CACHE_NUTRITION_API, key = "'off:barcode:' + #barcode")
     public Optional<OFFProductDto> lookupByBarcode(String barcode) {
+        Optional<OFFProductDocument> local = offProductRepository.findByCode(barcode);
+        if (local.isPresent()) {
+            log.debug("OFF local hit: barcode={}", barcode);
+            return local.map(doc -> toDto(doc, barcode));
+        }
+
         String url = baseUrl + "/api/v2/product/" + barcode + "?fields=" + PRODUCT_FIELDS;
         try {
             ResponseEntity<ProductApiResponse> response = restTemplate.exchange(
@@ -88,16 +98,25 @@ public class OpenFoodFactsService {
     }
 
     /**
-     * Search products by name (free text). Results are ranked by OFF relevance score.
+     * Search products by name (free text).
+     * Queries the local MongoDB dump first (case-insensitive regex); falls back to the remote OFF API.
      * pageSize is capped at 50 to respect OFF rate limits.
      */
     @Cacheable(value = CacheConfig.CACHE_NUTRITION_API,
                key = "'off:search:' + #query.toLowerCase() + ':' + #pageSize")
     public List<OFFProductDto> searchProducts(String query, int pageSize) {
+        int limit = Math.min(pageSize, 50);
+        List<OFFProductDocument> local = offProductRepository.findByProductNameContaining(
+                query, PageRequest.of(0, limit));
+        if (!local.isEmpty()) {
+            log.debug("OFF local search hit: query='{}' results={}", query, local.size());
+            return local.stream().map(doc -> toDto(doc, doc.getCode())).toList();
+        }
+
         String encoded = UriUtils.encode(query, StandardCharsets.UTF_8);
         String url = baseUrl + "/api/v2/search?search_terms=" + encoded
                 + "&fields=" + PRODUCT_FIELDS
-                + "&page_size=" + Math.min(pageSize, 50)
+                + "&page_size=" + limit
                 + "&json=1";
         try {
             ResponseEntity<SearchApiResponse> response = restTemplate.exchange(
@@ -112,6 +131,31 @@ public class OpenFoodFactsService {
             log.warn("OFF search failed: query={} error={}", query, e.getMessage());
             return List.of();
         }
+    }
+
+    private static OFFProductDto toDto(OFFProductDocument doc, String barcode) {
+        OFFProductDto dto = new OFFProductDto();
+        dto.setBarcode(barcode);
+        dto.setProductName(doc.getProductName());
+        dto.setServingSize(doc.getServingSize());
+        dto.setBrands(doc.getBrands());
+        dto.setImageUrl(doc.getImageUrl());
+        dto.setCategoriesTags(doc.getCategoriesTags());
+        if (doc.getNutriments() != null) {
+            OFFProductDocument.Nutriments src = doc.getNutriments();
+            OFFProductDto.Nutriments n = new OFFProductDto.Nutriments();
+            n.setCarbohydrates100g(src.getCarbohydrates100g());
+            n.setProteins100g(src.getProteins100g());
+            n.setFat100g(src.getFat100g());
+            n.setFiber100g(src.getFiber100g());
+            n.setEnergyKcal100g(src.getEnergyKcal100g());
+            n.setSugars100g(src.getSugars100g());
+            dto.setNutriments(n);
+        }
+        if (doc.getServingQuantityG() != null) {
+            try { dto.setServingQuantityG(doc.getServingQuantityG()); } catch (Exception ignored) {}
+        }
+        return dto;
     }
 
     /**

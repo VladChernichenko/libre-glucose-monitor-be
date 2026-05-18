@@ -1,7 +1,9 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.dto.ARNutritionRequest;
 import che.glucosemonitorbe.dto.NutritionAnalyzeRequest;
 import che.glucosemonitorbe.dto.OFFProductDto;
+import che.glucosemonitorbe.service.nutrition.ARNutritionService;
 import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.service.nutrition.OpenFoodFactsService;
@@ -28,6 +30,7 @@ public class NutritionController {
 
     private final NutritionEnrichmentService nutritionEnrichmentService;
     private final OpenFoodFactsService openFoodFactsService;
+    private final ARNutritionService arNutritionService;
 
     @Operation(summary = "Analyze ingredients text and return GI/GL/carbs/fiber")
     @ApiResponses({ @ApiResponse(responseCode = "200", description = "Nutrition snapshot returned"),
@@ -58,6 +61,30 @@ public class NutritionController {
                 snapshot.getSource(),
                 foodsCount,
                 snapshot.getTotalCarbs());
+        return ResponseEntity.ok(snapshot);
+    }
+
+    @Operation(summary = "Analyze AR volume scan results using OFF MongoDB macro lookup",
+               description = "Accepts per-food (label, massG) pairs from ARKit. For each label, " +
+                             "queries the local OpenFoodFacts MongoDB dump and scales per-100g macros " +
+                             "by the estimated cooked mass. Falls back to keyword GI if no OFF match.")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Nutrition snapshot returned"),
+                    @ApiResponse(responseCode = "400", description = "Empty foods list"),
+                    @ApiResponse(responseCode = "401", description = "Unauthorized") })
+    @PostMapping("/analyze-ar")
+    public ResponseEntity<NutritionSnapshot> analyzeAR(
+            @RequestBody @jakarta.validation.Valid ARNutritionRequest request,
+            Authentication authentication
+    ) {
+        if (authentication == null) return ResponseEntity.status(401).build();
+        if (request.getFoods() == null || request.getFoods().isEmpty())
+            return ResponseEntity.badRequest().build();
+
+        NutritionSnapshot snapshot = arNutritionService.analyze(request);
+        log.info("AR nutrition analyze user={} foods={} source={} totalCarbs={} confidence={}",
+                authentication.getName(),
+                request.getFoods().stream().map(f -> f.getLabel() + ":" + f.getMassG() + "g").toList(),
+                snapshot.getSource(), snapshot.getTotalCarbs(), snapshot.getConfidence());
         return ResponseEntity.ok(snapshot);
     }
 
