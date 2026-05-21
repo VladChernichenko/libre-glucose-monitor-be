@@ -67,7 +67,6 @@ public class NightscoutController {
 
             // Offload persistence to a dedicated pool so the HTTP response returns immediately.
             chartDataService.storeChartDataAsync(userId, entries);
-            log.debug("Queued {} entries for async persistence for user {}", entries.size(), authentication.getName());
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries", e);
@@ -108,13 +107,9 @@ public class NightscoutController {
             log.info("Applying frontend timezone offset {} minutes (UTC offset: {}) to {} entries",
                     offsetMinutes, utcOffset, entries.size());
 
-            for (NightscoutEntryDto entry : entries) {
-                Integer existing = entry.getUtcOffset();
-                if (existing == null || existing == 0) {
-                    entry.setUtcOffset(utcOffset);
-                    log.debug("Set utcOffset to {} for entry {}", utcOffset, entry.getId());
-                }
-            }
+            entries.stream()
+                    .filter(e -> e.getUtcOffset() == null || e.getUtcOffset() == 0)
+                    .forEach(e -> e.setUtcOffset(utcOffset));
         } catch (NumberFormatException e) {
             log.warn("Invalid timezone offset format: {}", timezoneOffset);
         }

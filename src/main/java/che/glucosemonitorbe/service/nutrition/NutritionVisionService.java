@@ -67,12 +67,19 @@ public class NutritionVisionService {
             String base64 = Base64.getEncoder().encodeToString(bytes);
             String mimeType = photo.getContentType() != null ? photo.getContentType() : "image/jpeg";
             if (qwenGatewayService.isAvailable()) {
+                log.info("[QwenVision] Qwen available — using Qwen vision for image analysis mimeType={} imageBytes={}", mimeType, bytes.length);
                 try {
                     String json = qwenGatewayService.analyzeImageSync(base64, mimeType, VISION_PROMPT);
-                    return parseVisionResponse(json);
+                    NutritionSnapshot snapshot = parseVisionResponse(json);
+                    log.info("[QwenVision] parsed result foods={} totalCarbs={} gi={} gl={} absorptionMode={}",
+                            snapshot.getNormalizedFoods(), snapshot.getTotalCarbs(),
+                            snapshot.getEstimatedGi(), snapshot.getGlycemicLoad(), snapshot.getAbsorptionMode());
+                    return snapshot;
                 } catch (Exception qwenEx) {
                     log.warn("[QwenVision] failed, falling back to Ollama. reason={}", qwenEx.getMessage());
                 }
+            } else {
+                log.info("[QwenVision] Qwen not available — falling back to Ollama vision");
             }
             return callVisionLlm(base64);
         } catch (Exception e) {

@@ -1,7 +1,10 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.ai.QwenGatewayService;
 import che.glucosemonitorbe.service.nutrition.LogMealService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import che.glucosemonitorbe.service.nutrition.NutritionVisionService;
+import che.glucosemonitorbe.service.nutrition.YoloVisionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -26,8 +29,11 @@ import org.springframework.web.multipart.MultipartFile;
 public class NutritionImageController {
 
     private final LogMealService logMealService;
+    private final NutritionVisionService nutritionVisionService;
+    private final QwenGatewayService qwenGatewayService;
+    private final YoloVisionService yoloVisionService;
 
-    @Operation(summary = "Analyze a meal photo with LogMeal and return GI/GL/carbs/fiber")
+    @Operation(summary = "Analyze a meal photo — YOLO (local) → GPT/Ollama → LogMeal fallback chain")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Nutrition snapshot returned"),
             @ApiResponse(responseCode = "400", description = "No photo provided"),
@@ -45,7 +51,29 @@ public class NutritionImageController {
             return ResponseEntity.badRequest().build();
         }
 
-        NutritionSnapshot snapshot = logMealService.analyzeImage(photo);
+        // ── Tier 1: local YOLO (free, no API call) ────────────────────────────
+        NutritionSnapshot snapshot = null;
+        if (yoloVisionService.isAvailable()) {
+            log.info("Vision analyze user={} photoSize={} — trying YOLO (local)",
+                    authentication.getName(), photo.getSize());
+            snapshot = yoloVisionService.analyzeImage(photo);
+        }
+
+        // ── Tier 2: GPT-4o-mini / Ollama ──────────────────────────────────────
+        if (snapshot == null) {
+            if (qwenGatewayService.isAvailable()) {
+                log.info("Vision analyze user={} — YOLO miss, trying GPT/Ollama",
+                        authentication.getName());
+                snapshot = nutritionVisionService.analyzeImage(photo);
+            }
+        }
+
+        // ── Tier 3: LogMeal ────────────────────────────────────────────────────
+        if (snapshot == null || "VISION_FALLBACK".equals(snapshot.getSource())) {
+            log.info("Vision analyze user={} — falling back to LogMeal",
+                    authentication.getName());
+            snapshot = logMealService.analyzeImage(photo);
+        }
 
         log.info(
                 "Vision nutrition analyze user={} photoSize={} source={} foods={} totalCarbs={}",

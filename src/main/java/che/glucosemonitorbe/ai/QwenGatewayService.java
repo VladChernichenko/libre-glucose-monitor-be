@@ -15,12 +15,20 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.function.Consumer;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class QwenGatewayService {
+
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration REQUEST_TIMEOUT  = Duration.ofSeconds(90);
+
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(CONNECT_TIMEOUT)
+            .build();
 
     private final ObjectMapper objectMapper;
 
@@ -161,32 +169,54 @@ public class QwenGatewayService {
     }
 
     private HttpResponse<java.io.InputStream> sendRequest(String payload) throws Exception {
-        HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder(URI.create(qwenBaseUrl + "/chat/completions"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + qwenApiKey)
+                .timeout(REQUEST_TIMEOUT)
                 .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
                 .build();
-        HttpResponse<java.io.InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        // Read as String first so we can log the error body on failure
+        HttpResponse<String> strResponse = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+        if (strResponse.statusCode() >= 400) {
+            log.error("[Qwen] HTTP error status={} body={}", strResponse.statusCode(), strResponse.body());
+            throw new RuntimeException("Qwen API error status=" + strResponse.statusCode());
+        }
+        // Re-wrap as InputStream for the streaming reader
+        byte[] bodyBytes = strResponse.body().getBytes(StandardCharsets.UTF_8);
+        return new SyntheticStreamResponse(strResponse, bodyBytes);
+    }
+
+    private HttpResponse<String> sendRequestSync(String payload) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(qwenBaseUrl + "/chat/completions"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + qwenApiKey)
+                .timeout(REQUEST_TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
+                .build();
+        HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() >= 400) {
-            log.error("[Qwen] HTTP error status={}", response.statusCode());
-            throw new RuntimeException("Qwen API error status=" + response.statusCode());
+            log.error("[QwenVision] HTTP error status={} body={}", response.statusCode(), response.body());
+            throw new RuntimeException("Qwen API error status=" + response.statusCode() + " body=" + response.body());
         }
         return response;
     }
 
-    private HttpResponse<String> sendRequestSync(String payload) throws Exception {
-        HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(qwenBaseUrl + "/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + qwenApiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
-                .build();
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 400) {
-            throw new RuntimeException("Qwen API error status=" + response.statusCode() + " body=" + response.body());
+    /** Minimal HttpResponse<InputStream> wrapper around a pre-read String body. */
+    private static final class SyntheticStreamResponse implements HttpResponse<java.io.InputStream> {
+        private final HttpResponse<String> delegate;
+        private final byte[] body;
+        SyntheticStreamResponse(HttpResponse<String> delegate, byte[] body) {
+            this.delegate = delegate;
+            this.body = body;
         }
-        return response;
+        @Override public int statusCode() { return delegate.statusCode(); }
+        @Override public java.net.http.HttpRequest request() { return delegate.request(); }
+        @Override public java.util.Optional<HttpResponse<java.io.InputStream>> previousResponse() { return java.util.Optional.empty(); }
+        @Override public java.net.http.HttpHeaders headers() { return delegate.headers(); }
+        @Override public java.io.InputStream body() { return new java.io.ByteArrayInputStream(body); }
+        @Override public java.util.Optional<javax.net.ssl.SSLSession> sslSession() { return delegate.sslSession(); }
+        @Override public URI uri() { return delegate.uri(); }
+        @Override public java.net.http.HttpClient.Version version() { return delegate.version(); }
     }
 
     private String buildChatPayload(String prompt, String model, boolean stream) throws Exception {

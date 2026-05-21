@@ -88,9 +88,9 @@ app:
       num-ctx: ${OLLAMA_NUM_CTX:8192}
     qwen:
       enabled: ${QWEN_ENABLED:true}
-      url: ${QWEN_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      url: ${QWEN_URL:https://api.openai.com/v1}
       model: ${QWEN_MODEL:qwen-plus}
-      vision-model: ${QWEN_VISION_MODEL:qwen-vl-max}
+      vision-model: ${QWEN_VISION_MODEL:gpt-4o-mini}
       api-key: ${QWEN_API_KEY}
   version:
     version: "1.0.0"
