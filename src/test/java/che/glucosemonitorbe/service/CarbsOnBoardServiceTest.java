@@ -13,7 +13,11 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -285,6 +289,109 @@ class CarbsOnBoardServiceTest {
     @Test
     void totalCob_nullList_returnsZero() {
         assertThat(service.calculateTotalCarbsOnBoard(null, now, USER_ID)).isEqualTo(0.0);
+    }
+
+    // ── N+1 fix: getCOBSettings invocation counts ─────────────────────────────
+
+    /**
+     * Core regression for the N+1 fix:
+     * calculateTotalCarbsOnBoard with N entries must call getCOBSettings exactly once,
+     * not once per entry.
+     */
+    @Test
+    void totalCob_fiveEntries_loadsSettingsExactlyOnce() {
+        List<CarbsEntry> entries = List.of(
+                carbEntry(now.minusMinutes(30),  30.0, "MEDIUM", null),
+                carbEntry(now.minusMinutes(60),  25.0, "MEDIUM", null),
+                carbEntry(now.minusMinutes(90),  20.0, "SLOW",   null),
+                carbEntry(now.minusMinutes(120), 15.0, "FAST",   null),
+                carbEntry(now.minusMinutes(150), 10.0, "SLOW",   8.0)
+        );
+
+        service.calculateTotalCarbsOnBoard(entries, now, USER_ID);
+
+        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+    }
+
+    @Test
+    void totalCob_oneEntry_loadsSettingsExactlyOnce() {
+        List<CarbsEntry> entries = List.of(carbEntry(now.minusMinutes(30), 40.0, "MEDIUM", null));
+
+        service.calculateTotalCarbsOnBoard(entries, now, USER_ID);
+
+        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+    }
+
+    @Test
+    void totalCob_tenEntries_loadsSettingsExactlyOnce() {
+        List<CarbsEntry> entries = java.util.stream.IntStream.rangeClosed(1, 10)
+                .mapToObj(i -> carbEntry(now.minusMinutes(i * 15L), 20.0, "MEDIUM", null))
+                .toList();
+
+        service.calculateTotalCarbsOnBoard(entries, now, USER_ID);
+
+        // Must be 1 regardless of list size — the N+1 guarantee
+        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+    }
+
+    /** Empty list returns early — DB should never be hit. */
+    @Test
+    void totalCob_emptyList_neverLoadsSettings() {
+        service.calculateTotalCarbsOnBoard(List.of(), now, USER_ID);
+
+        verify(settingsService, never()).getCOBSettings(any());
+    }
+
+    /** Null list returns early — DB should never be hit. */
+    @Test
+    void totalCob_nullList_neverLoadsSettings() {
+        service.calculateTotalCarbsOnBoard(null, now, USER_ID);
+
+        verify(settingsService, never()).getCOBSettings(any());
+    }
+
+    /** Single-entry public API still loads settings exactly once. */
+    @Test
+    void singleEntry_loadsSettingsExactlyOnce() {
+        CarbsEntry e = carbEntry(now.minusMinutes(45), 50.0, "MEDIUM", null);
+
+        service.calculateRemainingCarbs(e, now, USER_ID);
+
+        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+    }
+
+    /** Null entry guard fires before any settings load. */
+    @Test
+    void singleEntry_null_neverLoadsSettings() {
+        service.calculateRemainingCarbs(null, now, USER_ID);
+
+        verify(settingsService, never()).getCOBSettings(any());
+    }
+
+    /** Zero-carbs guard fires before any settings load. */
+    @Test
+    void singleEntry_zeroCarbs_neverLoadsSettings() {
+        CarbsEntry e = carbEntry(now.minusMinutes(30), 0.0, "MEDIUM", null);
+
+        service.calculateRemainingCarbs(e, now, USER_ID);
+
+        verify(settingsService, never()).getCOBSettings(any());
+    }
+
+    /**
+     * Batch with null/zero entries mixed in — the filter skips them.
+     * Settings must still be loaded exactly once (not once per valid entry,
+     * not once per total entry count).
+     */
+    @Test
+    void totalCob_mixedValidAndZeroCarbs_loadsSettingsExactlyOnce() {
+        CarbsEntry valid1 = carbEntry(now.minusMinutes(30), 40.0, "MEDIUM", null);
+        CarbsEntry zero   = carbEntry(now.minusMinutes(45), 0.0,  "MEDIUM", null);
+        CarbsEntry valid2 = carbEntry(now.minusMinutes(60), 20.0, "SLOW",   null);
+
+        service.calculateTotalCarbsOnBoard(List.of(valid1, zero, valid2), now, USER_ID);
+
+        verify(settingsService, times(1)).getCOBSettings(USER_ID);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

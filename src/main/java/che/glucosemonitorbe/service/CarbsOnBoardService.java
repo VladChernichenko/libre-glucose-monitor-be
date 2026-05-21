@@ -18,18 +18,27 @@ public class CarbsOnBoardService {
     private final COBSettingsService cOBSettingsService;
 
     /**
-     * Calculate remaining carbs on board for a given time
+     * Calculate remaining carbs on board for a given time.
+     * Loads COB settings from DB — use {@link #calculateTotalCarbsOnBoard} for batch
+     * processing to avoid per-entry DB queries.
      */
     public double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime, UUID userId) {
         if (entry == null || entry.getCarbs() == null || entry.getCarbs() <= 0) {
             return 0.0;
         }
         COBSettingsDTO cobSettings = cOBSettingsService.getCOBSettings(userId);
+        return calculateRemainingCarbs(entry, currentTime, cobSettings);
+    }
+
+    /**
+     * Inner calculation using pre-loaded settings — avoids a DB round-trip per entry.
+     */
+    private double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime, COBSettingsDTO cobSettings) {
         long minutesSinceEntry = ChronoUnit.MINUTES.between(entry.getTimestamp(), currentTime);
         if (minutesSinceEntry < 0) {
             return 0.0;
         }
-        
+
         // Pattern-matched duration overrides user default (e.g. 8h for Double Wave pizza meals).
         int patternDuration = entry.getSuggestedDurationHours() != null
                 ? (int) (entry.getSuggestedDurationHours() * 60) : 0;
@@ -46,7 +55,7 @@ public class CarbsOnBoardService {
         if (halfLife <= 0) {
             return 0.0;
         }
-        
+
         if ("GI_GL_ENHANCED".equalsIgnoreCase(entry.getAbsorptionMode())) {
             return calculateEnhancedRemaining(entry, minutesSinceEntry, halfLife, maxDuration);
         }
@@ -107,15 +116,17 @@ public class CarbsOnBoardService {
     }
     
     /**
-     * Calculate total carbs on board from multiple entries
+     * Calculate total carbs on board from multiple entries.
+     * Settings are loaded once for the batch — O(1) DB queries regardless of list size.
      */
     public double calculateTotalCarbsOnBoard(List<CarbsEntry> entries, LocalDateTime currentTime, UUID userId) {
         if (entries == null || entries.isEmpty()) {
             return 0.0;
         }
-        
+        COBSettingsDTO cobSettings = cOBSettingsService.getCOBSettings(userId);
         return entries.stream()
-                .mapToDouble(entry -> calculateRemainingCarbs(entry, currentTime, userId))
+                .filter(e -> e != null && e.getCarbs() != null && e.getCarbs() > 0)
+                .mapToDouble(entry -> calculateRemainingCarbs(entry, currentTime, cobSettings))
                 .sum();
     }
     

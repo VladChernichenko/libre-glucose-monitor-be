@@ -87,11 +87,11 @@ class AiInsightServiceTest {
         when(contextAggregatorService.buildContext(userId, 24)).thenReturn(ctx);
         when(ragRetrieverService.retrieve(ctx)).thenReturn(chunks);
         when(llmGatewayService.generateStreamingMarkdown(eq(ctx), eq(chunks), any(), eq("What should I do?"),
-                isNull(), eq("custom-model"), eq(4096))).thenReturn(llmResult);
+                isNull(), eq("custom-model"), eq(4096), isNull())).thenReturn(llmResult);
 
         Consumer<String> consumer = token -> {};
         LlmGatewayService.GatewayResult result = service.streamRetrospectiveMarkdown(
-                userId, 24, consumer, "What should I do?", null, "custom-model", 4096);
+                userId, 24, consumer, "What should I do?", null, "custom-model", 4096, null);
 
         assertThat(result).isSameAs(llmResult);
     }
@@ -107,12 +107,12 @@ class AiInsightServiceTest {
         when(contextAggregatorService.buildContext(userId, 12)).thenReturn(ctx);
         when(ragRetrieverService.retrieve(ctx)).thenReturn(chunks);
         when(llmGatewayService.generateStreamingMarkdown(eq(ctx), eq(chunks), any(),
-                isNull(), isNull(), isNull(), isNull())).thenReturn(llmResult);
+                isNull(), isNull(), isNull(), isNull(), isNull())).thenReturn(llmResult);
 
         service.streamRetrospectiveMarkdown(userId, 12, token -> {});
 
         verify(llmGatewayService).generateStreamingMarkdown(
-                eq(ctx), eq(chunks), any(), isNull(), isNull(), isNull(), isNull());
+                eq(ctx), eq(chunks), any(), isNull(), isNull(), isNull(), isNull(), isNull());
     }
 
     // ---- helper ----

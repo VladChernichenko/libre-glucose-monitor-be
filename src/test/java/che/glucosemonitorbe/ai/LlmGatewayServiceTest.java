@@ -1,8 +1,11 @@
 package che.glucosemonitorbe.ai;
 
+import che.glucosemonitorbe.ai.QwenGatewayService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import static org.mockito.Mockito.mock;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +18,7 @@ class LlmGatewayServiceTest {
 
     @Test
     void streamingMarkdownReturnsNonEmptyFallbackWhenProvidersDisabled() {
-        LlmGatewayService service = new LlmGatewayService(new ObjectMapper());
+        LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), mock(QwenGatewayService.class));
         ReflectionTestUtils.setField(service, "ollamaEnabled", false);
         ReflectionTestUtils.setField(service, "remoteEnabled", false);
         ReflectionTestUtils.setField(service, "ollamaModel", "llama3.1:8b");
@@ -36,7 +39,7 @@ class LlmGatewayServiceTest {
 
     @Test
     void streamingMarkdownClampsNumCtxFromOverride() {
-        LlmGatewayService service = new LlmGatewayService(new ObjectMapper());
+        LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), mock(QwenGatewayService.class));
         ReflectionTestUtils.setField(service, "ollamaEnabled", false);
         ReflectionTestUtils.setField(service, "remoteEnabled", false);
         ReflectionTestUtils.setField(service, "ollamaModel", "llama3.1:8b");

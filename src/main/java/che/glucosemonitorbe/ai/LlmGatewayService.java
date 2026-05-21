@@ -49,6 +49,7 @@ public class LlmGatewayService {
                     + "## Disclaimer\nThis is a fallback response due to temporary AI connectivity issues.";
 
     private final ObjectMapper objectMapper;
+    private final QwenGatewayService qwenGatewayService;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${app.ai.ollama.enabled:true}")
@@ -170,7 +171,7 @@ public class LlmGatewayService {
             List<ClinicalKnowledgeChunk> chunks,
             Consumer<String> tokenConsumer
     ) {
-        return generateStreamingMarkdown(context, chunks, tokenConsumer, null, null, null, null);
+        return generateStreamingMarkdown(context, chunks, tokenConsumer, null, null, null, null, null);
     }
 
     public GatewayResult generateStreamingMarkdown(
@@ -182,11 +183,45 @@ public class LlmGatewayService {
             String modelOverride,
             Integer numCtxOverride
     ) {
+        return generateStreamingMarkdown(context, chunks, tokenConsumer,
+                followUpQuestion, conversationTurns, modelOverride, numCtxOverride, null);
+    }
+
+    public GatewayResult generateStreamingMarkdown(
+            AnalysisContext context,
+            List<ClinicalKnowledgeChunk> chunks,
+            Consumer<String> tokenConsumer,
+            String followUpQuestion,
+            List<AiAnalysisRequest.AiChatTurnDto> conversationTurns,
+            String modelOverride,
+            Integer numCtxOverride,
+            String providerOverride
+    ) {
         long start = System.currentTimeMillis();
         String effectiveModel = resolveModel(modelOverride);
         int effectiveNumCtx = resolveNumCtx(numCtxOverride);
 
+        if (shouldUseQwen(providerOverride)) {
+            log.info("[LLM] provider=qwen providerOverride={} model={}", providerOverride, modelOverride);
+            try {
+                String prompt = buildMarkdownPrompt(context, chunks, followUpQuestion, conversationTurns);
+                return qwenGatewayService.streamMarkdown(prompt, modelOverride, tokenConsumer);
+            } catch (Exception e) {
+                log.warn("[Qwen] stream/markdown call failed, falling back to Ollama. reason={}", e.getMessage());
+                if ("qwen".equalsIgnoreCase(providerOverride)) {
+                    if (tokenConsumer != null) tokenConsumer.accept(MARKDOWN_FALLBACK_MESSAGE);
+                    return GatewayResult.builder()
+                            .modelId("rules-only")
+                            .rawOutput(MARKDOWN_FALLBACK_MESSAGE)
+                            .contextWindow(effectiveNumCtx)
+                            .latencyMs(System.currentTimeMillis() - start)
+                            .build();
+                }
+            }
+        }
+
         if (ollamaEnabled) {
+            log.info("[LLM] provider=ollama providerOverride={} model={}", providerOverride, effectiveModel);
             try {
                 OllamaResponse response = callOllamaStreamingMarkdown(
                         context, chunks, tokenConsumer, followUpQuestion, conversationTurns, effectiveModel, effectiveNumCtx);
@@ -214,6 +249,13 @@ public class LlmGatewayService {
                 .contextWindow(effectiveNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
+    }
+
+    private boolean shouldUseQwen(String providerOverride) {
+        if ("ollama".equalsIgnoreCase(providerOverride)) return false;
+        if ("qwen".equalsIgnoreCase(providerOverride)) return qwenGatewayService.isAvailable();
+        // auto: prefer Qwen when available
+        return qwenGatewayService.isAvailable();
     }
 
     private OllamaResponse callOllama(AnalysisContext context, List<ClinicalKnowledgeChunk> chunks) throws Exception {

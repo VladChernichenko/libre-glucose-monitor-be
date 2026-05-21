@@ -39,7 +39,7 @@ public class AiInsightService {
     }
 
     public LlmGatewayService.GatewayResult streamRetrospectiveMarkdown(UUID userId, int windowHours, Consumer<String> tokenConsumer) {
-        return streamRetrospectiveMarkdown(userId, windowHours, tokenConsumer, null, null, null, null);
+        return streamRetrospectiveMarkdown(userId, windowHours, tokenConsumer, null, null, null, null, null);
     }
 
     public LlmGatewayService.GatewayResult streamRetrospectiveMarkdown(
@@ -49,7 +49,8 @@ public class AiInsightService {
             String followUpQuestion,
             List<AiAnalysisRequest.AiChatTurnDto> conversationTurns,
             String modelOverride,
-            Integer numCtxOverride
+            Integer numCtxOverride,
+            String providerOverride
     ) {
         AnalysisContext context = contextAggregatorService.buildContext(userId, windowHours);
         List<ClinicalKnowledgeChunk> chunks = ragRetrieverService.retrieve(context);
@@ -60,7 +61,8 @@ public class AiInsightService {
                 followUpQuestion,
                 conversationTurns,
                 modelOverride,
-                numCtxOverride
+                numCtxOverride,
+                providerOverride
         );
     }
 }

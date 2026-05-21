@@ -65,6 +65,7 @@ public class AiInsightController {
         List<AiAnalysisRequest.AiChatTurnDto> conversationTurns = request == null ? null : request.getConversationTurns();
         String modelOverride = request == null ? null : request.getModel();
         Integer numCtxOverride = request == null ? null : request.getNumCtx();
+        String providerOverride = request == null ? null : request.getProvider();
 
         StreamingResponseBody body = outputStream -> {
             try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8))) {
@@ -76,7 +77,7 @@ public class AiInsightController {
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
                         }
-                    }, followUpQuestion, conversationTurns, modelOverride, numCtxOverride);
+                    }, followUpQuestion, conversationTurns, modelOverride, numCtxOverride, providerOverride);
                     Integer prompt = usage.getPromptTokens();
                     Integer completion = usage.getCompletionTokens();
                     Integer contextWindow = usage.getContextWindow();

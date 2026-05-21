@@ -117,7 +117,7 @@ class AiInsightControllerTest {
                 .build();
 
         when(aiInsightService.streamRetrospectiveMarkdown(
-                any(), eq(12), any(), isNull(), isNull(), isNull(), isNull()))
+                any(), eq(12), any(), isNull(), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(gatewayResult);
 
         mockMvc.perform(post("/api/ai-insights/retrospective/stream")
@@ -141,7 +141,7 @@ class AiInsightControllerTest {
                 .build();
 
         when(aiInsightService.streamRetrospectiveMarkdown(
-                any(), eq(12), any(), isNull(), isNull(), isNull(), isNull()))
+                any(), eq(12), any(), isNull(), isNull(), isNull(), isNull(), isNull()))
                 .thenReturn(gatewayResult);
 
         var asyncResult = mockMvc.perform(post("/api/ai-insights/retrospective/stream")

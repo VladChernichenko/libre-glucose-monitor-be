@@ -18,6 +18,8 @@ public class AiAnalysisRequest {
 
     private String model;
 
+    private String provider;
+
     @Min(512)
     @Max(32768)
     private Integer numCtx;

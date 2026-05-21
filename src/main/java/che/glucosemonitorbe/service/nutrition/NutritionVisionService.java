@@ -39,6 +39,7 @@ public class NutritionVisionService {
 
     private final ObjectMapper objectMapper;
     private final NutritionEnrichmentService nutritionEnrichmentService;
+    private final che.glucosemonitorbe.ai.QwenGatewayService qwenGatewayService;
     private final RestTemplate restTemplate = buildRestTemplate();
 
     @Value("${app.ai.ollama.enabled:true}")
@@ -64,6 +65,15 @@ public class NutritionVisionService {
         try {
             byte[] bytes = photo.getBytes();
             String base64 = Base64.getEncoder().encodeToString(bytes);
+            String mimeType = photo.getContentType() != null ? photo.getContentType() : "image/jpeg";
+            if (qwenGatewayService.isAvailable()) {
+                try {
+                    String json = qwenGatewayService.analyzeImageSync(base64, mimeType, VISION_PROMPT);
+                    return parseVisionResponse(json);
+                } catch (Exception qwenEx) {
+                    log.warn("[QwenVision] failed, falling back to Ollama. reason={}", qwenEx.getMessage());
+                }
+            }
             return callVisionLlm(base64);
         } catch (Exception e) {
             log.warn("Vision LLM analysis failed, falling back to empty snapshot. reason={}", e.getMessage());

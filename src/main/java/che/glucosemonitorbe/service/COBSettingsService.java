@@ -4,6 +4,8 @@ import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.entity.COBSettings;
 import che.glucosemonitorbe.repository.COBSettingsRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,7 @@ public class COBSettingsService {
      * @param userId the user ID
      * @return COB settings DTO
      */
+    @Cacheable(value = "cobSettings", key = "#userId")
     public COBSettingsDTO getCOBSettings(UUID userId) {
         Optional<COBSettings> settings = cobSettingsRepository.findByUserId(userId);
         
@@ -39,6 +42,7 @@ public class COBSettingsService {
      * @param settingsDTO the settings to save
      * @return the saved COB settings DTO
      */
+    @CacheEvict(value = "cobSettings", key = "#userId")
     public COBSettingsDTO saveCOBSettings(UUID userId, COBSettingsDTO settingsDTO) {
         Optional<COBSettings> existingSettings = cobSettingsRepository.findByUserId(userId);
         
@@ -60,6 +64,7 @@ public class COBSettingsService {
      * Delete COB settings for a user
      * @param userId the user ID
      */
+    @CacheEvict(value = "cobSettings", key = "#userId")
     public void deleteCOBSettings(UUID userId) {
         cobSettingsRepository.deleteByUserId(userId);
     }

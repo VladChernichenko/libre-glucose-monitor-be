@@ -15,6 +15,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
+import che.glucosemonitorbe.ai.QwenGatewayService;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
@@ -44,7 +45,7 @@ class NutritionVisionServiceTest {
     @BeforeEach
     void setUp() {
         enrichmentService = mock(NutritionEnrichmentService.class);
-        service = new NutritionVisionService(objectMapper, enrichmentService);
+        service = new NutritionVisionService(objectMapper, enrichmentService, mock(QwenGatewayService.class));
 
         restTemplate = new RestTemplate();
         mockServer = MockRestServiceServer.createServer(restTemplate);
