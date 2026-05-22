@@ -9,6 +9,7 @@ import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserDto;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.NotesService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
@@ -197,5 +199,83 @@ class GlucoseCalculationsServiceTest {
                 .as("HFHP note from 7.5 hours ago must be included in COB calculation; "
                         + "current 6-hour window excludes it (BUG: L2)")
                 .anyMatch(e -> e.getCarbs() != null && e.getCarbs() >= 60.0);
+    }
+
+    // ── P4: getCOBSettings called O(N) times per prediction path ─────────────
+
+    /**
+     * // BUG: P4 — GlucoseCalculationsService.buildPredictionPath calls
+     * cobService.calculateTotalCarbsOnBoard once per prediction step (1-minute intervals,
+     * up to 480 steps). CarbsOnBoardService.calculateTotalCarbsOnBoard calls
+     * getCOBSettings on EACH invocation, causing 240-480 DB/cache lookups per request.
+     * getCOBSettings must be called exactly ONCE per calculateGlucoseData call.
+     *
+     * This test uses a real CarbsOnBoardService (not mocked) so the prediction loop
+     * actually reaches getCOBSettings. It FAILS against current code because
+     * getCOBSettings is called once per loop iteration.
+     */
+    @Test
+    void p4_calculateGlucoseData_getCOBSettings_calledExactlyOnce() {
+        COBSettingsService cobSettingsMock = mock(COBSettingsService.class);
+        CarbsOnBoardService realCobService = new CarbsOnBoardService(cobSettingsMock);
+
+        // Use a fresh service instance wired to the real cobService
+        GlucoseCalculationsService svc = new GlucoseCalculationsService(
+                realCobService, insulinCalculatorService, noteRepository,
+                userService, userInsulinPreferencesService, objectMapper,
+                featureToggleConfig, cobSettingsMock);
+
+        String username = "p4user";
+        UUID userId = UUID.randomUUID();
+
+        UserDto mockUser = UserDto.builder().id(userId).username(username).build();
+        when(userService.getUserByUsername(username)).thenReturn(mockUser);
+
+        COBSettingsDTO cobSettings = new COBSettingsDTO();
+        cobSettings.setUserId(userId);
+        cobSettings.setCarbRatio(2.0);
+        cobSettings.setIsf(1.0);
+        cobSettings.setCarbHalfLife(45);
+        cobSettings.setMaxCOBDuration(240);
+        when(cobSettingsMock.getCOBSettings(userId)).thenReturn(cobSettings);
+
+        when(noteRepository.findByUserIdAndTimestampBetween(any(), any(), any()))
+                .thenReturn(List.of());
+        when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
+                .thenReturn(0.0);
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+        when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
+
+        GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
+                .currentGlucose(7.0)
+                .userId(username)
+                .includePredictionFactors(false)
+                .build();
+
+        svc.calculateGlucoseData(request);
+
+        // BUG: currently called 240+ times (once per prediction step) — this FAILS
+        verify(cobSettingsMock, times(1))
+                .getCOBSettings(userId);
+    }
+
+    // ── P5: NotesService.getAllNotes lacks @Cacheable ─────────────────────────
+
+    /**
+     * // BUG: P5 — NotesService.getAllNotes has no @Cacheable annotation. Every call
+     * hits the database, even for the same userId within a short window. High-frequency
+     * polling from the iOS app (every 30 s) causes repeated full-table scans.
+     *
+     * This test FAILS because the @Cacheable annotation is absent.
+     */
+    @Test
+    void p5_notesService_getAllNotes_mustHaveCacheableAnnotation() throws Exception {
+        Method method = NotesService.class.getMethod("getAllNotes", UUID.class);
+
+        // BUG: method has no @Cacheable — this FAILS
+        assertThat(method.isAnnotationPresent(Cacheable.class))
+                .as("NotesService.getAllNotes must be @Cacheable to avoid repeated full scans (BUG: P5)")
+                .isTrue();
     }
 }

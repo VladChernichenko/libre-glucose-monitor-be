@@ -8,10 +8,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -94,6 +97,43 @@ class COBSettingsServiceTest {
      * the service (same-bean invocation), so the save IS reached in tests — which is
      * exactly what we want to document as the bug.
      */
+    // ── C1: TOCTOU race in getCOBSettings creates duplicate default settings ──
+
+    /**
+     * // BUG: C1 — COBSettingsService.getCOBSettings is non-atomic: it first calls
+     * findByUserId, then (if absent) calls save. Under concurrent requests, two threads
+     * can both see "no settings" and both attempt to insert, causing a
+     * DataIntegrityViolationException from the unique constraint on userId.
+     * The service must handle this race gracefully — either by using an atomic upsert
+     * or by catching the constraint violation and retrying the read.
+     *
+     * This test simulates the race: findByUserId returns empty, but save throws
+     * DataIntegrityViolationException (as if a concurrent insert just won the race).
+     * The service must recover and return valid settings rather than propagating the error.
+     * It FAILS against current code because the exception is not handled.
+     */
+    @Test
+    void c1_getCOBSettings_mustHandleConcurrentInsertGracefully() {
+        UUID userId = UUID.randomUUID();
+
+        COBSettings existingSettings = new COBSettings(userId);
+
+        // First call: no settings found (concurrent thread hasn't inserted yet)
+        when(repository.findByUserId(userId))
+                .thenReturn(Optional.empty())  // first call — race window
+                .thenReturn(Optional.of(existingSettings)); // retry read after conflict
+
+        // save throws due to concurrent insert winning the race
+        when(repository.save(any(COBSettings.class)))
+                .thenThrow(new DataIntegrityViolationException("duplicate key: userId"));
+
+        // BUG: currently propagates DataIntegrityViolationException — this FAILS
+        assertThatNoException()
+                .as("getCOBSettings must not propagate DataIntegrityViolationException "
+                        + "caused by concurrent default-settings insert (BUG: C1)")
+                .isThrownBy(() -> service.getCOBSettings(userId));
+    }
+
     @Test
     void l3_getCOBSettings_mustNotCallRepositorySave() {
         UUID userId = UUID.randomUUID();
