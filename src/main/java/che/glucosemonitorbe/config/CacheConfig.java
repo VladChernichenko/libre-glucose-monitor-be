@@ -23,6 +23,7 @@ public class CacheConfig {
     public static final String CACHE_NUTRITION_API          = "nutritionApiResponses";
     public static final String CACHE_CGM_READINGS           = "cgmReadings";
     public static final String CACHE_LLM_RESPONSES          = "llmResponses";
+    public static final String CACHE_USER_NOTES             = "userNotes";
 
     @Bean
     public CacheManager cacheManager() {
@@ -62,6 +63,15 @@ public class CacheConfig {
                 Caffeine.newBuilder()
                         .maximumSize(5_000)
                         .expireAfterWrite(24, TimeUnit.HOURS)
+                        .recordStats()
+                        .build());
+
+        // P5 fix: cache user note lists to absorb iOS 30-second polling bursts.
+        // TTL matches the polling interval; evicted on any note mutation.
+        manager.registerCustomCache(CACHE_USER_NOTES,
+                Caffeine.newBuilder()
+                        .maximumSize(10_000)
+                        .expireAfterWrite(30, TimeUnit.SECONDS)
                         .recordStats()
                         .build());
 

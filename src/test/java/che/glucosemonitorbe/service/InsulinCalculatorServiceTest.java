@@ -152,7 +152,7 @@ class InsulinCalculatorServiceTest {
     void activityStatus_beyondDia_returnsNone() {
         LocalDateTime doseTime = LocalDateTime.of(2025, 6, 1, 8, 0);
         double diaHours = 4.5;
-        LocalDateTime pastDia = doseTime.plusHours((long) diaHours).plusMinutes(1);
+        LocalDateTime pastDia = doseTime.plusMinutes((long)(diaHours * 60) + 1);
         InsulinDose dose = InsulinDose.builder().timestamp(doseTime).units(4.0).build();
 
         // Total IOB is 0 — status should not be "falling"

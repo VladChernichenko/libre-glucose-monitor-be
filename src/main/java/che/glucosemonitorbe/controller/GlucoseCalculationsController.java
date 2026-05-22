@@ -111,13 +111,17 @@ public class GlucoseCalculationsController {
         
         try {
             GlucoseCalculationsResponse response = glucoseCalculationsService.calculateGlucoseData(request);
-            
+
             return ResponseEntity.ok(Map.of(
                 "data", response,
                 "featureEnabled", true,
                 "backendMode", true,
                 "message", "Glucose calculations completed using backend service"
             ));
+        } catch (RuntimeException e) {
+            // BUG A1 fix: RuntimeExceptions are server faults — let GlobalExceptionHandler
+            // map them to HTTP 500. Only catch checked / user-input exceptions as 400.
+            throw e;
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of(
                 "error", "Calculation failed",
@@ -127,7 +131,7 @@ public class GlucoseCalculationsController {
             ));
         }
     }
-    
+
     /**
      * Get feature status for glucose calculations
      */

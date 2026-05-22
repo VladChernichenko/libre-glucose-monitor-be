@@ -10,6 +10,8 @@ import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,8 +44,11 @@ public class NotesService {
     private UserService userService;
     
     /**
-     * Get all notes for a user
+     * Get all notes for a user.
+     * P5 fix: @Cacheable avoids repeated full-table scans on every iOS poll (every 30 s).
+     * Cache is evicted by createNote / updateNote / deleteNote below.
      */
+    @Cacheable(value = "userNotes", key = "#userId")
     public List<NoteDto> getAllNotes(UUID userId) {
         List<Note> notes = noteRepository.findByUserIdOrderByTimestampDesc(userId);
         return notes.stream()
@@ -65,18 +70,15 @@ public class NotesService {
      * Get a specific note by ID for a user
      */
     public NoteDto getNoteById(UUID userId, UUID noteId) {
-        Note note = noteRepository.findByIdAndUserId(noteId, userId);
-        // BE-9 fix: null note passed to mapper produced NullPointerException → 500.
-        // Throw typed 404 instead so the client can handle "not found" correctly.
-        if (note == null) {
-            throw new ResourceNotFoundException("Note not found: " + noteId);
-        }
+        Note note = noteRepository.findByIdAndUserId(noteId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Note not found: " + noteId));
         return noteMapper.toDto(note);
     }
     
     /**
      * Create a new note for a user
      */
+    @CacheEvict(value = "userNotes", key = "#userId")
     public NoteDto createNote(UUID userId, CreateNoteRequest request) {
         Note note = new Note(
             userId,
@@ -136,8 +138,9 @@ public class NotesService {
     /**
      * Update an existing note for a user
      */
+    @CacheEvict(value = "userNotes", key = "#userId")
     public NoteDto updateNote(UUID userId, UUID noteId, UpdateNoteRequest request) {
-        Note existingNote = noteRepository.findByIdAndUserId(noteId, userId);
+        Note existingNote = noteRepository.findByIdAndUserId(noteId, userId).orElse(null);
         if (existingNote == null) {
             return null;
         }
@@ -170,6 +173,9 @@ public class NotesService {
         if (request.getMockData() != null) {
             existingNote.setMockData(request.getMockData());
         }
+        if (request.getAbsorptionMode() != null) {
+            existingNote.setAbsorptionMode(request.getAbsorptionMode());
+        }
         enrichNutrition(existingNote);
         
         Note updatedNote = noteRepository.save(existingNote);
@@ -177,9 +183,16 @@ public class NotesService {
     }
     
     /**
-     * Delete a note for a user
+     * Delete a note for a user.
+     * BUG D1 fix: verify the note belongs to the requesting user before deleting.
+     * The findByIdAndUserId check ensures we return false — not true — when the note
+     * doesn't exist or doesn't belong to this user.
      */
+    @CacheEvict(value = "userNotes", key = "#userId")
     public boolean deleteNote(UUID userId, UUID noteId) {
+        if (noteRepository.findByIdAndUserId(noteId, userId).isEmpty()) {
+            return false;
+        }
         try {
             noteRepository.deleteByIdAndUserId(noteId, userId);
             return true;
@@ -235,7 +248,7 @@ public class NotesService {
      * Check if a note exists and belongs to the user
      */
     public boolean noteExistsAndBelongsToUser(UUID userId, UUID noteId) {
-        return noteRepository.findByIdAndUserId(noteId, userId) != null;
+        return noteRepository.findByIdAndUserId(noteId, userId).isPresent();
     }
 
     private void enrichNutrition(Note note) {

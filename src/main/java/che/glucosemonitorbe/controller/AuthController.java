@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -38,12 +39,12 @@ public class AuthController {
     }
 
     @Operation(summary = "Register a new user")
-    @ApiResponses({ @ApiResponse(responseCode = "200", description = "User registered, JWT tokens returned"),
+    @ApiResponses({ @ApiResponse(responseCode = "201", description = "User registered, JWT tokens returned"),
                     @ApiResponse(responseCode = "400", description = "Username already taken") })
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
         AuthResponse response = authService.register(request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @Operation(summary = "Refresh access token using refresh token")
@@ -60,19 +61,18 @@ public class AuthController {
     @PostMapping("/logout")
     public ResponseEntity<LogoutResponse> logout(@Valid @RequestBody LogoutRequest request) {
         LogoutResponse response = authService.logout(request);
+        if (!response.isSuccess()) {
+            return ResponseEntity.badRequest().body(response);
+        }
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/logout-all")
     public ResponseEntity<LogoutResponse> logoutAllDevices(HttpServletRequest request) {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()) {
-            return ResponseEntity.ok(LogoutResponse.error("User not authenticated"));
-        }
-
-        String username = authentication.getName();
-        LogoutResponse response = authService.logoutAllDevices(username);
-        return ResponseEntity.ok(response);
+        // BUG A5/BE-7 fix: server-side "logout all devices" is not implemented (no per-user
+        // token store). Return 501 so clients know not to rely on this endpoint.
+        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
+                .body(LogoutResponse.error("Logout from all devices is not yet implemented"));
     }
 
     @GetMapping("/test")
@@ -94,6 +94,9 @@ public class AuthController {
         logoutRequest.setAccessToken(token);
 
         LogoutResponse response = authService.logout(logoutRequest);
+        if (!response.isSuccess()) {
+            return ResponseEntity.badRequest().body(response);
+        }
         return ResponseEntity.ok(response);
     }
 

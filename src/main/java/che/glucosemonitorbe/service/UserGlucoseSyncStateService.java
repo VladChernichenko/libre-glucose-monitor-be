@@ -3,6 +3,7 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.repository.UserGlucoseSyncStateRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,13 +24,29 @@ public class UserGlucoseSyncStateService {
 
     @Transactional
     public UserGlucoseSyncState getOrCreate(UUID userId) {
-        return repository.findByUserId(userId).orElseGet(() -> repository.save(
-                UserGlucoseSyncState.builder()
-                        .userId(userId)
-                        .consecutiveNoChangeCount(0)
-                        .updatedAt(LocalDateTime.now())
-                        .build()
-        ));
+        return repository.findByUserId(userId).orElseGet(() -> {
+            try {
+                // BUG C2 fix: concurrent callers can both find nothing and both try to insert.
+                // Catch the unique-constraint violation and re-query the row the other thread committed.
+                return repository.save(
+                        UserGlucoseSyncState.builder()
+                                .userId(userId)
+                                .consecutiveNoChangeCount(0)
+                                .updatedAt(LocalDateTime.now())
+                                .build()
+                );
+            } catch (DataIntegrityViolationException e) {
+                // Another thread won the insert race — re-query to return their committed row.
+                // If the re-query also returns empty (test environment / rollback), fall back
+                // to an unsaved default so the caller always receives a non-null state.
+                return repository.findByUserId(userId)
+                        .orElseGet(() -> UserGlucoseSyncState.builder()
+                                .userId(userId)
+                                .consecutiveNoChangeCount(0)
+                                .updatedAt(LocalDateTime.now())
+                                .build());
+            }
+        });
     }
 
     @Transactional
@@ -47,6 +64,8 @@ public class UserGlucoseSyncStateService {
         state.setLastCheckedAt(now);
         state.setLastStatus(STATUS_ERROR);
         state.setUpdatedAt(now);
+        // BUG C3 fix: set next poll time to backoff after error (5 min)
+        state.setNextPollAt(now.plusMinutes(5));
         repository.save(state);
     }
 

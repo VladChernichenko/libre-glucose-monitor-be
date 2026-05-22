@@ -1,12 +1,14 @@
 package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.service.NotesService;
 import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -67,11 +69,9 @@ public class NotesController {
     public ResponseEntity<NoteDto> getNoteById(@PathVariable UUID id, Authentication authentication) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
-            NoteDto note = notesService.getNoteById(userId, id);
-            if (note == null) {
-                return ResponseEntity.notFound().build();
-            }
-            return ResponseEntity.ok(note);
+            return ResponseEntity.ok(notesService.getNoteById(userId, id));
+        } catch (ResourceNotFoundException e) {
+            return ResponseEntity.notFound().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
@@ -81,7 +81,7 @@ public class NotesController {
     @ApiResponses({ @ApiResponse(responseCode = "201", description = "Note created"),
                     @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @PostMapping
-    public ResponseEntity<NoteDto> createNote(@RequestBody CreateNoteRequest request, Authentication authentication) {
+    public ResponseEntity<NoteDto> createNote(@Valid @RequestBody CreateNoteRequest request, Authentication authentication) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
             NoteDto createdNote = notesService.createNote(userId, request);

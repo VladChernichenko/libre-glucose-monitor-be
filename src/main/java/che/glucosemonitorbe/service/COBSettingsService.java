@@ -24,16 +24,19 @@ public class COBSettingsService {
      * @param userId the user ID
      * @return COB settings DTO
      */
+    /**
+     * Get COB settings for a user, returning defaults if none exist.
+     * BUG L3 fix: getCOBSettings must NOT call repository.save — it is a read method
+     * that is decorated with @Cacheable. Calling save from a @Cacheable method creates
+     * a write-in-read side-effect that breaks caching semantics and causes unexpected
+     * DataIntegrityViolationExceptions under concurrency (see C1).
+     * Returns a default DTO (not persisted) when no settings row exists.
+     */
     @Cacheable(value = "cobSettings", key = "#userId")
     public COBSettingsDTO getCOBSettings(UUID userId) {
-        Optional<COBSettings> settings = cobSettingsRepository.findByUserId(userId);
-        
-        if (settings.isPresent()) {
-            return convertToDTO(settings.get());
-        } else {
-            // Create default settings for the user
-            return createDefaultSettings(userId);
-        }
+        return cobSettingsRepository.findByUserId(userId)
+                .map(this::convertToDTO)
+                .orElseGet(() -> new COBSettingsDTO(null, userId, 2.0, 1.0, 45, 240));
     }
     
     /**
@@ -76,17 +79,6 @@ public class COBSettingsService {
      */
     public boolean hasCOBSettings(UUID userId) {
         return cobSettingsRepository.existsByUserId(userId);
-    }
-    
-    /**
-     * Create default COB settings for a user
-     * @param userId the user ID
-     * @return the created COB settings DTO
-     */
-    private COBSettingsDTO createDefaultSettings(UUID userId) {
-        COBSettings defaultSettings = new COBSettings(userId);
-        COBSettings savedSettings = cobSettingsRepository.save(defaultSettings);
-        return convertToDTO(savedSettings);
     }
     
     /**
