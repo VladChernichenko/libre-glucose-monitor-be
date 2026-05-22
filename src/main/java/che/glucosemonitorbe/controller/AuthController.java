@@ -94,6 +94,9 @@ public class AuthController {
         logoutRequest.setAccessToken(token);
 
         LogoutResponse response = authService.logout(logoutRequest);
+        if (!response.isSuccess()) {
+            return ResponseEntity.badRequest().body(response);
+        }
         return ResponseEntity.ok(response);
     }
 
