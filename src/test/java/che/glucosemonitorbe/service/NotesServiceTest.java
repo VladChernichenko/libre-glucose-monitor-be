@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
@@ -84,7 +85,7 @@ class NotesServiceTest {
     void updateNoteReturnsNullWhenMissing() {
         UUID userId = UUID.randomUUID();
         UUID noteId = UUID.randomUUID();
-        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(null);
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.empty());
 
         NoteDto result = notesService.updateNote(userId, noteId, new UpdateNoteRequest());
 
@@ -95,6 +96,9 @@ class NotesServiceTest {
     void deleteNoteReturnsFalseWhenRepositoryThrows() {
         UUID userId = UUID.randomUUID();
         UUID noteId = UUID.randomUUID();
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
         doThrow(new RuntimeException("db error")).when(noteRepository).deleteByIdAndUserId(noteId, userId);
 
         boolean deleted = notesService.deleteNote(userId, noteId);
@@ -239,8 +243,8 @@ class NotesServiceTest {
         UUID userId = UUID.randomUUID();
         UUID noteId = UUID.randomUUID();
 
-        // BUG: before fix — repository returns null, mapper.toDto(null) throws NPE
-        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(null);
+        // Repository returns empty Optional — note not found for this user
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.empty());
 
         // After fix: service must throw ResourceNotFoundException
         Assertions.assertThatThrownBy(() -> notesService.getNoteById(userId, noteId))
@@ -267,8 +271,8 @@ class NotesServiceTest {
         UUID userId = UUID.randomUUID();
         UUID noteId = UUID.randomUUID();
 
-        // Note does not exist for this user
-        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(null);
+        // Note does not exist for this user — repository returns empty Optional
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.empty());
 
         // BUG: current code calls deleteByIdAndUserId unconditionally and returns true
         boolean result = notesService.deleteNote(userId, noteId);

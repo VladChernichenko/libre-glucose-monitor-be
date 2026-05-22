@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -66,7 +67,7 @@ public interface NoteRepository extends JpaRepository<Note, UUID> {
     /**
      * Find notes by user ID and note ID (for ownership validation)
      */
-    Note findByIdAndUserId(UUID id, UUID userId);
+    Optional<Note> findByIdAndUserId(UUID id, UUID userId);
     
     /**
      * Delete notes by user ID and note ID (for ownership validation)

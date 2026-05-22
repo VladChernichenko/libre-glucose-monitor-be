@@ -19,7 +19,8 @@ public class UpdateNoteRequest {
     private String detailedInput;
     private String insulinDose;
     private Boolean mockData;
-    
+    private String absorptionMode;
+
     // Constructors
     public UpdateNoteRequest() {}
     
@@ -94,5 +95,13 @@ public class UpdateNoteRequest {
 
     public void setMockData(Boolean mockData) {
         this.mockData = mockData;
+    }
+
+    public String getAbsorptionMode() {
+        return absorptionMode;
+    }
+
+    public void setAbsorptionMode(String absorptionMode) {
+        this.absorptionMode = absorptionMode;
     }
 }

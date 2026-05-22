@@ -65,12 +65,8 @@ public class NotesService {
      * Get a specific note by ID for a user
      */
     public NoteDto getNoteById(UUID userId, UUID noteId) {
-        Note note = noteRepository.findByIdAndUserId(noteId, userId);
-        // BE-9 fix: null note passed to mapper produced NullPointerException → 500.
-        // Throw typed 404 instead so the client can handle "not found" correctly.
-        if (note == null) {
-            throw new ResourceNotFoundException("Note not found: " + noteId);
-        }
+        Note note = noteRepository.findByIdAndUserId(noteId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Note not found: " + noteId));
         return noteMapper.toDto(note);
     }
     
@@ -137,7 +133,7 @@ public class NotesService {
      * Update an existing note for a user
      */
     public NoteDto updateNote(UUID userId, UUID noteId, UpdateNoteRequest request) {
-        Note existingNote = noteRepository.findByIdAndUserId(noteId, userId);
+        Note existingNote = noteRepository.findByIdAndUserId(noteId, userId).orElse(null);
         if (existingNote == null) {
             return null;
         }
@@ -170,6 +166,9 @@ public class NotesService {
         if (request.getMockData() != null) {
             existingNote.setMockData(request.getMockData());
         }
+        if (request.getAbsorptionMode() != null) {
+            existingNote.setAbsorptionMode(request.getAbsorptionMode());
+        }
         enrichNutrition(existingNote);
         
         Note updatedNote = noteRepository.save(existingNote);
@@ -177,9 +176,15 @@ public class NotesService {
     }
     
     /**
-     * Delete a note for a user
+     * Delete a note for a user.
+     * BUG D1 fix: verify the note belongs to the requesting user before deleting.
+     * The findByIdAndUserId check ensures we return false — not true — when the note
+     * doesn't exist or doesn't belong to this user.
      */
     public boolean deleteNote(UUID userId, UUID noteId) {
+        if (noteRepository.findByIdAndUserId(noteId, userId).isEmpty()) {
+            return false;
+        }
         try {
             noteRepository.deleteByIdAndUserId(noteId, userId);
             return true;
@@ -235,7 +240,7 @@ public class NotesService {
      * Check if a note exists and belongs to the user
      */
     public boolean noteExistsAndBelongsToUser(UUID userId, UUID noteId) {
-        return noteRepository.findByIdAndUserId(noteId, userId) != null;
+        return noteRepository.findByIdAndUserId(noteId, userId).isPresent();
     }
 
     private void enrichNutrition(Note note) {

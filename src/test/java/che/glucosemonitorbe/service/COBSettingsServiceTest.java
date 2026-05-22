@@ -8,7 +8,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -37,7 +36,6 @@ class COBSettingsServiceTest {
     void getCOBSettingsCreatesDefaultsWhenMissing() {
         UUID userId = UUID.randomUUID();
         when(repository.findByUserId(userId)).thenReturn(Optional.empty());
-        when(repository.save(any(COBSettings.class))).thenAnswer(inv -> inv.getArgument(0));
 
         COBSettingsDTO result = service.getCOBSettings(userId);
 
@@ -123,10 +121,6 @@ class COBSettingsServiceTest {
                 .thenReturn(Optional.empty())  // first call — race window
                 .thenReturn(Optional.of(existingSettings)); // retry read after conflict
 
-        // save throws due to concurrent insert winning the race
-        when(repository.save(any(COBSettings.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate key: userId"));
-
         // BUG: currently propagates DataIntegrityViolationException — this FAILS
         assertThatNoException()
                 .as("getCOBSettings must not propagate DataIntegrityViolationException "
@@ -138,9 +132,6 @@ class COBSettingsServiceTest {
     void l3_getCOBSettings_mustNotCallRepositorySave() {
         UUID userId = UUID.randomUUID();
         when(repository.findByUserId(userId)).thenReturn(Optional.empty());
-        // Do NOT stub repository.save — if it is called unexpectedly, Mockito strict
-        // mode will fail; if we stub it we hide the bug.  Use verify(never()) instead.
-        when(repository.save(any(COBSettings.class))).thenAnswer(inv -> inv.getArgument(0));
 
         service.getCOBSettings(userId);
 

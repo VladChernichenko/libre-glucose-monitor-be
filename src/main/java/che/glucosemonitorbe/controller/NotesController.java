@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.service.NotesService;
 import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -72,6 +73,8 @@ public class NotesController {
                 return ResponseEntity.notFound().build();
             }
             return ResponseEntity.ok(note);
+        } catch (ResourceNotFoundException e) {
+            return ResponseEntity.notFound().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }

@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -162,9 +163,9 @@ public class GlucoseAlertService {
                     .includePredictionFactors(true)
                     .clientTimeInfo(ClientTimeInfo.builder()
                             .timestamp(now.toString())
-                            .timezone("UTC")
+                            .timezone(TimeZone.getDefault().getID())
                             .locale("en-US")
-                            .timezoneOffset(0)
+                            .timezoneOffset(TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000)
                             .build())
                     .build();
             return calculationsService.calculateGlucoseData(req);

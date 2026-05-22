@@ -16,7 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -104,7 +104,6 @@ class GlobalExceptionHandlerTest {
     @Test
     void a1_calculationService_throwsRuntimeException_mustReturn500NotBadRequest() throws Exception {
         when(featureToggleService.shouldUseBackend("glucose-calculations")).thenReturn(true);
-        when(featureToggleService.shouldMigrate(anyString(), any())).thenReturn(true);
         when(glucoseCalculationsService.calculateGlucoseData(any(GlucoseCalculationsRequest.class)))
                 .thenThrow(new RuntimeException("server down"));
 
@@ -133,7 +132,6 @@ class GlobalExceptionHandlerTest {
     @Test
     void a1_currentBugDocumentation_runtimeExceptionCurrentlyReturns400() throws Exception {
         when(featureToggleService.shouldUseBackend("glucose-calculations")).thenReturn(true);
-        when(featureToggleService.shouldMigrate(anyString(), any())).thenReturn(true);
         when(glucoseCalculationsService.calculateGlucoseData(any(GlucoseCalculationsRequest.class)))
                 .thenThrow(new RuntimeException("server error"));
 

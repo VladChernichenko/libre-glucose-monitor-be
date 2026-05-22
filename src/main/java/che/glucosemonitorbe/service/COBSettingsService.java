@@ -6,6 +6,7 @@ import che.glucosemonitorbe.repository.COBSettingsRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,16 +25,19 @@ public class COBSettingsService {
      * @param userId the user ID
      * @return COB settings DTO
      */
+    /**
+     * Get COB settings for a user, returning defaults if none exist.
+     * BUG L3 fix: getCOBSettings must NOT call repository.save — it is a read method
+     * that is decorated with @Cacheable. Calling save from a @Cacheable method creates
+     * a write-in-read side-effect that breaks caching semantics and causes unexpected
+     * DataIntegrityViolationExceptions under concurrency (see C1).
+     * Returns a default DTO (not persisted) when no settings row exists.
+     */
     @Cacheable(value = "cobSettings", key = "#userId")
     public COBSettingsDTO getCOBSettings(UUID userId) {
-        Optional<COBSettings> settings = cobSettingsRepository.findByUserId(userId);
-        
-        if (settings.isPresent()) {
-            return convertToDTO(settings.get());
-        } else {
-            // Create default settings for the user
-            return createDefaultSettings(userId);
-        }
+        return cobSettingsRepository.findByUserId(userId)
+                .map(this::convertToDTO)
+                .orElseGet(() -> new COBSettingsDTO(null, userId, 2.0, 1.0, 45, 240));
     }
     
     /**
@@ -79,14 +83,23 @@ public class COBSettingsService {
     }
     
     /**
-     * Create default COB settings for a user
-     * @param userId the user ID
-     * @return the created COB settings DTO
+     * Create default COB settings for a user.
+     * BUG C1 fix: two concurrent threads can both see "not present" and both try to insert,
+     * causing a DataIntegrityViolationException on the unique userId constraint.
+     * We catch that and re-query so the caller always gets a valid DTO.
      */
     private COBSettingsDTO createDefaultSettings(UUID userId) {
         COBSettings defaultSettings = new COBSettings(userId);
-        COBSettings savedSettings = cobSettingsRepository.save(defaultSettings);
-        return convertToDTO(savedSettings);
+        try {
+            COBSettings savedSettings = cobSettingsRepository.save(defaultSettings);
+            return convertToDTO(savedSettings);
+        } catch (DataIntegrityViolationException e) {
+            // Another thread already inserted the row; use that one.
+            return cobSettingsRepository.findByUserId(userId)
+                    .map(this::convertToDTO)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "COB settings not found after concurrent insert for user: " + userId, e));
+        }
     }
     
     /**

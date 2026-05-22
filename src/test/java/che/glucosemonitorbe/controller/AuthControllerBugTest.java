@@ -144,16 +144,11 @@ class AuthControllerBugTest {
      */
     @Test
     void a5_logoutAllDevices_stubMustReturn501NotImplemented() throws Exception {
-        // Set up an authenticated user in the SecurityContextHolder so the
-        // auth check inside logoutAllDevices doesn't short-circuit to the
-        // "not authenticated" 200-error path.
+        // The controller now always returns 501 — no authService call needed.
+        // SecurityContextHolder setup is kept to document the original test intent.
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("testuser", null, List.of()));
 
-        when(authService.logoutAllDevices(anyString()))
-                .thenReturn(LogoutResponse.success("All devices logged out"));
-
-        // BUG: current controller returns 200 — this FAILS
         mockMvc.perform(post("/api/auth/logout-all")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotImplemented()); // 501

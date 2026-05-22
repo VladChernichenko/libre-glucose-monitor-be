@@ -71,7 +71,8 @@ public class GlucoseCalculationsService {
         COBSettingsDTO userSettings = cOBSettingsService.getCOBSettings(userUUID);
         
         // Get recent notes/entries for calculations
-        List<Note> recentNotes = getRecentNotes(userId, currentTime);
+        // BUG P1 fix: pass resolved userUUID directly to avoid a second getUserByUsername call
+        List<Note> recentNotes = getRecentNotes(userUUID, currentTime);
         List<CarbsEntry> carbsEntries = recentNotes.stream()
                 .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
                 .map(this::convertNoteToCarbsEntry)
@@ -387,24 +388,14 @@ public class GlucoseCalculationsService {
     }
     
     /**
-     * Get recent carbs entries for a user from Notes within the last 6 hours
-     * Converts Notes with carbs > 0 to CarbsEntry objects for calculation
+     * Get recent notes for a user from the last 6 hours.
+     * BUG P1 fix: accepts UUID directly so getUserByUsername is only called once per request.
      */
-    private List<Note> getRecentNotes(String username, LocalDateTime currentTime) {
+    private List<Note> getRecentNotes(UUID userId, LocalDateTime currentTime) {
         try {
-            // Convert username to UUID using UserService
-            UUID userId = userService.getUserByUsername(username).getId();
-            
-            // Query notes from the last 6 hours to capture active carbs
             LocalDateTime startTime = currentTime.minusHours(6);
-            
-            List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(
-                userId, startTime, currentTime);
-            
-            return recentNotes;
-                
+            return noteRepository.findByUserIdAndTimestampBetween(userId, startTime, currentTime);
         } catch (Exception e) {
-            // User not found or database error
             return new ArrayList<>();
         }
     }
