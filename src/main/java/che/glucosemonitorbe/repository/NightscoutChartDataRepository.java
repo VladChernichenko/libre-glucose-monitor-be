@@ -11,6 +11,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface NightscoutChartDataRepository extends JpaRepository<NightscoutChartData, UUID> {
@@ -39,6 +41,11 @@ public interface NightscoutChartDataRepository extends JpaRepository<NightscoutC
             @Param("nightscoutIds") List<String> nightscoutIds);
 
     List<NightscoutChartData> findByUserIdOrderByDateTimestampAsc(UUID userId);
+
+    /**
+     * P3 fix: paginated overload to avoid loading all CGM entries into memory.
+     */
+    Page<NightscoutChartData> findByUserIdOrderByDateTimestampAsc(UUID userId, Pageable pageable);
 
     Optional<NightscoutChartData> findByUserIdAndNightscoutId(UUID userId, String nightscoutId);
 

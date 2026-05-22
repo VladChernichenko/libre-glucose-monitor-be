@@ -122,30 +122,4 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isInternalServerError());
     }
 
-    /**
-     * A1 documentation — current buggy behaviour: RuntimeException maps to 400.
-     *
-     * This anti-test verifies the CURRENT (broken) state: the controller's catch block
-     * intercepts all exceptions and returns 400.  Once A1 is fixed, this test should be
-     * removed (or changed to expect 500 as per the test above).
-     */
-    @Test
-    void a1_currentBugDocumentation_runtimeExceptionCurrentlyReturns400() throws Exception {
-        when(featureToggleService.shouldUseBackend("glucose-calculations")).thenReturn(true);
-        when(glucoseCalculationsService.calculateGlucoseData(any(GlucoseCalculationsRequest.class)))
-                .thenThrow(new RuntimeException("server error"));
-
-        String requestJson = objectMapper.writeValueAsString(
-                GlucoseCalculationsRequest.builder()
-                        .currentGlucose(5.5)
-                        .userId("testuser")
-                        .build());
-
-        // This documents the BUG: currently returns 400 (bad request) for server errors.
-        // After A1 is fixed, this test must be updated or removed.
-        mockMvc.perform(post("/api/glucose-calculations/")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestJson))
-                .andExpect(status().isBadRequest());
-    }
 }

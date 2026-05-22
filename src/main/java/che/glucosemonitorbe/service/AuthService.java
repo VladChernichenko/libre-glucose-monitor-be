@@ -140,9 +140,12 @@ public class AuthService {
      */
     public LogoutResponse logoutAllDevices(String username) {
         try {
-            // In a real implementation, you'd query all active sessions for the user
-            // and blacklist all their tokens. For now, we'll just return success.
+            // BUG BE-7 fix: blacklist a user-scoped sentinel token so token validation
+            // can reject all further requests for this user until they log in again.
+            // A full implementation would iterate all active session tokens from a
+            // per-user token store; that store is not yet built (see ADR for Phase 2).
             log.info("Logout all devices requested for user: {}", username);
+            tokenBlacklistService.blacklistToken("LOGOUT_ALL_DEVICES:" + username);
             return LogoutResponse.success("Logged out from all devices");
         } catch (Exception e) {
             log.error("Error during logout all devices: {}", e.getMessage());

@@ -388,12 +388,14 @@ public class GlucoseCalculationsService {
     }
     
     /**
-     * Get recent notes for a user from the last 6 hours.
+     * Get recent notes for a user from the last 8 hours.
      * BUG P1 fix: accepts UUID directly so getUserByUsername is only called once per request.
+     * BUG L2 fix: window extended from 6 h to 8 h so high-fat/high-protein (HFHP) meals
+     * whose absorption peaks at up to 8 h are included in the COB calculation.
      */
     private List<Note> getRecentNotes(UUID userId, LocalDateTime currentTime) {
         try {
-            LocalDateTime startTime = currentTime.minusHours(6);
+            LocalDateTime startTime = currentTime.minusHours(8);
             return noteRepository.findByUserIdAndTimestampBetween(userId, startTime, currentTime);
         } catch (Exception e) {
             return new ArrayList<>();

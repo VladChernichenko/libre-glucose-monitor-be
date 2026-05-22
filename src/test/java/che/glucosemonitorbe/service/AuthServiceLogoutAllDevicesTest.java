@@ -83,20 +83,4 @@ class AuthServiceLogoutAllDevicesTest {
         verify(tokenBlacklistService, atLeastOnce()).blacklistToken(anyString());
     }
 
-    /**
-     * BUG: BE-7 — verify that logoutAllDevices never calls blacklistToken
-     * in the current (buggy) implementation.  This is an anti-test: it passes
-     * only while the bug exists and will fail once the bug is fixed.
-     *
-     * This test is marked to be removed after the fix lands.
-     * It is kept as documentation of the current broken state.
-     */
-    @Test
-    void be7_currentBugDocumentation_noBlacklistCallIsMade() {
-        authService.logoutAllDevices("someuser");
-
-        // This assertion documents the BUG — it currently passes (bug present).
-        // Once BE-7 is fixed, this test must be deleted and the above tests will pass.
-        verify(tokenBlacklistService, never()).blacklistToken(anyString());
-    }
 }

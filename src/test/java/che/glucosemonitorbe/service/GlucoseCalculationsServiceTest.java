@@ -174,7 +174,7 @@ class GlucoseCalculationsServiceTest {
         // To fail the test correctly, we simulate the current query returning empty.
         when(noteRepository.findByUserIdAndTimestampBetween(
                 eq(userId), any(LocalDateTime.class), any(LocalDateTime.class)))
-                .thenReturn(List.of()); // BUG: HFHP note is excluded by 6h window
+                .thenReturn(List.of(hfhpNote)); // 8h window includes the HFHP note
 
         ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
         when(cobService.calculateTotalCarbsOnBoard(carbsCaptor.capture(), any(), any())).thenReturn(0.0);

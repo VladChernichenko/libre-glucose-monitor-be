@@ -10,6 +10,8 @@ import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,8 +44,11 @@ public class NotesService {
     private UserService userService;
     
     /**
-     * Get all notes for a user
+     * Get all notes for a user.
+     * P5 fix: @Cacheable avoids repeated full-table scans on every iOS poll (every 30 s).
+     * Cache is evicted by createNote / updateNote / deleteNote below.
      */
+    @Cacheable(value = "userNotes", key = "#userId")
     public List<NoteDto> getAllNotes(UUID userId) {
         List<Note> notes = noteRepository.findByUserIdOrderByTimestampDesc(userId);
         return notes.stream()
@@ -73,6 +78,7 @@ public class NotesService {
     /**
      * Create a new note for a user
      */
+    @CacheEvict(value = "userNotes", key = "#userId")
     public NoteDto createNote(UUID userId, CreateNoteRequest request) {
         Note note = new Note(
             userId,
@@ -132,6 +138,7 @@ public class NotesService {
     /**
      * Update an existing note for a user
      */
+    @CacheEvict(value = "userNotes", key = "#userId")
     public NoteDto updateNote(UUID userId, UUID noteId, UpdateNoteRequest request) {
         Note existingNote = noteRepository.findByIdAndUserId(noteId, userId).orElse(null);
         if (existingNote == null) {
@@ -181,6 +188,7 @@ public class NotesService {
      * The findByIdAndUserId check ensures we return false — not true — when the note
      * doesn't exist or doesn't belong to this user.
      */
+    @CacheEvict(value = "userNotes", key = "#userId")
     public boolean deleteNote(UUID userId, UUID noteId) {
         if (noteRepository.findByIdAndUserId(noteId, userId).isEmpty()) {
             return false;

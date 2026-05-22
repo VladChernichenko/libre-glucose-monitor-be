@@ -10,6 +10,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface NoteRepository extends JpaRepository<Note, UUID> {
@@ -18,6 +20,11 @@ public interface NoteRepository extends JpaRepository<Note, UUID> {
      * Find all notes for a specific user
      */
     List<Note> findByUserIdOrderByTimestampDesc(UUID userId);
+
+    /**
+     * P2 fix: paginated overload to avoid loading the entire note history into memory.
+     */
+    Page<Note> findByUserIdOrderByTimestampDesc(UUID userId, Pageable pageable);
     
     /**
      * Find notes for a user within a date range

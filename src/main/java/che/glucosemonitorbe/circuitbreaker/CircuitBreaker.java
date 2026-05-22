@@ -86,19 +86,21 @@ public class CircuitBreaker {
         if (currentState == State.OPEN) {
             // Check if timeout has passed to transition to HALF_OPEN
             LocalDateTime lastFailure = lastFailureTime.get();
-            if (lastFailure != null && 
+            if (lastFailure != null &&
                 ChronoUnit.MILLIS.between(lastFailure, LocalDateTime.now()) >= timeoutDurationMs) {
-                
+
                 if (state.compareAndSet(State.OPEN, State.HALF_OPEN)) {
                     halfOpenCalls.set(0);
                     successCount.set(0);
                     log.info("Circuit breaker {} transitioned to HALF_OPEN", name);
                 }
+                // Fall through to HALF_OPEN check: first probe call must be allowed
+            } else {
+                return true; // Timeout not yet elapsed — circuit still blocked
             }
-            return true;
         }
-        
-        // HALF_OPEN state
+
+        // HALF_OPEN state (or just transitioned from OPEN → HALF_OPEN above)
         return halfOpenCalls.get() >= halfOpenMaxCalls;
     }
     
