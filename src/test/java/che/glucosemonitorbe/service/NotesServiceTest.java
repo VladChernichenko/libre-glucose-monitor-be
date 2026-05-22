@@ -288,11 +288,14 @@ class NotesServiceTest {
      * UpdateNoteRequest.  It will produce a compilation error until the fix is applied.
      */
     @Test
-    void d2_updateNoteRequest_mustHaveAbsorptionModeField() {
+    void d2_updateNoteRequest_mustHaveAbsorptionModeField() throws Exception {
+        // Use reflection so the test compiles against buggy code and fails at runtime.
+        // BUG: UpdateNoteRequest has no absorptionMode field — NoSuchMethodException until fixed.
+        java.lang.reflect.Method setter = UpdateNoteRequest.class.getMethod("setAbsorptionMode", String.class);
+        java.lang.reflect.Method getter = UpdateNoteRequest.class.getMethod("getAbsorptionMode");
         UpdateNoteRequest request = new UpdateNoteRequest();
-        // BUG: these lines cause a compilation error until absorptionMode is added
-        request.setAbsorptionMode("slow");
-        assertEquals("slow", request.getAbsorptionMode());
+        setter.invoke(request, "slow");
+        assertEquals("slow", getter.invoke(request));
     }
 
     // ── D3: CreateNoteRequest must validate timestamp and carbs with @NotNull ─

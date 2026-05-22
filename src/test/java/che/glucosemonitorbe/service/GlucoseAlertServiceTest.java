@@ -14,6 +14,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +27,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.mockito.quality.Strictness;
+import org.mockito.junit.jupiter.MockitoSettings;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -32,6 +37,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class GlucoseAlertServiceTest {
 
     @Mock private GlucoseAlertEvaluator evaluator;
@@ -68,8 +74,7 @@ class GlucoseAlertServiceTest {
             String username = "testuser";
 
             GlucoseCalculationsResponse mockResponse = mock(GlucoseCalculationsResponse.class);
-            when(mockResponse.getActiveInsulin()).thenReturn(2.0);
-            when(mockResponse.getCarbsOnBoard()).thenReturn(30.0);
+            when(mockResponse.getCurrentGlucose()).thenReturn(6.5);
             when(mockResponse.getPredictionPath()).thenReturn(List.of());
 
             ArgumentCaptor<GlucoseCalculationsRequest> requestCaptor =
@@ -126,13 +131,13 @@ class GlucoseAlertServiceTest {
                 "Consider a snack");
 
         GlucoseCalculationsResponse mockResponse = mock(GlucoseCalculationsResponse.class);
-        when(mockResponse.getActiveInsulin()).thenReturn(0.0);
-        when(mockResponse.getCarbsOnBoard()).thenReturn(0.0);
+        when(mockResponse.getCurrentGlucose()).thenReturn(4.2);
         when(mockResponse.getPredictionPath()).thenReturn(List.of());
 
         // Both threads get the same alert from the evaluator
         when(calculationsService.calculateGlucoseData(any())).thenReturn(mockResponse);
-        when(evaluator.evaluateAll(eq(userId), any(), anyDouble(), any())).thenReturn(List.of(alert));
+        when(evaluator.evaluateAll(eq(userId), any(), anyDouble(), any(), any(LocalDateTime.class)))
+                .thenReturn(List.of(alert));
 
         CountDownLatch startLatch = new CountDownLatch(1);
         ExecutorService executor = Executors.newFixedThreadPool(2);
