@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.LogoutResponse;
 import che.glucosemonitorbe.dto.RegisterRequest;
 import che.glucosemonitorbe.service.AuthService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,10 +14,15 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.List;
+
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -26,6 +32,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * - A2: POST /api/auth/register must return HTTP 201 Created, not 200 OK
  * - A3: POST /api/auth/logout must return a non-200 status when the service
  *       indicates failure (success=false), not always HTTP 200
+ * - A5: POST /api/auth/logout-all is an unimplemented stub and must return
+ *       HTTP 501 Not Implemented until the full implementation is wired
  */
 @ExtendWith(MockitoExtension.class)
 class AuthControllerBugTest {
@@ -42,6 +50,11 @@ class AuthControllerBugTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(authController).build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
     }
 
     // ── A2: register must return 201 Created ─────────────────────────────────
@@ -116,5 +129,33 @@ class AuthControllerBugTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(logoutRequest)))
                 .andExpect(status().isOk());
+    }
+
+    // ── A5: /logout-all is an unimplemented stub — must return 501 ───────────
+
+    /**
+     * // BUG: A5 — AuthController.logoutAllDevices calls authService.logoutAllDevices
+     * which is a no-op stub (see BE-7). Returning HTTP 200 OK for an operation that
+     * does nothing is misleading — clients believe all devices were logged out.
+     * The endpoint must return HTTP 501 Not Implemented until the real blacklisting
+     * logic is in place.
+     *
+     * This test FAILS because current code returns HTTP 200.
+     */
+    @Test
+    void a5_logoutAllDevices_stubMustReturn501NotImplemented() throws Exception {
+        // Set up an authenticated user in the SecurityContextHolder so the
+        // auth check inside logoutAllDevices doesn't short-circuit to the
+        // "not authenticated" 200-error path.
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("testuser", null, List.of()));
+
+        when(authService.logoutAllDevices(anyString()))
+                .thenReturn(LogoutResponse.success("All devices logged out"));
+
+        // BUG: current controller returns 200 — this FAILS
+        mockMvc.perform(post("/api/auth/logout-all")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotImplemented()); // 501
     }
 }
