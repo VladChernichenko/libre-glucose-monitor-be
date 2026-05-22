@@ -206,8 +206,13 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── exponential decay behaviour ───────────────────────────────────────────
+    // ── exponential decay behaviour (BE-3 regression guards) ─────────────────
 
+    /**
+     * // BUG: BE-3 — CarbsOnBoardService used linear decay instead of exponential
+     * half-life decay.  Fixed: now uses 2^(-t/halfLife) exponential model.
+     * This regression test PASSES on the fixed code and documents the correct behaviour.
+     */
     @Test
     void moreRemainingAtEarlierTime() {
         CarbsEntry at30min = carbEntry(now.minusMinutes(30), 50.0, "MEDIUM", null);
