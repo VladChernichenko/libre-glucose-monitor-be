@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,5 +75,36 @@ class COBSettingsServiceTest {
 
         verify(repository).deleteByUserId(userId);
         assertFalse(exists);
+    }
+
+    // ── L3: getCOBSettings must not perform DB saves (side-effect in @Cacheable) ────
+
+    /**
+     * BUG: L3 — COBSettingsService.getCOBSettings is annotated @Cacheable but when no
+     * settings exist it calls createDefaultSettings, which does a DB INSERT (save).
+     * A read method annotated @Cacheable must not have side-effects because:
+     *   1. The cache may serve subsequent calls, bypassing the save.
+     *   2. It violates the principle of least surprise for callers expecting a read.
+     *
+     * This test verifies that getCOBSettings does NOT call repository.save when invoked.
+     * It FAILS because the current implementation always saves default settings on first
+     * access (the save IS called).
+     *
+     * Note: Spring's @Cacheable proxy is bypassed when calling the method directly on
+     * the service (same-bean invocation), so the save IS reached in tests — which is
+     * exactly what we want to document as the bug.
+     */
+    @Test
+    void l3_getCOBSettings_mustNotCallRepositorySave() {
+        UUID userId = UUID.randomUUID();
+        when(repository.findByUserId(userId)).thenReturn(Optional.empty());
+        // Do NOT stub repository.save — if it is called unexpectedly, Mockito strict
+        // mode will fail; if we stub it we hide the bug.  Use verify(never()) instead.
+        when(repository.save(any(COBSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.getCOBSettings(userId);
+
+        // BUG: repository.save IS called (createDefaultSettings) — this FAILS
+        verify(repository, never()).save(any(COBSettings.class));
     }
 }
