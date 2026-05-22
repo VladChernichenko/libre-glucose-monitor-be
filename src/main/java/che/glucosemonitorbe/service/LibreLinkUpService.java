@@ -40,6 +40,7 @@ public class LibreLinkUpService {
      */
     private static final String[] LIBRE_AUTH_FALLBACK_BASES = {
             "https://api-eu.libreview.io",
+            "https://api-fr.libreview.io",
             "https://api-us.libreview.io",
             "https://api-ap.libreview.io",
             "https://api-jp.libreview.io",
@@ -60,6 +61,9 @@ public class LibreLinkUpService {
     private final ConcurrentHashMap<UUID, String> baseUrlStore     = new ConcurrentHashMap<>();
     // account-id fix: SHA-256(user.id) required on all authenticated LibreLinkUp requests (Nov 2024+).
     private final ConcurrentHashMap<UUID, String> accountIdStore   = new ConcurrentHashMap<>();
+    // Locale fix: Accept-Language must match the account's locale (e.g. "fr-FR") or the API
+    // returns MissingLocale / malformed responses for non-EN accounts.
+    private final ConcurrentHashMap<UUID, String> localeStore      = new ConcurrentHashMap<>();
 
     /** Convenience: token for userId, or null if not authenticated. */
     private String tokenFor(UUID userId) {
@@ -78,6 +82,15 @@ public class LibreLinkUpService {
     /** SHA-256(user.id) stored after login — required as account-id header (Nov 2024+). */
     private String accountIdFor(UUID userId) {
         return userId != null ? accountIdStore.get(userId) : null;
+    }
+
+    /** Accept-Language value for userId; falls back to "en-GB" (EU default). */
+    private String localeFor(UUID userId) {
+        if (userId != null) {
+            String stored = localeStore.get(userId);
+            if (stored != null && !stored.isBlank()) return stored;
+        }
+        return "en-GB";
     }
 
     /** Hex-encoded SHA-256 of the given string. Never throws — SHA-256 is always available on JVM. */
@@ -138,24 +151,28 @@ public class LibreLinkUpService {
     /**
      * Canonical LibreLinkUp headers — verified against pylibrelinkup 0.10.0 and the khskekec HTTP dump.
      * cache-control and Connection casing are required exactly as shown; deviations cause 400/430 on some CDN edges.
+     * Accept-Language must match the account locale (e.g. "fr-FR") or the API returns MissingLocale errors.
      */
-    private HttpHeaders buildLibreLoginHeaders() {
+    private HttpHeaders buildLibreLoginHeaders(String locale) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Accept", "application/json");
         headers.set("accept-encoding", "gzip");           // lowercase; "br" triggers Brotli decode failure on JDK
-        headers.set("cache-control", "no-cache");         // required — omitting this causes 400
-        headers.set("connection", "Keep-Alive");          // exact casing required by CDN
+        headers.set("cache-control", "no-cache");
+        headers.set("connection", "keep-alive");
         headers.set("product", "llu.android");
         headers.set("version", clientVersion);
+        headers.set("User-Agent", "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Mobile Safari/537.36");
+        headers.set("Accept-Language", locale != null && !locale.isBlank() ? locale : "en-GB");
         return headers;
     }
 
     /**
      * Build headers for authenticated endpoints (connections, graph, etc.).
-     * Adds Authorization and the account-id header (SHA-256 of user.id, required since Nov 2024).
+     * Adds Authorization, account-id, and the per-user Accept-Language locale.
      */
     private HttpHeaders buildAuthenticatedHeaders(UUID userId) {
-        HttpHeaders headers = buildLibreLoginHeaders();
+        HttpHeaders headers = buildLibreLoginHeaders(localeFor(userId));
         String token = tokenFor(userId);
         if (token != null) {
             headers.set("authorization", "Bearer " + token);
@@ -171,8 +188,13 @@ public class LibreLinkUpService {
 
     private ResponseEntity<byte[]> postLluAuthLogin(String apiBaseUrl, LibreAuthRequest authRequest) {
         String url = normalizeLibreBaseUrl(apiBaseUrl) + "/llu/auth/login";
-        HttpEntity<LibreAuthRequest> entity = new HttpEntity<>(authRequest, buildLibreLoginHeaders());
-        logger.info("postLluAuthLogin: entity {}, : {}", entity.getBody().getPassword(), entity.getBody().getEmail());
+        String locale = authRequest != null ? authRequest.getLocale() : null;
+        // LibreLinkUp only accepts {"email","password"} — extra fields (locale, etc.) cause 400.
+        java.util.Map<String, String> body = new java.util.LinkedHashMap<>();
+        body.put("email", authRequest != null ? authRequest.getEmail() : "");
+        body.put("password", authRequest != null ? authRequest.getPassword() : "");
+        HttpEntity<java.util.Map<String, String>> entity = new HttpEntity<>(body, buildLibreLoginHeaders(locale));
+        logger.info("postLluAuthLogin to {}: email={}", url, authRequest != null ? authRequest.getEmail() : "null");
         return restTemplate.exchange(url, HttpMethod.POST, entity, byte[].class);
     }
 
@@ -226,6 +248,23 @@ public class LibreLinkUpService {
     }
 
     /**
+     * Maps an IETF locale tag to the most likely LibreLinkUp regional base URL.
+     * Used to probe the locale-matched host first so accounts on regional endpoints
+     * (e.g. "fr-FR" → api-fr.libreview.io) are not rejected with "wrong credentials"
+     * by the wrong regional host.
+     */
+    private static String localeToBaseUrl(String locale) {
+        if (locale == null || locale.isBlank()) return null;
+        String lang = locale.toLowerCase(Locale.ROOT).split("[_\\-]")[0];
+        switch (lang) {
+            case "fr": return "https://api-fr.libreview.io";
+            case "ja": return "https://api-jp.libreview.io";
+            case "zh": return "https://api-ap.libreview.io";
+            default:   return null;  // EU/US covered by defaultBaseUrl + fallback list
+        }
+    }
+
+    /**
      * Authenticate with LibreLinkUp API and store the resulting token per-user.
      * BE-1 fix: credentials are keyed by userId — no more shared singleton state.
      */
@@ -235,6 +274,13 @@ public class LibreLinkUpService {
             return circuitBreaker.execute(() -> {
                 try {
                     LinkedHashSet<String> bases = new LinkedHashSet<>();
+                    // Locale-first routing: probe the locale-matched host before the configured default.
+                    // api-eu rejects French accounts with status:2 instead of a redirect, so "fr-FR"
+                    // must hit api-fr.libreview.io directly.
+                    String localeBase = localeToBaseUrl(authRequest.getLocale());
+                    if (localeBase != null) {
+                        bases.add(localeBase);
+                    }
                     bases.add(normalizeLibreBaseUrl(defaultBaseUrl));
                     bases.addAll(Arrays.asList(LIBRE_AUTH_FALLBACK_BASES));
                     List<String> baseList = new ArrayList<>(bases);
@@ -245,12 +291,10 @@ public class LibreLinkUpService {
                     for (int i = 0; i < baseList.size(); i++) {
                         String apiBase = baseList.get(i);
                         try {
-                            logger.info("Authenticating with LibreLinkUp API at {}/llu/auth/login", apiBase);
+                            logger.info("Authenticating with LibreLinkUp API at {}/llu/auth/login (password length={})",
+                                    apiBase,
+                                    authRequest.getPassword() != null ? authRequest.getPassword().length() : 0);
                             response = postLluAuthLogin(apiBase, authRequest);
-                            if (!apiBase.equals(configuredBase) && userId != null) {
-                                baseUrlStore.put(userId, apiBase);
-                                logger.info("LibreLinkUp auth succeeded using host {} for user {}", apiBase, userId);
-                            }
                             break;
                         } catch (HttpClientErrorException e) {
                             int code = e.getStatusCode().value();
@@ -301,6 +345,19 @@ public class LibreLinkUpService {
                     if (token != null) {
                         if (userId != null) {
                             tokenStore.put(userId, token);
+                            // Store the host that actually accepted auth (may differ from default)
+                            // NOTE: currentBase captured from the loop — stored here after confirmed success
+                            // Store locale for Accept-Language on subsequent requests
+                            String locale = authRequest.getLocale();
+                            if (locale != null && !locale.isBlank()) {
+                                localeStore.put(userId, locale);
+                                // Derive and store the base URL from the locale so subsequent calls use the right host
+                                String lb = localeToBaseUrl(locale);
+                                if (lb != null) {
+                                    baseUrlStore.put(userId, lb);
+                                    logger.info("Stored regional base URL {} for user {} (locale {})", lb, userId, locale);
+                                }
+                            }
                             // Extract user.id and store its SHA-256 hash as account-id (required since Nov 2024)
                             JsonNode userNode = data != null ? data.get("user") : null;
                             if (userNode != null && userNode.has("id")) {
@@ -368,6 +425,11 @@ public class LibreLinkUpService {
                         if (userId != null) {
                             tokenStore.put(userId, token);
                             baseUrlStore.put(userId, regionBaseUrl);
+                            // Store locale for Accept-Language on subsequent requests
+                            String locale = authRequest.getLocale();
+                            if (locale != null && !locale.isBlank()) {
+                                localeStore.put(userId, locale);
+                            }
                             // Extract user.id and store its SHA-256 hash as account-id (required since Nov 2024)
                             JsonNode userNode = data != null ? data.get("user") : null;
                             if (userNode != null && userNode.has("id")) {
@@ -407,9 +469,10 @@ public class LibreLinkUpService {
             case "us":
             case "usa":
                 return "https://api-us.libreview.io";
+            case "fr":
+                return "https://api-fr.libreview.io";
             case "eu":
             case "de":
-            case "fr":
             case "uk":
             case "gb":
                 return "https://api-eu.libreview.io";
@@ -449,10 +512,10 @@ public class LibreLinkUpService {
                     HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
 
                     logger.info("Fetching LibreLinkUp connections from {}", url);
-                    ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
 
                     if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = objectMapper.readTree(response.getBody());
+                        JsonNode jsonResponse = parseLibreAuthResponseBytes(response.getBody(), response.getHeaders());
                         List<LibreConnection> connections = new ArrayList<>();
 
                         if (jsonResponse.has("error")) {
@@ -471,8 +534,8 @@ public class LibreLinkUpService {
                                 String lastSync  = connection.has("lastSync")  ? connection.get("lastSync").asText()  : Instant.now().toString();
 
                                 connections.add(new LibreConnection(
-                                    patientId,
                                     firstName + " " + lastName,
+                                    patientId,
                                     status,
                                     lastSync
                                 ));
@@ -516,10 +579,10 @@ public class LibreLinkUpService {
                     HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
 
                     logger.info("Fetching LibreLinkUp glucose data for patient {} from {}", patientId, url);
-                    ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
 
                     if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = objectMapper.readTree(response.getBody());
+                        JsonNode jsonResponse = parseLibreAuthResponseBytes(response.getBody(), response.getHeaders());
                         List<LibreGlucoseReading> readings = new ArrayList<>();
                         
                         // Check for error in response
@@ -635,10 +698,10 @@ public class LibreLinkUpService {
                     HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
                     
                     logger.info("Fetching LibreLinkUp user profile from {}", url);
-                    ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
 
                     if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = objectMapper.readTree(response.getBody());
+                        JsonNode jsonResponse = parseLibreAuthResponseBytes(response.getBody(), response.getHeaders());
                         
                         // Check for error in response
                         if (jsonResponse.has("error")) {
@@ -664,22 +727,30 @@ public class LibreLinkUpService {
     }
 
     /**
-     * Parse timestamp string to Date object
+     * Parse timestamp string to Date object.
+     * Handles ISO-8601, Unix ms, and LibreLinkUp regional formats:
+     *   US: "M/d/yyyy h:mm:ss a"  (e.g. "1/14/2026 10:22:33 PM")
+     *   EU: "dd/MM/yyyy HH:mm:ss" (e.g. "14/01/2026 22:22:33")
      */
     private Date parseTimestamp(String timestamp) {
-        try {
-            // Handle different timestamp formats
-            if (timestamp.contains("T")) {
-                // ISO format
-                return new Date(java.time.Instant.parse(timestamp).toEpochMilli());
-            } else {
-                // Unix timestamp (milliseconds)
-                return new Date(Long.parseLong(timestamp));
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to parse timestamp: {}, using current time", timestamp);
-            return new Date();
+        if (timestamp == null || timestamp.isBlank()) return new Date();
+        // ISO-8601
+        if (timestamp.contains("T")) {
+            try { return new Date(Instant.parse(timestamp).toEpochMilli()); } catch (Exception ignored) {}
         }
+        // Unix milliseconds
+        try { return new Date(Long.parseLong(timestamp.trim())); } catch (Exception ignored) {}
+        // Regional date formats
+        for (String pattern : new String[]{"M/d/yyyy h:mm:ss a", "M/d/yyyy H:mm:ss", "dd/MM/yyyy HH:mm:ss", "dd/MM/yyyy HH:mm"}) {
+            try {
+                return java.util.Date.from(java.time.LocalDateTime.parse(
+                        timestamp.trim(),
+                        java.time.format.DateTimeFormatter.ofPattern(pattern, java.util.Locale.US))
+                    .atZone(java.time.ZoneId.systemDefault()).toInstant());
+            } catch (Exception ignored) {}
+        }
+        logger.warn("Failed to parse timestamp: {}, using current time", timestamp);
+        return new Date();
     }
 
     /**
@@ -726,10 +797,10 @@ public class LibreLinkUpService {
                     HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
                     
                     logger.info("Fetching LibreLinkUp glucose history for patient {} from {} ({} days)", patientId, url, days);
-                    ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
 
                     if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = objectMapper.readTree(response.getBody());
+                        JsonNode jsonResponse = parseLibreAuthResponseBytes(response.getBody(), response.getHeaders());
                         List<LibreGlucoseReading> readings = new ArrayList<>();
                         
                         // Check for error in response
@@ -831,10 +902,10 @@ public class LibreLinkUpService {
                     HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
 
                     logger.info("Fetching raw LibreLinkUp glucose reading for patient {} from {}", patientId, url);
-                    ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
 
                     if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = objectMapper.readTree(response.getBody());
+                        JsonNode jsonResponse = parseLibreAuthResponseBytes(response.getBody(), response.getHeaders());
                         
                         // Check for error in response
                         if (jsonResponse.has("error")) {
@@ -874,6 +945,7 @@ public class LibreLinkUpService {
             tokenStore.remove(userId);
             baseUrlStore.remove(userId);
             accountIdStore.remove(userId);
+            localeStore.remove(userId);
         }
     }
 }

@@ -263,6 +263,141 @@ class GlucoseCalculationsServiceTest {
                 .getCOBSettings(userId);
     }
 
+    // ── NotebookLM scenario 4: prospective notes null / empty ────────────────
+
+    @Test
+    void prospectiveNotesNull_doesNotCrash_returnsValidResponse() {
+        String username = "prosp_null";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+
+        GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
+                .currentGlucose(6.0)
+                .userId(username)
+                .prospectiveNotes(null)
+                .build();
+
+        var response = service.calculateGlucoseData(request);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getTwoHourPrediction()).isNotNull();
+    }
+
+    @Test
+    void prospectiveNotesEmpty_treatedSameAsNoProspectiveNotes() {
+        String username = "prosp_empty";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+
+        GlucoseCalculationsRequest withNull = GlucoseCalculationsRequest.builder()
+                .currentGlucose(7.0).userId(username).prospectiveNotes(null).build();
+        GlucoseCalculationsRequest withEmpty = GlucoseCalculationsRequest.builder()
+                .currentGlucose(7.0).userId(username).prospectiveNotes(List.of()).build();
+
+        var respNull  = service.calculateGlucoseData(withNull);
+        var respEmpty = service.calculateGlucoseData(withEmpty);
+
+        assertThat(respNull.getTwoHourPrediction())
+                .isEqualTo(respEmpty.getTwoHourPrediction());
+    }
+
+    // ── NotebookLM scenario 5: hypoglycemia branch — confidence reduced ───────
+
+    @Test
+    void confidence_hypoGlucose_reducedBelowNormal() {
+        String username = "hypo_user";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+
+        // Include a prospective carbs note so carbsEntries.size()=1 → base confidence
+        // becomes CONFIDENCE_MEDIUM (0.7) rather than CONFIDENCE_LOW (0.5).
+        // Hypo path: 0.7 * 0.8 = 0.56 which is < normal 0.7, and > CONFIDENCE_LOW floor.
+        che.glucosemonitorbe.dto.ProspectiveNoteDTO meal =
+                che.glucosemonitorbe.dto.ProspectiveNoteDTO.builder().carbs(40.0).meal("Lunch").build();
+
+        GlucoseCalculationsRequest hypo = GlucoseCalculationsRequest.builder()
+                .currentGlucose(2.8).userId(username).prospectiveNotes(List.of(meal)).build();
+        GlucoseCalculationsRequest normal = GlucoseCalculationsRequest.builder()
+                .currentGlucose(6.5).userId(username).prospectiveNotes(List.of(meal)).build();
+
+        var respHypo   = service.calculateGlucoseData(hypo);
+        var respNormal = service.calculateGlucoseData(normal);
+
+        assertThat(respHypo.getConfidence()).isLessThan(respNormal.getConfidence());
+    }
+
+    @Test
+    void confidence_zeroDataPoints_returnsLowConfidence() {
+        String username = "no_data";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+
+        GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
+                .currentGlucose(7.0).userId(username).build();
+
+        var response = service.calculateGlucoseData(request);
+
+        // 0 carbs + 0 insulin entries → CONFIDENCE_LOW = 0.5
+        assertThat(response.getConfidence()).isLessThanOrEqualTo(0.5);
+    }
+
+    @Test
+    void predictionPath_notEmpty_for4hHorizon() {
+        String username = "path_user";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+
+        GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
+                .currentGlucose(8.0).userId(username).build();
+
+        var response = service.calculateGlucoseData(request);
+
+        assertThat(response.getPredictionPath()).isNotNull().isNotEmpty();
+        assertThat(response.getFourHourPrediction()).isNotNull();
+    }
+
+    @Test
+    void predictionPath_glucoseClamped_between1and25() {
+        String username = "clamp_user";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+
+        // Extreme glucose that might produce out-of-bounds predictions
+        GlucoseCalculationsRequest high = GlucoseCalculationsRequest.builder()
+                .currentGlucose(22.0).userId(username).build();
+
+        var response = service.calculateGlucoseData(high);
+
+        response.getPredictionPath().forEach(point ->
+                assertThat(point.getPredictedGlucose()).isBetween(1.0, 25.0));
+    }
+
+    // ── helper ────────────────────────────────────────────────────────────────
+
+    private void stubFullPipeline(String username, UUID userId) {
+        che.glucosemonitorbe.dto.UserDto mockUser = che.glucosemonitorbe.dto.UserDto.builder()
+                .id(userId).username(username).build();
+        when(userService.getUserByUsername(username)).thenReturn(mockUser);
+
+        COBSettingsDTO cobSettings = new COBSettingsDTO();
+        cobSettings.setUserId(userId);
+        cobSettings.setCarbRatio(2.0);
+        cobSettings.setIsf(1.0);
+        cobSettings.setCarbHalfLife(45);
+        cobSettings.setMaxCOBDuration(240);
+        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(cobSettings);
+
+        when(noteRepository.findByUserIdAndTimestampBetween(
+                any(UUID.class), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(List.of());
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any())).thenReturn(0.0);
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+        when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
+                .thenReturn(0.0);
+        when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
+    }
+
     // ── P5: NotesService.getAllNotes lacks @Cacheable ─────────────────────────
 
     /**

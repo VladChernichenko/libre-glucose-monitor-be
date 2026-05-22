@@ -399,6 +399,57 @@ class CarbsOnBoardServiceTest {
         verify(settingsService, times(1)).getCOBSettings(USER_ID);
     }
 
+    // ── NotebookLM scenario 1: fiber >5g net-carb threshold ──────────────────
+
+    /**
+     * Clinical rule: when fiber > 5g, subtract it from total carbs before calculating COB.
+     * The GI_GL_ENHANCED model always uses availableCarbs = carbs - fiber, so COB with
+     * high-fiber content must be strictly lower than COB with zero fiber at the same carb count.
+     */
+    @Test
+    void enhancedMode_fiberOver5g_reducesEffectiveCarbs() {
+        // 25g carbs, 7g fiber (>5g threshold) — net 18g available
+        CarbsEntry highFiber = giEnhancedEntry(now.minusMinutes(30), 25.0, 50.0, 7.0, 5.0, 3.0);
+        // 25g carbs, 0g fiber — all 25g available
+        CarbsEntry noFiber   = giEnhancedEntry(now.minusMinutes(30), 25.0, 50.0, 0.0, 5.0, 3.0);
+
+        double cobHighFiber = service.calculateRemainingCarbs(highFiber, now, USER_ID);
+        double cobNoFiber   = service.calculateRemainingCarbs(noFiber,   now, USER_ID);
+
+        assertThat(cobHighFiber).isLessThan(cobNoFiber);
+    }
+
+    @Test
+    void enhancedMode_fiberExceedsCarbs_cobIsZero() {
+        // fiber=30g > carbs=25g → availableCarbs clamped to 0
+        CarbsEntry e = giEnhancedEntry(now.minusMinutes(20), 25.0, 55.0, 30.0, 5.0, 3.0);
+        assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
+    }
+
+    // ── NotebookLM scenario 2: double-wave FPU >= 2 extends path to 8h ───────
+
+    @Test
+    void doubleWave_exactBoundary_carbsGoneAt480min() {
+        // 8h = 480 min → at exactly 481 min → 0
+        CarbsEntry e = carbEntry(now.minusMinutes(481), 60.0, "SLOW", 8.0);
+        assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
+    }
+
+    @Test
+    void doubleWave_carbsStillPresentAt479min() {
+        CarbsEntry e = carbEntry(now.minusMinutes(479), 60.0, "SLOW", 8.0);
+        assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
+    }
+
+    // ── NotebookLM scenario 3: IOB edge — zero halfLife returns 0 ─────────────
+
+    @Test
+    void zeroHalfLife_returnsZeroImmediately() {
+        stubSettings(240, 0); // halfLife=0
+        CarbsEntry e = carbEntry(now.minusMinutes(10), 50.0, "MEDIUM", null);
+        assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private void stubSettings(int maxCobMinutes, int halfLife) {
