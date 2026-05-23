@@ -63,6 +63,7 @@ public class UserDataSourceConfigService {
                 request.getLibrePatientId(),
                 true // isLibreConfig flag
             );
+            config.setLibreLocale(request.getLibreLocale());
         } else {
             throw new IllegalArgumentException("Invalid data source type: " + request.getDataSource());
         }
@@ -230,6 +231,29 @@ public class UserDataSourceConfigService {
     }
 
     /**
+     * Upsert LibreLinkUp credentials for a user after a successful LLU authentication.
+     * Called by the LLU controller so the background scheduler always has current credentials.
+     */
+    @Transactional
+    public void upsertLibreConfig(UUID userId, String email, String password, String locale, String patientId) {
+        log.info("Upserting LibreLinkUp config for user {}", userId);
+        User user = userService.getUserById(userId);
+        Optional<UserDataSourceConfig> existing = repository.findByUserIdAndDataSourceAndIsActiveTrue(
+                userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP);
+        UserDataSourceConfig config = existing.orElseGet(() -> {
+            UserDataSourceConfig c = new UserDataSourceConfig(user, email, password, patientId, true);
+            return c;
+        });
+        if (email   != null && !email.isBlank())   config.setLibreEmail(email);
+        if (password != null && !password.isBlank()) config.setLibrePassword(password);
+        if (locale  != null && !locale.isBlank())  config.setLibreLocale(locale);
+        if (patientId != null && !patientId.isBlank()) config.setLibrePatientId(patientId);
+        config.setIsActive(true);
+        config.updateLastUsed();
+        repository.save(config);
+    }
+
+    /**
      * Test a configuration by attempting to connect
      */
     public boolean testConfig(UUID userId, UUID configId) {
@@ -288,6 +312,7 @@ public class UserDataSourceConfigService {
                 .libreEmail(config.getLibreEmail())
                 .librePassword(null)
                 .librePatientId(config.getLibrePatientId())
+                .libreLocale(config.getLibreLocale())
                 .isActive(config.getIsActive())
                 .lastUsed(config.getLastUsed())
                 .createdAt(config.getCreatedAt())

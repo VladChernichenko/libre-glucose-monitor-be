@@ -591,23 +591,29 @@ public class LibreLinkUpService {
                             throw new RuntimeException("LibreLinkUp glucose data error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                         }
                         
-                        JsonNode graphData = jsonResponse.get("graphData");
+                        // LLU graph response envelope: {"status":0,"data":{"graphData":[...],...}}
+                        JsonNode dataEnvelope = jsonResponse.get("data");
+                        JsonNode graphData = dataEnvelope != null ? dataEnvelope.get("graphData") : jsonResponse.get("graphData");
+                        logger.info("LLU graph response structure: dataEnvelope={}, graphData size={}",
+                                dataEnvelope != null ? "present" : "absent",
+                                graphData != null && graphData.isArray() ? graphData.size() : "null/not-array");
                         if (graphData != null && graphData.isArray()) {
                             for (JsonNode point : graphData) {
-                                // Handle different possible field names for value
+                                // ValueInMgPerDl is always mg/dL regardless of account unit setting.
+                                // "Value" is in the account's display unit (mmol/L or mg/dL) — don't use it.
                                 double valueMgDl = 0;
-                                if (point.has("Value")) {
-                                    valueMgDl = point.get("Value").asDouble();
+                                if (point.has("ValueInMgPerDl")) {
+                                    valueMgDl = point.get("ValueInMgPerDl").asDouble();
                                 } else if (point.has("value")) {
                                     valueMgDl = point.get("value").asDouble();
                                 } else if (point.has("glucoseValue")) {
                                     valueMgDl = point.get("glucoseValue").asDouble();
                                 }
-                                
+
                                 // Convert from mg/dL to mmol/L
                                 double valueMmolL = valueMgDl / 18.0;
-                                
-                                // Handle different possible field names for timestamp
+
+                                // FactoryTimestamp is UTC; Timestamp is local. Prefer FactoryTimestamp.
                                 String timestamp = "";
                                 if (point.has("FactoryTimestamp")) {
                                     timestamp = point.get("FactoryTimestamp").asText();
@@ -616,10 +622,10 @@ public class LibreLinkUpService {
                                 } else if (point.has("timestamp")) {
                                     timestamp = point.get("timestamp").asText();
                                 }
-                                
+
                                 int trend = point.has("Trend") ? point.get("Trend").asInt() : 0;
                                 String trendArrow = convertTrendToArrow(trend);
-                                
+
                                 // Only add valid readings
                                 if (valueMgDl > 0 && !timestamp.isEmpty()) {
                                     readings.add(new LibreGlucoseReading(
@@ -634,7 +640,36 @@ public class LibreLinkUpService {
                                 }
                             }
                         }
-                        
+
+                        // Always check connection.glucoseMeasurement — it is the live reading and can be
+                        // more recent than the last graphData entry. Add it if newer or if graphData empty.
+                        if (dataEnvelope != null) {
+                            JsonNode conn = dataEnvelope.get("connection");
+                            JsonNode gm = conn != null ? conn.get("glucoseMeasurement") : null;
+                            if (gm != null) {
+                                // ValueInMgPerDl is always mg/dL; Value may be mmol/L depending on account unit.
+                                double valueMgDl = gm.has("ValueInMgPerDl") ? gm.get("ValueInMgPerDl").asDouble()
+                                                 : gm.has("Value")          ? gm.get("Value").asDouble() : 0;
+                                String ts = gm.has("FactoryTimestamp") ? gm.get("FactoryTimestamp").asText()
+                                          : gm.has("Timestamp")        ? gm.get("Timestamp").asText() : "";
+                                int trend = gm.has("Trend") ? gm.get("Trend").asInt() : 0;
+                                if (valueMgDl > 0 && !ts.isEmpty()) {
+                                    Date gmDate = parseTimestamp(ts);
+                                    boolean isNewer = readings.isEmpty()
+                                            || gmDate.after(readings.get(readings.size() - 1).getTimestamp());
+                                    if (isNewer) {
+                                        double mmol = valueMgDl / 18.0;
+                                        readings.add(new LibreGlucoseReading(
+                                            gmDate, mmol, trend, convertTrendToArrow(trend),
+                                            getGlucoseStatus(mmol), "mmol/L", gmDate
+                                        ));
+                                        logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
+                                            valueMgDl, trend, patientId);
+                                    }
+                                }
+                            }
+                        }
+
                         logger.info("Successfully fetched {} glucose readings for patient {}", readings.size(), patientId);
                         return new LibreGlucoseData(
                             patientId,
@@ -671,8 +706,9 @@ public class LibreLinkUpService {
         LibreGlucoseData glucoseData = getGlucoseData(patientId, 1, userId);
         
         if (glucoseData.getData() != null && !glucoseData.getData().isEmpty()) {
-            // Return the most recent reading (first in the list)
-            return glucoseData.getData().get(0);
+            // LLU graphData is sorted oldest-first; return the last element (most recent).
+            List<LibreGlucoseReading> readings = glucoseData.getData();
+            return readings.get(readings.size() - 1);
         } else {
             throw new RuntimeException("No glucose data available for patient " + patientId);
         }
@@ -740,13 +776,14 @@ public class LibreLinkUpService {
         }
         // Unix milliseconds
         try { return new Date(Long.parseLong(timestamp.trim())); } catch (Exception ignored) {}
-        // Regional date formats
+        // Regional date formats — FactoryTimestamp is always UTC, so parse as UTC explicitly.
+        // Using ZoneId.systemDefault() on a non-UTC server would shift all timestamps wrongly.
         for (String pattern : new String[]{"M/d/yyyy h:mm:ss a", "M/d/yyyy H:mm:ss", "dd/MM/yyyy HH:mm:ss", "dd/MM/yyyy HH:mm"}) {
             try {
                 return java.util.Date.from(java.time.LocalDateTime.parse(
                         timestamp.trim(),
                         java.time.format.DateTimeFormatter.ofPattern(pattern, java.util.Locale.US))
-                    .atZone(java.time.ZoneId.systemDefault()).toInstant());
+                    .atZone(java.time.ZoneOffset.UTC).toInstant());
             } catch (Exception ignored) {}
         }
         logger.warn("Failed to parse timestamp: {}, using current time", timestamp);
@@ -809,23 +846,25 @@ public class LibreLinkUpService {
                             throw new RuntimeException("LibreLinkUp glucose history error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                         }
                         
-                        JsonNode graphData = jsonResponse.get("graphData");
+                        // LLU graph response envelope: {"status":0,"data":{"graphData":[...],...}}
+                        JsonNode dataEnvelopeH = jsonResponse.get("data");
+                        JsonNode graphData = dataEnvelopeH != null ? dataEnvelopeH.get("graphData") : jsonResponse.get("graphData");
                         if (graphData != null && graphData.isArray()) {
                             for (JsonNode point : graphData) {
-                                // Handle different possible field names for value
+                                // ValueInMgPerDl is always mg/dL regardless of account unit setting.
                                 double valueMgDl = 0;
-                                if (point.has("Value")) {
-                                    valueMgDl = point.get("Value").asDouble();
+                                if (point.has("ValueInMgPerDl")) {
+                                    valueMgDl = point.get("ValueInMgPerDl").asDouble();
                                 } else if (point.has("value")) {
                                     valueMgDl = point.get("value").asDouble();
                                 } else if (point.has("glucoseValue")) {
                                     valueMgDl = point.get("glucoseValue").asDouble();
                                 }
-                                
+
                                 // Convert from mg/dL to mmol/L
                                 double valueMmolL = valueMgDl / 18.0;
-                                
-                                // Handle different possible field names for timestamp
+
+                                // FactoryTimestamp is UTC; Timestamp is local. Prefer FactoryTimestamp.
                                 String timestamp = "";
                                 if (point.has("FactoryTimestamp")) {
                                     timestamp = point.get("FactoryTimestamp").asText();
@@ -834,10 +873,10 @@ public class LibreLinkUpService {
                                 } else if (point.has("timestamp")) {
                                     timestamp = point.get("timestamp").asText();
                                 }
-                                
+
                                 int trend = point.has("Trend") ? point.get("Trend").asInt() : 0;
                                 String trendArrow = convertTrendToArrow(trend);
-                                
+
                                 // Only add valid readings
                                 if (valueMgDl > 0 && !timestamp.isEmpty()) {
                                     readings.add(new LibreGlucoseReading(
@@ -852,7 +891,7 @@ public class LibreLinkUpService {
                                 }
                             }
                         }
-                        
+
                         logger.info("Successfully fetched {} historical glucose readings for patient {}", readings.size(), patientId);
                         return new LibreGlucoseData(
                             patientId,
