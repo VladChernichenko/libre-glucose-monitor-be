@@ -27,6 +27,7 @@ public class UserDataSourceConfigDto {
     private String libreEmail;
     private String librePassword;
     private String librePatientId;
+    private String libreLocale;
     
     private Boolean isActive;
     private LocalDateTime lastUsed;

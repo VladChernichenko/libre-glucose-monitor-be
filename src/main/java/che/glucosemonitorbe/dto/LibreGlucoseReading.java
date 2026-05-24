@@ -1,10 +1,21 @@
 package che.glucosemonitorbe.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Date;
 
 public class LibreGlucoseReading {
-    
+
+    /**
+     * Sensor reading time — always stored as UTC internally.
+     * Serialised with an explicit UTC offset so the iOS JSONDecoder's ISO8601DateFormatter
+     * (which requires a timezone marker) parses it correctly regardless of the server's JVM
+     * timezone or Spring's global Jackson date-format setting.
+     * Without this the global format ("yyyy-MM-dd'T'HH:mm:ss", no suffix) causes the iOS
+     * client to misinterpret the UTC value as local time, producing a ~timezone-offset lag
+     * in the "Updated X ago" display (e.g. 3 hours behind for a UTC+3 device).
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX", timezone = "UTC")
     @JsonProperty("timestamp")
     private Date timestamp;
     
@@ -23,6 +34,7 @@ public class LibreGlucoseReading {
     @JsonProperty("unit")
     private String unit;
     
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX", timezone = "UTC")
     @JsonProperty("originalTimestamp")
     private Date originalTimestamp;
 

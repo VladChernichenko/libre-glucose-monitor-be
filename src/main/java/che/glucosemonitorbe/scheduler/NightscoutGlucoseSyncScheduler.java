@@ -57,11 +57,23 @@ public class NightscoutGlucoseSyncScheduler {
             return;
         }
         log.info("Glucose sync: {} user(s) with active Nightscout", userIds.size());
+        // Users whose active data source is LibreLinkUp: do not sync Nightscout for them
+        // (they have a dedicated LibreLinkUpGlucoseSyncScheduler).
+        List<UUID> libreUserIds = configRepository.findDistinctUserIdsByDataSourceAndIsActiveTrue(
+                UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP);
+        java.util.Set<UUID> libreUserSet = new java.util.HashSet<>(libreUserIds);
+
         int skippedByBackoff = 0;
+        int skippedLibre = 0;
         int usersWithNewData = 0;
         int usersNoChange = 0;
         int usersErrored = 0;
         for (UUID userId : userIds) {
+            if (libreUserSet.contains(userId)) {
+                skippedLibre++;
+                log.debug("Glucose sync user={} skipped: active LibreLinkUp data source", userId);
+                continue;
+            }
             try {
                 UserGlucoseSyncState state = syncStateService.getOrCreate(userId);
                 if (state.getNextPollAt() != null && now.isBefore(state.getNextPollAt())) {
@@ -123,8 +135,9 @@ public class NightscoutGlucoseSyncScheduler {
             }
         }
         log.info(
-                "Glucose sync summary: users={}, skippedByBackoff={}, newData={}, noChange={}, errors={}",
+                "Glucose sync summary: users={}, skippedLibre={}, skippedByBackoff={}, newData={}, noChange={}, errors={}",
                 userIds.size(),
+                skippedLibre,
                 skippedByBackoff,
                 usersWithNewData,
                 usersNoChange,

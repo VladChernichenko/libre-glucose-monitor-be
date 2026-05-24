@@ -49,6 +49,10 @@ public class UserDataSourceConfig {
     @Column(name = "libre_patient_id")
     private String librePatientId;
 
+    /** IETF locale tag (e.g. "fr-FR") used as Accept-Language for this LLU account's regional endpoint. */
+    @Column(name = "libre_locale", length = 20)
+    private String libreLocale;
+
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
 

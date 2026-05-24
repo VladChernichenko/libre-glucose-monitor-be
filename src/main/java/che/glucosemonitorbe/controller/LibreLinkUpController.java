@@ -1,11 +1,14 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.dto.LibreAlarms;
 import che.glucosemonitorbe.dto.LibreAuthRequest;
 import che.glucosemonitorbe.dto.LibreAuthResponse;
 import che.glucosemonitorbe.dto.LibreConnection;
 import che.glucosemonitorbe.dto.LibreGlucoseData;
 import che.glucosemonitorbe.dto.LibreGlucoseReading;
+import che.glucosemonitorbe.dto.LibreSensorInfo;
 import che.glucosemonitorbe.service.LibreLinkUpService;
+import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -35,6 +38,9 @@ public class LibreLinkUpController {
     @Autowired
     private UserService userService;
 
+    @Autowired
+    private UserDataSourceConfigService dataSourceConfigService;
+
     /** Resolve the UUID for the currently authenticated user. */
     private UUID userId(Authentication authentication) {
         return userService.getUserByUsername(authentication.getName()).getId();
@@ -49,8 +55,22 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting LibreLinkUp authentication", username);
 
-            LibreAuthResponse response = libreLinkUpService.authenticate(authRequest, userId(authentication));
+            UUID uid = userId(authentication);
+            LibreAuthResponse response = libreLinkUpService.authenticate(authRequest, uid);
             logger.info("LibreLinkUp authentication successful for user {}", username);
+
+            // Persist LLU credentials so the background scheduler can re-authenticate.
+            try {
+                dataSourceConfigService.upsertLibreConfig(
+                        uid,
+                        authRequest.getEmail(),
+                        authRequest.getPassword(),
+                        authRequest.getLocale(),
+                        null  // patientId resolved separately via /connections
+                );
+            } catch (Exception ex) {
+                logger.warn("Failed to persist LibreLinkUp config for user {}: {}", username, ex.getMessage());
+            }
 
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -60,7 +80,7 @@ public class LibreLinkUpController {
     }
 
     /**
-     * Get LibreLinkUp connections
+     * Get LibreLinkUp connections; also persists resolved patientId to the stored LLU config.
      */
     @GetMapping("/connections")
     public ResponseEntity<?> getConnections(Authentication authentication) {
@@ -68,7 +88,20 @@ public class LibreLinkUpController {
             String username = authentication.getName();
             logger.info("User {} requesting LibreLinkUp connections", username);
 
-            List<LibreConnection> connections = libreLinkUpService.getConnections(userId(authentication));
+            UUID uid = userId(authentication);
+            List<LibreConnection> connections = libreLinkUpService.getConnections(uid);
+
+            // Persist patientId from first connection so the scheduler can poll glucose data.
+            if (!connections.isEmpty()) {
+                String patientId = connections.get(0).getPatientId();
+                if (patientId != null && !patientId.isBlank()) {
+                    try {
+                        dataSourceConfigService.upsertLibreConfig(uid, null, null, null, patientId);
+                    } catch (Exception ex) {
+                        logger.warn("Failed to update patientId in LibreLinkUp config for user {}: {}", username, ex.getMessage());
+                    }
+                }
+            }
             logger.info("Retrieved {} LibreLinkUp connections for user {}", connections.size(), username);
 
             return ResponseEntity.ok(connections);
@@ -169,24 +202,49 @@ public class LibreLinkUpController {
     }
 
     /**
-     * Get raw glucose reading (unprocessed)
+     * Get active sensor information (model, serial number, activation date, days remaining).
+     * Data is extracted from the activeSensors node of the LibreLinkUp /graph response.
      */
-    @GetMapping("/connections/{patientId}/raw")
-    public ResponseEntity<?> getRawGlucoseReading(
+    @Operation(summary = "Get active sensor information for a patient")
+    @ApiResponse(responseCode = "200", description = "Sensor info returned")
+    @GetMapping("/connections/{patientId}/sensor")
+    public ResponseEntity<?> getSensorInfo(
             @PathVariable String patientId,
             Authentication authentication) {
         try {
             String username = authentication.getName();
-            logger.info("User {} requesting raw LibreLinkUp glucose reading for patient {}", username, patientId);
+            logger.info("User {} requesting sensor info for patient {}", username, patientId);
 
-            Object rawReading = libreLinkUpService.getRawGlucoseReading(patientId, userId(authentication));
-            logger.info("Retrieved raw glucose reading for patient {} and user {}", patientId, username);
+            LibreSensorInfo info = libreLinkUpService.getSensorInfo(patientId, userId(authentication));
+            logger.info("Retrieved sensor info for patient {} and user {}: {}", patientId, username, info);
 
-            return ResponseEntity.ok(rawReading);
+            return ResponseEntity.ok(info);
         } catch (Exception e) {
-            logger.error("Failed to fetch raw LibreLinkUp glucose reading for patient {} and user {}: {}", 
-                        patientId, authentication.getName(), e.getMessage());
-            return ResponseEntity.badRequest().body("Failed to fetch raw glucose reading: " + e.getMessage());
+            logger.error("Failed to fetch sensor info for patient {} and user {}: {}",
+                    patientId, authentication.getName(), e.getMessage());
+            return ResponseEntity.badRequest().body("Failed to fetch sensor info: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Get glucose alarm configuration (low threshold, high threshold, signal-loss alarm).
+     */
+    @Operation(summary = "Get glucose alarm configuration from LibreLinkUp")
+    @ApiResponse(responseCode = "200", description = "Alarm configuration returned")
+    @GetMapping("/alarms")
+    public ResponseEntity<?> getAlarms(Authentication authentication) {
+        try {
+            String username = authentication.getName();
+            logger.info("User {} requesting LibreLinkUp alarm configuration", username);
+
+            LibreAlarms alarms = libreLinkUpService.getAlarms(userId(authentication));
+            logger.info("Retrieved alarm configuration for user {}: {}", username, alarms);
+
+            return ResponseEntity.ok(alarms);
+        } catch (Exception e) {
+            logger.error("Failed to fetch LibreLinkUp alarms for user {}: {}",
+                    authentication.getName(), e.getMessage());
+            return ResponseEntity.badRequest().body("Failed to fetch alarm configuration: " + e.getMessage());
         }
     }
 }

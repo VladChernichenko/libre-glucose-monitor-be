@@ -1,8 +1,10 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.NightscoutChartDataService;
+import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -31,6 +33,7 @@ public class NightscoutController {
     private final NightScoutIntegration nightScoutIntegration;
     private final NightscoutChartDataService chartDataService;
     private final UserService userService;
+    private final UserDataSourceConfigService dataSourceConfigService;
     
     @Operation(summary = "Get recent glucose entries from Nightscout or stored cache")
     @ApiResponses({ @ApiResponse(responseCode = "200", description = "Glucose entries returned"),
@@ -209,20 +212,31 @@ public class NightscoutController {
             @RequestParam(value = "count", defaultValue = "100") int count,
             Authentication authentication) {
         log.info("User {} requesting {} stored chart data entries", authentication.getName(), count);
-        
-        // Get user UUID
+
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
-        
-        // Get stored chart data
+
         List<NightscoutEntryDto> chartData = chartDataService.getChartDataAsEntries(userId);
-        
+
+        // For LibreLinkUp users, only return entries written by the LLU scheduler
+        // (id prefix "llu-"). This filters out any stale Nightscout data that may
+        // remain in the table from a previous data-source configuration.
+        boolean isLibreUser = dataSourceConfigService
+                .getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)
+                .isPresent();
+        if (isLibreUser) {
+            chartData = chartData.stream()
+                    .filter(e -> e.getId() != null && e.getId().startsWith("llu-"))
+                    .collect(java.util.stream.Collectors.toList());
+        }
+
         // Most recent `count` points (stored ascending by time)
         if (chartData.size() > count) {
             int from = Math.max(0, chartData.size() - count);
             chartData = chartData.subList(from, chartData.size());
         }
-        
-        log.info("Retrieved {} stored chart data entries for user {}", chartData.size(), authentication.getName());
+
+        log.info("Retrieved {} stored chart data entries for user {} (libreFiltered={})",
+                chartData.size(), authentication.getName(), isLibreUser);
         return ResponseEntity.ok(chartData);
     }
     

@@ -27,6 +27,7 @@ public class DataSourceConfigRequestDto {
     private String libreEmail;
     private String librePassword;
     private String librePatientId;
+    private String libreLocale;
     
     @Builder.Default
     private Boolean isActive = true;

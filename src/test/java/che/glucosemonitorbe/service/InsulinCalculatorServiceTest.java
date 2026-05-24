@@ -218,6 +218,70 @@ class InsulinCalculatorServiceTest {
         assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
     }
 
+    // ── NotebookLM scenario 3: DIA edge cases ────────────────────────────────
+
+    @Test
+    void diaZero_failSafe_returnsZeroNotDivisionByZero() {
+        LocalDateTime t = LocalDateTime.of(2025, 6, 1, 12, 0);
+        InsulinDose dose = InsulinDose.builder().timestamp(t).units(4.0).build();
+        // diaHours=0 is guarded by the `if (diaHours <= 0)` check → must return 0, not throw
+        assertEquals(0.0, service.calculateRemainingInsulin(dose, t, 0.0, 55.0), 1e-9);
+    }
+
+    @Test
+    void peakMinutesZero_failSafe_returnsZero() {
+        LocalDateTime t = LocalDateTime.of(2025, 6, 1, 12, 0);
+        InsulinDose dose = InsulinDose.builder().timestamp(t).units(4.0).build();
+        assertEquals(0.0, service.calculateRemainingInsulin(dose, t, 4.5, 0.0), 1e-9);
+    }
+
+    @Test
+    void diaExactBoundary_atEndMinusOne_nonZero() {
+        // t = DIA*60 - 1 (still within window)
+        LocalDateTime doseTime = LocalDateTime.of(2025, 6, 1, 8, 0);
+        double diaHours = 5.0;
+        LocalDateTime almostExpired = doseTime.plusMinutes((long)(diaHours * 60) - 1);
+        InsulinDose dose = InsulinDose.builder().timestamp(doseTime).units(4.0).build();
+        assertThat(service.calculateRemainingInsulin(dose, almostExpired, diaHours, 75.0))
+                .isGreaterThan(0.0);
+    }
+
+    @Test
+    void diaExactBoundary_atEndMinutes_returnsZero() {
+        // t = DIA*60 (exactly at boundary → 0)
+        LocalDateTime doseTime = LocalDateTime.of(2025, 6, 1, 8, 0);
+        double diaHours = 5.0;
+        LocalDateTime atExpiry = doseTime.plusMinutes((long)(diaHours * 60));
+        InsulinDose dose = InsulinDose.builder().timestamp(doseTime).units(4.0).build();
+        assertEquals(0.0, service.calculateRemainingInsulin(dose, atExpiry, diaHours, 75.0), 1e-9);
+    }
+
+    @Test
+    void openApsExponential_nearZeroDenominator_fallsBackToLinear() {
+        // denom = 1 - 2*peak/end; when peak = end/2, denom ≈ 0 → linear fallback
+        double diaHours = 4.0;
+        double endMin = diaHours * 60.0;          // 240
+        double peakMin = endMin / 2.0;             // 120 → denom = 0
+        double units = 5.0;
+        double t = 60.0;
+
+        double iob = InsulinCalculatorService.iobOpenApsExponential(units, t, diaHours, peakMin);
+        // Linear fallback: units * max(0, 1 - t/end) = 5 * (1 - 60/240) = 5 * 0.75 = 3.75
+        assertThat(iob).isCloseTo(3.75, within(0.05));
+        assertThat(iob).isBetween(0.0, units);
+    }
+
+    @Test
+    void openApsExponential_nanGuard_neverReturnsNaN() {
+        // Pathological inputs that could produce NaN — must always get a finite value
+        for (double peak : new double[]{0.001, 135.0, 269.9}) {
+            double iob = InsulinCalculatorService.iobOpenApsExponential(5.0, 60.0, 4.5, peak);
+            assertThat(Double.isNaN(iob)).isFalse();
+            assertThat(Double.isInfinite(iob)).isFalse();
+            assertThat(iob).isBetween(0.0, 5.0 + 1e-9);
+        }
+    }
+
     @Test
     void recommendedInsulin_activeInsulinSubtracted() {
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
