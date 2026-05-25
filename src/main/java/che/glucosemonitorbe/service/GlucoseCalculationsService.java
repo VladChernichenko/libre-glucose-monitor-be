@@ -52,6 +52,7 @@ public class GlucoseCalculationsService {
     private static final int PREDICTION_PATH_MINUTES = 240;       // default 4 h
     private static final int PREDICTION_PATH_MAX_MINUTES = 480;   // ceiling 8 h (HFHP / Dual Wave)
     private static final int PREDICTION_PATH_STEP_MINUTES = 1;
+    private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 5;
     private final COBSettingsService cOBSettingsService;
 
     /**
@@ -102,7 +103,7 @@ public class GlucoseCalculationsService {
         RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userUUID);
         
         // Calculate active carbs on board
-        double activeCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userUUID);
+        double activeCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
         
         // Calculate active insulin on board (bolus IOB curve from user's rapid insulin catalog)
         double activeIOB = insulinCalculatorService.calculateTotalActiveInsulin(
@@ -113,7 +114,7 @@ public class GlucoseCalculationsService {
             request.getPredictionHorizonMinutes() : PREDICTION_HORIZON_MINUTES;
         LocalDateTime predictionTime = currentTime.plusMinutes((long) predictionHorizon);
         
-        double futureCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, predictionTime, userUUID);
+        double futureCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, predictionTime, userSettings);
         double futureIOB = insulinCalculatorService.calculateTotalActiveInsulin(
                 insulinEntries, predictionTime, rapidIob.diaHours(), rapidIob.peakMinutes());
         
@@ -190,28 +191,25 @@ public class GlucoseCalculationsService {
         double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
-        double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userUUID);
+        double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
         double activeIobNow = insulinCalculatorService.calculateTotalActiveInsulin(
                 insulinEntries, currentTime, rapidIob.diaHours(), rapidIob.peakMinutes());
 
-        // Extend path for HFHP / Dual Wave meals — delayed glucose tail can peak 3–6 h after eating
-        // and requires 8–10 h monitoring (Warsaw Method, ADA/ISPAD guidelines).
         int pathMinutes = resolvePathDurationMinutes(carbsEntries);
 
         List<PredictionPointDTO> points = new ArrayList<>();
+        final double diaHours = rapidIob.diaHours();
+        final double peakMinutes = rapidIob.peakMinutes();
+        final String pathAbsorptionMode = resolvePathAbsorptionMode(carbsEntries);
 
-        for (int minute = PREDICTION_PATH_STEP_MINUTES; minute <= pathMinutes; minute += PREDICTION_PATH_STEP_MINUTES) {
+        for (int minute = PREDICTION_PATH_STEP_MINUTES; minute <= pathMinutes; ) {
             LocalDateTime t = currentTime.plusMinutes(minute);
-            double cobAtT = cobService.calculateTotalCarbsOnBoard(carbsEntries, t, userUUID);
+            double cobAtT = cobService.calculateTotalCarbsOnBoard(carbsEntries, t, userSettings);
             double iobAtT = insulinCalculatorService.calculateTotalActiveInsulin(
-                    insulinEntries, t, rapidIob.diaHours(), rapidIob.peakMinutes());
+                    insulinEntries, t, diaHours, peakMinutes);
 
-            // Dynamic path: glucose impact comes from "delivered" effect between now and t.
-            // As COB decays, absorbed carbs tend to raise glucose.
             double carbsDeliveredEffect = ((activeCobNow - cobAtT) / 10.0) * userCarbRatio;
-            // As IOB decays, delivered insulin tends to lower glucose.
             double insulinDeliveredEffect = -((activeIobNow - iobAtT) * userISF);
-            // Spread pre-bolus timing effect over first 2h so path stays continuous at "now".
             double timingProgress = Math.min(1.0, minute / PREDICTION_HORIZON_MINUTES);
             double timingEffect = preBolusTimingContribution * timingProgress;
 
@@ -222,8 +220,13 @@ public class GlucoseCalculationsService {
                     .predictedGlucose(Math.round(predicted * 10.0) / 10.0)
                     .carbAbsorptionEffect(Math.round(carbsDeliveredEffect * 100.0) / 100.0)
                     .insulinActivityEffect(Math.round(insulinDeliveredEffect * 100.0) / 100.0)
-                    .absorptionMode(resolvePathAbsorptionMode(carbsEntries))
+                    .absorptionMode(pathAbsorptionMode)
                     .build());
+
+            int step = minute <= PREDICTION_PATH_MINUTES
+                    ? PREDICTION_PATH_STEP_MINUTES
+                    : PREDICTION_PATH_STEP_SPARSE_MINUTES;
+            minute += step;
         }
         return points;
     }

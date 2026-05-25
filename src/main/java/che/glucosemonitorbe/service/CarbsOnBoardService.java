@@ -124,6 +124,14 @@ public class CarbsOnBoardService {
             return 0.0;
         }
         COBSettingsDTO cobSettings = cOBSettingsService.getCOBSettings(userId);
+        return calculateTotalCarbsOnBoard(entries, currentTime, cobSettings);
+    }
+
+    /** Batch COB with pre-loaded settings (no per-iteration settings lookup). */
+    public double calculateTotalCarbsOnBoard(List<CarbsEntry> entries, LocalDateTime currentTime, COBSettingsDTO cobSettings) {
+        if (entries == null || entries.isEmpty()) {
+            return 0.0;
+        }
         return entries.stream()
                 .filter(e -> e != null && e.getCarbs() != null && e.getCarbs() > 0)
                 .mapToDouble(entry -> calculateRemainingCarbs(entry, currentTime, cobSettings))

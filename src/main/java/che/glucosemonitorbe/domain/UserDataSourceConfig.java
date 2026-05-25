@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.domain;
 
+import che.glucosemonitorbe.security.EncryptedStringConverter;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -33,9 +34,11 @@ public class UserDataSourceConfig {
     @Column(name = "nightscout_url")
     private String nightscoutUrl;
 
+    @Convert(converter = EncryptedStringConverter.class)
     @Column(name = "nightscout_api_secret")
     private String nightscoutApiSecret;
 
+    @Convert(converter = EncryptedStringConverter.class)
     @Column(name = "nightscout_api_token")
     private String nightscoutApiToken;
 
@@ -43,6 +46,7 @@ public class UserDataSourceConfig {
     @Column(name = "libre_email")
     private String libreEmail;
 
+    @Convert(converter = EncryptedStringConverter.class)
     @Column(name = "libre_password")
     private String librePassword;
 

@@ -308,7 +308,7 @@ public class UserDataSourceConfigService {
                 .dataSource(config.getDataSource())
                 .nightscoutUrl(config.getNightscoutUrl())
                 .nightscoutApiSecret(null)
-                .nightscoutApiToken(config.getNightscoutApiToken())
+                .nightscoutApiToken(null)
                 .libreEmail(config.getLibreEmail())
                 .librePassword(null)
                 .librePatientId(config.getLibrePatientId())
