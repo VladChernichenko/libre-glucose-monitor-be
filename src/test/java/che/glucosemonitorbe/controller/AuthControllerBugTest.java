@@ -131,26 +131,23 @@ class AuthControllerBugTest {
                 .andExpect(status().isOk());
     }
 
-    // ── A5: /logout-all is an unimplemented stub — must return 501 ───────────
-
-    /**
-     * // BUG: A5 — AuthController.logoutAllDevices calls authService.logoutAllDevices
-     * which is a no-op stub (see BE-7). Returning HTTP 200 OK for an operation that
-     * does nothing is misleading — clients believe all devices were logged out.
-     * The endpoint must return HTTP 501 Not Implemented until the real blacklisting
-     * logic is in place.
-     *
-     * This test FAILS because current code returns HTTP 200.
-     */
     @Test
-    void a5_logoutAllDevices_stubMustReturn501NotImplemented() throws Exception {
-        // The controller now always returns 501 — no authService call needed.
-        // SecurityContextHolder setup is kept to document the original test intent.
+    void a5_logoutAllDevices_whenAuthenticated_returns200() throws Exception {
+        when(authService.logoutAllDevices(anyString()))
+                .thenReturn(LogoutResponse.success("Logged out from all devices"));
+
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("testuser", null, List.of()));
 
         mockMvc.perform(post("/api/auth/logout-all")
                         .contentType(MediaType.APPLICATION_JSON))
-                .andExpect(status().isNotImplemented()); // 501
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void a5_logoutAllDevices_whenUnauthenticated_returns401() throws Exception {
+        mockMvc.perform(post("/api/auth/logout-all")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnauthorized());
     }
 }

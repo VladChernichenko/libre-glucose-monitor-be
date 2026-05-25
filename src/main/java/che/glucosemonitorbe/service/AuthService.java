@@ -145,7 +145,7 @@ public class AuthService {
             // A full implementation would iterate all active session tokens from a
             // per-user token store; that store is not yet built (see ADR for Phase 2).
             log.info("Logout all devices requested for user: {}", username);
-            tokenBlacklistService.blacklistToken("LOGOUT_ALL_DEVICES:" + username);
+            tokenBlacklistService.blacklistAllDevicesForUser(username);
             return LogoutResponse.success("Logged out from all devices");
         } catch (Exception e) {
             log.error("Error during logout all devices: {}", e.getMessage());

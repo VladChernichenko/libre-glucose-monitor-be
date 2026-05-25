@@ -46,6 +46,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (isValidToken && !isRefreshToken && !isBlacklisted) {
                     String username = tokenProvider.getUsernameFromToken(jwt);
 
+                    if (tokenBlacklistService.isUserGloballyLoggedOut(username)) {
+                        log.warn("JWT rejected for {}: user logged out from all devices", username);
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+
                     UserDetails userDetails = userDetailsService.loadUserByUsername(username);
                     UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                             userDetails, null, userDetails.getAuthorities());

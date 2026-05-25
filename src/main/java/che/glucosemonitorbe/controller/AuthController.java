@@ -21,7 +21,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
-@Tag(name = "Auth", description = "Authentication — login, register, logout, token refresh")
+@Tag(name = "Auth", description = "Authentication - login, register, logout, token refresh")
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -67,12 +67,20 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(summary = "Logout from all devices for the authenticated user")
     @PostMapping("/logout-all")
-    public ResponseEntity<LogoutResponse> logoutAllDevices(HttpServletRequest request) {
-        // BUG A5/BE-7 fix: server-side "logout all devices" is not implemented (no per-user
-        // token store). Return 501 so clients know not to rely on this endpoint.
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
-                .body(LogoutResponse.error("Logout from all devices is not yet implemented"));
+    public ResponseEntity<LogoutResponse> logoutAllDevices() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()
+                || authentication.getName() == null || authentication.getName().isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(LogoutResponse.error("Authentication required"));
+        }
+        LogoutResponse response = authService.logoutAllDevices(authentication.getName());
+        if (!response.isSuccess()) {
+            return ResponseEntity.badRequest().body(response);
+        }
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/test")

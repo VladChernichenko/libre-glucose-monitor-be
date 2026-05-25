@@ -27,7 +27,10 @@ import java.util.concurrent.TimeUnit;
 @Service
 @Slf4j
 public class TokenBlacklistService {
-    
+
+    /** Sentinel prefix for logout-all-devices (not a JWT). */
+    public static final String LOGOUT_ALL_DEVICES_PREFIX = "LOGOUT_ALL_DEVICES:";
+
     // Map of token -> expiration timestamp (milliseconds)
     private final Map<String, Long> blacklistedTokens = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
@@ -75,8 +78,43 @@ public class TokenBlacklistService {
     /**
      * Add a token to the blacklist with its expiration time
      */
+    /**
+     * Invalidate all sessions for a user until re-login (logout-all-devices).
+     */
+    public void blacklistAllDevicesForUser(String username) {
+        if (username == null || username.isBlank()) {
+            return;
+        }
+        String sentinel = LOGOUT_ALL_DEVICES_PREFIX + username.trim();
+        long expiration = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(30);
+        blacklistedTokens.put(sentinel, expiration);
+        log.info("Global logout sentinel registered for user {} until {}", username, new Date(expiration));
+    }
+
+    public boolean isUserGloballyLoggedOut(String username) {
+        if (username == null || username.isBlank()) {
+            return false;
+        }
+        String sentinel = LOGOUT_ALL_DEVICES_PREFIX + username.trim();
+        Long expirationTime = blacklistedTokens.get(sentinel);
+        if (expirationTime == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() > expirationTime) {
+            blacklistedTokens.remove(sentinel);
+            return false;
+        }
+        return true;
+    }
+
     public void blacklistToken(String token) {
         if (token != null && !token.trim().isEmpty()) {
+            if (token.startsWith(LOGOUT_ALL_DEVICES_PREFIX)) {
+                blacklistedTokens.put(
+                        token,
+                        System.currentTimeMillis() + TimeUnit.DAYS.toMillis(30));
+                return;
+            }
             Long expirationTime = extractExpirationTime(token);
             
             if (expirationTime != null) {
