@@ -14,28 +14,50 @@ import java.util.Map;
 public class CircuitBreakerManager {
     
     private final Map<String, CircuitBreaker> circuitBreakers = new ConcurrentHashMap<>();
-    
+
     // Default configuration
     private static final int DEFAULT_FAILURE_THRESHOLD = 5;
     private static final long DEFAULT_TIMEOUT_DURATION_MS = 60000; // 1 minute
     private static final int DEFAULT_HALF_OPEN_MAX_CALLS = 3;
+
+    /**
+     * BE-P1-2 fix: cap the number of per-user circuit-breaker entries so the map does not grow
+     * unboundedly if many user IDs rotate through (e.g. after a Redis-backed session store is
+     * introduced). When the cap is hit we still create the breaker but log a warning so ops
+     * can tune the limit or enable Redis-backed breakers.
+     */
+    private static final int MAX_CIRCUIT_BREAKERS = 2000;
     
     /**
-     * Get or create a circuit breaker for a service
+     * Get or create a circuit breaker for a service.
+     * <p>
+     * BE-P1-2: callers should scope {@code serviceName} per user
+     * (e.g. {@code "libre-glucose-data:" + userId}) so one user's failures cannot open
+     * the breaker for all other users.
      */
     public CircuitBreaker getCircuitBreaker(String serviceName) {
+        if (circuitBreakers.size() >= MAX_CIRCUIT_BREAKERS && !circuitBreakers.containsKey(serviceName)) {
+            log.warn("CircuitBreakerManager: map size {} reached cap {}; creating transient breaker for {}",
+                    circuitBreakers.size(), MAX_CIRCUIT_BREAKERS, serviceName);
+            return new CircuitBreaker(serviceName, DEFAULT_FAILURE_THRESHOLD, DEFAULT_TIMEOUT_DURATION_MS, DEFAULT_HALF_OPEN_MAX_CALLS);
+        }
         return circuitBreakers.computeIfAbsent(serviceName, name -> {
-            log.info("Creating circuit breaker for service: {}", name);
+            log.debug("Creating circuit breaker for service: {}", name);
             return new CircuitBreaker(name, DEFAULT_FAILURE_THRESHOLD, DEFAULT_TIMEOUT_DURATION_MS, DEFAULT_HALF_OPEN_MAX_CALLS);
         });
     }
-    
+
     /**
-     * Get or create a circuit breaker with custom configuration
+     * Get or create a circuit breaker with custom configuration.
      */
     public CircuitBreaker getCircuitBreaker(String serviceName, int failureThreshold, long timeoutDurationMs, int halfOpenMaxCalls) {
+        if (circuitBreakers.size() >= MAX_CIRCUIT_BREAKERS && !circuitBreakers.containsKey(serviceName)) {
+            log.warn("CircuitBreakerManager: map size {} reached cap {}; creating transient breaker for {}",
+                    circuitBreakers.size(), MAX_CIRCUIT_BREAKERS, serviceName);
+            return new CircuitBreaker(serviceName, failureThreshold, timeoutDurationMs, halfOpenMaxCalls);
+        }
         return circuitBreakers.computeIfAbsent(serviceName, name -> {
-            log.info("Creating circuit breaker for service: {} with custom config", name);
+            log.debug("Creating circuit breaker for service: {} with custom config", name);
             return new CircuitBreaker(name, failureThreshold, timeoutDurationMs, halfOpenMaxCalls);
         });
     }

@@ -109,8 +109,13 @@ public class LibreLinkUpService {
         }
     }
 
-    public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager) {
-        this.restTemplate = new RestTemplate();
+    /**
+     * BE-P1-7 fix: accept a configured {@link RestTemplate} bean (timeouts set in
+     * {@link che.glucosemonitorbe.config.RestTemplateConfig}) instead of creating a raw
+     * {@code new RestTemplate()} with no timeouts or connection-pool bounds.
+     */
+    public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager, RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
         this.objectMapper = new ObjectMapper();
         this.circuitBreakerManager = circuitBreakerManager;
     }
@@ -270,7 +275,7 @@ public class LibreLinkUpService {
      * BE-1 fix: credentials are keyed by userId — no more shared singleton state.
      */
     public LibreAuthResponse authenticate(LibreAuthRequest authRequest, UUID userId) throws Exception {
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-auth");
+        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-auth:" + userId);
         try {
             return circuitBreaker.execute(() -> {
                 try {
@@ -394,7 +399,7 @@ public class LibreLinkUpService {
      * Authenticate with region-specific endpoint. Stores credentials per userId.
      */
     private LibreAuthResponse authenticateWithRegion(LibreAuthRequest authRequest, String region, UUID userId) throws Exception {
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-auth-region");
+        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-auth-region:" + userId);
         try {
             return circuitBreaker.execute(() -> {
                 try {
@@ -503,7 +508,7 @@ public class LibreLinkUpService {
         }
         String baseUrl = baseUrlFor(userId);
 
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-connections");
+        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-connections:" + userId);
 
         return circuitBreaker.executeWithFallback(
             () -> {
@@ -570,7 +575,7 @@ public class LibreLinkUpService {
         }
         String baseUrl = baseUrlFor(userId);
 
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-data");
+        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-data:" + userId);
         
         return circuitBreaker.executeWithFallback(
             () -> {
@@ -725,7 +730,7 @@ public class LibreLinkUpService {
         }
         String baseUrl = baseUrlFor(userId);
 
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-profile");
+        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-profile:" + userId);
 
         return circuitBreaker.executeWithFallback(
             () -> {
@@ -861,7 +866,7 @@ public class LibreLinkUpService {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
         }
         String baseUrl = baseUrlFor(userId);
-        CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-sensor-info");
+        CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-sensor-info:" + userId);
 
         return cb.executeWithFallback(
             () -> {
@@ -951,7 +956,7 @@ public class LibreLinkUpService {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
         }
         String baseUrl = baseUrlFor(userId);
-        CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-alarms");
+        CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-alarms:" + userId);
 
         return cb.executeWithFallback(
             () -> {

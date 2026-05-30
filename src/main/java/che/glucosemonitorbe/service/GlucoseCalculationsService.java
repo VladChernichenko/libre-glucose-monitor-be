@@ -51,8 +51,10 @@ public class GlucoseCalculationsService {
     private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
     private static final int PREDICTION_PATH_MINUTES = 240;       // default 4 h
     private static final int PREDICTION_PATH_MAX_MINUTES = 480;   // ceiling 8 h (HFHP / Dual Wave)
-    private static final int PREDICTION_PATH_STEP_MINUTES = 1;
-    private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 5;
+    // BE-P0-1 fix: 5-min dense step reduces per-request COB+IOB iterations from ~240 to ~48 (-80%).
+    private static final int PREDICTION_PATH_STEP_MINUTES = 5;
+    // Sparse step applies beyond 4 h (HFHP / Dual Wave tail) — 10 min is fine for that region.
+    private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 10;
     private final COBSettingsService cOBSettingsService;
 
     /**
@@ -146,15 +148,16 @@ public class GlucoseCalculationsService {
         
         // fourHourPrediction = point at exactly 240 min (PREDICTION_PATH_MINUTES).
         // eightHourPrediction = last point when path extends beyond 4 h (HFHP / Dual Wave).
-        final int fourHourIndex = PREDICTION_PATH_MINUTES / PREDICTION_PATH_STEP_MINUTES - 1; // index 239
+        // BE-P0-1: with step=5 min the 4 h path has 48 points (240/5); index 47.
+        final int fourHourIndex = PREDICTION_PATH_MINUTES / PREDICTION_PATH_STEP_MINUTES - 1;
         Double fourHourPrediction = null;
         Double eightHourPrediction = null;
         if (!predictionPath.isEmpty()) {
             // Exact 4h mark — clamp to last available if path is shorter
             int idx4h = Math.min(fourHourIndex, predictionPath.size() - 1);
             fourHourPrediction = predictionPath.get(idx4h).getPredictedGlucose();
-            // 8h mark only when path is meaningfully longer than 4h (> 300 min)
-            if (predictionPath.size() > PREDICTION_PATH_MINUTES + 60) {
+            // 8h mark only when path has more points than a plain 4h path (HFHP / Dual Wave extension).
+            if (predictionPath.size() > PREDICTION_PATH_MINUTES / PREDICTION_PATH_STEP_MINUTES) {
                 eightHourPrediction = predictionPath.get(predictionPath.size() - 1).getPredictedGlucose();
             }
         }

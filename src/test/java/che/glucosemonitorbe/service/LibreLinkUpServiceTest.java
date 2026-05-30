@@ -2,6 +2,7 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.web.client.RestTemplate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,8 +25,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * - BE-1: per-user credential isolation (tokenStore keyed by userId)
  * - BE-2: getConnections unwraps the {"data":[...]} envelope
  *
- * LibreLinkUpService constructs its own RestTemplate internally, so HTTP calls are
- * not intercepted here. Instead the tests operate directly through the public API
+ * LibreLinkUpService accepts an injected RestTemplate (BE-P1-7). Tests pass a plain
+ * new RestTemplate() — HTTP calls are not expected. Tests operate through the public API
  * (isAuthenticated / logout) and via reflection on the tokenStore ConcurrentHashMap
  * to verify the per-user isolation contract without requiring a live network.
  */
@@ -37,7 +38,7 @@ class LibreLinkUpServiceTest {
     @BeforeEach
     void setUp() {
         CircuitBreakerManager cbm = new CircuitBreakerManager();
-        service = new LibreLinkUpService(cbm);
+        service = new LibreLinkUpService(cbm, new RestTemplate());
     }
 
     // Helper: inject a token directly into the tokenStore via reflection

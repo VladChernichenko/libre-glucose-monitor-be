@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.security;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +32,7 @@ public class CredentialEncryption {
     private final SecretKey secretKey;
     private final boolean usingDevFallback;
 
+    @Autowired
     public CredentialEncryption(@Value("${app.credentials.encryption-key:}") String configuredKey) {
         String keyMaterial = configuredKey == null || configuredKey.isBlank()
                 ? DEV_FALLBACK_KEY

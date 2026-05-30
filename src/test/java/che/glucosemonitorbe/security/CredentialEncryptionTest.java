@@ -11,7 +11,7 @@ class CredentialEncryptionTest {
 
     @BeforeEach
     void setUp() {
-        encryption = new CredentialEncryption(false, "test-encryption-key-for-unit-tests");
+        encryption = new CredentialEncryption("test-encryption-key-for-unit-tests");
         CredentialEncryptionHolder.set(encryption);
     }
 

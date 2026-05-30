@@ -52,7 +52,8 @@ public class NightScoutIntegration {
      */
     @Cacheable(value = CacheConfig.CACHE_NIGHTSCOUT_ENTRIES, key = "#userId + ':' + #count")
     public List<NightscoutEntryDto> getGlucoseEntries(UUID userId, int count) {
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("nightscout-entries");
+        // BE-P1-2 fix: per-user key prevents one user's NS failures from opening the global breaker.
+        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("nightscout-entries:" + userId);
 
         return circuitBreaker.executeWithFallback(
             () -> {
@@ -126,7 +127,8 @@ public class NightScoutIntegration {
     }
     
     public List<NightscoutEntryDto> getGlucoseEntriesByDate(UUID userId, Instant startDate, Instant endDate) {
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("nightscout-entries-by-date");
+        // BE-P1-2 fix: per-user key.
+        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("nightscout-entries-by-date:" + userId);
         
         return circuitBreaker.executeWithFallback(
             () -> {

@@ -109,7 +109,7 @@ class GlucoseCalculationsServiceTest {
                 .thenReturn(List.of());
 
         // Stub cobService to return 0.0
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any())).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
 
         // Stub insulin preferences and calculator
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
@@ -177,7 +177,7 @@ class GlucoseCalculationsServiceTest {
                 .thenReturn(List.of(hfhpNote)); // 8h window includes the HFHP note
 
         ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
-        when(cobService.calculateTotalCarbsOnBoard(carbsCaptor.capture(), any(), any())).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(carbsCaptor.capture(), any(LocalDateTime.class), any(COBSettingsDTO.class))).thenReturn(0.0);
 
         // Required stubs for the calculation pipeline
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
@@ -390,7 +390,7 @@ class GlucoseCalculationsServiceTest {
         when(noteRepository.findByUserIdAndTimestampBetween(
                 any(UUID.class), any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(List.of());
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any())).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(LocalDateTime.class), any(COBSettingsDTO.class))).thenReturn(0.0);
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
                 .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
