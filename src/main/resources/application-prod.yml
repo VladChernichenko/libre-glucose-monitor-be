@@ -1,4 +1,9 @@
 spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.mongo.MongoRepositoriesAutoConfiguration
   datasource:
     # Set via env (Neon JDBC, Render, etc.). Do not commit secrets. Example: jdbc:postgresql://host/db?sslmode=require&user=...&password=...
     url: ${DATABASE_URL}
@@ -56,3 +61,6 @@ app:
     url: ${NIGHTSCOUT_URL:}
     api-secret: ${NIGHTSCOUT_API_SECRET:}
     api-token: ${NIGHTSCOUT_API_TOKEN:}
+
+mongodb:
+  enabled: false
