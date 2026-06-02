@@ -100,13 +100,7 @@ public class LibreLinkUpService {
                     JsonNode jsonResponse = client.parse(response);
                     logger.info("LibreLinkUp auth response: {}", jsonResponse.toString());
 
-                    if (jsonResponse.has("error")) {
-                        JsonNode errorNode = jsonResponse.get("error");
-                        String errorMessage = errorNode.isObject()
-                                ? errorNode.path("message").asText(errorNode.toString())
-                                : errorNode.asText();
-                        throw new RuntimeException("LibreLinkUp authentication error: " + errorMessage);
-                    }
+                    throwIfApiError(jsonResponse, "LibreLinkUp authentication error: ");
 
                     JsonNode data = jsonResponse.get("data");
                     if (data != null && data.has("redirect") && data.get("redirect").asBoolean()) {
@@ -248,27 +242,9 @@ public class LibreLinkUpService {
                     String url = baseUrl + "/llu/connections";
                     logger.info("Fetching LibreLinkUp connections from {}", url);
                     JsonNode jsonResponse = client.authenticatedGet(userId, url);
+                    throwIfApiError(jsonResponse, "LibreLinkUp connections error: ");
 
-                    if (jsonResponse.has("error")) {
-                        JsonNode e = jsonResponse.get("error");
-                        throw new RuntimeException("LibreLinkUp connections error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
-                    }
-
-                    List<LibreConnection> connections = new ArrayList<>();
-                    // BE-2: API returns {"data":[...]} — unwrap the envelope.
-                    JsonNode dataNode = jsonResponse.get("data");
-                    if (dataNode != null && dataNode.isArray()) {
-                        for (JsonNode connection : dataNode) {
-                            String patientId = connection.has("patientId") ? connection.get("patientId").asText() : "";
-                            String firstName = connection.has("firstName") ? connection.get("firstName").asText() : "";
-                            String lastName  = connection.has("lastName")  ? connection.get("lastName").asText()  : "";
-                            String status    = connection.has("status")    ? connection.get("status").asText()    : "active";
-                            String lastSync  = connection.has("lastSync")  ? connection.get("lastSync").asText()  : Instant.now().toString();
-
-                            connections.add(new LibreConnection(firstName + " " + lastName, patientId, status, lastSync));
-                        }
-                    }
-
+                    List<LibreConnection> connections = responseParser.toConnections(jsonResponse);
                     logger.info("Successfully fetched {} LibreLinkUp connections for user {}", connections.size(), userId);
                     return connections;
                 } catch (Exception e) {
@@ -295,93 +271,11 @@ public class LibreLinkUpService {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
                     logger.info("Fetching LibreLinkUp glucose data for patient {} from {}", patientId, url);
                     JsonNode jsonResponse = client.authenticatedGet(userId, url);
+                    throwIfApiError(jsonResponse, "LibreLinkUp glucose data error: ");
 
-                    if (jsonResponse.has("error")) {
-                        JsonNode e = jsonResponse.get("error");
-                        throw new RuntimeException("LibreLinkUp glucose data error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
-                    }
-
-                    List<LibreGlucoseReading> readings = new ArrayList<>();
-                    // LLU graph envelope: {"status":0,"data":{"graphData":[...],...}}
-                    JsonNode dataEnvelope = jsonResponse.get("data");
-                    JsonNode graphData = dataEnvelope != null ? dataEnvelope.get("graphData") : jsonResponse.get("graphData");
-                    logger.info("LLU graph response structure: dataEnvelope={}, graphData size={}",
-                            dataEnvelope != null ? "present" : "absent",
-                            graphData != null && graphData.isArray() ? graphData.size() : "null/not-array");
-                    if (graphData != null && graphData.isArray()) {
-                        for (JsonNode point : graphData) {
-                            // ValueInMgPerDl is always mg/dL regardless of account unit setting.
-                            double valueMgDl = 0;
-                            if (point.has("ValueInMgPerDl")) {
-                                valueMgDl = point.get("ValueInMgPerDl").asDouble();
-                            } else if (point.has("value")) {
-                                valueMgDl = point.get("value").asDouble();
-                            } else if (point.has("glucoseValue")) {
-                                valueMgDl = point.get("glucoseValue").asDouble();
-                            }
-
-                            double valueMmolL = valueMgDl / 18.0;
-
-                            // FactoryTimestamp is UTC; Timestamp is local. Prefer FactoryTimestamp.
-                            String timestamp = "";
-                            if (point.has("FactoryTimestamp")) {
-                                timestamp = point.get("FactoryTimestamp").asText();
-                            } else if (point.has("Timestamp")) {
-                                timestamp = point.get("Timestamp").asText();
-                            } else if (point.has("timestamp")) {
-                                timestamp = point.get("timestamp").asText();
-                            }
-
-                            int trend = point.has("Trend") ? point.get("Trend").asInt() : 0;
-                            if (valueMgDl > 0 && !timestamp.isEmpty()) {
-                                readings.add(new LibreGlucoseReading(
-                                    responseParser.parseTimestamp(timestamp),
-                                    valueMmolL,
-                                    trend,
-                                    responseParser.trendToArrow(trend),
-                                    responseParser.glucoseStatus(valueMmolL),
-                                    "mmol/L",
-                                    responseParser.parseTimestamp(timestamp)
-                                ));
-                            }
-                        }
-                    }
-
-                    // connection.glucoseMeasurement is the live reading and can be newer than the last graphData entry.
-                    if (dataEnvelope != null) {
-                        JsonNode conn = dataEnvelope.get("connection");
-                        JsonNode gm = conn != null ? conn.get("glucoseMeasurement") : null;
-                        if (gm != null) {
-                            double valueMgDl = gm.has("ValueInMgPerDl") ? gm.get("ValueInMgPerDl").asDouble()
-                                             : gm.has("Value")          ? gm.get("Value").asDouble() : 0;
-                            String ts = gm.has("FactoryTimestamp") ? gm.get("FactoryTimestamp").asText()
-                                      : gm.has("Timestamp")        ? gm.get("Timestamp").asText() : "";
-                            int trend = gm.has("Trend") ? gm.get("Trend").asInt() : 0;
-                            if (valueMgDl > 0 && !ts.isEmpty()) {
-                                Date gmDate = responseParser.parseTimestamp(ts);
-                                boolean isNewer = readings.isEmpty()
-                                        || gmDate.after(readings.get(readings.size() - 1).getTimestamp());
-                                if (isNewer) {
-                                    double mmol = valueMgDl / 18.0;
-                                    readings.add(new LibreGlucoseReading(
-                                        gmDate, mmol, trend, responseParser.trendToArrow(trend),
-                                        responseParser.glucoseStatus(mmol), "mmol/L", gmDate
-                                    ));
-                                    logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
-                                        valueMgDl, trend, patientId);
-                                }
-                            }
-                        }
-                    }
-
-                    logger.info("Successfully fetched {} glucose readings for patient {}", readings.size(), patientId);
-                    return new LibreGlucoseData(
-                        patientId,
-                        readings,
-                        Instant.now().minusSeconds(12 * 60 * 60).toString(), // Last 12 hours
-                        Instant.now().toString(),
-                        "mmol/L"
-                    );
+                    LibreGlucoseData glucoseData = responseParser.toGlucoseData(jsonResponse, patientId);
+                    logger.info("Successfully fetched {} glucose readings for patient {}", glucoseData.getData().size(), patientId);
+                    return glucoseData;
                 } catch (Exception e) {
                     logger.error("Failed to fetch LibreLinkUp glucose data for patient {}: {}", patientId, e.getMessage());
                     throw new RuntimeException("Failed to fetch LibreLinkUp glucose data: " + e.getMessage());
@@ -424,11 +318,7 @@ public class LibreLinkUpService {
                     String url = baseUrl + "/user/profile";
                     logger.info("Fetching LibreLinkUp user profile from {}", url);
                     JsonNode jsonResponse = client.authenticatedGet(userId, url);
-
-                    if (jsonResponse.has("error")) {
-                        JsonNode e = jsonResponse.get("error");
-                        throw new RuntimeException("LibreLinkUp user profile error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
-                    }
+                    throwIfApiError(jsonResponse, "LibreLinkUp user profile error: ");
 
                     logger.info("Successfully fetched LibreLinkUp user profile");
                     return jsonResponse;
@@ -484,55 +374,7 @@ public class LibreLinkUpService {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
                     logger.info("Fetching sensor info for patient {} from {}", patientId, url);
                     JsonNode json = client.authenticatedGet(userId, url);
-
-                    JsonNode data = json.get("data");
-                    JsonNode activeSensors = data != null ? data.get("activeSensors") : null;
-                    if (activeSensors == null || !activeSensors.isArray() || activeSensors.isEmpty()) {
-                        logger.warn("No activeSensors in graph response for patient {}", patientId);
-                        return responseParser.unknownSensorInfo();
-                    }
-
-                    JsonNode sensorEntry = activeSensors.get(0);
-                    JsonNode sensor = sensorEntry.get("sensor");
-                    JsonNode device = sensorEntry.get("device");
-
-                    String sn = sensor != null && sensor.has("sn") ? sensor.get("sn").asText() : null;
-
-                    long activationEpoch = sensor != null && sensor.has("a") ? sensor.get("a").asLong(0) : 0;
-                    Date activationDate = activationEpoch > 0 ? new Date(activationEpoch * 1000L) : null;
-
-                    int sensorMaxDays = 14;
-                    Date expiryDate = activationDate != null
-                            ? new Date(activationDate.getTime() + (long) sensorMaxDays * 86400 * 1000L)
-                            : null;
-
-                    Integer ageDays = null;
-                    Integer remaining = null;
-                    if (activationDate != null) {
-                        long ageMs = System.currentTimeMillis() - activationDate.getTime();
-                        ageDays  = (int) (ageMs / (86400 * 1000L));
-                        remaining = sensorMaxDays - ageDays;
-                    }
-
-                    String status = "unknown";
-                    if (ageDays != null) {
-                        if (ageDays < 0) status = "warmup";
-                        else if (remaining != null && remaining >= 0) status = "active";
-                        else status = "expired";
-                    }
-
-                    String model = "FreeStyle Libre";
-                    if (device != null && device.has("dtid")) {
-                        int dtid = device.get("dtid").asInt();
-                        if (dtid == 40 || dtid == 41) model = "FreeStyle Libre 3";
-                        else if (dtid == 30 || dtid == 31) model = "FreeStyle Libre 2";
-                        else if (dtid == 5) model = "FreeStyle Libre";
-                    }
-
-                    logger.info("Sensor info for patient {}: model={}, sn={}, age={}d, remaining={}d, status={}",
-                            patientId, model, sn, ageDays, remaining, status);
-                    return new LibreSensorInfo(sn, model, activationDate, expiryDate,
-                            ageDays, sensorMaxDays, status, remaining);
+                    return responseParser.toSensorInfo(json, patientId);
                 } catch (Exception e) {
                     logger.error("Failed to fetch sensor info for patient {}: {}", patientId, e.getMessage());
                     throw new RuntimeException("Failed to fetch sensor info: " + e.getMessage(), e);
@@ -557,34 +399,9 @@ public class LibreLinkUpService {
                     String url = baseUrl + "/llu/notifications/alarms";
                     logger.info("Fetching LLU alarms from {}", url);
                     JsonNode json = client.authenticatedGet(userId, url);
+                    throwIfApiError(json, "LLU alarms error: ");
 
-                    if (json.has("error")) {
-                        JsonNode e = json.get("error");
-                        throw new RuntimeException("LLU alarms error: " +
-                                (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
-                    }
-
-                    JsonNode data = json.has("data") ? json.get("data") : json;
-                    JsonNode low  = data.get("lowAlarm");
-                    JsonNode high = data.get("highAlarm");
-                    JsonNode sig  = data.get("signalLossAlarm");
-
-                    boolean lowEnabled  = low  != null && low.path("enabled").asBoolean(false);
-                    boolean highEnabled = high != null && high.path("enabled").asBoolean(false);
-                    boolean sigEnabled  = sig  != null && sig.path("enabled").asBoolean(false);
-
-                    Double lowMgDl  = low  != null && low.has("threshold")  ? low.get("threshold").asDouble()  : null;
-                    Double highMgDl = high != null && high.has("threshold") ? high.get("threshold").asDouble() : null;
-                    Integer lowSnooze  = low  != null && low.has("snooze")  ? low.get("snooze").asInt()  : null;
-                    Integer highSnooze = high != null && high.has("snooze") ? high.get("snooze").asInt() : null;
-
-                    Double lowMmol  = lowMgDl  != null ? Math.round(lowMgDl  / 18.0 * 10.0) / 10.0 : null;
-                    Double highMmol = highMgDl != null ? Math.round(highMgDl / 18.0 * 10.0) / 10.0 : null;
-
-                    logger.info("LLU alarms for user {}: low={} @{}mmol, high={} @{}mmol, signalLoss={}",
-                            userId, lowEnabled, lowMmol, highEnabled, highMmol, sigEnabled);
-                    return new LibreAlarms(lowEnabled, lowMgDl, lowMmol, lowSnooze,
-                            highEnabled, highMgDl, highMmol, highSnooze, sigEnabled);
+                    return responseParser.toAlarms(json, userId);
                 } catch (Exception e) {
                     logger.error("Failed to fetch LLU alarms for user {}: {}", userId, e.getMessage());
                     throw new RuntimeException("Failed to fetch LLU alarms: " + e.getMessage(), e);
@@ -610,6 +427,15 @@ public class LibreLinkUpService {
     private void requireAuthenticated(UUID userId) {
         if (sessionStore.token(userId) == null) {
             throw new RuntimeException("Not authenticated with LibreLinkUp");
+        }
+    }
+
+    /** Throw a RuntimeException prefixed with {@code prefix} if the response carries an {@code {"error":...}} node. */
+    private void throwIfApiError(JsonNode json, String prefix) {
+        if (json.has("error")) {
+            JsonNode error = json.get("error");
+            String message = error.isObject() ? error.path("message").asText(error.toString()) : error.asText();
+            throw new RuntimeException(prefix + message);
         }
     }
 }

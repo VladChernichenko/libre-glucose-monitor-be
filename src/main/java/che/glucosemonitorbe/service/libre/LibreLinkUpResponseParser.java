@@ -1,6 +1,6 @@
 package che.glucosemonitorbe.service.libre;
 
-import che.glucosemonitorbe.dto.LibreSensorInfo;
+import che.glucosemonitorbe.dto.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -17,8 +17,11 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -147,5 +150,202 @@ public class LibreLinkUpResponseParser {
     /** Null-safe sensor info when no active sensor is present. */
     public LibreSensorInfo unknownSensorInfo() {
         return new LibreSensorInfo(null, "FreeStyle Libre", null, null, null, 14, "unknown", null);
+    }
+
+    // ── wire → domain mapping (BE-M5 decomposition) ───────────────────────────
+
+    /**
+     * Map the {@code /llu/connections} success response to domain connections, unwrapping the
+     * {@code {"data":[...]}} envelope (BE-2). The display name ("firstName lastName") is stored in
+     * the connection's id field, consistent with the {@link LibreConnection} contract.
+     */
+    public List<LibreConnection> toConnections(JsonNode jsonResponse) {
+        List<LibreConnection> connections = new ArrayList<>();
+        JsonNode dataNode = jsonResponse.get("data");
+        if (dataNode != null && dataNode.isArray()) {
+            for (JsonNode connection : dataNode) {
+                String patientId = connection.has("patientId") ? connection.get("patientId").asText() : "";
+                String firstName = connection.has("firstName") ? connection.get("firstName").asText() : "";
+                String lastName  = connection.has("lastName")  ? connection.get("lastName").asText()  : "";
+                String status    = connection.has("status")    ? connection.get("status").asText()    : "active";
+                String lastSync  = connection.has("lastSync")  ? connection.get("lastSync").asText()  : Instant.now().toString();
+
+                connections.add(new LibreConnection(firstName + " " + lastName, patientId, status, lastSync));
+            }
+        }
+        return connections;
+    }
+
+    /**
+     * Map a {@code /llu/connections/{id}/graph} success response to domain glucose data. Reads
+     * graphData (ValueInMgPerDl → mmol/L at the LLU 18.0 divisor, FactoryTimestamp preferred over
+     * Timestamp) and appends the live {@code connection.glucoseMeasurement} when it is newer than
+     * the last graph point.
+     */
+    public LibreGlucoseData toGlucoseData(JsonNode jsonResponse, String patientId) {
+        List<LibreGlucoseReading> readings = new ArrayList<>();
+        // LLU graph envelope: {"status":0,"data":{"graphData":[...],...}}
+        JsonNode dataEnvelope = jsonResponse.get("data");
+        JsonNode graphData = dataEnvelope != null ? dataEnvelope.get("graphData") : jsonResponse.get("graphData");
+        logger.info("LLU graph response structure: dataEnvelope={}, graphData size={}",
+                dataEnvelope != null ? "present" : "absent",
+                graphData != null && graphData.isArray() ? graphData.size() : "null/not-array");
+        if (graphData != null && graphData.isArray()) {
+            for (JsonNode point : graphData) {
+                // ValueInMgPerDl is always mg/dL regardless of account unit setting.
+                double valueMgDl = 0;
+                if (point.has("ValueInMgPerDl")) {
+                    valueMgDl = point.get("ValueInMgPerDl").asDouble();
+                } else if (point.has("value")) {
+                    valueMgDl = point.get("value").asDouble();
+                } else if (point.has("glucoseValue")) {
+                    valueMgDl = point.get("glucoseValue").asDouble();
+                }
+
+                double valueMmolL = valueMgDl / 18.0;
+
+                // FactoryTimestamp is UTC; Timestamp is local. Prefer FactoryTimestamp.
+                String timestamp = "";
+                if (point.has("FactoryTimestamp")) {
+                    timestamp = point.get("FactoryTimestamp").asText();
+                } else if (point.has("Timestamp")) {
+                    timestamp = point.get("Timestamp").asText();
+                } else if (point.has("timestamp")) {
+                    timestamp = point.get("timestamp").asText();
+                }
+
+                int trend = point.has("Trend") ? point.get("Trend").asInt() : 0;
+                if (valueMgDl > 0 && !timestamp.isEmpty()) {
+                    readings.add(new LibreGlucoseReading(
+                        parseTimestamp(timestamp),
+                        valueMmolL,
+                        trend,
+                        trendToArrow(trend),
+                        glucoseStatus(valueMmolL),
+                        "mmol/L",
+                        parseTimestamp(timestamp)
+                    ));
+                }
+            }
+        }
+
+        // connection.glucoseMeasurement is the live reading and can be newer than the last graphData entry.
+        if (dataEnvelope != null) {
+            JsonNode conn = dataEnvelope.get("connection");
+            JsonNode gm = conn != null ? conn.get("glucoseMeasurement") : null;
+            if (gm != null) {
+                double valueMgDl = gm.has("ValueInMgPerDl") ? gm.get("ValueInMgPerDl").asDouble()
+                                 : gm.has("Value")          ? gm.get("Value").asDouble() : 0;
+                String ts = gm.has("FactoryTimestamp") ? gm.get("FactoryTimestamp").asText()
+                          : gm.has("Timestamp")        ? gm.get("Timestamp").asText() : "";
+                int trend = gm.has("Trend") ? gm.get("Trend").asInt() : 0;
+                if (valueMgDl > 0 && !ts.isEmpty()) {
+                    Date gmDate = parseTimestamp(ts);
+                    boolean isNewer = readings.isEmpty()
+                            || gmDate.after(readings.get(readings.size() - 1).getTimestamp());
+                    if (isNewer) {
+                        double mmol = valueMgDl / 18.0;
+                        readings.add(new LibreGlucoseReading(
+                            gmDate, mmol, trend, trendToArrow(trend),
+                            glucoseStatus(mmol), "mmol/L", gmDate
+                        ));
+                        logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
+                            valueMgDl, trend, patientId);
+                    }
+                }
+            }
+        }
+
+        return new LibreGlucoseData(
+            patientId,
+            readings,
+            Instant.now().minusSeconds(12 * 60 * 60).toString(), // Last 12 hours
+            Instant.now().toString(),
+            "mmol/L"
+        );
+    }
+
+    /**
+     * Map the {@code activeSensors[0]} node of a {@code /graph} response to sensor info (model from
+     * {@code device.dtid}, age/expiry from the 14-day sensor life); returns
+     * {@link #unknownSensorInfo()} when no active sensor is present.
+     */
+    public LibreSensorInfo toSensorInfo(JsonNode json, String patientId) {
+        JsonNode data = json.get("data");
+        JsonNode activeSensors = data != null ? data.get("activeSensors") : null;
+        if (activeSensors == null || !activeSensors.isArray() || activeSensors.isEmpty()) {
+            logger.warn("No activeSensors in graph response for patient {}", patientId);
+            return unknownSensorInfo();
+        }
+
+        JsonNode sensorEntry = activeSensors.get(0);
+        JsonNode sensor = sensorEntry.get("sensor");
+        JsonNode device = sensorEntry.get("device");
+
+        String sn = sensor != null && sensor.has("sn") ? sensor.get("sn").asText() : null;
+
+        long activationEpoch = sensor != null && sensor.has("a") ? sensor.get("a").asLong(0) : 0;
+        Date activationDate = activationEpoch > 0 ? new Date(activationEpoch * 1000L) : null;
+
+        int sensorMaxDays = 14;
+        Date expiryDate = activationDate != null
+                ? new Date(activationDate.getTime() + (long) sensorMaxDays * 86400 * 1000L)
+                : null;
+
+        Integer ageDays = null;
+        Integer remaining = null;
+        if (activationDate != null) {
+            long ageMs = System.currentTimeMillis() - activationDate.getTime();
+            ageDays  = (int) (ageMs / (86400 * 1000L));
+            remaining = sensorMaxDays - ageDays;
+        }
+
+        String status = "unknown";
+        if (ageDays != null) {
+            if (ageDays < 0) status = "warmup";
+            else if (remaining != null && remaining >= 0) status = "active";
+            else status = "expired";
+        }
+
+        String model = "FreeStyle Libre";
+        if (device != null && device.has("dtid")) {
+            int dtid = device.get("dtid").asInt();
+            if (dtid == 40 || dtid == 41) model = "FreeStyle Libre 3";
+            else if (dtid == 30 || dtid == 31) model = "FreeStyle Libre 2";
+            else if (dtid == 5) model = "FreeStyle Libre";
+        }
+
+        logger.info("Sensor info for patient {}: model={}, sn={}, age={}d, remaining={}d, status={}",
+                patientId, model, sn, ageDays, remaining, status);
+        return new LibreSensorInfo(sn, model, activationDate, expiryDate,
+                ageDays, sensorMaxDays, status, remaining);
+    }
+
+    /**
+     * Map the {@code /llu/notifications/alarms} success response to domain alarms; thresholds are
+     * mg/dL on the wire and converted to mmol/L (1 dp) at the LLU 18.0 divisor.
+     */
+    public LibreAlarms toAlarms(JsonNode json, UUID userId) {
+        JsonNode data = json.has("data") ? json.get("data") : json;
+        JsonNode low  = data.get("lowAlarm");
+        JsonNode high = data.get("highAlarm");
+        JsonNode sig  = data.get("signalLossAlarm");
+
+        boolean lowEnabled  = low  != null && low.path("enabled").asBoolean(false);
+        boolean highEnabled = high != null && high.path("enabled").asBoolean(false);
+        boolean sigEnabled  = sig  != null && sig.path("enabled").asBoolean(false);
+
+        Double lowMgDl  = low  != null && low.has("threshold")  ? low.get("threshold").asDouble()  : null;
+        Double highMgDl = high != null && high.has("threshold") ? high.get("threshold").asDouble() : null;
+        Integer lowSnooze  = low  != null && low.has("snooze")  ? low.get("snooze").asInt()  : null;
+        Integer highSnooze = high != null && high.has("snooze") ? high.get("snooze").asInt() : null;
+
+        Double lowMmol  = lowMgDl  != null ? Math.round(lowMgDl  / 18.0 * 10.0) / 10.0 : null;
+        Double highMmol = highMgDl != null ? Math.round(highMgDl / 18.0 * 10.0) / 10.0 : null;
+
+        logger.info("LLU alarms for user {}: low={} @{}mmol, high={} @{}mmol, signalLoss={}",
+                userId, lowEnabled, lowMmol, highEnabled, highMmol, sigEnabled);
+        return new LibreAlarms(lowEnabled, lowMgDl, lowMmol, lowSnooze,
+                highEnabled, highMgDl, highMmol, highSnooze, sigEnabled);
     }
 }
