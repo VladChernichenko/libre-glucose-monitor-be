@@ -20,13 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
@@ -47,6 +41,12 @@ public class LibreLinkUpService {
             "https://api-jp.libreview.io",
             "https://api-ae.libreview.io"
     };
+
+    private static final Map<String, String> lluLocalSites = Map.of(
+            "fr", "https://api-fr.libreview.io",
+            "ja", "https://api-jp.libreview.io",
+            "zh","https://api-ap.libreview.io"
+            );// EU/US covered by defaultBaseUrl + fallback list
 
     @Value("${libre.api.base-url:https://api-eu.libreview.io}")
     private String defaultBaseUrl;
