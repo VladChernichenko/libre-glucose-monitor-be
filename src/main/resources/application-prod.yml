@@ -7,9 +7,9 @@ spring:
   datasource:
     # Set via env (Neon JDBC, Render, etc.). Do not commit secrets. Example: jdbc:postgresql://host/db?sslmode=require&user=...&password=...
     url: ${DATABASE_URL}
-    # Do not inherit local defaults (application.yml): credentials usually live in DATABASE_URL.
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    # Credentials are embedded in DATABASE_URL (Neon/Railway JDBC URL). Override via env if needed.
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
