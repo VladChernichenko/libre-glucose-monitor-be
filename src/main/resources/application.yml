@@ -58,6 +58,12 @@ security:
     access-expiration-ms: 3600000      # 1 hour
     # Long-lived refresh so mobile clients stay signed in across weeks without re-login.
     refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:31536000000}    # default 365 days
+  # Per-IP brute-force protection on /api/auth/login and /api/auth/register (counts failed attempts).
+  rate-limit:
+    auth:
+      enabled: ${AUTH_RATE_LIMIT_ENABLED:true}
+      max-attempts: ${AUTH_RATE_LIMIT_MAX_ATTEMPTS:10}
+      window-seconds: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:300}
 
 server:
   port: 8080
