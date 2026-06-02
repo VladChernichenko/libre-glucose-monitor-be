@@ -3,8 +3,11 @@ package che.glucosemonitorbe.domain;
 import che.glucosemonitorbe.security.EncryptedStringConverter;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
-import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -13,7 +16,11 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "user_data_source_config")
-@Data
+@Getter
+@Setter
+// JPA-safe: id-only equality (avoids touching the lazy user association); keep secrets out of toString (BE-M4).
+@ToString(exclude = {"user", "nightscoutApiSecret", "nightscoutApiToken", "librePassword"})
+@EqualsAndHashCode(of = "id")
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserDataSourceConfig {

@@ -6,6 +6,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
+import che.glucosemonitorbe.exception.InvalidTokenException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
@@ -43,9 +44,9 @@ public class JwtTokenProvider {
         Date expiryDate = new Date(now.getTime() + jwtExpirationInMs);
 
         return Jwts.builder()
-                .setSubject(username)
-                .setIssuedAt(now)
-                .setExpiration(expiryDate)
+                .subject(username)
+                .issuedAt(now)
+                .expiration(expiryDate)
                 .signWith(getSigningKey(), Jwts.SIG.HS512)
                 .compact();
     }
@@ -54,28 +55,38 @@ public class JwtTokenProvider {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + refreshExpirationInMs);
         return Jwts.builder()
-                .setSubject(username)
-                .setIssuedAt(now)
-                .setExpiration(expiryDate)
+                .subject(username)
+                .issuedAt(now)
+                .expiration(expiryDate)
                 .claim("type", "refresh")
                 .signWith(getSigningKey(), Jwts.SIG.HS512)
                 .compact();
     }
 
-    public String getUsernameFromToken(String token) {
-        Claims claims = Jwts.parser()
-                .verifyWith(getSigningKey())
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
-
-        return claims.getSubject();
+    /** Access-token lifetime in seconds, for the {@code expiresIn} field of auth responses. */
+    public long getAccessTokenExpirySeconds() {
+        return jwtExpirationInMs / 1000;
     }
 
-    public boolean validateToken(String authToken) {
+    public String getUsernameFromToken(String token) {
+        return parseClaims(token)
+                .map(Claims::getSubject)
+                .orElseThrow(() -> new InvalidTokenException("Invalid JWT token"));
+    }
+
+    /**
+     * Parse and verify a token once, returning its claims. Returns empty (and logs the reason) for
+     * any invalid/expired/malformed token, so callers can avoid re-parsing the same token multiple
+     * times in a single request (BE-M3).
+     */
+    public Optional<Claims> parseClaims(String token) {
         try {
-            Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(authToken);
-            return true;
+            Claims claims = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            return Optional.of(claims);
         } catch (SecurityException ex) {
             log.error("Invalid JWT signature");
         } catch (MalformedJwtException ex) {
@@ -87,20 +98,16 @@ public class JwtTokenProvider {
         } catch (IllegalArgumentException ex) {
             log.error("JWT claims string is empty");
         }
-        return false; // BE-12 fix: removed dead `Map<String, String> map = new HashMap<>()` variable
+        return Optional.empty();
+    }
+
+    public boolean validateToken(String authToken) {
+        return parseClaims(authToken).isPresent();
     }
 
     public boolean isRefreshToken(String token) {
-        try {
-            Claims claims = Jwts.parser()
-                    .verifyWith(getSigningKey())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-            
-            return "refresh".equals(claims.get("type"));
-        } catch (Exception e) {
-            return false;
-        }
+        return parseClaims(token)
+                .map(claims -> "refresh".equals(claims.get("type")))
+                .orElse(false);
     }
 }

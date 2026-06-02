@@ -56,10 +56,19 @@ public class CarbsOnBoardService {
             return 0.0;
         }
 
-        if ("GI_GL_ENHANCED".equalsIgnoreCase(entry.getAbsorptionMode())) {
-            return calculateEnhancedRemaining(entry, minutesSinceEntry, halfLife, maxDuration);
+        double raw = "GI_GL_ENHANCED".equalsIgnoreCase(entry.getAbsorptionMode())
+                ? calculateEnhancedRemaining(entry, minutesSinceEntry, halfLife, maxDuration)
+                : calculateDefaultRemaining(entry.getCarbs(), minutesSinceEntry, halfLife);
+
+        // Linear taper over the last 30 min of the window so COB reaches zero smoothly
+        // instead of snapping from ~1g to 0 at maxDuration, which causes a step in the
+        // prediction path (carbsDeliveredEffect = (cobNow - cobAtT) / 10 * carbRatio).
+        int taperStartMinutes = maxDuration - 30;
+        if (minutesSinceEntry >= taperStartMinutes) {
+            double taperProgress = (double)(minutesSinceEntry - taperStartMinutes) / 30.0;
+            raw *= Math.max(0.0, 1.0 - taperProgress);
         }
-        return calculateDefaultRemaining(entry.getCarbs(), minutesSinceEntry, halfLife);
+        return raw;
     }
 
     private double calculateDefaultRemaining(double carbs, long minutesSinceEntry, int halfLife) {

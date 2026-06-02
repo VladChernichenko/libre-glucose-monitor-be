@@ -17,7 +17,7 @@ spring:
 
 security:
   jwt:
-    secret: "very-strong-secret-change-me-please-make-it-long-and-secure-in-production"
+    secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-CHANGE-ME-do-not-use-in-production-0123456789}
     access-expiration-ms: 3600000      # 1 hour
     refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:31536000000}    # default 365 days
 

@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.security;
 
 import che.glucosemonitorbe.service.TokenBlacklistService;
+import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -11,7 +12,10 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,10 +37,12 @@ class JwtAuthenticationFilterLogoutAllTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
-        when(tokenProvider.validateToken(jwt)).thenReturn(true);
-        when(tokenProvider.isRefreshToken(jwt)).thenReturn(false);
+        // Single-parse design (BE-M3): the filter reads claims once via parseClaims().
+        Claims claims = mock(Claims.class);
+        when(claims.get("type")).thenReturn(null); // access token, not a refresh token
+        when(claims.getSubject()).thenReturn("alice");
+        when(tokenProvider.parseClaims(jwt)).thenReturn(Optional.of(claims));
         when(tokenBlacklistService.isTokenBlacklisted(jwt)).thenReturn(false);
-        when(tokenProvider.getUsernameFromToken(jwt)).thenReturn("alice");
         when(tokenBlacklistService.isUserGloballyLoggedOut("alice")).thenReturn(true);
 
         SecurityContextHolder.clearContext();

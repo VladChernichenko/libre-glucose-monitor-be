@@ -12,9 +12,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 
 import static org.mockito.Mockito.when;
@@ -120,6 +123,25 @@ class GlobalExceptionHandlerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andExpect(status().isInternalServerError());
+    }
+
+    // ── client disconnect (broken pipe) is benign, not a 500 ──────────────────
+
+    /**
+     * When the client closes the connection mid-response (broken pipe), Spring MVC raises
+     * {@link AsyncRequestNotUsableException}. The handler must swallow it quietly (void → no body
+     * written to the dead socket) and never rethrow or escalate it to an ERROR 500. Regression guard
+     * for /api/nightscout/chart-data broken-pipe noise.
+     */
+    @Test
+    void clientDisconnect_isHandledQuietly_neverRethrown() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/nightscout/chart-data");
+
+        assertThatCode(() -> handler.handleClientDisconnect(
+                new AsyncRequestNotUsableException("ServletOutputStream failed to write: Broken pipe"),
+                request))
+                .doesNotThrowAnyException();
     }
 
 }

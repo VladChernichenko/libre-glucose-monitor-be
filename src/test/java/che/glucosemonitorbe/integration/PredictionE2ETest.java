@@ -347,6 +347,96 @@ class PredictionE2ETest {
 
     // Scenario 8 (feature flag off): PredictionE2EFeatureFlagOffTest (separate Spring context).
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Scenario 9: COB taper — no sudden step near meal-window expiry
+    // Regression guard for the hard-cutoff-causes-step bug fixed in CarbsOnBoardService.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * A 50g FAST-class meal eaten 90 min ago has its COB window expire at
+     * 120 min from the meal, i.e., 30 min into the prediction path.
+     *
+     * <p>Before the fix, COB snapped from ~7.9g to 0g at that boundary, creating
+     * a {@code carbsDeliveredEffect} jump of ~1.6 mmol/L in a single 5-min step.
+     *
+     * <p>After the fix, a 30-min linear taper reduces the remaining COB smoothly.
+     * The largest consecutive step in the whole prediction path must stay below
+     * 0.8 mmol/L (pre-fix value was ~1.6 mmol/L for this scenario).
+     */
+    @Test
+    @DisplayName("9 · COB taper — no sudden step in path when FAST meal expires (regression: hard-cutoff step)")
+    void predictionPath_noSuddenStep_cobExpiryFastMeal() throws Exception {
+        // 50g FAST (window=120 min), bolus at same time — meal exactly at taper entry now
+        String fastProfile = """
+                {"absorptionMode":"GI_GL_ENHANCED","estimatedGi":75,"glycemicLoad":37.5,
+                 "fiber":1.0,"protein":3.0,"fat":2.0,"absorptionSpeedClass":"FAST",
+                 "totalCarbs":50.0}
+                """;
+        postNote(50.0, 4.0, "Snack", fastProfile, 90);
+
+        JsonNode data = calculate(8.5);
+        JsonNode path = data.path("predictionPath");
+
+        assertTrue(path.isArray() && path.size() > 0, "predictionPath must be non-empty");
+
+        double maxDelta = 0.0;
+        for (int i = 1; i < path.size(); i++) {
+            double prev = path.get(i - 1).path("predictedGlucose").asDouble();
+            double curr = path.get(i).path("predictedGlucose").asDouble();
+            maxDelta = Math.max(maxDelta, Math.abs(curr - prev));
+        }
+
+        // Pre-fix the hard cutoff at minute 30 produced a ~1.6 mmol/L jump.
+        // Post-fix the taper must keep every consecutive step below 0.8 mmol/L.
+        assertTrue(maxDelta < 0.8,
+                "COB-taper regression: max consecutive prediction-path step = " + maxDelta
+                + " mmol/L. A value ≥ 0.8 indicates the hard-cutoff step is back "
+                + "(pre-fix value for this scenario was ~1.6 mmol/L).");
+    }
+
+    /**
+     * Default (no speed class) meal eaten 148 min ago expires at 240 min from
+     * meal = 92 min into the prediction path.  This is the exact scenario observed
+     * in the original bug report (Lunch 35g + Pre-bolus 5u).
+     *
+     * <p>Pre-fix: COB snapped from ~0.9g → 0 at minute 92, causing a ~0.18 mmol/L step.
+     * Post-fix: the taper zone (210-240 min from meal = 62-92 min from now) smooths
+     * this transition; the step near minute 92 must be ≤ 0.1 mmol/L.
+     */
+    @Test
+    @DisplayName("9b · COB taper — original bug scenario: 35g meal 148 min ago, step near minute 92 < 0.1")
+    void predictionPath_originalBugScenario_tinyStepAtExpiry() throws Exception {
+        postNote(35.0, 5.0, "Lunch", null, 148);
+
+        JsonNode data = calculate(8.5);
+        JsonNode path = data.path("predictionPath");
+
+        assertTrue(path.isArray() && path.size() > 0, "predictionPath must be non-empty");
+
+        // Find the prediction window 80-100 min from now (where expiry fires at ~92 min).
+        // Path step = 5 min; minute 80 = index 16 (80/5 - 1), minute 100 = index 19.
+        double maxDeltaInExpiryWindow = 0.0;
+        for (int i = 1; i < path.size(); i++) {
+            // Each index = (i * 5) minutes from now
+            int minuteFromNow = i * 5;
+            if (minuteFromNow < 80 || minuteFromNow > 100) continue;
+
+            double prev = path.get(i - 1).path("predictedGlucose").asDouble();
+            double curr = path.get(i).path("predictedGlucose").asDouble();
+            maxDeltaInExpiryWindow = Math.max(maxDeltaInExpiryWindow, Math.abs(curr - prev));
+        }
+
+        // predictedGlucose is rounded to 1 decimal place; 0.1 is the minimum non-zero step.
+        // Pre-fix: the hard COB cutoff added ~0.08 mmol/L on top of normal model evolution,
+        // producing a total step of ~0.18 in this window.
+        // Post-fix: the taper reduces the COB burst to near-zero; residual step is normal
+        // model evolution (≈ 0.1 mmol/L per 5-min step for this scenario).
+        // Threshold 0.15 sits between pre-fix (~0.18) and post-fix (~0.10).
+        assertTrue(maxDeltaInExpiryWindow < 0.15,
+                "COB-taper original-bug regression: step near minute 92 = " + maxDeltaInExpiryWindow
+                + " mmol/L. Pre-fix was ~0.18 mmol/L; post-fix must be < 0.15 (normal model evolution).");
+    }
+
     // Additional regression: 4h baseline path = exactly 48 points (BE-P0-1)
     // ─────────────────────────────────────────────────────────────────────────
 

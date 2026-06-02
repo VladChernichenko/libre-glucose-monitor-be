@@ -169,12 +169,13 @@ class NotesIntegrationTest {
                 Void.class);
         assertEquals(HttpStatus.NO_CONTENT, deleteResp.getStatusCode());
 
-        // Verify it's gone
-        ResponseEntity<NoteDto> getResp = rest.exchange(
+        // Verify it's gone. A missing note now returns 404 with a CustomErrorResponse body
+        // (via GlobalExceptionHandler), so read it as String — we only assert the status here.
+        ResponseEntity<String> getResp = rest.exchange(
                 "/api/notes/" + noteId,
                 HttpMethod.GET,
                 new HttpEntity<>(headers),
-                NoteDto.class);
+                String.class);
         assertEquals(HttpStatus.NOT_FOUND, getResp.getStatusCode());
     }
 }

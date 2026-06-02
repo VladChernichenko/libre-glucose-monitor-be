@@ -1,28 +1,31 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.entity.RevokedToken;
+import che.glucosemonitorbe.repository.TokenBlacklistRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Date;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.HexFormat;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Service to manage blacklisted JWT tokens
- * Uses in-memory storage with expiration tracking - in production, consider using Redis or database
- * 
- * FIXED: Properly tracks token expiration times and cleans up expired tokens to prevent memory leaks
+ * Manages revoked JWTs, backed by the {@code token_blacklist} table (BE-H3).
+ *
+ * <p>Durable across restarts and shared across instances (the previous in-memory map lost all
+ * revocations on restart and was per-instance). Tokens are stored as a SHA-256 hex hash — the raw
+ * token is never persisted. Naturally-expired entries are pruned hourly and ignored on lookup.
  */
 @Service
 @Slf4j
@@ -31,29 +34,23 @@ public class TokenBlacklistService {
     /** Sentinel prefix for logout-all-devices (not a JWT). */
     public static final String LOGOUT_ALL_DEVICES_PREFIX = "LOGOUT_ALL_DEVICES:";
 
-    // Map of token -> expiration timestamp (milliseconds)
-    private final Map<String, Long> blacklistedTokens = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-    
+    private static final long FALLBACK_TTL_MS = TimeUnit.HOURS.toMillis(24);
+    private static final long LOGOUT_ALL_TTL_MS = TimeUnit.DAYS.toMillis(30);
+
+    private final TokenBlacklistRepository repository;
+
     @Value("${security.jwt.secret}")
     private String jwtSecret;
-    
-    public TokenBlacklistService() {
-        // Clean up expired tokens every hour
-        scheduler.scheduleAtFixedRate(this::cleanupExpiredTokens, 1, 1, TimeUnit.HOURS);
-        log.info("TokenBlacklistService initialized with automatic cleanup every hour");
+
+    public TokenBlacklistService(TokenBlacklistRepository repository) {
+        this.repository = repository;
     }
-    
-    /**
-     * Get signing key for JWT parsing
-     */
+
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(jwtSecret.getBytes());
     }
-    
-    /**
-     * Extract expiration time from JWT token
-     */
+
+    /** Extract a token's expiry (ms epoch), tolerating already-expired tokens; null if unparseable. */
     private Long extractExpirationTime(String token) {
         try {
             Claims claims = Jwts.parser()
@@ -61,171 +58,104 @@ public class TokenBlacklistService {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
-            
             Date expiration = claims.getExpiration();
             return expiration != null ? expiration.getTime() : null;
         } catch (ExpiredJwtException e) {
-            // Token is already expired, get expiration from exception
             Date expiration = e.getClaims().getExpiration();
             return expiration != null ? expiration.getTime() : null;
         } catch (Exception e) {
             log.warn("Failed to parse JWT token expiration: {}", e.getMessage());
-            // Default to 24 hours from now if we can't parse
-            return System.currentTimeMillis() + TimeUnit.HOURS.toMillis(24);
+            return null;
         }
     }
-    
-    /**
-     * Add a token to the blacklist with its expiration time
-     */
-    /**
-     * Invalidate all sessions for a user until re-login (logout-all-devices).
-     */
+
+    /** Invalidate all sessions for a user until re-login (logout-all-devices). */
+    @Transactional
     public void blacklistAllDevicesForUser(String username) {
         if (username == null || username.isBlank()) {
             return;
         }
-        String sentinel = LOGOUT_ALL_DEVICES_PREFIX + username.trim();
-        long expiration = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(30);
-        blacklistedTokens.put(sentinel, expiration);
+        long expiration = System.currentTimeMillis() + LOGOUT_ALL_TTL_MS;
+        store(LOGOUT_ALL_DEVICES_PREFIX + username.trim(), expiration);
         log.info("Global logout sentinel registered for user {} until {}", username, new Date(expiration));
     }
 
+    @Transactional(readOnly = true)
     public boolean isUserGloballyLoggedOut(String username) {
         if (username == null || username.isBlank()) {
             return false;
         }
-        String sentinel = LOGOUT_ALL_DEVICES_PREFIX + username.trim();
-        Long expirationTime = blacklistedTokens.get(sentinel);
-        if (expirationTime == null) {
-            return false;
-        }
-        if (System.currentTimeMillis() > expirationTime) {
-            blacklistedTokens.remove(sentinel);
-            return false;
-        }
-        return true;
+        return isActive(LOGOUT_ALL_DEVICES_PREFIX + username.trim());
     }
 
+    @Transactional
     public void blacklistToken(String token) {
-        if (token != null && !token.trim().isEmpty()) {
-            if (token.startsWith(LOGOUT_ALL_DEVICES_PREFIX)) {
-                blacklistedTokens.put(
-                        token,
-                        System.currentTimeMillis() + TimeUnit.DAYS.toMillis(30));
-                return;
-            }
-            Long expirationTime = extractExpirationTime(token);
-            
-            if (expirationTime != null) {
-                blacklistedTokens.put(token, expirationTime);
-                log.debug("Token blacklisted until {}: {}...", 
-                        new Date(expirationTime),
-                        token.substring(0, Math.min(20, token.length())));
-            } else {
-                // Fallback: keep for 24 hours if we can't determine expiration
-                long fallbackExpiration = System.currentTimeMillis() + TimeUnit.HOURS.toMillis(24);
-                blacklistedTokens.put(token, fallbackExpiration);
-                log.warn("Token blacklisted with fallback expiration (24h): {}...", 
-                        token.substring(0, Math.min(20, token.length())));
-            }
+        if (token == null || token.trim().isEmpty()) {
+            return;
         }
-    }
-    
-    /**
-     * Check if a token is blacklisted and not expired
-     */
-    public boolean isTokenBlacklisted(String token) {
-        if (token == null) {
-            return false;
+        if (token.startsWith(LOGOUT_ALL_DEVICES_PREFIX)) {
+            store(token, System.currentTimeMillis() + LOGOUT_ALL_TTL_MS);
+            return;
         }
-        
-        Long expirationTime = blacklistedTokens.get(token);
+        Long expirationTime = extractExpirationTime(token);
         if (expirationTime == null) {
-            return false;
+            expirationTime = System.currentTimeMillis() + FALLBACK_TTL_MS;
+            log.warn("Token blacklisted with fallback expiration (24h)");
         }
-        
-        // Check if the token is still valid (not expired)
-        long currentTime = System.currentTimeMillis();
-        if (currentTime > expirationTime) {
-            // Token has expired, remove it from blacklist
-            blacklistedTokens.remove(token);
-            log.debug("Removed expired token from blacklist during lookup");
-            return false;
-        }
-        
-        return true;
+        store(token, expirationTime);
+        log.debug("Token blacklisted until {}", new Date(expirationTime));
     }
-    
-    /**
-     * Remove a token from the blacklist (useful for testing)
-     */
+
+    @Transactional(readOnly = true)
+    public boolean isTokenBlacklisted(String token) {
+        return token != null && isActive(token);
+    }
+
+    /** Remove a token from the blacklist (useful for testing). */
+    @Transactional
     public void removeFromBlacklist(String token) {
         if (token != null) {
-            blacklistedTokens.remove(token);
-            log.debug("Token removed from blacklist: {}...", 
-                    token.substring(0, Math.min(20, token.length())));
+            repository.deleteById(sha256Hex(token));
         }
     }
-    
-    /**
-     * Get the number of blacklisted tokens (for monitoring)
-     */
+
+    /** Number of blacklisted entries (for monitoring). */
+    @Transactional(readOnly = true)
     public int getBlacklistSize() {
-        return blacklistedTokens.size();
+        return (int) repository.count();
     }
-    
-    /**
-     * Clear all blacklisted tokens (useful for testing)
-     */
+
+    /** Clear all blacklisted tokens (useful for testing). */
+    @Transactional
     public void clearBlacklist() {
-        int sizeBefore = blacklistedTokens.size();
-        blacklistedTokens.clear();
-        log.info("Token blacklist cleared: {} tokens removed", sizeBefore);
+        repository.deleteAll();
     }
-    
-    /**
-     * Clean up expired tokens from blacklist
-     * This prevents memory leaks by removing tokens that have naturally expired
-     */
-    private void cleanupExpiredTokens() {
-        int sizeBefore = blacklistedTokens.size();
-        long currentTime = System.currentTimeMillis();
-        int removedCount = 0;
-        
-        // Iterate through all blacklisted tokens and remove expired ones
-        Iterator<Map.Entry<String, Long>> iterator = blacklistedTokens.entrySet().iterator();
-        while (iterator.hasNext()) {
-            Map.Entry<String, Long> entry = iterator.next();
-            Long expirationTime = entry.getValue();
-            
-            if (expirationTime != null && currentTime > expirationTime) {
-                iterator.remove();
-                removedCount++;
-                log.trace("Removed expired token from blacklist: {}...", 
-                        entry.getKey().substring(0, Math.min(20, entry.getKey().length())));
-            }
+
+    /** Hourly housekeeping: drop naturally-expired entries (expired entries are ignored on lookup anyway). */
+    @Scheduled(initialDelayString = "PT1H", fixedDelayString = "PT1H")
+    @Transactional
+    public void cleanupExpiredTokens() {
+        int removed = repository.deleteExpired(Instant.now());
+        if (removed > 0) {
+            log.info("Token blacklist cleanup removed {} expired entries", removed);
         }
-        
-        int sizeAfter = blacklistedTokens.size();
-        log.info("Token blacklist cleanup completed: removed {} expired tokens, {} remaining (was {})", 
-                removedCount, sizeAfter, sizeBefore);
     }
-    
-    /**
-     * Shutdown scheduler gracefully (called by Spring on bean destruction)
-     */
-    @PreDestroy
-    public void shutdown() {
-        log.info("Shutting down TokenBlacklistService scheduler");
-        scheduler.shutdown();
+
+    private void store(String rawKey, long expiresAtMs) {
+        repository.save(new RevokedToken(sha256Hex(rawKey), Instant.ofEpochMilli(expiresAtMs)));
+    }
+
+    private boolean isActive(String rawKey) {
+        return repository.existsByTokenHashAndExpiresAtAfter(sha256Hex(rawKey), Instant.now());
+    }
+
+    private static String sha256Hex(String value) {
         try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                scheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            scheduler.shutdownNow();
-            Thread.currentThread().interrupt();
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 not available", e);
         }
     }
 }

@@ -22,6 +22,9 @@ security:
     secret: "test-secret-key-for-integration-tests-only-please-use-at-least-sixty-four-bytes-long-value-1234567890"
     access-expiration-ms: 3600000      # 1 hour
     refresh-expiration-ms: 86400000    # 24 hours
+  rate-limit:
+    auth:
+      enabled: false   # integration tests exercise auth freely; the limiter has its own unit test
 
 logging:
   level:

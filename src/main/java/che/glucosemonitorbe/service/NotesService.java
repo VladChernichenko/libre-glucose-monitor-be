@@ -9,7 +9,7 @@ import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -23,25 +23,15 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class NotesService {
 
-    @Autowired
-    private NoteRepository noteRepository;
-
-    @Autowired
-    private NoteMapper noteMapper;
-
-    @Autowired
-    private NutritionEnrichmentService nutritionEnrichmentService;
-
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    @Autowired
-    private GlucoseAlertService glucoseAlertService;
-
-    @Autowired
-    private UserService userService;
+    private final NoteRepository noteRepository;
+    private final NoteMapper noteMapper;
+    private final NutritionEnrichmentService nutritionEnrichmentService;
+    private final ObjectMapper objectMapper;
+    private final GlucoseAlertService glucoseAlertService;
+    private final UserService userService;
     
     /**
      * Get all notes for a user.

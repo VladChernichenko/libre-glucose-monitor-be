@@ -6,7 +6,8 @@ services:
     environment:
       POSTGRES_DB: glucose_monitor
       POSTGRES_USER: glucose_monitor_user
-      POSTGRES_PASSWORD: glucose
+      # Local-dev default; override with POSTGRES_PASSWORD in your shell/.env for anything shared.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-glucose}
     ports:
       - "5433:5432"
     volumes:
@@ -27,8 +28,8 @@ services:
     ports:
       - 27017:27017
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
+      # Local-only Mongo for OpenFoodFacts cache (prod disables Mongo). No auth by default so the
+      # committed connection string carries no credentials; set MONGO_INITDB_ROOT_* + MONGODB_URI if you need auth.
       MONGO_INITDB_DATABASE: products
     volumes:
       - mongo_data:/data/db
