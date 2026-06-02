@@ -450,6 +450,142 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
 
+    // ── COB taper: smooth approach to zero (regression for the step-in-prediction bug) ──
+
+    /**
+     * In the 30-minute taper zone (maxDuration-30 … maxDuration) COB must be
+     * strictly decreasing — no plateau or uptick that would create a step in the
+     * prediction path.
+     */
+    @Test
+    void cobTaper_inTaperZone_isStrictlyDecreasing() {
+        // SLOW class → maxDuration=240, taperStart=210
+        double prev = Double.MAX_VALUE;
+        for (int t = 210; t <= 240; t += 5) {
+            CarbsEntry e = carbEntry(now.minusMinutes(t), 60.0, "SLOW", null);
+            double cob = service.calculateRemainingCarbs(e, now, USER_ID);
+            assertThat(cob).isLessThan(prev);
+            prev = cob;
+        }
+    }
+
+    /**
+     * COB must be exactly 0 at maxDuration via the taper (taperProgress=1.0),
+     * and also at maxDuration+1 via the hard cutoff — no residual value leaks
+     * past the window end.
+     */
+    @Test
+    void cobTaper_atMaxDuration_isZero() {
+        // Taper at exactly 240 min (taperProgress = (240-210)/30 = 1.0 → raw *= 0)
+        CarbsEntry atMax = carbEntry(now.minusMinutes(240), 60.0, "SLOW", null);
+        assertThat(service.calculateRemainingCarbs(atMax, now, USER_ID)).isEqualTo(0.0);
+
+        // Hard cutoff beyond maxDuration
+        CarbsEntry pastMax = carbEntry(now.minusMinutes(241), 60.0, "SLOW", null);
+        assertThat(service.calculateRemainingCarbs(pastMax, now, USER_ID)).isEqualTo(0.0);
+    }
+
+    /**
+     * The taper must significantly reduce the COB value at the last step before
+     * maxDuration compared with the natural exponential decay.
+     * Pre-fix, a 60g SLOW meal at t=235 min had ~1.5g COB which then snapped
+     * to 0 at t=240 — visible as a step in the prediction path.
+     * Post-fix, the taper must have reduced that 1.5g to ≤25% of the natural value.
+     */
+    @Test
+    void cobTaper_nearEnd_isSignificantlyLessThanNaturalDecay() {
+        // t=235 min → taperProgress = (235-210)/30 = 0.833 → raw *= 0.167
+        CarbsEntry e = carbEntry(now.minusMinutes(235), 60.0, "SLOW", null);
+        double tapered = service.calculateRemainingCarbs(e, now, USER_ID);
+
+        // Natural decay at 235 min: 60 * 0.5^(235/45) ≈ 1.5g
+        double natural = 60.0 * Math.pow(0.5, 235.0 / 45.0);
+
+        assertThat(tapered).isLessThan(natural * 0.25);
+    }
+
+    /**
+     * The key bug: the hard cutoff caused a single 5-min path step of
+     * ~15.7g → 0g at maxDuration.  The taper reduces this boundary step
+     * (minute 115 → 120) to ≤ 20% of the pre-fix natural decay value.
+     *
+     * The taper zone entry (minute 90 → 95) has a larger delta due to
+     * taper progress beginning there — that's expected.  The regression
+     * guard is specifically about the BOUNDARY step that the original bug
+     * reported (a sudden spike in the prediction chart at meal expiry time).
+     */
+    @Test
+    void cobTaper_boundaryStep_reducedToLessThan20PercentOfPreFix() {
+        // Pre-fix: hard cutoff snapped from naturalAt120 → 0 in one step
+        double naturalAt120 = 100.0 * Math.pow(0.5, 120.0 / 45.0); // ~15.7g
+
+        // Post-fix: step from last point inside window (115 min) to maxDuration (120 min)
+        CarbsEntry at115 = carbEntry(now.minusMinutes(115), 100.0, "FAST", null);
+        CarbsEntry at120 = carbEntry(now.minusMinutes(120), 100.0, "FAST", null);
+        double cobAt115 = service.calculateRemainingCarbs(at115, now, USER_ID);
+        double cobAt120 = service.calculateRemainingCarbs(at120, now, USER_ID);
+
+        double boundaryStepAfterFix = Math.abs(cobAt115 - cobAt120);
+
+        // The taper must reduce the boundary step to < 20% of the pre-fix jump
+        assertThat(boundaryStepAfterFix).isLessThan(naturalAt120 * 0.20);
+        // And maxDuration itself must still be 0 (hard cutoff preserved)
+        assertThat(cobAt120).isEqualTo(0.0);
+    }
+
+    /**
+     * COB must be strictly non-negative throughout the entire absorption window
+     * including the taper zone.
+     */
+    @Test
+    void cobTaper_neverNegative_throughoutWindow() {
+        for (int t = 0; t <= 245; t += 5) {
+            CarbsEntry e = carbEntry(now.minusMinutes(t), 60.0, "SLOW", null);
+            assertThat(service.calculateRemainingCarbs(e, now, USER_ID))
+                    .as("COB must be >= 0 at t=%d min", t)
+                    .isGreaterThanOrEqualTo(0.0);
+        }
+    }
+
+    /**
+     * The taper applies for the GI_GL_ENHANCED path too — verifies that the
+     * enhanced mode also approaches 0 smoothly instead of snapping at maxDuration.
+     */
+    @Test
+    void cobTaper_enhancedMode_alsoSmooth() {
+        // GI_GL_ENHANCED, SLOW (maxDuration=240), taper zone 210-240 min
+        double prev = Double.MAX_VALUE;
+        for (int t = 210; t <= 240; t += 5) {
+            CarbsEntry e = giEnhancedEntry(now.minusMinutes(t), 60.0, 55.0, 3.0, 10.0, 8.0);
+            e.setAbsorptionSpeedClass("SLOW");
+            double cob = service.calculateRemainingCarbs(e, now, USER_ID);
+            assertThat(cob).isLessThanOrEqualTo(prev);
+            prev = cob;
+        }
+        // Must reach 0 at maxDuration
+        CarbsEntry atMax = giEnhancedEntry(now.minusMinutes(240), 60.0, 55.0, 3.0, 10.0, 8.0);
+        atMax.setAbsorptionSpeedClass("SLOW");
+        assertThat(service.calculateRemainingCarbs(atMax, now, USER_ID)).isEqualTo(0.0);
+    }
+
+    /**
+     * Taper is correctly applied in the batch API (calculateTotalCarbsOnBoard):
+     * the sum of two tapered entries must be strictly less than their combined
+     * natural-decay value at t=235 min.
+     */
+    @Test
+    void cobTaper_batchApi_taperedSumLessThanNatural() {
+        CarbsEntry e1 = carbEntry(now.minusMinutes(235), 40.0, "SLOW", null);
+        CarbsEntry e2 = carbEntry(now.minusMinutes(235), 20.0, "SLOW", null);
+
+        double totalTapered = service.calculateTotalCarbsOnBoard(List.of(e1, e2), now, USER_ID);
+
+        double natural1 = 40.0 * Math.pow(0.5, 235.0 / 45.0);
+        double natural2 = 20.0 * Math.pow(0.5, 235.0 / 45.0);
+
+        assertThat(totalTapered).isLessThan((natural1 + natural2) * 0.25);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private void stubSettings(int maxCobMinutes, int halfLife) {
