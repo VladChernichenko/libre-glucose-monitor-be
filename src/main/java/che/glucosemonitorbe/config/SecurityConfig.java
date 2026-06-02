@@ -45,7 +45,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/public/**").permitAll()
                         .requestMatchers("/api/features/**").permitAll()
                         .requestMatchers("/api/version/**").permitAll()  // Allow version checks
-                        .requestMatchers("/actuator/**").permitAll()
+                        // Only liveness/readiness + info are public (for orchestrator probes);
+                        // metrics, caches, loggers, env, etc. require authentication.
+                        .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/webjars/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/health").permitAll()  // Allow health checks

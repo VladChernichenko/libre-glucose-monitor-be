@@ -152,10 +152,12 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,caches
+        # Keep the default profile aligned with prod: only health/info exposed.
+        # metrics/caches/loggers must be opted into per-environment AND are authenticated (see SecurityConfig).
+        include: health,info
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
 
 # Libre Link Up: EU host default (France / EU LibreView accounts). Override with LIBRE_API_BASE_URL.
 libre:
