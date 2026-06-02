@@ -7,6 +7,7 @@ import che.glucosemonitorbe.dto.LogoutRequest;
 import che.glucosemonitorbe.dto.LogoutResponse;
 import che.glucosemonitorbe.dto.RefreshTokenRequest;
 import che.glucosemonitorbe.dto.RegisterRequest;
+import che.glucosemonitorbe.exception.InvalidTokenException;
 import che.glucosemonitorbe.exception.UsernameAlreadyExistsException;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.security.JwtTokenProvider;
@@ -78,14 +79,14 @@ public class AuthService {
     }
 
     public AuthResponse refreshToken(RefreshTokenRequest request) {
-        if (!tokenProvider.validateToken(request.getRefreshToken()) || 
+        if (!tokenProvider.validateToken(request.getRefreshToken()) ||
             !tokenProvider.isRefreshToken(request.getRefreshToken())) {
-            throw new RuntimeException("Invalid refresh token");
+            throw new InvalidTokenException("Invalid refresh token");
         }
-        
+
         // Check if refresh token is blacklisted
         if (tokenBlacklistService.isTokenBlacklisted(request.getRefreshToken())) {
-            throw new RuntimeException("Refresh token has been revoked");
+            throw new InvalidTokenException("Refresh token has been revoked");
         }
 
         String username = tokenProvider.getUsernameFromToken(request.getRefreshToken());
