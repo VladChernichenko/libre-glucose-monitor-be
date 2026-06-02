@@ -42,7 +42,7 @@ public class AuthService {
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .tokenType("Bearer")
-                .expiresIn(3600L) // 1 hour
+                .expiresIn(tokenProvider.getAccessTokenExpirySeconds()) // 1 hour
                 .build();
     }
 
@@ -74,7 +74,7 @@ public class AuthService {
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .tokenType("Bearer")
-                .expiresIn(3600L)
+                .expiresIn(tokenProvider.getAccessTokenExpirySeconds())
                 .build();
     }
 
@@ -100,7 +100,7 @@ public class AuthService {
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .tokenType("Bearer")
-                .expiresIn(3600L)
+                .expiresIn(tokenProvider.getAccessTokenExpirySeconds())
                 .build();
     }
     

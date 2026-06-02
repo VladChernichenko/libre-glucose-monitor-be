@@ -44,9 +44,9 @@ public class JwtTokenProvider {
         Date expiryDate = new Date(now.getTime() + jwtExpirationInMs);
 
         return Jwts.builder()
-                .setSubject(username)
-                .setIssuedAt(now)
-                .setExpiration(expiryDate)
+                .subject(username)
+                .issuedAt(now)
+                .expiration(expiryDate)
                 .signWith(getSigningKey(), Jwts.SIG.HS512)
                 .compact();
     }
@@ -55,12 +55,17 @@ public class JwtTokenProvider {
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + refreshExpirationInMs);
         return Jwts.builder()
-                .setSubject(username)
-                .setIssuedAt(now)
-                .setExpiration(expiryDate)
+                .subject(username)
+                .issuedAt(now)
+                .expiration(expiryDate)
                 .claim("type", "refresh")
                 .signWith(getSigningKey(), Jwts.SIG.HS512)
                 .compact();
+    }
+
+    /** Access-token lifetime in seconds, for the {@code expiresIn} field of auth responses. */
+    public long getAccessTokenExpirySeconds() {
+        return jwtExpirationInMs / 1000;
     }
 
     public String getUsernameFromToken(String token) {
