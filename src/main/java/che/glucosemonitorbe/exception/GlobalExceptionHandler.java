@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
@@ -140,6 +142,19 @@ public class GlobalExceptionHandler {
         if (!response.isCommitted()) {
             response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
         }
+    }
+
+    /**
+     * The client closed the connection before the response finished (broken pipe / connection reset):
+     * the app was backgrounded, a newer request superseded this one (e.g. pull-to-refresh), or a proxy
+     * timed out. The socket is already gone, so there is nothing to write back — log quietly at DEBUG
+     * and swallow. This is <em>not</em> a server fault: logging it as an ERROR 500 is misleading and
+     * also fails a second time trying to serialise a body onto the dead connection.
+     */
+    @ExceptionHandler({AsyncRequestNotUsableException.class, ClientAbortException.class})
+    public void handleClientDisconnect(Exception ex, HttpServletRequest request) {
+        log.debug("Client disconnected before the response completed on {} [{}]: {}",
+                request.getRequestURI(), correlationId(), ex.getMessage());
     }
 
     @ExceptionHandler(RuntimeException.class)
