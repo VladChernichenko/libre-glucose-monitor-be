@@ -70,6 +70,10 @@ public class GlucoseCalculationsController {
                 "backendMode", true,
                 "message", "Glucose calculations completed using backend service"
             ));
+        } catch (RuntimeException e) {
+            // Align with the POST variant: RuntimeExceptions are server faults -> let
+            // GlobalExceptionHandler map them to 500 (not a masked 400).
+            throw e;
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of(
                 "error", "Calculation failed",

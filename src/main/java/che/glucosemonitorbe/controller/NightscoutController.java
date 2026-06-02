@@ -2,6 +2,7 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
+import che.glucosemonitorbe.exception.ExternalServiceException;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.NightscoutChartDataService;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
@@ -73,7 +74,7 @@ public class NightscoutController {
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries", e);
-            throw new RuntimeException("Failed to fetch glucose data: " + rootCauseMessage(e), e);
+            throw new ExternalServiceException("Failed to fetch glucose data: " + rootCauseMessage(e), e);
         }
     }
 
@@ -152,7 +153,7 @@ public class NightscoutController {
             return ResponseEntity.ok(currentGlucose);
         } catch (Exception e) {
             log.error("Failed to fetch current glucose", e);
-            throw new RuntimeException("Failed to fetch current glucose: " + rootCauseMessage(e), e);
+            throw new ExternalServiceException("Failed to fetch current glucose: " + rootCauseMessage(e), e);
         }
     }
     
@@ -201,7 +202,7 @@ public class NightscoutController {
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries by date", e);
-            throw new RuntimeException("Failed to fetch glucose data: " + rootCauseMessage(e), e);
+            throw new ExternalServiceException("Failed to fetch glucose data: " + rootCauseMessage(e), e);
         }
     }
     
