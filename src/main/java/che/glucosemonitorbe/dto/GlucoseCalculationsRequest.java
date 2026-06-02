@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.DecimalMin;
 
 import java.util.List;
 
@@ -15,7 +15,7 @@ import java.util.List;
 @AllArgsConstructor
 public class GlucoseCalculationsRequest {
     @NotNull(message = "Current glucose value is required")
-    @Min(value = 0, message = "Glucose value must be positive")
+    @DecimalMin(value = "0.1", message = "Glucose value must be positive")
     private Double currentGlucose;
 
     private String userId;
@@ -34,5 +34,13 @@ public class GlucoseCalculationsRequest {
      * requiring persistence first.
      */
     private List<ProspectiveNoteDTO> prospectiveNotes;
+
+    /**
+     * Current glucose rate-of-change from the CGM sensor trend arrow (mmol/L per minute).
+     * Used to blend short-term momentum into the prediction path so that when glucose is
+     * currently flat the near-term prediction does not show an unrealistic steep rise.
+     * Null / absent means no momentum term (pure COB/IOB model).
+     */
+    private Double currentTrendMmolPerMin;
 }
 

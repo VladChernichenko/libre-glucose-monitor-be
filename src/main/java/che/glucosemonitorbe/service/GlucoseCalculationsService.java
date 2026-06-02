@@ -15,6 +15,7 @@ import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -22,8 +23,8 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class GlucoseCalculationsService {
@@ -79,11 +80,11 @@ public class GlucoseCalculationsService {
         List<CarbsEntry> carbsEntries = recentNotes.stream()
                 .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
                 .map(this::convertNoteToCarbsEntry)
-                .collect(Collectors.toList());
+                .toList();
         List<InsulinDose> insulinEntries = recentNotes.stream()
                 .filter(note -> note.getInsulin() != null && note.getInsulin() > 0)
                 .map(this::convertNoteToInsulinDose)
-                .collect(Collectors.toList());
+                .toList();
 
         // Merge any prospective (un-persisted) meal/insulin events — used by the Nutrition
         // screen to show "what-if" predictions before the user saves the note.
@@ -143,7 +144,8 @@ public class GlucoseCalculationsService {
                 userUUID,
                 userSettings,
                 avgBolusToMealMinutes,
-                rapidIob
+                rapidIob,
+                request.getCurrentTrendMmolPerMin()
         );
         
         // fourHourPrediction = point at exactly 240 min (PREDICTION_PATH_MINUTES).
@@ -189,7 +191,8 @@ public class GlucoseCalculationsService {
             UUID userUUID,
             COBSettingsDTO userSettings,
             Double avgBolusToMealMinutes,
-            RapidInsulinIobParameters rapidIob
+            RapidInsulinIobParameters rapidIob,
+            Double currentTrendMmolPerMin
     ) {
         double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
@@ -197,6 +200,11 @@ public class GlucoseCalculationsService {
         double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
         double activeIobNow = insulinCalculatorService.calculateTotalActiveInsulin(
                 insulinEntries, currentTime, rapidIob.diaHours(), rapidIob.peakMinutes());
+
+        // Velocity for the momentum-blend term: clamp to sane physiological range.
+        double velocity = currentTrendMmolPerMin != null
+                ? Math.max(-0.15, Math.min(0.15, currentTrendMmolPerMin))
+                : 0.0;
 
         int pathMinutes = resolvePathDurationMinutes(carbsEntries);
 
@@ -216,7 +224,15 @@ public class GlucoseCalculationsService {
             double timingProgress = Math.min(1.0, minute / PREDICTION_HORIZON_MINUTES);
             double timingEffect = preBolusTimingContribution * timingProgress;
 
-            double predicted = currentGlucose + carbsDeliveredEffect + insulinDeliveredEffect + timingEffect;
+            double modelEffect = carbsDeliveredEffect + insulinDeliveredEffect + timingEffect;
+
+            // Momentum-blend: for short horizons anchor to current sensor velocity; for
+            // long horizons let the COB/IOB model dominate.  Half-weight at ~30 min.
+            double blend = Math.exp(-minute / 30.0);
+            double momentumEffect = velocity * minute;
+            double totalEffect = blend * momentumEffect + (1.0 - blend) * modelEffect;
+
+            double predicted = currentGlucose + totalEffect;
             predicted = Math.max(1.0, Math.min(25.0, predicted));
             points.add(PredictionPointDTO.builder()
                     .timestamp(t)
@@ -404,6 +420,7 @@ public class GlucoseCalculationsService {
             LocalDateTime startTime = currentTime.minusHours(8);
             return noteRepository.findByUserIdAndTimestampBetween(userId, startTime, currentTime);
         } catch (Exception e) {
+            log.warn("Failed to fetch recent notes for user {}: {}", userId, e.getMessage());
             return new ArrayList<>();
         }
     }
@@ -443,7 +460,8 @@ public class GlucoseCalculationsService {
                 entry.setBolusStrategy(snapshot.getBolusStrategy());
                 entry.setSuggestedDurationHours(snapshot.getSuggestedDurationHours());
                 entry.setPatternName(snapshot.getPatternName());
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.warn("Failed to parse nutritionProfile for note {}: {}", note.getId(), e.getMessage());
                 entry.setAbsorptionMode("DEFAULT_DECAY");
             }
         }
@@ -545,8 +563,8 @@ public class GlucoseCalculationsService {
                 entry.setBolusStrategy(snapshot.getBolusStrategy());
                 entry.setSuggestedDurationHours(snapshot.getSuggestedDurationHours());
                 entry.setPatternName(snapshot.getPatternName());
-            } catch (Exception ignored) {
-                // Keep DEFAULT_DECAY on parse failure
+            } catch (Exception e) {
+                log.warn("Failed to parse nutritionProfileJson for prospective note: {}", e.getMessage());
             }
         }
         return entry;
@@ -575,8 +593,8 @@ public class GlucoseCalculationsService {
         if (carbsEntries == null || carbsEntries.isEmpty()) return new PatternSummary(null, null);
         // Use the most recent entry that has a matched pattern
         return carbsEntries.stream()
-                .filter(e -> e.getPatternName() != null)
-                .reduce((a, b) -> b) // last in time (stream is time-sorted)
+                .filter(e -> e.getPatternName() != null && e.getTimestamp() != null)
+                .max(Comparator.comparing(CarbsEntry::getTimestamp))
                 .map(e -> new PatternSummary(e.getPatternName(), e.getBolusStrategy()))
                 .orElse(new PatternSummary(null, null));
     }
@@ -604,8 +622,8 @@ public class GlucoseCalculationsService {
      */
     private InsulinDose.InsulinType determineInsulinType(Note note) {
         // If meal type is "Correction" or no carbs, it's a correction dose
-        if ("Correction".equalsIgnoreCase(note.getMeal()) || 
-            (note.getCarbs() != null && note.getCarbs() == 0)) {
+        if ("Correction".equalsIgnoreCase(note.getMeal()) ||
+            (note.getCarbs() != null && note.getCarbs() == 0.0)) {
             return InsulinDose.InsulinType.CORRECTION;
         }
         
