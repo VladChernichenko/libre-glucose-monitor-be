@@ -4,6 +4,7 @@ import che.glucosemonitorbe.circuitbreaker.CircuitBreaker;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerException;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
 import che.glucosemonitorbe.service.libre.LibreLinkUpResponseParser;
 import che.glucosemonitorbe.service.libre.LibreLinkUpSessionStore;
@@ -12,10 +13,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
 import java.util.*;
@@ -24,9 +24,10 @@ import java.util.*;
  * Orchestrates LibreLinkUp authentication and data retrieval (auth, connections, glucose graph,
  * profile, sensor info, alarms) with per-operation circuit breakers.
  *
- * <p>BE-M5 decomposition: per-user session state, regional host routing, and wire decoding/mapping
- * now live in {@link LibreLinkUpSessionStore}, {@link LibreLinkUpRegionResolver} and
- * {@link LibreLinkUpResponseParser}. This class is the thin coordinator over those collaborators.
+ * <p>BE-M5 decomposition: transport (HTTP, headers, byte parsing) lives in {@link LibreLinkUpClient};
+ * per-user session state in {@link LibreLinkUpSessionStore}; regional host routing in
+ * {@link LibreLinkUpRegionResolver}; wire→domain mapping helpers in {@link LibreLinkUpResponseParser}.
+ * This class coordinates those collaborators and owns the auth flow and JSON→DTO mapping.
  */
 @Service
 public class LibreLinkUpService {
@@ -36,26 +37,21 @@ public class LibreLinkUpService {
     @Value("${libre.api.base-url:https://api-eu.libreview.io}")
     private String defaultBaseUrl;
 
-    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final CircuitBreakerManager circuitBreakerManager;
+    private final LibreLinkUpClient client;
     private final LibreLinkUpSessionStore sessionStore;
     private final LibreLinkUpRegionResolver regionResolver;
     private final LibreLinkUpResponseParser responseParser;
-    private final String clientVersion = "4.16.0";
 
-    /**
-     * BE-P1-7: accept the configured {@link RestTemplate} bean (timeouts from
-     * {@link che.glucosemonitorbe.config.RestTemplateConfig}) rather than {@code new RestTemplate()}.
-     */
     public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager,
-                              RestTemplate restTemplate,
+                              LibreLinkUpClient client,
                               LibreLinkUpSessionStore sessionStore,
                               LibreLinkUpRegionResolver regionResolver,
                               LibreLinkUpResponseParser responseParser) {
-        this.restTemplate = restTemplate;
         this.objectMapper = new ObjectMapper();
         this.circuitBreakerManager = circuitBreakerManager;
+        this.client = client;
         this.sessionStore = sessionStore;
         this.regionResolver = regionResolver;
         this.responseParser = responseParser;
@@ -64,69 +60,6 @@ public class LibreLinkUpService {
     /** Resolved base URL for userId (falls back to the configured default). */
     private String baseUrlFor(UUID userId) {
         return sessionStore.baseUrlOrDefault(userId, LibreLinkUpRegionResolver.normalizeBaseUrl(defaultBaseUrl));
-    }
-
-    /**
-     * Canonical LibreLinkUp headers — verified against pylibrelinkup 0.10.0 and the khskekec dump.
-     * cache-control and Connection casing are required exactly; deviations cause 400/430 on some edges.
-     */
-    private HttpHeaders buildLibreLoginHeaders(String locale) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("Accept", "application/json");
-        headers.set("accept-encoding", "gzip");           // lowercase; "br" triggers Brotli decode failure on JDK
-        headers.set("cache-control", "no-cache");
-        headers.set("connection", "keep-alive");
-        headers.set("product", "llu.android");
-        headers.set("version", clientVersion);
-        headers.set("User-Agent", "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Mobile Safari/537.36");
-        headers.set("Accept-Language", locale != null && !locale.isBlank() ? locale : "en-GB");
-        return headers;
-    }
-
-    /** Headers for authenticated endpoints: Authorization + account-id + per-user Accept-Language. */
-    private HttpHeaders buildAuthenticatedHeaders(UUID userId) {
-        HttpHeaders headers = buildLibreLoginHeaders(sessionStore.localeOrDefault(userId));
-        String token = sessionStore.token(userId);
-        if (token != null) {
-            headers.set("authorization", "Bearer " + token);
-        }
-        String accountId = sessionStore.accountId(userId);
-        if (accountId != null) {
-            headers.set("account-id", accountId);   // required: SHA-256(data.user.id from login response)
-        } else {
-            logger.warn("account-id not available for user {} — authenticated request may fail (RequiredHeaderMissing)", userId);
-        }
-        return headers;
-    }
-
-    private ResponseEntity<byte[]> postLluAuthLogin(String apiBaseUrl, LibreAuthRequest authRequest) {
-        String url = LibreLinkUpRegionResolver.normalizeBaseUrl(apiBaseUrl) + "/llu/auth/login";
-        String locale = authRequest != null ? authRequest.getLocale() : null;
-        // LibreLinkUp only accepts {"email","password"} — extra fields (locale, etc.) cause 400.
-        Map<String, String> body = new LinkedHashMap<>();
-        body.put("email", authRequest != null ? authRequest.getEmail() : "");
-        body.put("password", authRequest != null ? authRequest.getPassword() : "");
-        HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, buildLibreLoginHeaders(locale));
-        logger.info("postLluAuthLogin to {}: email={}", url, authRequest != null ? authRequest.getEmail() : "null");
-        return restTemplate.exchange(url, HttpMethod.POST, entity, byte[].class);
-    }
-
-    private RuntimeException libreAuthHttpError(HttpClientErrorException e) {
-        int code = e.getStatusCode().value();
-        String extra = "";
-        if (code == 430 || code == 403) {
-            extra = " Try setting libre.api.base-url to https://api-eu.libreview.io or https://api-us.libreview.io.";
-        } else if (code == 429) {
-            extra = " Wait several minutes before trying again; avoid repeated logins or \"Test connection\" in a short period.";
-        }
-        String detail = LibreLinkUpResponseParser.formatErrorBody(e.getResponseBodyAsByteArray());
-        String msg = "LibreLinkUp authentication failed: HTTP " + code;
-        if (!detail.isEmpty()) {
-            msg += " — " + detail;
-        }
-        msg += extra;
-        return new RuntimeException(msg, e);
     }
 
     /**
@@ -149,7 +82,7 @@ public class LibreLinkUpService {
                             logger.info("Authenticating with LibreLinkUp API at {}/llu/auth/login (password length={})",
                                     apiBase,
                                     authRequest.getPassword() != null ? authRequest.getPassword().length() : 0);
-                            response = postLluAuthLogin(apiBase, authRequest);
+                            response = client.postLogin(apiBase, authRequest);
                             break;
                         } catch (HttpClientErrorException e) {
                             int code = e.getStatusCode().value();
@@ -157,14 +90,14 @@ public class LibreLinkUpService {
                                 logger.warn("LibreLinkUp auth HTTP {} from {}, trying next regional host", code, apiBase);
                                 continue;
                             }
-                            throw libreAuthHttpError(e);
+                            throw client.authError(e);
                         }
                     }
                     if (response == null) {
                         throw new RuntimeException("LibreLinkUp authentication failed: no response from API hosts");
                     }
 
-                    JsonNode jsonResponse = responseParser.parseResponseBytes(response.getBody(), response.getHeaders());
+                    JsonNode jsonResponse = client.parse(response);
                     logger.info("LibreLinkUp auth response: {}", jsonResponse.toString());
 
                     if (jsonResponse.has("error")) {
@@ -197,26 +130,7 @@ public class LibreLinkUpService {
 
                     if (token != null) {
                         if (userId != null) {
-                            sessionStore.putToken(userId, token);
-                            // Store locale for Accept-Language, and derive the regional base URL from it.
-                            String locale = authRequest.getLocale();
-                            if (locale != null && !locale.isBlank()) {
-                                sessionStore.putLocale(userId, locale);
-                                String lb = regionResolver.localeToBaseUrl(locale);
-                                if (lb != null) {
-                                    sessionStore.putBaseUrl(userId, lb);
-                                    logger.info("Stored regional base URL {} for user {} (locale {})", lb, userId, locale);
-                                }
-                            }
-                            // Extract user.id and store its SHA-256 hash as account-id (required since Nov 2024).
-                            JsonNode userNode = data != null ? data.get("user") : null;
-                            if (userNode != null && userNode.has("id")) {
-                                String libreUserId = userNode.get("id").asText();
-                                if (!libreUserId.isBlank()) {
-                                    sessionStore.putAccountId(userId, LibreLinkUpResponseParser.sha256Hex(libreUserId));
-                                    logger.info("Stored account-id hash for user {}", userId);
-                                }
-                            }
+                            storeSession(userId, token, authRequest.getLocale(), data, regionResolver.localeToBaseUrl(authRequest.getLocale()));
                         }
                         logger.info("Successfully authenticated with LibreLinkUp for user {}, token expires: {}", userId, expires);
                         return new LibreAuthResponse(token, expires);
@@ -249,12 +163,12 @@ public class LibreLinkUpService {
                     logger.info("Authenticating with region-specific LibreLinkUp API at {}/llu/auth/login", regionBaseUrl);
                     ResponseEntity<byte[]> response;
                     try {
-                        response = postLluAuthLogin(regionBaseUrl, authRequest);
+                        response = client.postLogin(regionBaseUrl, authRequest);
                     } catch (HttpClientErrorException e) {
-                        throw libreAuthHttpError(e);
+                        throw client.authError(e);
                     }
 
-                    JsonNode jsonResponse = responseParser.parseResponseBytes(response.getBody(), response.getHeaders());
+                    JsonNode jsonResponse = client.parse(response);
                     logger.info("Region-specific auth response: {}", jsonResponse.toString());
 
                     JsonNode data = jsonResponse.get("data");
@@ -269,20 +183,9 @@ public class LibreLinkUpService {
 
                     if (token != null) {
                         if (userId != null) {
-                            sessionStore.putToken(userId, token);
-                            sessionStore.putBaseUrl(userId, regionBaseUrl);
-                            String locale = authRequest.getLocale();
-                            if (locale != null && !locale.isBlank()) {
-                                sessionStore.putLocale(userId, locale);
-                            }
-                            JsonNode userNode = data != null ? data.get("user") : null;
-                            if (userNode != null && userNode.has("id")) {
-                                String libreUserId = userNode.get("id").asText();
-                                if (!libreUserId.isBlank()) {
-                                    sessionStore.putAccountId(userId, LibreLinkUpResponseParser.sha256Hex(libreUserId));
-                                    logger.info("Stored account-id hash for user {} (region {})", userId, region);
-                                }
-                            }
+                            // Region login always pins the resolved region host.
+                            storeSession(userId, token, authRequest.getLocale(), data, regionBaseUrl);
+                            logger.info("Stored region {} base URL for user {}", region, userId);
                         }
                         logger.info("Successfully authenticated with region {} endpoint for user {}, token expires: {}", region, userId, expires);
                         return new LibreAuthResponse(token, expires);
@@ -306,60 +209,68 @@ public class LibreLinkUpService {
     }
 
     /**
+     * Persist the per-user session from a successful login: token, locale, regional base URL, and the
+     * SHA-256(user.id) account-id hash required since Nov 2024.
+     *
+     * @param baseUrlOverride base URL to pin for this user, or {@code null} to leave it at the default
+     *                        (used by locale-derived routing on the primary login path)
+     */
+    private void storeSession(UUID userId, String token, String locale, JsonNode data, String baseUrlOverride) {
+        sessionStore.putToken(userId, token);
+        if (locale != null && !locale.isBlank()) {
+            sessionStore.putLocale(userId, locale);
+        }
+        if (baseUrlOverride != null) {
+            sessionStore.putBaseUrl(userId, baseUrlOverride);
+        }
+        JsonNode userNode = data != null ? data.get("user") : null;
+        if (userNode != null && userNode.has("id")) {
+            String libreUserId = userNode.get("id").asText();
+            if (!libreUserId.isBlank()) {
+                sessionStore.putAccountId(userId, LibreLinkUpResponseParser.sha256Hex(libreUserId));
+                logger.info("Stored account-id hash for user {}", userId);
+            }
+        }
+    }
+
+    /**
      * Get LibreLinkUp connections for a user.
      * BE-1: per-user token/baseUrl. BE-2: unwraps the {"data":[...]} envelope.
      */
     public List<LibreConnection> getConnections(UUID userId) throws Exception {
-        String authToken = sessionStore.token(userId);
-        if (authToken == null) {
-            throw new RuntimeException("Not authenticated with LibreLinkUp");
-        }
+        requireAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
-
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-connections:" + userId);
 
         return circuitBreaker.executeWithFallback(
             () -> {
                 try {
                     String url = baseUrl + "/llu/connections";
-                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
-
                     logger.info("Fetching LibreLinkUp connections from {}", url);
-                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
+                    JsonNode jsonResponse = client.authenticatedGet(userId, url);
 
-                    if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = responseParser.parseResponseBytes(response.getBody(), response.getHeaders());
-                        List<LibreConnection> connections = new ArrayList<>();
-
-                        if (jsonResponse.has("error")) {
-                            JsonNode e = jsonResponse.get("error");
-                            throw new RuntimeException("LibreLinkUp connections error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
-                        }
-
-                        // BE-2: API returns {"data":[...]} — unwrap the envelope.
-                        JsonNode dataNode = jsonResponse.get("data");
-                        if (dataNode != null && dataNode.isArray()) {
-                            for (JsonNode connection : dataNode) {
-                                String patientId = connection.has("patientId") ? connection.get("patientId").asText() : "";
-                                String firstName = connection.has("firstName") ? connection.get("firstName").asText() : "";
-                                String lastName  = connection.has("lastName")  ? connection.get("lastName").asText()  : "";
-                                String status    = connection.has("status")    ? connection.get("status").asText()    : "active";
-                                String lastSync  = connection.has("lastSync")  ? connection.get("lastSync").asText()  : Instant.now().toString();
-
-                                connections.add(new LibreConnection(
-                                    firstName + " " + lastName,
-                                    patientId,
-                                    status,
-                                    lastSync
-                                ));
-                            }
-                        }
-
-                        logger.info("Successfully fetched {} LibreLinkUp connections for user {}", connections.size(), userId);
-                        return connections;
-                    } else {
-                        throw new RuntimeException("Failed to fetch connections with status: " + response.getStatusCode());
+                    if (jsonResponse.has("error")) {
+                        JsonNode e = jsonResponse.get("error");
+                        throw new RuntimeException("LibreLinkUp connections error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                     }
+
+                    List<LibreConnection> connections = new ArrayList<>();
+                    // BE-2: API returns {"data":[...]} — unwrap the envelope.
+                    JsonNode dataNode = jsonResponse.get("data");
+                    if (dataNode != null && dataNode.isArray()) {
+                        for (JsonNode connection : dataNode) {
+                            String patientId = connection.has("patientId") ? connection.get("patientId").asText() : "";
+                            String firstName = connection.has("firstName") ? connection.get("firstName").asText() : "";
+                            String lastName  = connection.has("lastName")  ? connection.get("lastName").asText()  : "";
+                            String status    = connection.has("status")    ? connection.get("status").asText()    : "active";
+                            String lastSync  = connection.has("lastSync")  ? connection.get("lastSync").asText()  : Instant.now().toString();
+
+                            connections.add(new LibreConnection(firstName + " " + lastName, patientId, status, lastSync));
+                        }
+                    }
+
+                    logger.info("Successfully fetched {} LibreLinkUp connections for user {}", connections.size(), userId);
+                    return connections;
                 } catch (Exception e) {
                     logger.error("Failed to fetch LibreLinkUp connections for user {}: {}", userId, e.getMessage());
                     throw new RuntimeException("Failed to fetch LibreLinkUp connections: " + e.getMessage());
@@ -374,117 +285,103 @@ public class LibreLinkUpService {
 
     /** Get glucose data for a patient. BE-1: per-user credentials. */
     public LibreGlucoseData getGlucoseData(String patientId, int days, UUID userId) throws Exception {
-        String authToken = sessionStore.token(userId);
-        if (authToken == null) {
-            throw new RuntimeException("Not authenticated with LibreLinkUp");
-        }
+        requireAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
-
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-data:" + userId);
 
         return circuitBreaker.executeWithFallback(
             () -> {
                 try {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
-                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
-
                     logger.info("Fetching LibreLinkUp glucose data for patient {} from {}", patientId, url);
-                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
+                    JsonNode jsonResponse = client.authenticatedGet(userId, url);
 
-                    if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = responseParser.parseResponseBytes(response.getBody(), response.getHeaders());
-                        List<LibreGlucoseReading> readings = new ArrayList<>();
-
-                        if (jsonResponse.has("error")) {
-                            JsonNode e = jsonResponse.get("error");
-                            throw new RuntimeException("LibreLinkUp glucose data error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
-                        }
-
-                        // LLU graph envelope: {"status":0,"data":{"graphData":[...],...}}
-                        JsonNode dataEnvelope = jsonResponse.get("data");
-                        JsonNode graphData = dataEnvelope != null ? dataEnvelope.get("graphData") : jsonResponse.get("graphData");
-                        logger.info("LLU graph response structure: dataEnvelope={}, graphData size={}",
-                                dataEnvelope != null ? "present" : "absent",
-                                graphData != null && graphData.isArray() ? graphData.size() : "null/not-array");
-                        if (graphData != null && graphData.isArray()) {
-                            for (JsonNode point : graphData) {
-                                // ValueInMgPerDl is always mg/dL regardless of account unit setting.
-                                double valueMgDl = 0;
-                                if (point.has("ValueInMgPerDl")) {
-                                    valueMgDl = point.get("ValueInMgPerDl").asDouble();
-                                } else if (point.has("value")) {
-                                    valueMgDl = point.get("value").asDouble();
-                                } else if (point.has("glucoseValue")) {
-                                    valueMgDl = point.get("glucoseValue").asDouble();
-                                }
-
-                                double valueMmolL = valueMgDl / 18.0;
-
-                                // FactoryTimestamp is UTC; Timestamp is local. Prefer FactoryTimestamp.
-                                String timestamp = "";
-                                if (point.has("FactoryTimestamp")) {
-                                    timestamp = point.get("FactoryTimestamp").asText();
-                                } else if (point.has("Timestamp")) {
-                                    timestamp = point.get("Timestamp").asText();
-                                } else if (point.has("timestamp")) {
-                                    timestamp = point.get("timestamp").asText();
-                                }
-
-                                int trend = point.has("Trend") ? point.get("Trend").asInt() : 0;
-                                String trendArrow = responseParser.trendToArrow(trend);
-
-                                if (valueMgDl > 0 && !timestamp.isEmpty()) {
-                                    readings.add(new LibreGlucoseReading(
-                                        responseParser.parseTimestamp(timestamp),
-                                        valueMmolL,
-                                        trend,
-                                        trendArrow,
-                                        responseParser.glucoseStatus(valueMmolL),
-                                        "mmol/L",
-                                        responseParser.parseTimestamp(timestamp)
-                                    ));
-                                }
-                            }
-                        }
-
-                        // connection.glucoseMeasurement is the live reading and can be newer than the last graphData entry.
-                        if (dataEnvelope != null) {
-                            JsonNode conn = dataEnvelope.get("connection");
-                            JsonNode gm = conn != null ? conn.get("glucoseMeasurement") : null;
-                            if (gm != null) {
-                                double valueMgDl = gm.has("ValueInMgPerDl") ? gm.get("ValueInMgPerDl").asDouble()
-                                                 : gm.has("Value")          ? gm.get("Value").asDouble() : 0;
-                                String ts = gm.has("FactoryTimestamp") ? gm.get("FactoryTimestamp").asText()
-                                          : gm.has("Timestamp")        ? gm.get("Timestamp").asText() : "";
-                                int trend = gm.has("Trend") ? gm.get("Trend").asInt() : 0;
-                                if (valueMgDl > 0 && !ts.isEmpty()) {
-                                    Date gmDate = responseParser.parseTimestamp(ts);
-                                    boolean isNewer = readings.isEmpty()
-                                            || gmDate.after(readings.get(readings.size() - 1).getTimestamp());
-                                    if (isNewer) {
-                                        double mmol = valueMgDl / 18.0;
-                                        readings.add(new LibreGlucoseReading(
-                                            gmDate, mmol, trend, responseParser.trendToArrow(trend),
-                                            responseParser.glucoseStatus(mmol), "mmol/L", gmDate
-                                        ));
-                                        logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
-                                            valueMgDl, trend, patientId);
-                                    }
-                                }
-                            }
-                        }
-
-                        logger.info("Successfully fetched {} glucose readings for patient {}", readings.size(), patientId);
-                        return new LibreGlucoseData(
-                            patientId,
-                            readings,
-                            Instant.now().minusSeconds(12 * 60 * 60).toString(), // Last 12 hours
-                            Instant.now().toString(),
-                            "mmol/L"
-                        );
-                    } else {
-                        throw new RuntimeException("Failed to fetch glucose data with status: " + response.getStatusCode());
+                    if (jsonResponse.has("error")) {
+                        JsonNode e = jsonResponse.get("error");
+                        throw new RuntimeException("LibreLinkUp glucose data error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                     }
+
+                    List<LibreGlucoseReading> readings = new ArrayList<>();
+                    // LLU graph envelope: {"status":0,"data":{"graphData":[...],...}}
+                    JsonNode dataEnvelope = jsonResponse.get("data");
+                    JsonNode graphData = dataEnvelope != null ? dataEnvelope.get("graphData") : jsonResponse.get("graphData");
+                    logger.info("LLU graph response structure: dataEnvelope={}, graphData size={}",
+                            dataEnvelope != null ? "present" : "absent",
+                            graphData != null && graphData.isArray() ? graphData.size() : "null/not-array");
+                    if (graphData != null && graphData.isArray()) {
+                        for (JsonNode point : graphData) {
+                            // ValueInMgPerDl is always mg/dL regardless of account unit setting.
+                            double valueMgDl = 0;
+                            if (point.has("ValueInMgPerDl")) {
+                                valueMgDl = point.get("ValueInMgPerDl").asDouble();
+                            } else if (point.has("value")) {
+                                valueMgDl = point.get("value").asDouble();
+                            } else if (point.has("glucoseValue")) {
+                                valueMgDl = point.get("glucoseValue").asDouble();
+                            }
+
+                            double valueMmolL = valueMgDl / 18.0;
+
+                            // FactoryTimestamp is UTC; Timestamp is local. Prefer FactoryTimestamp.
+                            String timestamp = "";
+                            if (point.has("FactoryTimestamp")) {
+                                timestamp = point.get("FactoryTimestamp").asText();
+                            } else if (point.has("Timestamp")) {
+                                timestamp = point.get("Timestamp").asText();
+                            } else if (point.has("timestamp")) {
+                                timestamp = point.get("timestamp").asText();
+                            }
+
+                            int trend = point.has("Trend") ? point.get("Trend").asInt() : 0;
+                            if (valueMgDl > 0 && !timestamp.isEmpty()) {
+                                readings.add(new LibreGlucoseReading(
+                                    responseParser.parseTimestamp(timestamp),
+                                    valueMmolL,
+                                    trend,
+                                    responseParser.trendToArrow(trend),
+                                    responseParser.glucoseStatus(valueMmolL),
+                                    "mmol/L",
+                                    responseParser.parseTimestamp(timestamp)
+                                ));
+                            }
+                        }
+                    }
+
+                    // connection.glucoseMeasurement is the live reading and can be newer than the last graphData entry.
+                    if (dataEnvelope != null) {
+                        JsonNode conn = dataEnvelope.get("connection");
+                        JsonNode gm = conn != null ? conn.get("glucoseMeasurement") : null;
+                        if (gm != null) {
+                            double valueMgDl = gm.has("ValueInMgPerDl") ? gm.get("ValueInMgPerDl").asDouble()
+                                             : gm.has("Value")          ? gm.get("Value").asDouble() : 0;
+                            String ts = gm.has("FactoryTimestamp") ? gm.get("FactoryTimestamp").asText()
+                                      : gm.has("Timestamp")        ? gm.get("Timestamp").asText() : "";
+                            int trend = gm.has("Trend") ? gm.get("Trend").asInt() : 0;
+                            if (valueMgDl > 0 && !ts.isEmpty()) {
+                                Date gmDate = responseParser.parseTimestamp(ts);
+                                boolean isNewer = readings.isEmpty()
+                                        || gmDate.after(readings.get(readings.size() - 1).getTimestamp());
+                                if (isNewer) {
+                                    double mmol = valueMgDl / 18.0;
+                                    readings.add(new LibreGlucoseReading(
+                                        gmDate, mmol, trend, responseParser.trendToArrow(trend),
+                                        responseParser.glucoseStatus(mmol), "mmol/L", gmDate
+                                    ));
+                                    logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
+                                        valueMgDl, trend, patientId);
+                                }
+                            }
+                        }
+                    }
+
+                    logger.info("Successfully fetched {} glucose readings for patient {}", readings.size(), patientId);
+                    return new LibreGlucoseData(
+                        patientId,
+                        readings,
+                        Instant.now().minusSeconds(12 * 60 * 60).toString(), // Last 12 hours
+                        Instant.now().toString(),
+                        "mmol/L"
+                    );
                 } catch (Exception e) {
                     logger.error("Failed to fetch LibreLinkUp glucose data for patient {}: {}", patientId, e.getMessage());
                     throw new RuntimeException("Failed to fetch LibreLinkUp glucose data: " + e.getMessage());
@@ -506,7 +403,6 @@ public class LibreLinkUpService {
     /** Most recent reading for a patient. BE-1: per-user credentials. */
     public LibreGlucoseReading getCurrentGlucose(String patientId, UUID userId) throws Exception {
         LibreGlucoseData glucoseData = getGlucoseData(patientId, 1, userId);
-
         if (glucoseData.getData() != null && !glucoseData.getData().isEmpty()) {
             // LLU graphData is sorted oldest-first; return the last element (most recent).
             List<LibreGlucoseReading> readings = glucoseData.getData();
@@ -518,36 +414,24 @@ public class LibreLinkUpService {
 
     /** Raw LibreLinkUp user profile JSON. BE-1: per-user credentials. */
     public Object getUserProfile(UUID userId) throws Exception {
-        String authToken = sessionStore.token(userId);
-        if (authToken == null) {
-            throw new RuntimeException("Not authenticated with LibreLinkUp");
-        }
+        requireAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
-
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-profile:" + userId);
 
         return circuitBreaker.executeWithFallback(
             () -> {
                 try {
                     String url = baseUrl + "/user/profile";
-                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
-
                     logger.info("Fetching LibreLinkUp user profile from {}", url);
-                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
+                    JsonNode jsonResponse = client.authenticatedGet(userId, url);
 
-                    if (response.getStatusCode() == HttpStatus.OK) {
-                        JsonNode jsonResponse = responseParser.parseResponseBytes(response.getBody(), response.getHeaders());
-
-                        if (jsonResponse.has("error")) {
-                            JsonNode e = jsonResponse.get("error");
-                            throw new RuntimeException("LibreLinkUp user profile error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
-                        }
-
-                        logger.info("Successfully fetched LibreLinkUp user profile");
-                        return jsonResponse;
-                    } else {
-                        throw new RuntimeException("Failed to fetch user profile with status: " + response.getStatusCode());
+                    if (jsonResponse.has("error")) {
+                        JsonNode e = jsonResponse.get("error");
+                        throw new RuntimeException("LibreLinkUp user profile error: " + (e.isObject() ? e.path("message").asText(e.toString()) : e.asText()));
                     }
+
+                    logger.info("Successfully fetched LibreLinkUp user profile");
+                    return jsonResponse;
                 } catch (Exception e) {
                     logger.error("Failed to fetch LibreLinkUp user profile: {}", e.getMessage());
                     throw new RuntimeException("Failed to fetch LibreLinkUp user profile: " + e.getMessage());
@@ -590,9 +474,7 @@ public class LibreLinkUpService {
      * Returns null-safe sensor info when no active sensor is present.
      */
     public LibreSensorInfo getSensorInfo(String patientId, UUID userId) throws Exception {
-        if (sessionStore.token(userId) == null) {
-            throw new RuntimeException("Not authenticated with LibreLinkUp");
-        }
+        requireAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
         CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-sensor-info:" + userId);
 
@@ -600,10 +482,8 @@ public class LibreLinkUpService {
             () -> {
                 try {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
-                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
                     logger.info("Fetching sensor info for patient {} from {}", patientId, url);
-                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
-                    JsonNode json = responseParser.parseResponseBytes(response.getBody(), response.getHeaders());
+                    JsonNode json = client.authenticatedGet(userId, url);
 
                     JsonNode data = json.get("data");
                     JsonNode activeSensors = data != null ? data.get("activeSensors") : null;
@@ -619,8 +499,7 @@ public class LibreLinkUpService {
                     String sn = sensor != null && sensor.has("sn") ? sensor.get("sn").asText() : null;
 
                     long activationEpoch = sensor != null && sensor.has("a") ? sensor.get("a").asLong(0) : 0;
-                    Date activationDate = activationEpoch > 0
-                            ? new Date(activationEpoch * 1000L) : null;
+                    Date activationDate = activationEpoch > 0 ? new Date(activationEpoch * 1000L) : null;
 
                     int sensorMaxDays = 14;
                     Date expiryDate = activationDate != null
@@ -668,9 +547,7 @@ public class LibreLinkUpService {
 
     /** Fetch glucose alarm configuration from LibreLinkUp {@code /llu/notifications/alarms}. */
     public LibreAlarms getAlarms(UUID userId) throws Exception {
-        if (sessionStore.token(userId) == null) {
-            throw new RuntimeException("Not authenticated with LibreLinkUp");
-        }
+        requireAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
         CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-alarms:" + userId);
 
@@ -678,10 +555,8 @@ public class LibreLinkUpService {
             () -> {
                 try {
                     String url = baseUrl + "/llu/notifications/alarms";
-                    HttpEntity<String> entity = new HttpEntity<>(buildAuthenticatedHeaders(userId));
                     logger.info("Fetching LLU alarms from {}", url);
-                    ResponseEntity<byte[]> response = restTemplate.exchange(url, HttpMethod.GET, entity, byte[].class);
-                    JsonNode json = responseParser.parseResponseBytes(response.getBody(), response.getHeaders());
+                    JsonNode json = client.authenticatedGet(userId, url);
 
                     if (json.has("error")) {
                         JsonNode e = json.get("error");
@@ -730,5 +605,11 @@ public class LibreLinkUpService {
     /** Clear all LibreLinkUp session state for a user. BE-1: per-user. */
     public void logout(UUID userId) {
         sessionStore.clear(userId);
+    }
+
+    private void requireAuthenticated(UUID userId) {
+        if (sessionStore.token(userId) == null) {
+            throw new RuntimeException("Not authenticated with LibreLinkUp");
+        }
     }
 }

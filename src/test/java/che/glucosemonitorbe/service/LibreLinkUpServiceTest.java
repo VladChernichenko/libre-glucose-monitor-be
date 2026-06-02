@@ -1,9 +1,13 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
+import che.glucosemonitorbe.dto.LibreConnection;
+import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
 import che.glucosemonitorbe.service.libre.LibreLinkUpResponseParser;
 import che.glucosemonitorbe.service.libre.LibreLinkUpSessionStore;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,10 +15,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for LibreLinkUpService after the BE-M5 decomposition.
@@ -27,18 +36,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class LibreLinkUpServiceTest {
 
     private LibreLinkUpSessionStore sessionStore;
+    private LibreLinkUpResponseParser responseParser;
     private LibreLinkUpService service;
 
     @BeforeEach
     void setUp() {
         CircuitBreakerManager cbm = new CircuitBreakerManager();
         sessionStore = new LibreLinkUpSessionStore();
+        responseParser = new LibreLinkUpResponseParser();
+        LibreLinkUpClient client = new LibreLinkUpClient(new RestTemplate(), responseParser, sessionStore);
         service = new LibreLinkUpService(
                 cbm,
-                new RestTemplate(),
+                client,
                 sessionStore,
                 new LibreLinkUpRegionResolver(),
-                new LibreLinkUpResponseParser());
+                responseParser);
     }
 
     // ── BE-1: per-user token isolation ────────────────────────────────────────
@@ -135,6 +147,34 @@ class LibreLinkUpServiceTest {
         assertThatThrownBy(() -> service.getConnections(userId))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Not authenticated");
+    }
+
+    /**
+     * BE-2: getConnections must unwrap the {"data":[...]} envelope. With transport now behind
+     * LibreLinkUpClient this is finally testable end-to-end (the old reflection-only test could not
+     * stub the HTTP call). A mocked client returns a canned envelope; the service must map it.
+     */
+    @Test
+    void be2_getConnections_unwrapsDataEnvelopeAndMaps() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+
+        LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
+        JsonNode envelope = new ObjectMapper().readTree(
+                "{\"data\":[{\"patientId\":\"p1\",\"firstName\":\"John\",\"lastName\":\"Doe\","
+                        + "\"status\":\"active\",\"lastSync\":\"2025-01-01T00:00:00Z\"}]}");
+        when(mockClient.authenticatedGet(eq(userId), anyString())).thenReturn(envelope);
+
+        LibreLinkUpService svc = new LibreLinkUpService(
+                new CircuitBreakerManager(), mockClient, sessionStore,
+                new LibreLinkUpRegionResolver(), responseParser);
+
+        List<LibreConnection> connections = svc.getConnections(userId);
+
+        assertThat(connections).hasSize(1);
+        assertThat(connections.get(0).getPatientId()).isEqualTo("p1");
+        // The service stores "firstName lastName" in the connection's id field.
+        assertThat(connections.get(0).getId()).isEqualTo("John Doe");
     }
 
     @Test
