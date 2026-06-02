@@ -37,7 +37,8 @@ spring:
       spec: maximumSize=50000,expireAfterWrite=5m
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb://admin:password123@localhost:27017/off?authSource=admin}
+      # No credentials in committed config. For an auth-enabled Mongo, supply full creds via MONGODB_URI env.
+      uri: ${MONGODB_URI:mongodb://localhost:27017/off}
   flyway:
     enabled: true
     baseline-on-migrate: true
@@ -51,7 +52,9 @@ spring:
 
 security:
   jwt:
-    secret: ${JWT_SECRET:very-strong-secret-change-me-please-make-it-long-and-secure-in-production}
+    # Dev-only fallback (>=64 bytes for HS512). SecretsStartupValidator refuses to boot under the
+    # 'prod' profile with this default — set a strong JWT_SECRET (e.g. `openssl rand -base64 64`).
+    secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-CHANGE-ME-do-not-use-in-production-0123456789}
     access-expiration-ms: 3600000      # 1 hour
     # Long-lived refresh so mobile clients stay signed in across weeks without re-login.
     refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:31536000000}    # default 365 days

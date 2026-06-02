@@ -113,6 +113,13 @@ application-dev.properties
 application-prod.properties
 application-test.properties
 
+# Local secrets / per-developer config (use the tracked *.example as a template).
+# Keep application.yml, application-prod.yml, application-docker.yml (env-driven, no secrets).
+src/main/resources/application-local.yml
+src/main/resources/application-secrets.yml
+**/application-secrets.yml
+!**/application-local.yml.example
+
 # Database
 *.db
 *.sqlite
