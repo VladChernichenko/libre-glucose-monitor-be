@@ -34,46 +34,57 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         try {
             String jwt = getJwtFromRequest(request);
-
             if (StringUtils.hasText(jwt)) {
-                boolean isValidToken = tokenProvider.validateToken(jwt);
-                boolean isRefreshToken = tokenProvider.isRefreshToken(jwt);
-                boolean isBlacklisted = tokenBlacklistService.isTokenBlacklisted(jwt);
-                
-                log.debug("JWT validation for {}: valid={}, refresh={}, blacklisted={}", 
-                    request.getRequestURI(), isValidToken, isRefreshToken, isBlacklisted);
-                
-                if (isValidToken && !isRefreshToken && !isBlacklisted) {
-                    String username = tokenProvider.getUsernameFromToken(jwt);
-
-                    if (tokenBlacklistService.isUserGloballyLoggedOut(username)) {
-                        log.warn("JWT rejected for {}: user logged out from all devices", username);
-                        filterChain.doFilter(request, response);
-                        return;
-                    }
-
-                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                            userDetails, null, userDetails.getAuthorities());
-                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
-                    MDC.put("userId", username);
-                    log.debug("Successfully authenticated user: {}", username);
-                } else {
-                    log.warn("JWT authentication failed for {}: valid={}, refresh={}, blacklisted={}", 
-                        request.getRequestURI(), isValidToken, isRefreshToken, isBlacklisted);
+                try {
+                    authenticateFromToken(jwt, request);
+                } catch (Exception ex) {
+                    // Never let an auth-setup failure break the chain; the request just stays anonymous.
+                    log.error("Could not set user authentication for {}: {}",
+                            request.getRequestURI(), ex.getMessage());
                 }
             } else {
                 log.debug("No JWT token found for request: {}", request.getRequestURI());
             }
-        } catch (Exception ex) {
-            log.error("Could not set user authentication in security context for {}: {}", 
-                request.getRequestURI(), ex.getMessage());
+
+            filterChain.doFilter(request, response);
+        } finally {
+            // BE-M3: always clear the per-request MDC key, even if a downstream filter throws,
+            // so pooled threads never leak one user's id into the next request's logs.
+            MDC.remove("userId");
+        }
+    }
+
+    /** Parse the token once and, if it authorises a non-refresh, non-revoked session, set the context. */
+    private void authenticateFromToken(String jwt, HttpServletRequest request) {
+        var claimsOpt = tokenProvider.parseClaims(jwt);
+        if (claimsOpt.isEmpty()) {
+            log.warn("JWT authentication failed for {}: invalid token", request.getRequestURI());
+            return;
         }
 
-        filterChain.doFilter(request, response);
-        MDC.remove("userId");
+        var claims = claimsOpt.get();
+        boolean isRefreshToken = "refresh".equals(claims.get("type"));
+        boolean isBlacklisted = tokenBlacklistService.isTokenBlacklisted(jwt);
+        if (isRefreshToken || isBlacklisted) {
+            log.warn("JWT rejected for {}: refresh={}, blacklisted={}",
+                    request.getRequestURI(), isRefreshToken, isBlacklisted);
+            return;
+        }
+
+        String username = claims.getSubject();
+        if (tokenBlacklistService.isUserGloballyLoggedOut(username)) {
+            log.warn("JWT rejected for {}: user logged out from all devices", username);
+            return;
+        }
+
+        UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                userDetails, null, userDetails.getAuthorities());
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        MDC.put("userId", username);
+        log.debug("Successfully authenticated user: {}", username);
     }
 
     private String getJwtFromRequest(HttpServletRequest request) {
