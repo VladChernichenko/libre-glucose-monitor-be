@@ -77,14 +77,14 @@ public class GlucoseCalculationsService {
         // Get recent notes/entries for calculations
         // BUG P1 fix: pass resolved userUUID directly to avoid a second getUserByUsername call
         List<Note> recentNotes = getRecentNotes(userUUID, currentTime);
-        List<CarbsEntry> carbsEntries = recentNotes.stream()
+        List<CarbsEntry> carbsEntries = new ArrayList<>(recentNotes.stream()
                 .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
                 .map(this::convertNoteToCarbsEntry)
-                .toList();
-        List<InsulinDose> insulinEntries = recentNotes.stream()
+                .toList());
+        List<InsulinDose> insulinEntries = new ArrayList<>(recentNotes.stream()
                 .filter(note -> note.getInsulin() != null && note.getInsulin() > 0)
                 .map(this::convertNoteToInsulinDose)
-                .toList();
+                .toList());
 
         // Merge any prospective (un-persisted) meal/insulin events — used by the Nutrition
         // screen to show "what-if" predictions before the user saves the note.
