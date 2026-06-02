@@ -3,7 +3,7 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.entity.COBSettings;
 import che.glucosemonitorbe.repository.COBSettingsRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -14,10 +14,10 @@ import java.util.UUID;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class COBSettingsService {
-    
-    @Autowired
-    private COBSettingsRepository cobSettingsRepository;
+
+    private final COBSettingsRepository cobSettingsRepository;
     
     /**
      * Get COB settings for a user, creating default settings if none exist

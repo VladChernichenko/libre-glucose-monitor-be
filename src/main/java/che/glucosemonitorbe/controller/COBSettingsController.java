@@ -7,7 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -17,13 +17,11 @@ import java.util.UUID;
 @Tag(name = "COB Settings", description = "Carbs-on-board decay configuration per user")
 @RestController
 @RequestMapping("/api/cob-settings")
+@RequiredArgsConstructor
 public class COBSettingsController {
-    
-    @Autowired
-    private COBSettingsService cobSettingsService;
-    
-    @Autowired
-    private UserService userService;
+
+    private final COBSettingsService cobSettingsService;
+    private final UserService userService;
     
     @Operation(summary = "Get COB settings for the authenticated user")
     @ApiResponses({ @ApiResponse(responseCode = "200", description = "Settings returned"),

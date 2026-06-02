@@ -14,9 +14,9 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -27,19 +27,15 @@ import java.util.UUID;
 @Tag(name = "LibreLinkUp CGM", description = "FreeStyle Libre CGM integration — authentication, connections, and glucose readings")
 @RestController
 @RequestMapping("/api/libre")
-@CrossOrigin(origins = "*")
+// Wildcard CORS removed (BE-M6): defer to the restricted global CorsConfig like every other controller.
+@RequiredArgsConstructor
 public class LibreLinkUpController {
 
     private static final Logger logger = LoggerFactory.getLogger(LibreLinkUpController.class);
 
-    @Autowired
-    private LibreLinkUpService libreLinkUpService;
-
-    @Autowired
-    private UserService userService;
-
-    @Autowired
-    private UserDataSourceConfigService dataSourceConfigService;
+    private final LibreLinkUpService libreLinkUpService;
+    private final UserService userService;
+    private final UserDataSourceConfigService dataSourceConfigService;
 
     /** Resolve the UUID for the currently authenticated user. */
     private UUID userId(Authentication authentication) {
