@@ -14,4 +14,6 @@ public class UserInsulinPreferencesDTO {
     private String longActingInsulinCode;
     private InsulinCatalogDTO rapidInsulin;
     private InsulinCatalogDTO longActingInsulin;
+    /** Optional daily long-acting injection time as "HH:mm" (null when unset). */
+    private String longActingInjectionTime;
 }

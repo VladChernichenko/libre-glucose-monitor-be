@@ -82,7 +82,8 @@ public class GlucoseCalculationsService {
                 .map(this::convertNoteToCarbsEntry)
                 .toList());
         List<InsulinDose> insulinEntries = new ArrayList<>(recentNotes.stream()
-                .filter(note -> note.getInsulin() != null && note.getInsulin() > 0)
+                // Long-acting (basal) doses are not rapid-acting boluses — exclude from bolus IOB & predictions.
+                .filter(note -> note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing())
                 .map(this::convertNoteToInsulinDose)
                 .toList());
 
@@ -365,7 +366,7 @@ public class GlucoseCalculationsService {
             }
 
             Note bolus = sorted.stream()
-                    .filter(n -> n.getInsulin() != null && n.getInsulin() > 0)
+                    .filter(n -> n.getInsulin() != null && n.getInsulin() > 0 && !n.isLongActing())
                     .filter(n -> n.getTimestamp().isBefore(meal.getTimestamp()) || n.getTimestamp().isEqual(meal.getTimestamp()))
                     .filter(n -> {
                         long minutes = java.time.Duration.between(n.getTimestamp(), meal.getTimestamp()).toMinutes();

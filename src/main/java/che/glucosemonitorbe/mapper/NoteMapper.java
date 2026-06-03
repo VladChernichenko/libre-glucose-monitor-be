@@ -28,6 +28,7 @@ public class NoteMapper {
         dto.setInsulinDose(note.getInsulinDose());
         dto.setNutritionProfile(note.getNutritionProfile());
         dto.setAbsorptionMode(note.getAbsorptionMode());
+        dto.setType(note.getType());
         dto.setMockData(note.isMockData());
         dto.setCreatedAt(note.getCreatedAt());
         dto.setUpdatedAt(note.getUpdatedAt());
@@ -56,8 +57,11 @@ public class NoteMapper {
         note.setInsulinDose(dto.getInsulinDose());
         note.setNutritionProfile(dto.getNutritionProfile());
         note.setAbsorptionMode(dto.getAbsorptionMode());
+        if (dto.getType() != null) {
+            note.setType(dto.getType());
+        }
         note.setMockData(dto.isMockData());
-        
+
         return note;
     }
     
@@ -98,6 +102,9 @@ public class NoteMapper {
         }
         if (dto.getAbsorptionMode() != null) {
             existingNote.setAbsorptionMode(dto.getAbsorptionMode());
+        }
+        if (dto.getType() != null) {
+            existingNote.setType(dto.getType());
         }
         existingNote.setMockData(dto.isMockData());
     }

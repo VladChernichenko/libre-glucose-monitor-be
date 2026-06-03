@@ -20,6 +20,8 @@ public class UpdateNoteRequest {
     private String insulinDose;
     private Boolean mockData;
     private String absorptionMode;
+    /** Note category: "normal" or "long_acting". Null leaves the existing value unchanged. */
+    private String type;
 
     // Constructors
     public UpdateNoteRequest() {}
@@ -103,5 +105,13 @@ public class UpdateNoteRequest {
 
     public void setAbsorptionMode(String absorptionMode) {
         this.absorptionMode = absorptionMode;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
     }
 }

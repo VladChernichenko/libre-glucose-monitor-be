@@ -81,6 +81,7 @@ public class NotesService {
             request.getDetailedInput(),
             request.getInsulinDose()
         );
+        note.setType(request.getType() != null ? request.getType() : Note.TYPE_NORMAL);
         note.setMockData(Boolean.TRUE.equals(request.getMockData()));
         if (request.getAbsorptionMode() != null) {
             note.setAbsorptionMode(request.getAbsorptionMode());
@@ -110,8 +111,9 @@ public class NotesService {
 
         // Fire over-injection check asynchronously — does not block the response.
         // Condition: note has insulin AND we have a current glucose reading to anchor the prediction.
+        // Long-acting (basal) doses are not boluses, so they never trigger the over-injection alert.
         double insulinUnits = savedNote.getInsulin() != null ? savedNote.getInsulin() : 0.0;
-        if (insulinUnits > 0) {
+        if (insulinUnits > 0 && !savedNote.isLongActing()) {
             // Resolve the username from the userId for the calculations service
             try {
                 String username = userService.getUserById(userId).getUsername();
