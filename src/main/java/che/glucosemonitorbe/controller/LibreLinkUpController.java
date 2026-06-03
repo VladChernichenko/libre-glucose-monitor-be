@@ -1,6 +1,5 @@
 package che.glucosemonitorbe.controller;
 
-import che.glucosemonitorbe.dto.LibreAlarms;
 import che.glucosemonitorbe.dto.LibreAuthRequest;
 import che.glucosemonitorbe.dto.LibreAuthResponse;
 import che.glucosemonitorbe.dto.LibreConnection;
@@ -153,25 +152,6 @@ public class LibreLinkUpController {
     }
 
     /**
-     * Get user profile information
-     */
-    @GetMapping("/profile")
-    public ResponseEntity<?> getUserProfile(Authentication authentication) {
-        try {
-            String username = authentication.getName();
-            logger.info("User {} requesting LibreLinkUp profile", username);
-
-            Object profile = libreLinkUpService.getUserProfile(userId(authentication));
-            logger.info("Retrieved LibreLinkUp profile for user {}", username);
-
-            return ResponseEntity.ok(profile);
-        } catch (Exception e) {
-            logger.error("Failed to fetch LibreLinkUp profile for user {}: {}", authentication.getName(), e.getMessage());
-            return ResponseEntity.badRequest().body("Failed to fetch profile: " + e.getMessage());
-        }
-    }
-
-    /**
      * Get historical glucose data for a specific patient
      */
     @GetMapping("/connections/{patientId}/history")
@@ -222,26 +202,5 @@ public class LibreLinkUpController {
         }
     }
 
-    /**
-     * Get glucose alarm configuration (low threshold, high threshold, signal-loss alarm).
-     */
-    @Operation(summary = "Get glucose alarm configuration from LibreLinkUp")
-    @ApiResponse(responseCode = "200", description = "Alarm configuration returned")
-    @GetMapping("/alarms")
-    public ResponseEntity<?> getAlarms(Authentication authentication) {
-        try {
-            String username = authentication.getName();
-            logger.info("User {} requesting LibreLinkUp alarm configuration", username);
-
-            LibreAlarms alarms = libreLinkUpService.getAlarms(userId(authentication));
-            logger.info("Retrieved alarm configuration for user {}: {}", username, alarms);
-
-            return ResponseEntity.ok(alarms);
-        } catch (Exception e) {
-            logger.error("Failed to fetch LibreLinkUp alarms for user {}: {}",
-                    authentication.getName(), e.getMessage());
-            return ResponseEntity.badRequest().body("Failed to fetch alarm configuration: " + e.getMessage());
-        }
-    }
 }
 

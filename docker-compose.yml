@@ -9,7 +9,7 @@ services:
       # Local-dev default; override with POSTGRES_PASSWORD in your shell/.env for anything shared.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-glucose}
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./setup_database.sql:/docker-entrypoint-initdb.d/setup_database.sql

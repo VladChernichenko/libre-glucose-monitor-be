@@ -1,6 +1,5 @@
 package che.glucosemonitorbe.service.libre;
 
-import che.glucosemonitorbe.dto.LibreAlarms;
 import che.glucosemonitorbe.dto.LibreConnection;
 import che.glucosemonitorbe.dto.LibreGlucoseData;
 import che.glucosemonitorbe.dto.LibreGlucoseReading;
@@ -270,38 +269,4 @@ class LibreLinkUpResponseParserTest {
         assertThat(info.getActivationDate()).isNull();
     }
 
-    // ── toAlarms (threshold mg/dL → mmol/L) ───────────────────────────────────
-
-    @Test
-    @DisplayName("toAlarms — converts mg/dL thresholds to mmol/L (1 dp) and carries snooze/enabled")
-    void toAlarms_convertsMgDlThresholdsToMmol() {
-        LibreAlarms a = parser.toAlarms(json(
-                "{\"data\":{"
-                        + "\"lowAlarm\":{\"enabled\":true,\"threshold\":70,\"snooze\":20},"
-                        + "\"highAlarm\":{\"enabled\":true,\"threshold\":240,\"snooze\":30},"
-                        + "\"signalLossAlarm\":{\"enabled\":false}}}"), UUID.randomUUID());
-
-        assertThat(a.isLowAlarmEnabled()).isTrue();
-        assertThat(a.getLowThresholdMgDl()).isEqualTo(70.0);
-        assertThat(a.getLowThresholdMmol()).isEqualTo(3.9);   // round(70/18*10)/10
-        assertThat(a.getLowSnoozeMinutes()).isEqualTo(20);
-        assertThat(a.isHighAlarmEnabled()).isTrue();
-        assertThat(a.getHighThresholdMgDl()).isEqualTo(240.0);
-        assertThat(a.getHighThresholdMmol()).isEqualTo(13.3); // round(240/18*10)/10
-        assertThat(a.getHighSnoozeMinutes()).isEqualTo(30);
-        assertThat(a.isSignalLossAlarmEnabled()).isFalse();
-    }
-
-    @Test
-    @DisplayName("toAlarms — missing alarm nodes yield disabled alarms with null thresholds")
-    void toAlarms_missingNodes_disabledWithNullThresholds() {
-        LibreAlarms a = parser.toAlarms(json("{\"data\":{}}"), UUID.randomUUID());
-
-        assertThat(a.isLowAlarmEnabled()).isFalse();
-        assertThat(a.isHighAlarmEnabled()).isFalse();
-        assertThat(a.isSignalLossAlarmEnabled()).isFalse();
-        assertThat(a.getLowThresholdMgDl()).isNull();
-        assertThat(a.getLowThresholdMmol()).isNull();
-        assertThat(a.getHighThresholdMmol()).isNull();
-    }
 }

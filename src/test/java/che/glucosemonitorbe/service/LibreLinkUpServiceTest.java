@@ -187,15 +187,6 @@ class LibreLinkUpServiceTest {
     }
 
     @Test
-    @DisplayName("getAlarms — unauthenticated user throws RuntimeException")
-    void getAlarms_requiresAuthentication() {
-        UUID userId = UUID.randomUUID();
-        assertThatThrownBy(() -> service.getAlarms(userId))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Not authenticated");
-    }
-
-    @Test
     @DisplayName("getGlucoseHistory — unauthenticated user throws RuntimeException")
     void getGlucoseHistory_requiresAuthentication() {
         UUID userId = UUID.randomUUID();
@@ -209,15 +200,6 @@ class LibreLinkUpServiceTest {
     void getCurrentGlucose_requiresAuthentication() {
         UUID userId = UUID.randomUUID();
         assertThatThrownBy(() -> service.getCurrentGlucose("patient-1", userId))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Not authenticated");
-    }
-
-    @Test
-    @DisplayName("getUserProfile — unauthenticated user throws RuntimeException")
-    void getUserProfile_requiresAuthentication() {
-        UUID userId = UUID.randomUUID();
-        assertThatThrownBy(() -> service.getUserProfile(userId))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Not authenticated");
     }

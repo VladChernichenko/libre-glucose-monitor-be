@@ -214,28 +214,6 @@ class LibreLinkUpControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch current glucose")));
     }
 
-    // ── GET /api/libre/profile ────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("GET /profile — returns 200 with profile object")
-    void getUserProfile_success_returns200() throws Exception {
-        when(libreLinkUpService.getUserProfile(userId)).thenReturn("{\"firstName\":\"John\"}");
-
-        mockMvc.perform(get("/api/libre/profile").principal(auth))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    @DisplayName("GET /profile — service error returns 400")
-    void getUserProfile_serviceThrows_returns400() throws Exception {
-        when(libreLinkUpService.getUserProfile(any()))
-                .thenThrow(new RuntimeException("Not authenticated"));
-
-        mockMvc.perform(get("/api/libre/profile").principal(auth))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch profile")));
-    }
-
     // ── GET /api/libre/connections/{patientId}/history ────────────────────────
 
     @Test
@@ -304,34 +282,4 @@ class LibreLinkUpControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch sensor info")));
     }
 
-    // ── GET /api/libre/alarms ─────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("GET /alarms — returns 200 with alarm configuration")
-    void getAlarms_success_returns200() throws Exception {
-        LibreAlarms alarms = new LibreAlarms(
-                true, 70.0, 3.9, 30,
-                true, 180.0, 10.0, 60,
-                true);
-        when(libreLinkUpService.getAlarms(userId)).thenReturn(alarms);
-
-        mockMvc.perform(get("/api/libre/alarms").principal(auth))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.lowAlarmEnabled").value(true))
-                .andExpect(jsonPath("$.highAlarmEnabled").value(true))
-                .andExpect(jsonPath("$.lowThresholdMmol").value(3.9))
-                .andExpect(jsonPath("$.highThresholdMmol").value(10.0))
-                .andExpect(jsonPath("$.signalLossAlarmEnabled").value(true));
-    }
-
-    @Test
-    @DisplayName("GET /alarms — service error returns 400")
-    void getAlarms_serviceThrows_returns400() throws Exception {
-        when(libreLinkUpService.getAlarms(any()))
-                .thenThrow(new RuntimeException("Alarm service error"));
-
-        mockMvc.perform(get("/api/libre/alarms").principal(auth))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch alarm configuration")));
-    }
 }

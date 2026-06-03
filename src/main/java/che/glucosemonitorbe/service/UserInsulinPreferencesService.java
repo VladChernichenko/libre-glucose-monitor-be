@@ -7,6 +7,7 @@ import che.glucosemonitorbe.entity.InsulinCatalog;
 import che.glucosemonitorbe.entity.UserInsulinPreferences;
 import che.glucosemonitorbe.repository.UserInsulinPreferencesRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +16,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class UserInsulinPreferencesService {
 
@@ -65,6 +67,9 @@ public class UserInsulinPreferencesService {
 
     @Transactional
     public UserInsulinPreferencesDTO savePreferences(UUID userId, UpdateUserInsulinPreferencesRequest request) {
+        log.info("[insulin-prefs] save request user={} rapid={} long={} injectionTimeRaw='{}'",
+                userId, request.getRapidInsulinCode(), request.getLongActingInsulinCode(),
+                request.getLongActingInjectionTime());
         InsulinCatalog rapid = insulinCatalogService.getRequiredByCode(request.getRapidInsulinCode().trim().toUpperCase());
         InsulinCatalog basal = insulinCatalogService.getRequiredByCode(request.getLongActingInsulinCode().trim().toUpperCase());
 
@@ -86,6 +91,7 @@ public class UserInsulinPreferencesService {
         }
 
         UserInsulinPreferences saved = userInsulinPreferencesRepository.save(entity);
+        log.info("[insulin-prefs] persisted user={} injectionTime={}", userId, saved.getLongActingInjectionTime());
         return toDto(saved);
     }
 

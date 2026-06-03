@@ -306,34 +306,6 @@ public class LibreLinkUpService {
         }
     }
 
-    /** Raw LibreLinkUp user profile JSON. BE-1: per-user credentials. */
-    public Object getUserProfile(UUID userId) throws Exception {
-        requireAuthenticated(userId);
-        String baseUrl = baseUrlFor(userId);
-        CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-profile:" + userId);
-
-        return circuitBreaker.executeWithFallback(
-            () -> {
-                try {
-                    String url = baseUrl + "/user/profile";
-                    logger.info("Fetching LibreLinkUp user profile from {}", url);
-                    JsonNode jsonResponse = client.authenticatedGet(userId, url);
-                    throwIfApiError(jsonResponse, "LibreLinkUp user profile error: ");
-
-                    logger.info("Successfully fetched LibreLinkUp user profile");
-                    return jsonResponse;
-                } catch (Exception e) {
-                    logger.error("Failed to fetch LibreLinkUp user profile: {}", e.getMessage());
-                    throw new RuntimeException("Failed to fetch LibreLinkUp user profile: " + e.getMessage());
-                }
-            },
-            () -> {
-                logger.warn("LibreLinkUp user profile circuit breaker is OPEN - returning empty profile");
-                return objectMapper.createObjectNode();
-            }
-        );
-    }
-
     /**
      * Historical glucose data for a patient. Delegates to {@link #getGlucoseData} (same /graph
      * endpoint) and applies optional date filtering on the result.
@@ -383,33 +355,6 @@ public class LibreLinkUpService {
             () -> {
                 logger.warn("LibreLinkUp sensor info circuit breaker is OPEN");
                 return responseParser.unknownSensorInfo();
-            }
-        );
-    }
-
-    /** Fetch glucose alarm configuration from LibreLinkUp {@code /llu/notifications/alarms}. */
-    public LibreAlarms getAlarms(UUID userId) throws Exception {
-        requireAuthenticated(userId);
-        String baseUrl = baseUrlFor(userId);
-        CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-alarms:" + userId);
-
-        return cb.executeWithFallback(
-            () -> {
-                try {
-                    String url = baseUrl + "/llu/notifications/alarms";
-                    logger.info("Fetching LLU alarms from {}", url);
-                    JsonNode json = client.authenticatedGet(userId, url);
-                    throwIfApiError(json, "LLU alarms error: ");
-
-                    return responseParser.toAlarms(json, userId);
-                } catch (Exception e) {
-                    logger.error("Failed to fetch LLU alarms for user {}: {}", userId, e.getMessage());
-                    throw new RuntimeException("Failed to fetch LLU alarms: " + e.getMessage(), e);
-                }
-            },
-            () -> {
-                logger.warn("LibreLinkUp alarms circuit breaker is OPEN - returning disabled alarms");
-                return new LibreAlarms(false, null, null, null, false, null, null, null, false);
             }
         );
     }

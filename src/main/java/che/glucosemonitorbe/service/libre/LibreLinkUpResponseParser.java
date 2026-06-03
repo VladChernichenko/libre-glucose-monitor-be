@@ -321,31 +321,4 @@ public class LibreLinkUpResponseParser {
                 ageDays, sensorMaxDays, status, remaining);
     }
 
-    /**
-     * Map the {@code /llu/notifications/alarms} success response to domain alarms; thresholds are
-     * mg/dL on the wire and converted to mmol/L (1 dp) at the LLU 18.0 divisor.
-     */
-    public LibreAlarms toAlarms(JsonNode json, UUID userId) {
-        JsonNode data = json.has("data") ? json.get("data") : json;
-        JsonNode low  = data.get("lowAlarm");
-        JsonNode high = data.get("highAlarm");
-        JsonNode sig  = data.get("signalLossAlarm");
-
-        boolean lowEnabled  = low  != null && low.path("enabled").asBoolean(false);
-        boolean highEnabled = high != null && high.path("enabled").asBoolean(false);
-        boolean sigEnabled  = sig  != null && sig.path("enabled").asBoolean(false);
-
-        Double lowMgDl  = low  != null && low.has("threshold")  ? low.get("threshold").asDouble()  : null;
-        Double highMgDl = high != null && high.has("threshold") ? high.get("threshold").asDouble() : null;
-        Integer lowSnooze  = low  != null && low.has("snooze")  ? low.get("snooze").asInt()  : null;
-        Integer highSnooze = high != null && high.has("snooze") ? high.get("snooze").asInt() : null;
-
-        Double lowMmol  = lowMgDl  != null ? Math.round(lowMgDl  / 18.0 * 10.0) / 10.0 : null;
-        Double highMmol = highMgDl != null ? Math.round(highMgDl / 18.0 * 10.0) / 10.0 : null;
-
-        logger.info("LLU alarms for user {}: low={} @{}mmol, high={} @{}mmol, signalLoss={}",
-                userId, lowEnabled, lowMmol, highEnabled, highMmol, sigEnabled);
-        return new LibreAlarms(lowEnabled, lowMgDl, lowMmol, lowSnooze,
-                highEnabled, highMgDl, highMmol, highSnooze, sigEnabled);
-    }
 }
