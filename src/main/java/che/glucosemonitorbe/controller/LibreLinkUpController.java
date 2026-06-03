@@ -7,6 +7,7 @@ import che.glucosemonitorbe.dto.LibreGlucoseData;
 import che.glucosemonitorbe.dto.LibreGlucoseReading;
 import che.glucosemonitorbe.dto.LibreSensorInfo;
 import che.glucosemonitorbe.service.LibreLinkUpService;
+import che.glucosemonitorbe.service.LibreLinkUpSyncService;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,6 +17,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -33,6 +35,7 @@ public class LibreLinkUpController {
     private static final Logger logger = LoggerFactory.getLogger(LibreLinkUpController.class);
 
     private final LibreLinkUpService libreLinkUpService;
+    private final LibreLinkUpSyncService libreLinkUpSyncService;
     private final UserService userService;
     private final UserDataSourceConfigService dataSourceConfigService;
 
@@ -127,6 +130,39 @@ public class LibreLinkUpController {
                         patientId, authentication.getName(), e.getMessage());
             return ResponseEntity.badRequest().body("Failed to fetch glucose data: " + e.getMessage());
         }
+    }
+
+    /**
+     * On-demand LibreLinkUp sync for the authenticated user. Fetches the latest CGM readings
+     * immediately and stores them in the chart cache, bypassing the periodic scheduler interval so
+     * the iOS refresh button does not have to wait for the next tick.
+     *
+     * <p>Concurrency-safe via {@link LibreLinkUpSyncService}: per-user locking serialises a user's
+     * syncs (manual + scheduled), different users run in parallel, and rapid repeat taps are
+     * coalesced.
+     */
+    @Operation(summary = "Refresh LibreLinkUp readings now (on-demand sync)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Sync completed (new or unchanged data)"),
+            @ApiResponse(responseCode = "202", description = "A sync for this user is already in progress"),
+            @ApiResponse(responseCode = "409", description = "No LibreLinkUp credentials configured"),
+            @ApiResponse(responseCode = "502", description = "Sync failed (auth/network error)")
+    })
+    @PostMapping("/sync-now")
+    public ResponseEntity<?> syncNow(Authentication authentication) {
+        UUID uid = userId(authentication);
+        logger.info("User {} requested on-demand LibreLinkUp sync", authentication.getName());
+
+        LibreLinkUpSyncService.Outcome outcome = libreLinkUpSyncService.syncUser(uid, true);
+        logger.info("On-demand LibreLinkUp sync for user {} -> {}", authentication.getName(), outcome);
+
+        HttpStatus status = switch (outcome) {
+            case NEW_DATA, NO_CHANGE, SKIPPED_BACKOFF -> HttpStatus.OK;
+            case IN_PROGRESS                          -> HttpStatus.ACCEPTED;
+            case SKIPPED_NO_CREDS                     -> HttpStatus.CONFLICT;
+            case ERROR                                -> HttpStatus.BAD_GATEWAY;
+        };
+        return ResponseEntity.status(status).body(java.util.Map.of("outcome", outcome.name()));
     }
 
     /**
