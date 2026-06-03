@@ -12,7 +12,12 @@ import java.util.UUID;
 @Entity
 @Table(name = "notes")
 public class Note {
-    
+
+    /** {@link #type} value for ordinary meal/correction/bolus notes (the default). */
+    public static final String TYPE_NORMAL = "normal";
+    /** {@link #type} value for long-acting (basal) insulin notes — excluded from bolus IOB/predictions. */
+    public static final String TYPE_LONG_ACTING = "long_acting";
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -51,6 +56,10 @@ public class Note {
 
     @Column(name = "absorption_mode", length = 32)
     private String absorptionMode;
+
+    /** Note category: {@link #TYPE_NORMAL} (default) or {@link #TYPE_LONG_ACTING}. */
+    @Column(name = "type", nullable = false, length = 20)
+    private String type = TYPE_NORMAL;
 
     @Column(name = "mock_data", nullable = false)
     private boolean mockData = false;
@@ -182,6 +191,19 @@ public class Note {
 
     public void setAbsorptionMode(String absorptionMode) {
         this.absorptionMode = absorptionMode;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    /** True when this note is a long-acting (basal) injection — excluded from bolus IOB/predictions. */
+    public boolean isLongActing() {
+        return TYPE_LONG_ACTING.equals(type);
     }
 
     public boolean isMockData() {

@@ -23,6 +23,8 @@ public class CreateNoteRequest {
     private String insulinDose;
     private Boolean mockData;
     private String absorptionMode;
+    /** Note category: "normal" (default) or "long_acting". */
+    private String type;
 
     /**
      * Pre-computed nutrition profile JSON from the iOS Nutrition analyser.
@@ -130,5 +132,13 @@ public class CreateNoteRequest {
 
     public void setNutritionProfile(String nutritionProfile) {
         this.nutritionProfile = nutritionProfile;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
     }
 }

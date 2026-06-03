@@ -2,6 +2,7 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
+import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.PredictionFactors;
@@ -202,6 +203,53 @@ class GlucoseCalculationsServiceTest {
                 .as("HFHP note from 7.5 hours ago must be included in COB calculation; "
                         + "current 6-hour window excludes it (BUG: L2)")
                 .anyMatch(e -> e.getCarbs() != null && e.getCarbs() >= 60.0);
+    }
+
+    // ── Long-acting (basal) doses must not be treated as bolus IOB ───────────
+
+    /**
+     * A long-acting (basal) note carries an insulin dose but must NEVER be fed into the
+     * rapid-acting bolus IOB curve / prediction path. It is excluded from the insulinEntries
+     * passed to InsulinCalculatorService. Regression guard for the long-acting logging feature.
+     */
+    @Test
+    void longActingNote_excludedFromBolusInsulinEntries() {
+        String username = "basal_user";
+        UUID userId = UUID.randomUUID();
+        when(userService.getUserByUsername(username))
+                .thenReturn(UserDto.builder().id(userId).username(username).build());
+
+        COBSettingsDTO cobSettings = new COBSettingsDTO();
+        cobSettings.setUserId(userId);
+        cobSettings.setCarbRatio(2.0);
+        cobSettings.setIsf(1.0);
+        cobSettings.setCarbHalfLife(45);
+        cobSettings.setMaxCOBDuration(240);
+        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(cobSettings);
+
+        // 20 U of long-acting taken 1 h ago — a massive phantom bolus IOB if mis-classified.
+        Note basal = new Note(userId, LocalDateTime.now().minusHours(1), 0.0, 20.0, "Tresiba");
+        basal.setId(UUID.randomUUID());
+        basal.setType(Note.TYPE_LONG_ACTING);
+        when(noteRepository.findByUserIdAndTimestampBetween(any(), any(), any()))
+                .thenReturn(List.of(basal));
+
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+        when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<InsulinDose>> insulinCaptor = ArgumentCaptor.forClass(List.class);
+        when(insulinCalculatorService.calculateTotalActiveInsulin(
+                insulinCaptor.capture(), any(), anyDouble(), anyDouble())).thenReturn(0.0);
+
+        service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(6.0).userId(username).includePredictionFactors(false).build());
+
+        assertThat(insulinCaptor.getValue())
+                .as("long-acting (basal) doses must be excluded from bolus IOB entries")
+                .isEmpty();
     }
 
     // ── P4: getCOBSettings called O(N) times per prediction path ─────────────

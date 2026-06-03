@@ -18,6 +18,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.annotations.UuidGenerator;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.UUID;
 
 @Getter
@@ -45,6 +46,10 @@ public class UserInsulinPreferences {
     @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(name = "long_acting_insulin_id", referencedColumnName = "id", nullable = false)
     private InsulinCatalog longActingInsulin;
+
+    /** Optional daily time the user takes their long-acting (basal) dose; gates the logging action. */
+    @Column(name = "long_acting_injection_time")
+    private LocalTime longActingInjectionTime;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

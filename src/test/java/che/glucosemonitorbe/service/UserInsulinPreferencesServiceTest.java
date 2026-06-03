@@ -7,10 +7,12 @@ import che.glucosemonitorbe.entity.UserInsulinPreferences;
 import che.glucosemonitorbe.repository.UserInsulinPreferencesRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -87,6 +89,42 @@ class UserInsulinPreferencesServiceTest {
 
         assertEquals("FIASP", result.getRapidInsulinCode());
         assertEquals("TRESIBA", result.getLongActingInsulinCode());
+    }
+
+    @Test
+    void savePreferencesPersistsAndReturnsInjectionTime() {
+        UUID userId = UUID.randomUUID();
+        UpdateUserInsulinPreferencesRequest request = new UpdateUserInsulinPreferencesRequest();
+        request.setRapidInsulinCode("FIASP");
+        request.setLongActingInsulinCode("TRESIBA");
+        request.setLongActingInjectionTime("22:00");
+
+        when(insulinCatalogService.getRequiredByCode("FIASP")).thenReturn(insulin("FIASP", InsulinCatalog.Category.RAPID));
+        when(insulinCatalogService.getRequiredByCode("TRESIBA")).thenReturn(insulin("TRESIBA", InsulinCatalog.Category.LONG_ACTING));
+        when(userInsulinPreferencesRepository.findByUserId(userId)).thenReturn(Optional.empty());
+
+        ArgumentCaptor<UserInsulinPreferences> captor = ArgumentCaptor.forClass(UserInsulinPreferences.class);
+        // Return the entity as-saved so the DTO reflects the parsed time.
+        when(userInsulinPreferencesRepository.save(captor.capture())).thenAnswer(inv -> inv.getArgument(0));
+
+        UserInsulinPreferencesDTO result = service.savePreferences(userId, request);
+
+        assertEquals(LocalTime.of(22, 0), captor.getValue().getLongActingInjectionTime());
+        assertEquals("22:00", result.getLongActingInjectionTime());
+    }
+
+    @Test
+    void savePreferencesRejectsInvalidInjectionTime() {
+        UUID userId = UUID.randomUUID();
+        UpdateUserInsulinPreferencesRequest request = new UpdateUserInsulinPreferencesRequest();
+        request.setRapidInsulinCode("FIASP");
+        request.setLongActingInsulinCode("TRESIBA");
+        request.setLongActingInjectionTime("9pm"); // not HH:mm
+
+        when(insulinCatalogService.getRequiredByCode("FIASP")).thenReturn(insulin("FIASP", InsulinCatalog.Category.RAPID));
+        when(insulinCatalogService.getRequiredByCode("TRESIBA")).thenReturn(insulin("TRESIBA", InsulinCatalog.Category.LONG_ACTING));
+
+        assertThrows(IllegalArgumentException.class, () -> service.savePreferences(userId, request));
     }
 
     private static InsulinCatalog insulin(String code, InsulinCatalog.Category category) {

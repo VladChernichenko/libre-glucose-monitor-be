@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 @Service
@@ -18,6 +20,9 @@ public class UserInsulinPreferencesService {
 
     public static final String DEFAULT_RAPID_CODE = "FIASP";
     public static final String DEFAULT_LONG_ACTING_CODE = "TRESIBA";
+
+    /** Wire format for the long-acting injection time ("HH:mm", 24-hour). */
+    private static final DateTimeFormatter INJECTION_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
 
     private final UserInsulinPreferencesRepository userInsulinPreferencesRepository;
     private final InsulinCatalogService insulinCatalogService;
@@ -75,9 +80,28 @@ public class UserInsulinPreferencesService {
         entity.setUserId(userId);
         entity.setRapidInsulin(rapid);
         entity.setLongActingInsulin(basal);
+        // null → leave unchanged; "" → clear; "HH:mm" → set. Lets older clients omit the field safely.
+        if (request.getLongActingInjectionTime() != null) {
+            entity.setLongActingInjectionTime(parseInjectionTime(request.getLongActingInjectionTime()));
+        }
 
         UserInsulinPreferences saved = userInsulinPreferencesRepository.save(entity);
         return toDto(saved);
+    }
+
+    private static LocalTime parseInjectionTime(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalTime.parse(raw.trim(), INJECTION_TIME_FORMAT);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid long-acting injection time (expected HH:mm): " + raw);
+        }
+    }
+
+    private static String formatInjectionTime(LocalTime time) {
+        return time != null ? time.format(INJECTION_TIME_FORMAT) : null;
     }
 
     private UserInsulinPreferencesDTO buildDtoWithCatalogOnly(String rapidCode, String longCode) {
@@ -97,6 +121,7 @@ public class UserInsulinPreferencesService {
                 .longActingInsulinCode(p.getLongActingInsulin().getCode())
                 .rapidInsulin(InsulinCatalogService.toDto(p.getRapidInsulin()))
                 .longActingInsulin(InsulinCatalogService.toDto(p.getLongActingInsulin()))
+                .longActingInjectionTime(formatInjectionTime(p.getLongActingInjectionTime()))
                 .build();
     }
 }

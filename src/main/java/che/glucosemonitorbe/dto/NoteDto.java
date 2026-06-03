@@ -25,6 +25,8 @@ public class NoteDto {
     private String insulinDose;
     private String nutritionProfile;
     private String absorptionMode;
+    /** Note category: "normal" (default) or "long_acting". */
+    private String type;
     private boolean mockData;
     
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
@@ -149,7 +151,15 @@ public class NoteDto {
     public void setAbsorptionMode(String absorptionMode) {
         this.absorptionMode = absorptionMode;
     }
-    
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
