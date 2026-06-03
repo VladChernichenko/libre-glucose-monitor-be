@@ -1,0 +1,95 @@
+name: CI
+
+# Pipeline: run the test suite with coverage (gating on coverage of new/changed code),
+# then deploy to Railway only when the test job passes (push to main).
+#
+# Tests run here — not in the Railway build — because the suite uses Testcontainers, which
+# needs a Docker daemon (available on GitHub's ubuntu-latest runners, not in Railway's builder).
+#
+# Required repo config (Settings → Secrets and variables → Actions):
+#   secrets.RAILWAY_TOKEN   — a Railway project/account token used by `railway up`.
+#   vars.RAILWAY_SERVICE    — (optional) the Railway service name to deploy; omit if the token
+#                             is scoped to a single service.
+# Also turn OFF Railway's automatic GitHub deploys so this pipeline is the only deployer.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # for the coverage comment on PRs
+
+jobs:
+  test:
+    name: Test & coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so changed-files coverage can be diffed
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Run tests with coverage
+        run: ./gradlew test jacocoTestReport --no-daemon
+
+      - name: Coverage gate (new/changed code)
+        if: always()   # still report/enforce coverage when some tests fail
+        uses: madrapps/jacoco-report@v1.7.1
+        with:
+          paths: ${{ github.workspace }}/build/reports/jacoco/test/jacocoTestReport.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "Code coverage (new code)"
+          update-comment: true
+          min-coverage-overall: 0       # do not gate overall coverage…
+          min-coverage-changed-files: 80 # …only fail when NEW/changed code is < 80% covered
+
+      - name: Upload test & coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-and-coverage-reports
+          path: |
+            build/reports/tests/test
+            build/reports/jacoco/test
+          if-no-files-found: ignore
+
+  deploy:
+    name: Deploy to Railway
+    needs: test                                   # only deploys if tests + coverage gate passed
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN secret is not set (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          if [ -n "$RAILWAY_SERVICE" ]; then
+            railway up --ci --service "$RAILWAY_SERVICE"
+          else
+            railway up --ci
+          fi
