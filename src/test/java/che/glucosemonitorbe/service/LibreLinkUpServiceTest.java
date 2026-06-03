@@ -1,7 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
-import che.glucosemonitorbe.dto.LibreConnection;
+import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
 import che.glucosemonitorbe.service.libre.LibreLinkUpResponseParser;
@@ -13,6 +13,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
@@ -20,6 +22,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -229,5 +232,144 @@ class LibreLinkUpServiceTest {
         assertThatThrownBy(() -> service.getGlucoseData("patient-1", 1, userId))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Not authenticated");
+    }
+
+    // ── Auth flow & data success paths (mocked transport client) ───────────────
+
+    @Test
+    @DisplayName("authenticate — stores token + account-id hash and returns the auth response")
+    void authenticate_storesTokenAndAccountId() throws Exception {
+        UUID userId = UUID.randomUUID();
+        LibreAuthRequest req = new LibreAuthRequest("a@b.com", "pw");
+        req.setLocale("en-GB");
+
+        LibreLinkUpClient client = mock(LibreLinkUpClient.class);
+        ResponseEntity<byte[]> resp = ResponseEntity.ok(new byte[0]);
+        when(client.postLogin(anyString(), any(LibreAuthRequest.class))).thenReturn(resp);
+        when(client.parse(any())).thenReturn(json(
+                "{\"data\":{\"authTicket\":{\"token\":\"tok123\",\"expires\":111},\"user\":{\"id\":\"u1\"}}}"));
+
+        LibreAuthResponse out = serviceWith(client).authenticate(req, userId);
+
+        assertThat(out.getToken()).isEqualTo("tok123");
+        assertThat(out.getExpires()).isEqualTo(111L);
+        assertThat(sessionStore.token(userId)).isEqualTo("tok123");
+        assertThat(sessionStore.accountId(userId)).isNotNull();   // SHA-256(user.id)
+    }
+
+    @Test
+    @DisplayName("authenticate — region redirect follows the regional endpoint and pins its host")
+    void authenticate_regionRedirect_followsRegionEndpoint() throws Exception {
+        UUID userId = UUID.randomUUID();
+        LibreAuthRequest req = new LibreAuthRequest("a@b.com", "pw");
+        req.setLocale("en-GB");
+
+        LibreLinkUpClient client = mock(LibreLinkUpClient.class);
+        ResponseEntity<byte[]> r1 = new ResponseEntity<>(new byte[]{1}, HttpStatus.OK);
+        ResponseEntity<byte[]> r2 = new ResponseEntity<>(new byte[]{2}, HttpStatus.OK);
+        when(client.postLogin(anyString(), any(LibreAuthRequest.class))).thenReturn(r1, r2);
+        when(client.parse(r1)).thenReturn(json("{\"data\":{\"redirect\":true,\"region\":\"us\"}}"));
+        when(client.parse(r2)).thenReturn(json(
+                "{\"data\":{\"authTicket\":{\"token\":\"tokUS\",\"expires\":222},\"user\":{\"id\":\"u2\"}}}"));
+
+        LibreAuthResponse out = serviceWith(client).authenticate(req, userId);
+
+        assertThat(out.getToken()).isEqualTo("tokUS");
+        assertThat(sessionStore.baseUrlOrDefault(userId, "x")).isEqualTo("https://api-us.libreview.io");
+    }
+
+    @Test
+    @DisplayName("getGlucoseData — maps the graph envelope (mg/dL → mmol/L)")
+    void getGlucoseData_success_mapsGraphEnvelope() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        LibreLinkUpClient client = mock(LibreLinkUpClient.class);
+        when(client.authenticatedGet(eq(userId), anyString())).thenReturn(json(
+                "{\"data\":{\"graphData\":[{\"ValueInMgPerDl\":180,"
+                        + "\"FactoryTimestamp\":\"2025-01-14T22:22:33Z\",\"Trend\":3}]}}"));
+
+        LibreGlucoseData data = serviceWith(client).getGlucoseData("p1", 1, userId);
+
+        assertThat(data.getPatientId()).isEqualTo("p1");
+        assertThat(data.getData()).hasSize(1);
+        assertThat(data.getData().get(0).getValue()).isEqualTo(10.0);
+    }
+
+    @Test
+    @DisplayName("getCurrentGlucose — returns the most recent reading")
+    void getCurrentGlucose_returnsLatest() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        LibreLinkUpClient client = mock(LibreLinkUpClient.class);
+        when(client.authenticatedGet(eq(userId), anyString())).thenReturn(json(
+                "{\"data\":{\"graphData\":["
+                        + "{\"ValueInMgPerDl\":90,\"FactoryTimestamp\":\"2025-01-14T22:00:00Z\",\"Trend\":4},"
+                        + "{\"ValueInMgPerDl\":108,\"FactoryTimestamp\":\"2025-01-14T22:25:00Z\",\"Trend\":4}]}}"));
+
+        LibreGlucoseReading r = serviceWith(client).getCurrentGlucose("p1", userId);
+
+        assertThat(r.getValue()).isEqualTo(6.0);   // 108 / 18, the latest point
+    }
+
+    @Test
+    @DisplayName("getSensorInfo — maps the active sensor (Libre 3, active)")
+    void getSensorInfo_success_mapsActiveSensor() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        long activation = System.currentTimeMillis() / 1000L - 3L * 86400L;
+        LibreLinkUpClient client = mock(LibreLinkUpClient.class);
+        when(client.authenticatedGet(eq(userId), anyString())).thenReturn(json(
+                "{\"data\":{\"activeSensors\":[{\"sensor\":{\"sn\":\"S1\",\"a\":" + activation
+                        + "},\"device\":{\"dtid\":40}}]}}"));
+
+        LibreSensorInfo info = serviceWith(client).getSensorInfo("p1", userId);
+
+        assertThat(info.getSensorModel()).isEqualTo("FreeStyle Libre 3");
+        assertThat(info.getStatus()).isEqualTo("active");
+        assertThat(info.getSerialNumber()).isEqualTo("S1");
+    }
+
+    @Test
+    @DisplayName("getAlarms — maps thresholds (mg/dL → mmol/L)")
+    void getAlarms_success_mapsThresholds() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        LibreLinkUpClient client = mock(LibreLinkUpClient.class);
+        when(client.authenticatedGet(eq(userId), anyString())).thenReturn(json(
+                "{\"data\":{\"lowAlarm\":{\"enabled\":true,\"threshold\":70},"
+                        + "\"highAlarm\":{\"enabled\":true,\"threshold\":240},"
+                        + "\"signalLossAlarm\":{\"enabled\":false}}}"));
+
+        LibreAlarms alarms = serviceWith(client).getAlarms(userId);
+
+        assertThat(alarms.isLowAlarmEnabled()).isTrue();
+        assertThat(alarms.getLowThresholdMmol()).isEqualTo(3.9);
+        assertThat(alarms.isHighAlarmEnabled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("getUserProfile — returns the raw profile JSON")
+    void getUserProfile_success_returnsJson() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        LibreLinkUpClient client = mock(LibreLinkUpClient.class);
+        when(client.authenticatedGet(eq(userId), anyString())).thenReturn(json("{\"firstName\":\"John\"}"));
+
+        Object profile = serviceWith(client).getUserProfile(userId);
+
+        assertThat(profile).isInstanceOf(JsonNode.class);
+        assertThat(((JsonNode) profile).get("firstName").asText()).isEqualTo("John");
+    }
+
+    // ── helpers ────────────────────────────────────────────────────────────────
+
+    /** Build a service wired to a (usually mocked) transport client plus the real collaborators. */
+    private LibreLinkUpService serviceWith(LibreLinkUpClient client) {
+        return new LibreLinkUpService(new CircuitBreakerManager(), client, sessionStore,
+                new LibreLinkUpRegionResolver(), responseParser);
+    }
+
+    private JsonNode json(String raw) throws Exception {
+        return new ObjectMapper().readTree(raw);
     }
 }
