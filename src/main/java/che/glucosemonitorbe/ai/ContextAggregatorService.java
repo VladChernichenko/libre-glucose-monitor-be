@@ -1,6 +1,6 @@
 package che.glucosemonitorbe.ai;
 
-import che.glucosemonitorbe.domain.NightscoutChartData;
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
@@ -8,7 +8,7 @@ import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.repository.NightscoutChartDataRepository;
+import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.COBSettingsService;
@@ -33,7 +33,7 @@ public class ContextAggregatorService {
     private static final long PRE_BOLUS_WINDOW_MINUTES = 90L;
     private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
 
-    private final NightscoutChartDataRepository chartDataRepository;
+    private final CgmReadingRepository chartDataRepository;
     private final NoteRepository noteRepository;
     private final COBSettingsService cobSettingsService;
     private final UserInsulinPreferencesService insulinPreferencesService;
@@ -46,14 +46,14 @@ public class ContextAggregatorService {
         long startTsMs = start.toInstant(ZoneOffset.UTC).toEpochMilli();
         long endTsMs = end.toInstant(ZoneOffset.UTC).toEpochMilli();
 
-        List<NightscoutChartData> all = chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId);
-        List<NightscoutChartData> inWindow = all.stream()
+        List<CgmReading> all = chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId);
+        List<CgmReading> inWindow = all.stream()
                 .filter(r -> r.getDateTimestamp() != null && r.getDateTimestamp() >= startTsMs && r.getDateTimestamp() <= endTsMs)
                 .toList();
 
         List<Double> glucoseValues = new ArrayList<>();
         List<Long> glucoseTimes = new ArrayList<>();
-        for (NightscoutChartData row : inWindow) {
+        for (CgmReading row : inWindow) {
             if (row.getSgv() == null) continue;
             glucoseValues.add(row.getSgv() / 18.0);
             glucoseTimes.add(row.getDateTimestamp());

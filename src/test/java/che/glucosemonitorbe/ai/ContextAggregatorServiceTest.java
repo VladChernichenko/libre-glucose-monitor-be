@@ -1,11 +1,11 @@
 package che.glucosemonitorbe.ai;
 
-import che.glucosemonitorbe.domain.NightscoutChartData;
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.repository.NightscoutChartDataRepository;
+import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.service.COBSettingsService;
@@ -34,7 +34,7 @@ import static org.mockito.Mockito.when;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class ContextAggregatorServiceTest {
 
-    @Mock NightscoutChartDataRepository chartDataRepository;
+    @Mock CgmReadingRepository chartDataRepository;
     @Mock NoteRepository noteRepository;
     @Mock COBSettingsService cobSettingsService;
     @Mock UserInsulinPreferencesService insulinPreferencesService;
@@ -70,8 +70,8 @@ class ContextAggregatorServiceTest {
     void buildContext_convertsSgvToMmolL() {
         // sgv 108 → 6.0 mmol/L, sgv 162 → 9.0 mmol/L
         long now = System.currentTimeMillis();
-        NightscoutChartData r1 = chartRow(108, now - 3_600_000L);
-        NightscoutChartData r2 = chartRow(162, now - 60_000L);
+        CgmReading r1 = chartRow(108, now - 3_600_000L);
+        CgmReading r2 = chartRow(162, now - 60_000L);
         when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of(r1, r2));
 
         AnalysisContext ctx = service.buildContext(userId, 12);
@@ -99,7 +99,7 @@ class ContextAggregatorServiceTest {
     @DisplayName("2h prediction clamped to [1, 25] with activeCOB contribution")
     void buildContext_2hPredictionClamped() {
         long now = System.currentTimeMillis();
-        NightscoutChartData r = chartRow(450, now - 1000); // 25 mmol/L
+        CgmReading r = chartRow(450, now - 1000); // 25 mmol/L
         when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of(r));
         when(carbsOnBoardService.calculateTotalCarbsOnBoard(any(), any(), eq(userId))).thenReturn(200.0); // huge COB
 
@@ -113,7 +113,7 @@ class ContextAggregatorServiceTest {
     @DisplayName("correction units are positive when latest glucose exceeds 6.5 and IOB is zero")
     void buildContext_correctionUnitsCalculatedWhenHyper() {
         long now = System.currentTimeMillis();
-        NightscoutChartData r = chartRow((int)(11.5 * 18), now - 1000);
+        CgmReading r = chartRow((int)(11.5 * 18), now - 1000);
         when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of(r));
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble())).thenReturn(0.0);
 
@@ -186,8 +186,8 @@ class ContextAggregatorServiceTest {
 
     // ---- helpers ----
 
-    private NightscoutChartData chartRow(int sgv, long tsMs) {
-        NightscoutChartData row = new NightscoutChartData();
+    private CgmReading chartRow(int sgv, long tsMs) {
+        CgmReading row = new CgmReading();
         row.setSgv(sgv);
         row.setDateTimestamp(tsMs);
         row.setUserId(userId);

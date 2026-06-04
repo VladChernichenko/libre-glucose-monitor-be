@@ -81,7 +81,7 @@ app:
 
   logmeal:
     enabled: ${LOGMEAL_ENABLED:true}
-    api-key: ${LOGMEAL_API_KEY}
+    api-key: ${LOGMEAL_API_KEY:}
     base-url: ${LOGMEAL_BASE_URL:https://api.logmeal.com/v2}
   ai:
     ollama:
@@ -97,7 +97,7 @@ app:
       url: ${QWEN_URL:https://api.openai.com/v1}
       model: ${QWEN_MODEL:qwen-plus}
       vision-model: ${QWEN_VISION_MODEL:gpt-4o-mini}
-      api-key: ${QWEN_API_KEY}
+      api-key: ${QWEN_API_KEY:}
   version:
     version: "1.0.0"
     api-version: "v1"

@@ -1,10 +1,11 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.exception.ExternalServiceException;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
-import che.glucosemonitorbe.service.NightscoutChartDataService;
+import che.glucosemonitorbe.service.CgmReadingService;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,7 +33,7 @@ import java.util.UUID;
 public class NightscoutController {
     
     private final NightScoutIntegration nightScoutIntegration;
-    private final NightscoutChartDataService chartDataService;
+    private final CgmReadingService chartDataService;
     private final UserService userService;
     private final UserDataSourceConfigService dataSourceConfigService;
     
@@ -70,7 +71,7 @@ public class NightscoutController {
             applyTimezoneOffsetToEntries(entries, timezoneOffset);
 
             // Offload persistence to a dedicated pool so the HTTP response returns immediately.
-            chartDataService.storeChartDataAsync(userId, entries);
+            chartDataService.storeChartDataAsync(userId, entries, CgmReading.DataSource.NIGHTSCOUT);
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries", e);
@@ -198,7 +199,7 @@ public class NightscoutController {
 
             applyTimezoneOffsetToEntries(entries, timezoneOffset);
 
-            chartDataService.storeChartDataAsync(userId, entries);
+            chartDataService.storeChartDataAsync(userId, entries, CgmReading.DataSource.NIGHTSCOUT);
             return ResponseEntity.ok(entries);
         } catch (Exception e) {
             log.error("Failed to fetch glucose entries by date", e);

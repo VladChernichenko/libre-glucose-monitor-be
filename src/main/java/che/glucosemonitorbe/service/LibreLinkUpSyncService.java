@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.dto.LibreAuthRequest;
@@ -22,9 +23,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Fetches CGM readings from LibreLinkUp for a single user and stores them in
- * {@code nightscout_chart_data} (reusing the Nightscout chart storage so the iOS chart endpoint
- * works for both data sources).
+ * Fetches CGM readings from LibreLinkUp for a single user and stores them in the shared
+ * {@code cgm_readings} cache (tagged with {@link CgmReading.DataSource#LIBRE_LINK_UP} so the
+ * iOS chart endpoint works for both data sources).
  *
  * <p>Used by two callers:
  * <ul>
@@ -66,7 +67,7 @@ public class LibreLinkUpSyncService {
 
     private final UserDataSourceConfigRepository configRepository;
     private final LibreLinkUpService libreLinkUpService;
-    private final NightscoutChartDataService nightscoutChartDataService;
+    private final CgmReadingService cgmReadingService;
     private final UserGlucoseSyncStateService syncStateService;
 
     @Value("${app.libre-sync.fast-interval-minutes:5}")
@@ -197,7 +198,7 @@ public class LibreLinkUpSyncService {
                 entries.add(entry);
             }
 
-            nightscoutChartDataService.storeChartData(userId, entries);
+            cgmReadingService.storeChartData(userId, entries, CgmReading.DataSource.LIBRE_LINK_UP);
 
             OptionalLong newestTs = entries.stream().mapToLong(NightscoutEntryDto::getDate).max();
             long prevSeen = state.getLastSeenEntryTimestamp() == null ? Long.MIN_VALUE

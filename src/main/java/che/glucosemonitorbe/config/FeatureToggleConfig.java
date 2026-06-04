@@ -20,6 +20,9 @@ public class FeatureToggleConfig {
     // Global toggle to switch between frontend and backend
     private boolean backendModeEnabled = false;
 
+    // Experiments — ISF / Carb Ratio determination (on by default)
+    private boolean experimentsEnabled = true;
+
     // Phase 2–4 integration gates (all off by default — toggle on per feature-flag)
     private boolean foodPhotoAnalysisEnabled = false;
     private boolean arSpatialEnabled = false;
