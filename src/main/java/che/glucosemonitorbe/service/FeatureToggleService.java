@@ -71,6 +71,7 @@ public class FeatureToggleService {
      */
     public boolean isEnabled(String featureName) {
         return switch (featureName.toLowerCase()) {
+            case "experiments-enabled"         -> config.isExperimentsEnabled();
             case "food-photo-analysis-enabled" -> config.isFoodPhotoAnalysisEnabled();
             case "ar-spatial-enabled"          -> config.isArSpatialEnabled();
             case "cgm-service-external"        -> config.isCgmServiceExternal();

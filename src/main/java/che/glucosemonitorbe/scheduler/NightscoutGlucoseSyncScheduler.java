@@ -1,11 +1,12 @@
 package che.glucosemonitorbe.scheduler;
 
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
-import che.glucosemonitorbe.service.NightscoutChartDataService;
+import che.glucosemonitorbe.service.CgmReadingService;
 import che.glucosemonitorbe.service.UserGlucoseSyncStateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Periodically pulls Nightscout entries for each user with an active Nightscout config and merges
- * them into stored chart data (duplicates are ignored by {@link NightscoutChartDataService}).
+ * them into the shared CGM cache (duplicates are ignored by {@link CgmReadingService}).
  */
 @Slf4j
 @Component
@@ -39,7 +40,7 @@ public class NightscoutGlucoseSyncScheduler {
 
     private final UserDataSourceConfigRepository configRepository;
     private final NightScoutIntegration nightScoutIntegration;
-    private final NightscoutChartDataService nightscoutChartDataService;
+    private final CgmReadingService cgmReadingService;
     private final UserGlucoseSyncStateService syncStateService;
 
     @Value("${app.glucose-sync.entry-count:100}")
@@ -116,7 +117,7 @@ public class NightscoutGlucoseSyncScheduler {
                     }
 
                     List<NightscoutEntryDto> entries = nightScoutIntegration.getGlucoseEntries(userId, entryCount);
-                    nightscoutChartDataService.storeChartData(userId, entries);
+                    cgmReadingService.storeChartData(userId, entries, CgmReading.DataSource.NIGHTSCOUT);
 
                     OptionalLong newestTs = entries.stream()
                             .map(NightscoutEntryDto::getDate)

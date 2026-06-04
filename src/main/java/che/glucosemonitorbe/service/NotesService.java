@@ -32,6 +32,7 @@ public class NotesService {
     private final ObjectMapper objectMapper;
     private final GlucoseAlertService glucoseAlertService;
     private final UserService userService;
+    private final VerificationService verificationService;
     
     /**
      * Get all notes for a user.
@@ -122,6 +123,13 @@ public class NotesService {
             } catch (Exception ignored) {
                 // Username lookup failure must never prevent the note from being saved
             }
+        }
+
+        // Enqueue for real-life verification (fire-and-forget — never blocks save)
+        try {
+            verificationService.enqueueNote(savedNote.getId(), userId);
+        } catch (Exception ignored) {
+            // Verification enqueue failure must never prevent the note from being saved
         }
 
         return noteMapper.toDto(savedNote);

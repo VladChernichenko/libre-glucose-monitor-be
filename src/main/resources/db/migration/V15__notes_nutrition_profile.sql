@@ -1,2 +1,0 @@
-ALTER TABLE notes ADD COLUMN IF NOT EXISTS nutrition_profile TEXT;
-ALTER TABLE notes ADD COLUMN IF NOT EXISTS absorption_mode VARCHAR(32);

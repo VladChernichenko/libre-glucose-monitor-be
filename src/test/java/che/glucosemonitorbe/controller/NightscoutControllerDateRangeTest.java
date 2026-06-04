@@ -3,7 +3,7 @@ package che.glucosemonitorbe.controller;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.dto.UserDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
-import che.glucosemonitorbe.service.NightscoutChartDataService;
+import che.glucosemonitorbe.service.CgmReadingService;
 import che.glucosemonitorbe.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,7 +40,7 @@ class NightscoutControllerDateRangeTest {
     private NightScoutIntegration nightScoutIntegration;
 
     @Mock
-    private NightscoutChartDataService chartDataService;
+    private CgmReadingService chartDataService;
 
     @Mock
     private UserService userService;

@@ -1,11 +1,12 @@
 package che.glucosemonitorbe.scheduler;
 
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
-import che.glucosemonitorbe.service.NightscoutChartDataService;
+import che.glucosemonitorbe.service.CgmReadingService;
 import che.glucosemonitorbe.service.UserGlucoseSyncStateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ class NightscoutGlucoseSyncSchedulerTest {
     @Mock
     private NightScoutIntegration nightScoutIntegration;
     @Mock
-    private NightscoutChartDataService nightscoutChartDataService;
+    private CgmReadingService cgmReadingService;
     @Mock
     private UserGlucoseSyncStateService syncStateService;
 
@@ -53,7 +54,7 @@ class NightscoutGlucoseSyncSchedulerTest {
         scheduler.syncNightscoutForAllUsers();
 
         verifyNoInteractions(nightScoutIntegration);
-        verifyNoInteractions(nightscoutChartDataService);
+        verifyNoInteractions(cgmReadingService);
     }
 
     @Test
@@ -71,8 +72,8 @@ class NightscoutGlucoseSyncSchedulerTest {
 
         verify(nightScoutIntegration).getGlucoseEntries(u1, 100);
         verify(nightScoutIntegration).getGlucoseEntries(u2, 100);
-        verify(nightscoutChartDataService).storeChartData(u1, batch);
-        verify(nightscoutChartDataService).storeChartData(u2, batch);
+        verify(cgmReadingService).storeChartData(u1, batch, CgmReading.DataSource.NIGHTSCOUT);
+        verify(cgmReadingService).storeChartData(u2, batch, CgmReading.DataSource.NIGHTSCOUT);
     }
 
     @Test
@@ -88,7 +89,7 @@ class NightscoutGlucoseSyncSchedulerTest {
 
         scheduler.syncNightscoutForAllUsers();
 
-        verify(nightscoutChartDataService).storeChartData(eq(u2), any());
-        verify(nightscoutChartDataService, never()).storeChartData(eq(u1), any());
+        verify(cgmReadingService).storeChartData(eq(u2), any(), eq(CgmReading.DataSource.NIGHTSCOUT));
+        verify(cgmReadingService, never()).storeChartData(eq(u1), any(), any());
     }
 }

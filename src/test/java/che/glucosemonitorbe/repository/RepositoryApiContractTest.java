@@ -1,6 +1,6 @@
 package che.glucosemonitorbe.repository;
 
-import che.glucosemonitorbe.domain.NightscoutChartData;
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.entity.Note;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Pageable;
@@ -61,16 +61,16 @@ class RepositoryApiContractTest {
                 .isTrue();
     }
 
-    // ── P3: NightscoutChartDataRepository.findByUserId lacks limit/Pageable ─
+    // ── P3: CgmReadingRepository.findByUserId lacks limit/Pageable ─
 
     /**
-     * // BUG: P3 — NightscoutChartDataRepository.findByUserIdOrderByDateTimestampAsc returns
+     * // BUG: P3 — CgmReadingRepository.findByUserIdOrderByDateTimestampAsc returns
      * all CGM entries for a user without any limit, causing OOM on large data sets.
      */
     @Test
-    void p3_nightscoutChartDataRepository_findAll_mustAcceptPageable() {
+    void p3_cgmReadingRepository_findAll_mustAcceptPageable() {
         boolean hasPageableVariant = false;
-        for (Method m : NightscoutChartDataRepository.class.getMethods()) {
+        for (Method m : CgmReadingRepository.class.getMethods()) {
             if (m.getName().equals("findByUserIdOrderByDateTimestampAsc")) {
                 for (Class<?> param : m.getParameterTypes()) {
                     if (Pageable.class.isAssignableFrom(param)) {
@@ -82,7 +82,7 @@ class RepositoryApiContractTest {
         }
         // BUG: no Pageable overload exists — this FAILS
         assertThat(hasPageableVariant)
-                .as("NightscoutChartDataRepository must have a "
+                .as("CgmReadingRepository must have a "
                         + "findByUserIdOrderByDateTimestampAsc(UUID, Pageable) variant (BUG: P3)")
                 .isTrue();
     }
