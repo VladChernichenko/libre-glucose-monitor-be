@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class VerificationSummaryDTO {
+    @JsonProperty("nEvents")
     private int nEvents;
     private Double meanError;
     private Double consistencyScore;
