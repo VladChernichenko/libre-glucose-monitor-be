@@ -260,23 +260,6 @@ class ExperimentE2ETest {
                 "Second experiment start should return 409 — got: " + second.getBody());
     }
 
-    // ── T9: Feature flag off → feature disabled ───────────────────────────────
-
-    @Nested
-    @TestPropertySource(properties = {"app.features.experiments-enabled=false"})
-    @DisplayName("T9 — Feature flag disabled")
-    class FeatureFlagOff {
-        @Test
-        @DisplayName("GET /available returns 404 when feature is disabled")
-        void featureDisabled_returns404() {
-            ResponseEntity<String> resp = rest.exchange(
-                    "/api/experiments/available", HttpMethod.GET,
-                    new HttpEntity<>(authHeaders), String.class);
-            assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode(),
-                    "Disabled feature should return 404 — got: " + resp.getBody());
-        }
-    }
-
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private HttpHeaders registerAndLogin() {

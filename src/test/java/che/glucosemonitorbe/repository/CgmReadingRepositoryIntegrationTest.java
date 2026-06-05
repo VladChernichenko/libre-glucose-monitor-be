@@ -5,6 +5,8 @@ import che.glucosemonitorbe.domain.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -57,6 +59,7 @@ class CgmReadingRepositoryIntegrationTest {
 
     @Autowired private CgmReadingRepository repository;
     @Autowired private UserRepository userRepository;
+    @PersistenceContext private EntityManager em;
 
     private UUID userId;
     private UUID otherUserId;
@@ -180,17 +183,26 @@ class CgmReadingRepositoryIntegrationTest {
     @Test
     @DisplayName("deleteOlderThan removes rows by lastUpdated only")
     void deleteOlderThan_byTimestamp() {
-        CgmReading old = reading(userId, CgmReading.DataSource.NIGHTSCOUT, "x", 1L, 100);
-        old.setLastUpdated(LocalDateTime.now().minusDays(30));
-        repository.save(old);
-        CgmReading fresh = reading(userId, CgmReading.DataSource.NIGHTSCOUT, "y", 2L, 110);
-        fresh.setLastUpdated(LocalDateTime.now());
-        repository.save(fresh);
+        // Save both rows normally (@PrePersist stamps lastUpdated = now for both).
+        CgmReading old   = repository.saveAndFlush(reading(userId, CgmReading.DataSource.NIGHTSCOUT, "x", 1L, 100));
+        CgmReading fresh = repository.saveAndFlush(reading(userId, CgmReading.DataSource.NIGHTSCOUT, "y", 2L, 110));
+
+        // Back-date "old" via JPQL bulk update — @PrePersist/@PreUpdate do not fire for bulk
+        // statements, so this is the only way to inject a historical lastUpdated without
+        // removing the lifecycle hook from the production entity.
+        em.createQuery("UPDATE CgmReading r SET r.lastUpdated = :ts WHERE r.id = :id")
+                .setParameter("ts", LocalDateTime.now().minusDays(30))
+                .setParameter("id", old.getId())
+                .executeUpdate();
+        em.flush();
 
         int deleted = repository.deleteOlderThan(LocalDateTime.now().minusDays(7));
 
         assertThat(deleted).isEqualTo(1);
         assertThat(repository.countByUserId(userId)).isEqualTo(1);
+        // The remaining row must be the fresh one
+        assertThat(repository.findByUserIdOrderByDateTimestampAsc(userId).get(0).getExternalId())
+                .isEqualTo(fresh.getExternalId());
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────

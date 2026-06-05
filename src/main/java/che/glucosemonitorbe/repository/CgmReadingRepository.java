@@ -51,6 +51,10 @@ public interface CgmReadingRepository extends JpaRepository<CgmReading, UUID> {
     /** Paginated overload to avoid loading the whole CGM history into memory. */
     Page<CgmReading> findByUserIdOrderByDateTimestampAsc(UUID userId, Pageable pageable);
 
+    /** Incremental fetch: readings strictly newer than the given epoch-ms timestamp. */
+    List<CgmReading> findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
+            UUID userId, Long dateTimestamp);
+
     Optional<CgmReading> findByUserIdAndDataSourceAndExternalId(
             UUID userId, CgmReading.DataSource dataSource, String externalId);
 

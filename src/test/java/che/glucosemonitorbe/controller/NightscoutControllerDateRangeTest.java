@@ -1,9 +1,11 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.dto.UserDto;
 import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.service.CgmReadingService;
+import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,9 +23,13 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -44,6 +50,9 @@ class NightscoutControllerDateRangeTest {
 
     @Mock
     private UserService userService;
+
+    @Mock
+    private UserDataSourceConfigService dataSourceConfigService;
 
     @InjectMocks
     private NightscoutController nightscoutController;
@@ -155,5 +164,86 @@ class NightscoutControllerDateRangeTest {
         assertThat(body)
                 .as("Entry from yesterday must not appear when window is last 1h — BUG: BE-10")
                 .doesNotContain("e1");
+    }
+
+    // ── /api/nightscout/chart-data — since param routing ─────────────────────────
+
+    /**
+     * When ?since=<epochMs> is supplied, the controller must delegate to
+     * getChartDataAsEntriesSince (incremental fetch) rather than getChartDataAsEntries.
+     */
+    @Test
+    void chartData_withSinceParam_callsEntriesSince() throws Exception {
+        long sinceMs = 1640998800000L;
+        NightscoutEntryDto entry = new NightscoutEntryDto("llu-new", 130, sinceMs + 300_000L,
+                null, 4, "Flat", "dev", "sgv", 0, null);
+        when(chartDataService.getChartDataAsEntriesSince(userId, sinceMs)).thenReturn(List.of(entry));
+        when(dataSourceConfigService.getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP))
+                .thenReturn(Optional.empty());
+
+        MvcResult result = mockMvc.perform(get("/api/nightscout/chart-data")
+                        .principal(auth)
+                        .param("since", String.valueOf(sinceMs)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).contains("llu-new");
+        verify(chartDataService).getChartDataAsEntriesSince(userId, sinceMs);
+        verify(chartDataService, never()).getChartDataAsEntries(userId);
+    }
+
+    /**
+     * Without ?since, the controller must call getChartDataAsEntries (full fetch)
+     * and cap results to the default count of 100.
+     */
+    @Test
+    void chartData_withoutSince_callsGetAllEntries() throws Exception {
+        List<NightscoutEntryDto> allEntries = List.of(
+                new NightscoutEntryDto("e1", 120, 1000L, null, 4, "Flat", "dev", "sgv", 0, null),
+                new NightscoutEntryDto("e2", 130, 2000L, null, 4, "Flat", "dev", "sgv", 0, null)
+        );
+        when(chartDataService.getChartDataAsEntries(userId)).thenReturn(allEntries);
+        when(dataSourceConfigService.getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP))
+                .thenReturn(Optional.empty());
+
+        MvcResult result = mockMvc.perform(get("/api/nightscout/chart-data")
+                        .principal(auth))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).contains("e1").contains("e2");
+        verify(chartDataService).getChartDataAsEntries(userId);
+        verify(chartDataService, never()).getChartDataAsEntriesSince(any(UUID.class), any(Long.class));
+    }
+
+    /**
+     * With ?since, the count cap must NOT be applied (incremental fetches are
+     * already bounded by the timestamp predicate in the DB query).
+     */
+    @Test
+    void chartData_withSince_doesNotCapCount() throws Exception {
+        long sinceMs = 1000L;
+        // Build 150 entries — more than the default count=100
+        List<NightscoutEntryDto> manyEntries = new java.util.ArrayList<>();
+        for (int i = 0; i < 150; i++) {
+            manyEntries.add(new NightscoutEntryDto("id-" + i, 100 + i, sinceMs + i * 1000L,
+                    null, 4, "Flat", "dev", "sgv", 0, null));
+        }
+        when(chartDataService.getChartDataAsEntriesSince(userId, sinceMs)).thenReturn(manyEntries);
+        when(dataSourceConfigService.getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP))
+                .thenReturn(Optional.empty());
+
+        MvcResult result = mockMvc.perform(get("/api/nightscout/chart-data")
+                        .principal(auth)
+                        .param("since", String.valueOf(sinceMs)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // All 150 entries must be present — the count cap only applies to full fetches
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.List<?> parsed = mapper.readValue(result.getResponse().getContentAsString(), java.util.List.class);
+        assertThat(parsed).hasSize(150);
     }
 }
