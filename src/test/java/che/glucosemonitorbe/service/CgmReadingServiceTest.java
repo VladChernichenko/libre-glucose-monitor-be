@@ -234,4 +234,74 @@ class CgmReadingServiceTest {
         chartDataService.clearChartData(testUserId);
         verify(repository, times(1)).deleteByUserId(testUserId);
     }
+
+    // ── getChartDataAsEntriesSince ────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("getChartDataAsEntriesSince delegates to the correct repository method with the given timestamp")
+    void getChartDataAsEntriesSince_delegatesToCorrectRepoMethod() {
+        long sinceEpochMs = 1640998800000L;
+        List<CgmReading> readings = List.of(
+                CgmReading.builder()
+                        .userId(testUserId)
+                        .dataSource(CgmReading.DataSource.LIBRE_LINK_UP)
+                        .externalId("llu-abc")
+                        .sgv(115)
+                        .dateTimestamp(1641002400000L)
+                        .direction("Flat")
+                        .build()
+        );
+        when(repository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(testUserId, sinceEpochMs))
+                .thenReturn(readings);
+
+        List<NightscoutEntryDto> result = chartDataService.getChartDataAsEntriesSince(testUserId, sinceEpochMs);
+
+        assertEquals(1, result.size());
+        assertEquals("llu-abc", result.get(0).getId());
+        assertEquals(115, result.get(0).getSgv());
+        verify(repository).findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(testUserId, sinceEpochMs);
+        verify(repository, never()).findByUserIdOrderByDateTimestampAsc(testUserId);
+    }
+
+    @Test
+    @DisplayName("getChartDataAsEntriesSince returns empty list when no newer entries exist")
+    void getChartDataAsEntriesSince_returnsEmptyWhenNoneNewer() {
+        when(repository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(testUserId, 9_999_999_999L))
+                .thenReturn(Collections.emptyList());
+
+        List<NightscoutEntryDto> result = chartDataService.getChartDataAsEntriesSince(testUserId, 9_999_999_999L);
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("getChartDataAsEntriesSince maps all DTO fields correctly (same as getChartDataAsEntries)")
+    void getChartDataAsEntriesSince_mapsAllFields() {
+        long since = 1000L;
+        CgmReading reading = CgmReading.builder()
+                .userId(testUserId)
+                .dataSource(CgmReading.DataSource.NIGHTSCOUT)
+                .externalId("ns-xyz")
+                .sgv(142)
+                .dateTimestamp(2000L)
+                .dateString("2022-01-01T02:00:00.000Z")
+                .trend(3)
+                .direction("SingleUp")
+                .device("dexcom")
+                .type("sgv")
+                .utcOffset(60)
+                .sysTime("2022-01-01T02:00:00.000Z")
+                .build();
+        when(repository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(testUserId, since))
+                .thenReturn(List.of(reading));
+
+        NightscoutEntryDto dto = chartDataService.getChartDataAsEntriesSince(testUserId, since).get(0);
+
+        assertEquals("ns-xyz",   dto.getId());
+        assertEquals(142,        dto.getSgv());
+        assertEquals(2000L,      dto.getDate());
+        assertEquals("SingleUp", dto.getDirection());
+        assertEquals("dexcom",   dto.getDevice());
+        assertEquals(60,         dto.getUtcOffset());
+    }
 }

@@ -20,6 +20,7 @@ import org.springframework.web.context.request.async.AsyncRequestNotUsableExcept
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.stream.Collectors;
 
@@ -119,6 +120,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<CustomErrorResponse> handleUploadTooLarge(
             MaxUploadSizeExceededException ex, HttpServletRequest request) {
         return build(HttpStatus.PAYLOAD_TOO_LARGE, "Payload too large", "Uploaded file exceeds the maximum allowed size.", request);
+    }
+
+    /** Passes through the status code carried by the exception (e.g. 409 from service layer). */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<CustomErrorResponse> handleResponseStatus(
+            ResponseStatusException ex, HttpServletRequest request) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        if (status == null) status = HttpStatus.INTERNAL_SERVER_ERROR;
+        String reason = ex.getReason() != null ? ex.getReason() : status.getReasonPhrase();
+        return build(status, status.getReasonPhrase(), reason, request);
     }
 
     // ── 5xx: server / upstream faults ───────────────────────────────────────────

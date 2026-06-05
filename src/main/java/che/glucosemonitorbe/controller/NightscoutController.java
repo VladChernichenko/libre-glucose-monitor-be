@@ -212,12 +212,14 @@ public class NightscoutController {
     @GetMapping("/chart-data")
     public ResponseEntity<List<NightscoutEntryDto>> getStoredChartData(
             @RequestParam(value = "count", defaultValue = "100") int count,
+            @RequestParam(value = "since", required = false) Long sinceEpochMs,
             Authentication authentication) {
-        log.info("User {} requesting {} stored chart data entries", authentication.getName(), count);
 
         UUID userId = userService.getUserByUsername(authentication.getName()).getId();
 
-        List<NightscoutEntryDto> chartData = chartDataService.getChartDataAsEntries(userId);
+        List<NightscoutEntryDto> chartData = sinceEpochMs != null
+                ? chartDataService.getChartDataAsEntriesSince(userId, sinceEpochMs)
+                : chartDataService.getChartDataAsEntries(userId);
 
         // For LibreLinkUp users, only return entries written by the LLU scheduler
         // (id prefix "llu-"). This filters out any stale Nightscout data that may
@@ -231,14 +233,14 @@ public class NightscoutController {
                     .collect(java.util.stream.Collectors.toList());
         }
 
-        // Most recent `count` points (stored ascending by time)
-        if (chartData.size() > count) {
+        // When doing a full fetch (no since), cap to most recent `count` points
+        if (sinceEpochMs == null && chartData.size() > count) {
             int from = Math.max(0, chartData.size() - count);
             chartData = chartData.subList(from, chartData.size());
         }
 
-        log.info("Retrieved {} stored chart data entries for user {} (libreFiltered={})",
-                chartData.size(), authentication.getName(), isLibreUser);
+        log.info("Retrieved {} stored chart data entries for user {} (libreFiltered={}, since={})",
+                chartData.size(), authentication.getName(), isLibreUser, sinceEpochMs);
         return ResponseEntity.ok(chartData);
     }
     

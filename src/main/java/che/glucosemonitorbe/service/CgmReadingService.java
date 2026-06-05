@@ -164,6 +164,16 @@ public class CgmReadingService {
                 .collect(Collectors.toList());
     }
 
+    /** Returns only readings with dateTimestamp > sinceEpochMs (incremental sync). */
+    public List<NightscoutEntryDto> getChartDataAsEntriesSince(UUID userId, long sinceEpochMs) {
+        log.debug("Retrieving CGM readings for user {} since epoch {}", userId, sinceEpochMs);
+        return repository
+                .findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(userId, sinceEpochMs)
+                .stream()
+                .map(this::convertToEntryDto)
+                .collect(Collectors.toList());
+    }
+
     @Transactional
     public void clearChartData(UUID userId) {
         log.info("Clearing all CGM readings for user {}", userId);

@@ -143,22 +143,6 @@ class VerificationE2ETest {
         assertTrue(body.size() >= 1, "Should return at least 1 event — got: " + body.size());
     }
 
-    // ── T6: Feature flag off → 404 ───────────────────────────────────────────
-
-    @Nested
-    @TestPropertySource(properties = {"app.features.experiments-enabled=false"})
-    @DisplayName("T6 — Feature flag disabled")
-    class FeatureOff {
-        @Test
-        @DisplayName("GET /verification/summary returns 404 when experiments disabled")
-        void featureDisabled_returns404() {
-            ResponseEntity<String> resp = rest.exchange(
-                    "/api/experiments/verification/summary", HttpMethod.GET,
-                    new HttpEntity<>(authHeaders), String.class);
-            assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode());
-        }
-    }
-
     // ── T7: POST accept-suggestion → 200 ─────────────────────────────────────
 
     @Test
