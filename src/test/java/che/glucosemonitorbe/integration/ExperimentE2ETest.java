@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -258,6 +259,89 @@ class ExperimentE2ETest {
                 new HttpEntity<>(req, authHeaders), String.class);
         assertEquals(HttpStatus.CONFLICT, second.getStatusCode(),
                 "Second experiment start should return 409 — got: " + second.getBody());
+    }
+
+    // ── T9: check-background returns correct COB/IOB ─────────────────────────
+
+    @Test
+    @DisplayName("T9 — GET /check-background returns isClean:true when no active notes")
+    void checkBackground_noNotes_isClean() {
+        ResponseEntity<BackgroundStatusDTO> resp = rest.exchange(
+                "/api/experiments/check-background", HttpMethod.GET,
+                new HttpEntity<>(authHeaders), BackgroundStatusDTO.class);
+
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertNotNull(resp.getBody());
+        assertTrue(resp.getBody().isClean(),
+                "Fresh account with no notes must have a clean background");
+        assertEquals(0.0, resp.getBody().getCobGrams(), 0.01);
+        assertEquals(0.0, resp.getBody().getIobUnits(), 0.01);
+        assertEquals(0, resp.getBody().getCleanInMinutes());
+    }
+
+    @Test
+    @DisplayName("T10 — REGRESSION: stale notes from >5 h ago show as clean (old code misapplied carbHalfLife to insulin)")
+    void checkBackground_staleBolusFromPreviousEvening_isClean() {
+        // Exact bug scenario: 7 u bolus + 15 g carbs logged ~5.5 h ago.
+        // Old code applied carbHalfLife (180 min) to insulin → 2.0 u IOB (dirty).
+        // New code uses InsulinCalculatorService with DIA 5 h → 0.0 u (clean).
+        LocalDateTime fiveAndHalfHoursAgo = LocalDateTime.now().minusMinutes(330);
+
+        CreateNoteRequest bolusNote = new CreateNoteRequest();
+        bolusNote.setTimestamp(fiveAndHalfHoursAgo);
+        bolusNote.setInsulin(7.0);
+        bolusNote.setCarbs(0.0);
+        bolusNote.setMeal("Pre-bolus");
+        rest.exchange("/api/notes", HttpMethod.POST,
+                new HttpEntity<>(bolusNote, authHeaders), NoteDto.class);
+
+        CreateNoteRequest mealNote = new CreateNoteRequest();
+        mealNote.setTimestamp(fiveAndHalfHoursAgo.plusMinutes(7));
+        mealNote.setInsulin(0.0);
+        mealNote.setCarbs(15.0);
+        mealNote.setMeal("Lunch");
+        rest.exchange("/api/notes", HttpMethod.POST,
+                new HttpEntity<>(mealNote, authHeaders), NoteDto.class);
+
+        ResponseEntity<BackgroundStatusDTO> resp = rest.exchange(
+                "/api/experiments/check-background", HttpMethod.GET,
+                new HttpEntity<>(authHeaders), BackgroundStatusDTO.class);
+
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertNotNull(resp.getBody());
+        assertTrue(resp.getBody().isClean(),
+                "Notes from 5.5 h ago must be fully absorbed — IOB and COB should be near 0. " +
+                "Got: COB=" + resp.getBody().getCobGrams() + "g, IOB=" + resp.getBody().getIobUnits() + "u");
+        assertThat(resp.getBody().getIobUnits())
+                .as("IOB must be negligible after 5.5 h (well beyond DIA=5h)")
+                .isLessThan(0.3);
+        assertThat(resp.getBody().getCobGrams())
+                .as("COB must be negligible after 5.5 h")
+                .isLessThan(5.0);
+    }
+
+    @Test
+    @DisplayName("T11 — Long-acting insulin note does NOT contribute to IOB background check")
+    void checkBackground_longActingInsulin_excluded() {
+        // A large long-acting basal dose must not pollute the background IOB reading
+        CreateNoteRequest basalNote = new CreateNoteRequest();
+        basalNote.setTimestamp(LocalDateTime.now().minusHours(1));
+        basalNote.setInsulin(20.0);
+        basalNote.setCarbs(0.0);
+        basalNote.setMeal("Long-acting");
+        basalNote.setType("long_acting");
+        rest.exchange("/api/notes", HttpMethod.POST,
+                new HttpEntity<>(basalNote, authHeaders), NoteDto.class);
+
+        ResponseEntity<BackgroundStatusDTO> resp = rest.exchange(
+                "/api/experiments/check-background", HttpMethod.GET,
+                new HttpEntity<>(authHeaders), BackgroundStatusDTO.class);
+
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertNotNull(resp.getBody());
+        assertThat(resp.getBody().getIobUnits())
+                .as("Long-acting insulin must be excluded from IOB; 20 u basal must not block experiments")
+                .isLessThan(0.3);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

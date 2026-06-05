@@ -1,12 +1,13 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.domain.CarbsEntry;
+import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.*;
-import che.glucosemonitorbe.entity.COBSettings;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.entity.Experiment.Status;
 import che.glucosemonitorbe.entity.Experiment.Type;
 import che.glucosemonitorbe.entity.ExperimentReading;
-import che.glucosemonitorbe.repository.COBSettingsRepository;
+import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.ExperimentRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -27,46 +27,54 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ExperimentService {
 
-    // COB thresholds for "clean background"
-    private static final double MAX_COB_GRAMS  = 5.0;
-    private static final double MAX_IOB_UNITS  = 0.3;
-    // Carb half-life default (minutes) used when user has no COBSettings
-    private static final int DEFAULT_CARB_HALF_LIFE = 60;
-    // Insulin DIA default (minutes)
-    private static final int DEFAULT_DIA_MINUTES = 240;
+    // COB/IOB thresholds for "clean background"
+    private static final double MAX_COB_GRAMS = 5.0;
+    private static final double MAX_IOB_UNITS = 0.3;
+    // History window: same 8-hour window as the dashboard COB/IOB calculation
+    private static final int HISTORY_HOURS = 8;
 
     private final ExperimentRepository experimentRepository;
-    private final COBSettingsRepository cobSettingsRepository;
     private final NoteRepository noteRepository;
+    private final CarbsOnBoardService cobService;
+    private final InsulinCalculatorService insulinCalculatorService;
+    private final COBSettingsService cobSettingsService;
+    private final UserInsulinPreferencesService userInsulinPreferencesService;
 
     // ── Background check ─────────────────────────────────────────────────────
 
     public BackgroundStatusDTO checkBackground(UUID userId) {
-        COBSettings cob = cobSettingsRepository.findByUserId(userId).orElse(null);
-        int halfLife = (cob != null && cob.getCarbHalfLife() != null) ? cob.getCarbHalfLife() : DEFAULT_CARB_HALF_LIFE;
-        int maxCob   = (cob != null && cob.getMaxCOBDuration() != null) ? cob.getMaxCOBDuration() : DEFAULT_DIA_MINUTES;
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime since = now.minusHours(HISTORY_HOURS);
 
-        LocalDateTime since = LocalDateTime.now().minusMinutes(maxCob);
-        List<che.glucosemonitorbe.entity.Note> recentNotes =
-                noteRepository.findByUserIdAndTimestampBetween(userId, since, LocalDateTime.now());
+        List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(userId, since, now);
 
-        double cobGrams = 0;
-        double iobUnits = 0;
-        for (var note : recentNotes) {
-            long minutesAgo = java.time.Duration.between(note.getTimestamp(), LocalDateTime.now()).toMinutes();
-            double decayFraction = Math.pow(0.5, (double) minutesAgo / halfLife);
-            if (note.getCarbs() != null) cobGrams  += note.getCarbs()   * decayFraction;
-            if (note.getInsulin() != null) iobUnits += note.getInsulin() * decayFraction;
-        }
+        // Mirror the dashboard's note-to-entry conversion: exclude long-acting insulin from IOB
+        List<CarbsEntry> carbsEntries = recentNotes.stream()
+                .filter(n -> n.getCarbs() != null && n.getCarbs() > 0)
+                .map(this::toCarbsEntry)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+
+        List<InsulinDose> insulinEntries = recentNotes.stream()
+                .filter(n -> n.getInsulin() != null && n.getInsulin() > 0 && !n.isLongActing())
+                .map(this::toInsulinDose)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+
+        // Use the same services (and user-specific settings) as the dashboard
+        COBSettingsDTO userSettings = cobSettingsService.getCOBSettings(userId);
+        RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userId);
+
+        double cobGrams = cobService.calculateTotalCarbsOnBoard(carbsEntries, now, userSettings);
+        double iobUnits = insulinCalculatorService.calculateTotalActiveInsulin(
+                insulinEntries, now, rapidIob.diaHours(), rapidIob.peakMinutes());
 
         boolean clean = cobGrams < MAX_COB_GRAMS && iobUnits < MAX_IOB_UNITS;
 
         int cleanInMinutes = 0;
         if (!clean) {
-            // Estimate when the dominant active substance drops below threshold
-            double maxSubstance = Math.max(cobGrams / MAX_COB_GRAMS, iobUnits / MAX_IOB_UNITS);
-            // minutes = halfLife * log2(ratio)
-            cleanInMinutes = (int) Math.ceil(halfLife * (Math.log(maxSubstance) / Math.log(2)));
+            // Estimate minutes until both COB and IOB fall below their thresholds by sampling
+            // the decay curves forward in time.
+            cleanInMinutes = estimateCleanInMinutes(carbsEntries, insulinEntries, now,
+                    userSettings, rapidIob);
         }
 
         return BackgroundStatusDTO.builder()
@@ -74,6 +82,49 @@ public class ExperimentService {
                 .cobGrams(Math.round(cobGrams * 10.0) / 10.0)
                 .iobUnits(Math.round(iobUnits * 100.0) / 100.0)
                 .cleanInMinutes(Math.max(cleanInMinutes, 0))
+                .build();
+    }
+
+    private int estimateCleanInMinutes(List<CarbsEntry> carbsEntries, List<InsulinDose> insulinEntries,
+                                       LocalDateTime now, COBSettingsDTO userSettings,
+                                       RapidInsulinIobParameters rapidIob) {
+        for (int m = 5; m <= 600; m += 5) {
+            LocalDateTime t = now.plusMinutes(m);
+            double cob = cobService.calculateTotalCarbsOnBoard(carbsEntries, t, userSettings);
+            double iob = insulinCalculatorService.calculateTotalActiveInsulin(
+                    insulinEntries, t, rapidIob.diaHours(), rapidIob.peakMinutes());
+            if (cob < MAX_COB_GRAMS && iob < MAX_IOB_UNITS) {
+                return m;
+            }
+        }
+        return 600;
+    }
+
+    private CarbsEntry toCarbsEntry(Note note) {
+        CarbsEntry e = CarbsEntry.builder()
+                .id(note.getId())
+                .timestamp(note.getTimestamp())
+                .carbs(note.getCarbs())
+                .insulin(note.getInsulin() != null ? note.getInsulin() : 0.0)
+                .mealType(note.getMeal())
+                .originalCarbs(note.getCarbs())
+                .userId(note.getUserId())
+                .build();
+        e.setAbsorptionMode(note.getAbsorptionMode() != null ? note.getAbsorptionMode() : "DEFAULT_DECAY");
+        return e;
+    }
+
+    private InsulinDose toInsulinDose(Note note) {
+        InsulinDose.InsulinType type = "Correction".equalsIgnoreCase(note.getMeal())
+                ? InsulinDose.InsulinType.CORRECTION
+                : InsulinDose.InsulinType.BOLUS;
+        return InsulinDose.builder()
+                .id(note.getId())
+                .timestamp(note.getTimestamp())
+                .units(note.getInsulin())
+                .type(type)
+                .mealType(note.getMeal())
+                .userId(note.getUserId())
                 .build();
     }
 
@@ -315,9 +366,9 @@ public class ExperimentService {
 
     private boolean saveCarbRatioToSettings(UUID userId, double carbRatio) {
         try {
-            COBSettings settings = cobSettingsRepository.findByUserId(userId).orElse(new COBSettings(userId));
-            settings.setCarbRatio(carbRatio);
-            cobSettingsRepository.save(settings);
+            COBSettingsDTO current = cobSettingsService.getCOBSettings(userId);
+            current.setCarbRatio(carbRatio);
+            cobSettingsService.saveCOBSettings(userId, current);
             return true;
         } catch (Exception e) {
             return false;
@@ -326,9 +377,9 @@ public class ExperimentService {
 
     private boolean saveIsfToSettings(UUID userId, double isf) {
         try {
-            COBSettings settings = cobSettingsRepository.findByUserId(userId).orElse(new COBSettings(userId));
-            settings.setIsf(isf);
-            cobSettingsRepository.save(settings);
+            COBSettingsDTO current = cobSettingsService.getCOBSettings(userId);
+            current.setIsf(isf);
+            cobSettingsService.saveCOBSettings(userId, current);
             return true;
         } catch (Exception e) {
             return false;
