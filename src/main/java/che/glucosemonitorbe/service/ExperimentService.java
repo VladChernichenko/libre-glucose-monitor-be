@@ -33,6 +33,21 @@ public class ExperimentService {
     // History window: same 8-hour window as the dashboard COB/IOB calculation
     private static final int HISTORY_HOURS = 8;
 
+    /**
+     * Minimum wall-clock minutes between {@code startedAt} and {@code completeExperiment}
+     * before a result is accepted. Below the floor the protocol hasn't run long enough to
+     * yield a meaningful answer: a Basal Check needs hours of post-bolus flatness to detect
+     * basal drift, a Carb Factor needs the post-meal rise to peak, an ISF needs insulin to
+     * reach nadir. Two readings at minute 62 produce mathematically-valid garbage.
+     */
+    static int minElapsedMinutes(Type type) {
+        return switch (type) {
+            case BASAL_CHECK   -> 180;  // 3 h floor; protocol target 4–6 h
+            case CARB_FACTOR   -> 60;
+            case ISF_ONE_UNIT  -> 180;  // 3 h floor; protocol target 4–5 h
+        };
+    }
+
     private final ExperimentRepository experimentRepository;
     private final NoteRepository noteRepository;
     private final CarbsOnBoardService cobService;
@@ -239,6 +254,17 @@ public class ExperimentService {
         if (exp.getReadings().size() < 2) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Need at least 2 readings to complete an experiment");
+        }
+
+        int minMinutes = minElapsedMinutes(exp.getType());
+        long elapsed = exp.getStartedAt() != null
+                ? java.time.Duration.between(exp.getStartedAt(), LocalDateTime.now()).toMinutes()
+                : Long.MAX_VALUE;
+        if (elapsed < minMinutes) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.format(
+                    "%s requires a minimum of %d minutes elapsed before completion (current: %d min). "
+                    + "Premature results are not clinically meaningful — keep the experiment running.",
+                    exp.getType(), minMinutes, elapsed));
         }
 
         ExperimentResultDTO result = switch (exp.getType()) {

@@ -47,6 +47,7 @@ class ExperimentE2ETest {
 
     @Autowired private TestRestTemplate rest;
     @Autowired private UserRepository userRepository;
+    @Autowired private che.glucosemonitorbe.repository.ExperimentRepository experimentRepository;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
     private HttpHeaders authHeaders;
@@ -145,6 +146,7 @@ class ExperimentE2ETest {
         postReading(expId, 6.2, 0,   "Baseline");
         postReading(expId, 6.5, 60,  "T+60min");
         postReading(expId, 6.3, 120, "T+120min");
+        backdateStartedAt(expId, 200); // satisfy BASAL_CHECK 180-min min-elapsed gate
 
         ResponseEntity<ExperimentResultDTO> result = rest.exchange(
                 "/api/experiments/" + expId + "/complete", HttpMethod.POST,
@@ -178,6 +180,7 @@ class ExperimentE2ETest {
         postReading(expId, 7.0, 0,  "Baseline");
         postReading(expId, 10.0, 35, "Peak");
         postReading(expId, 9.5, 60,  "T+60min");
+        backdateStartedAt(expId, 65); // satisfy CARB_FACTOR 60-min min-elapsed gate
 
         ResponseEntity<ExperimentResultDTO> result = rest.exchange(
                 "/api/experiments/" + expId + "/complete", HttpMethod.POST,
@@ -211,6 +214,7 @@ class ExperimentE2ETest {
         postReading(expId, 11.5, 60,  "T+60min");
         postReading(expId, 10.5, 120, "Nadir");
         postReading(expId, 11.0, 180, "T+180min");
+        backdateStartedAt(expId, 200); // satisfy ISF_ONE_UNIT 180-min min-elapsed gate
 
         ResponseEntity<ExperimentResultDTO> result = rest.exchange(
                 "/api/experiments/" + expId + "/complete", HttpMethod.POST,
@@ -378,6 +382,19 @@ class ExperimentE2ETest {
         return resp.getBody().getId();
     }
 
+    /**
+     * Backdates {@code startedAt} so the experiment passes the new min-elapsed-time gate
+     * in {@code ExperimentService.completeExperiment}. Without this, every E2E test that
+     * starts and immediately completes an experiment would be rejected (correctly) by the
+     * production safeguard.
+     */
+    private void backdateStartedAt(UUID expId, int minutesAgo) {
+        var exp = experimentRepository.findById(expId)
+                .orElseThrow(() -> new IllegalStateException("Experiment not found: " + expId));
+        exp.setStartedAt(LocalDateTime.now().minusMinutes(minutesAgo));
+        experimentRepository.save(exp);
+    }
+
     private void postReading(UUID expId, double glucose, int minutesElapsed, String label) {
         RecordReadingRequest req = new RecordReadingRequest(glucose, minutesElapsed, label);
         ResponseEntity<ExperimentDTO> resp = rest.exchange(
@@ -395,6 +412,7 @@ class ExperimentE2ETest {
         postReading(expId, 6.7, 60,  "T+60min");
         postReading(expId, 6.6, 120, "T+120min");
         postReading(expId, 6.8, 180, "T+180min");
+        backdateStartedAt(expId, 200); // satisfy BASAL_CHECK 180-min min-elapsed gate
 
         rest.exchange("/api/experiments/" + expId + "/complete", HttpMethod.POST,
                 new HttpEntity<>(authHeaders), ExperimentResultDTO.class);

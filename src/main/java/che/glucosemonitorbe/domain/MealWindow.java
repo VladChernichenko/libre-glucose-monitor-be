@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.domain;
 
+import lombok.Getter;
+
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -10,6 +12,7 @@ import java.util.Optional;
  * Night hours (22:00–04:59) intentionally map to {@code Optional.empty()} — corrections
  * during sleep are rare and signal-noisy, so we exclude them from the ISF profile.</p>
  */
+@Getter
 public enum MealWindow {
     BREAKFAST(5, 11),   // 05:00–10:59
     LUNCH(11, 16),      // 11:00–15:59
@@ -22,9 +25,6 @@ public enum MealWindow {
         this.startHourInclusive = startHourInclusive;
         this.endHourExclusive = endHourExclusive;
     }
-
-    public int getStartHourInclusive() { return startHourInclusive; }
-    public int getEndHourExclusive() { return endHourExclusive; }
 
     /**
      * Classifies an hour-of-day into a meal window, or returns empty for night (22:00–04:59).
