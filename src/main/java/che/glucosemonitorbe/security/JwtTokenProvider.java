@@ -21,6 +21,13 @@ import java.util.Optional;
 @Slf4j
 public class JwtTokenProvider {
 
+    /**
+     * Clock-skew tolerance (seconds) applied to {@code exp} validation. Without this, even
+     * a few seconds of device clock drift causes the very-fresh access token to be rejected
+     * on the next request, forcing an unnecessary 401 → refresh round-trip every hour.
+     */
+    public static final long CLOCK_SKEW_SECONDS = 30L;
+
     @Value("${security.jwt.secret}")
     private String jwtSecret;
 
@@ -83,6 +90,7 @@ public class JwtTokenProvider {
         try {
             Claims claims = Jwts.parser()
                     .verifyWith(getSigningKey())
+                    .clockSkewSeconds(CLOCK_SKEW_SECONDS)
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
