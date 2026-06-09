@@ -72,4 +72,45 @@ public class DallaManGutModel {
     public double ra(double qgutMmol) {
         return F * K_ABS * qgutMmol;
     }
+
+    /**
+     * Glucose appearance rate using a caller-supplied absorption constant.
+     * Used when the macro-modulated tMaxG has already been converted to an
+     * effective K_ABS via {@link #effectiveKAbs(double)}.
+     *
+     * @param qgutMmol  intestinal compartment content [mmol]
+     * @param kAbsEff   effective absorption rate constant [min⁻¹]
+     */
+    public double ra(double qgutMmol, double kAbsEff) {
+        return F * kAbsEff * qgutMmol;
+    }
+
+    // ── tMaxG → K_ABS scaling ─────────────────────────────────────────────────
+
+    /**
+     * Baseline tMaxG [min] for a pure-carbohydrate meal
+     * (45-min carb half-life, Hovorka 2-compartment factor 1.68).
+     */
+    static final double BASE_T_MAX_G_MIN = 45.0 / 1.68;  // ≈ 26.79 min
+
+    /**
+     * Effective intestinal absorption rate constant [min⁻¹], scaled for the
+     * macro-modulated gastric-emptying time.
+     *
+     * <p>The Dalla Man (2007) model uses a fixed K_ABS calibrated for average
+     * gastric emptying.  When fat and protein slow emptying (higher tMaxG),
+     * the intestinal drain rate should be proportionally reduced so that the
+     * predicted glucose appearance peak aligns with the macro-computed tMaxG.
+     * This re-connects {@link MacroNutrientGastricModel}'s tMaxG output to the
+     * actual ODE integration.</p>
+     *
+     * <p>Scale: K_ABS_eff = K_ABS × min(1, BASE_T_MAX_G / tMaxG).
+     * The clamp at 1 prevents speeding up absorption beyond the baseline.</p>
+     *
+     * @param tMaxGMin  macro-modulated tMaxG [min] — from {@link HovorkaParameters#tMaxG()}
+     * @return effective K_ABS [min⁻¹]
+     */
+    public static double effectiveKAbs(double tMaxGMin) {
+        return K_ABS * Math.min(1.0, BASE_T_MAX_G_MIN / Math.max(tMaxGMin, 1.0));
+    }
 }

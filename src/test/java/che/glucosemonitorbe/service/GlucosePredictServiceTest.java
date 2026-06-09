@@ -593,6 +593,123 @@ class GlucosePredictServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Gap 2 — FPU virtual slow-carb entry (Warsaw Protocol)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("fat+protein above threshold → fpu-equiv entry added at t+90 min")
+    void highFatProtein_fpuEntryAddedAt90min() {
+        // 25g protein × 4 = 100 kcal, 30g fat × 9 = 270 kcal → 370 kcal / 100 × 10 = 37 g equiv
+        PredictRequest req = simpleRequest(7.0, 0, 40, 25, 30, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        List<CarbsEntry> captured = carbsCaptor.getAllValues().get(carbsCaptor.getAllValues().size() - 1);
+
+        // Must contain an fpu-equiv entry
+        java.util.Optional<CarbsEntry> fpuEntry = captured.stream()
+                .filter(e -> "fpu-equiv".equals(e.getMealType()))
+                .findFirst();
+        assertThat(fpuEntry).isPresent();
+        assertThat(fpuEntry.get().getCarbs())
+                .as("FPU-equiv carbs = (25×4 + 30×9) / 100 × 10 = 37 g")
+                .isCloseTo(37.0, org.assertj.core.api.Assertions.within(0.5));
+    }
+
+    @Test
+    @DisplayName("fpu-equiv entry timestamp is exactly now + 90 min")
+    void fpuEntry_timestampIsNowPlus90() {
+        PredictRequest req = simpleRequest(7.0, 0, 40, 25, 30, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        List<CarbsEntry> captured = carbsCaptor.getAllValues().get(carbsCaptor.getAllValues().size() - 1);
+        java.util.Optional<CarbsEntry> fpuEntry = captured.stream()
+                .filter(e -> "fpu-equiv".equals(e.getMealType()))
+                .findFirst();
+        assertThat(fpuEntry).isPresent();
+        assertThat(fpuEntry.get().getTimestamp())
+                .as("FPU onset must be 90 min after the meal")
+                .isAfter(fpuEntry.get().getTimestamp().minusMinutes(91))
+                .isBefore(fpuEntry.get().getTimestamp().plusMinutes(1));
+        // Specifically: it must be ~90 min after now
+        assertThat(fpuEntry.get().getTimestamp())
+                .isAfterOrEqualTo(java.time.LocalDateTime.now().plusMinutes(89))
+                .isBeforeOrEqualTo(java.time.LocalDateTime.now().plusMinutes(91));
+    }
+
+    @Test
+    @DisplayName("carbs only (no fat/protein) → no fpu-equiv entry added")
+    void carbsOnlyNoPF_noFpuEntry() {
+        PredictRequest req = simpleRequest(7.0, 0, 60, 0, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        List<CarbsEntry> captured = carbsCaptor.getAllValues().get(carbsCaptor.getAllValues().size() - 1);
+        assertThat(captured.stream().noneMatch(e -> "fpu-equiv".equals(e.getMealType())))
+                .as("pure-carb meal must not generate an fpu-equiv entry")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("trace fat+protein below threshold (< 2 g equiv) → no fpu-equiv entry")
+    void traceFatProtein_belowThreshold_noFpuEntry() {
+        // 3g protein × 4 = 12 kcal → fpuEquivCarbs = 12/100×10 = 1.2 g < 2.0 threshold
+        PredictRequest req = simpleRequest(7.0, 0, 60, 3, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        List<CarbsEntry> captured = carbsCaptor.getAllValues().get(carbsCaptor.getAllValues().size() - 1);
+        assertThat(captured.stream().noneMatch(e -> "fpu-equiv".equals(e.getMealType())))
+                .as("sub-threshold FPU (1.2 g equiv) must not generate an fpu-equiv entry")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("pure protein meal (no carbs) still generates an fpu-equiv entry")
+    void pureProteinMeal_noCarbs_fpuEntryStillAdded() {
+        // 50g protein × 4 = 200 kcal → 20 g equiv > 2 g threshold; carbsG=0
+        PredictRequest req = simpleRequest(7.0, 0, 0, 50, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        List<CarbsEntry> captured = carbsCaptor.getAllValues().get(carbsCaptor.getAllValues().size() - 1);
+        assertThat(captured.stream().anyMatch(e -> "fpu-equiv".equals(e.getMealType())))
+                .as("pure-protein meal must still add an fpu-equiv entry even when carbsG=0")
+                .isTrue();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // MARK: Prospective insulin bolus timing
     // ─────────────────────────────────────────────────────────────────────────
 

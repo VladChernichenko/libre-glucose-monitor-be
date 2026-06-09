@@ -165,6 +165,9 @@ public class HovorkaGlucosePredictionService {
                 pastCarbsEntries, currentTime, pAdj);
 
         // ── Integration loop (1-min steps) ───────────────────────────────────
+        // Pre-compute effective K_ABS once — same tMaxG for the whole prediction.
+        double kAbsEff = DallaManGutModel.effectiveKAbs(pAdj.tMaxG());
+
         List<PredictionPointDTO> points = new ArrayList<>();
         int nextEmit = DENSE_STEP_MIN;
 
@@ -184,7 +187,7 @@ public class HovorkaGlucosePredictionService {
 
             if (min == nextEmit) {
                 double gPred = state.glucoseMmolL(pAdj);
-                double carbEffect  = gutModel.ra(state.qgut()) * DENSE_STEP_MIN;
+                double carbEffect  = gutModel.ra(state.qgut(), kAbsEff) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
                 points.add(PredictionPointDTO.builder()

@@ -101,7 +101,12 @@ public class HovorkaOdeSolver {
 
         double qsto  = qsto1 + qsto2;
         double kempt = gutModel.kEmpt(qsto, mealMmol);
-        double ra    = gutModel.ra(qgut);
+
+        // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix).
+        // A high-fat/protein meal has a longer tMaxG → slower intestinal drain
+        // → Ra peak shifts right without changing total absorbed glucose.
+        double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
+        double ra    = gutModel.ra(qgut, kAbsEff);
 
         // Glucose compartments
         double dq1 = -f01c - p.k12() * q1 + p.k21() * q2
@@ -112,7 +117,7 @@ public class HovorkaOdeSolver {
         // Dalla Man gut compartments
         double dqsto1 = -DallaManGutModel.K_GRI * qsto1;
         double dqsto2 = DallaManGutModel.K_GRI * qsto1 - kempt * qsto2;
-        double dqgut  = kempt * qsto2 - DallaManGutModel.K_ABS * qgut;
+        double dqgut  = kempt * qsto2 - kAbsEff * qgut;
 
         // Incretin GLP-1
         double dinc = K_INC * ra - K_DEL * inc;

@@ -125,18 +125,9 @@ public class LibreLinkUpResponseParser {
         return new Date();
     }
 
-    /** LibreLinkUp 1–7 trend code to arrow symbol. */
+    /** LibreLinkUp {@code TrendArrow} 1-5 to Unicode arrow. */
     public String trendToArrow(int trend) {
-        switch (trend) {
-            case 1: return "↑↑";
-            case 2: return "↑";
-            case 3: return "↗";
-            case 4: return "→";
-            case 5: return "↘";
-            case 6: return "↓";
-            case 7: return "↓↓";
-            default: return "→";
-        }
+        return LibreLinkUpTrend.toArrow(trend);
     }
 
     /** Glucose status from a value in mmol/L. */
@@ -214,7 +205,7 @@ public class LibreLinkUpResponseParser {
                     timestamp = point.get("timestamp").asText();
                 }
 
-                int trend = point.has("Trend") ? point.get("Trend").asInt() : 0;
+                int trend = LibreLinkUpTrend.readTrendCode(point);
                 if (valueMgDl > 0 && !timestamp.isEmpty()) {
                     readings.add(new LibreGlucoseReading(
                         parseTimestamp(timestamp),
@@ -238,7 +229,7 @@ public class LibreLinkUpResponseParser {
                                  : gm.has("Value")          ? gm.get("Value").asDouble() : 0;
                 String ts = gm.has("FactoryTimestamp") ? gm.get("FactoryTimestamp").asText()
                           : gm.has("Timestamp")        ? gm.get("Timestamp").asText() : "";
-                int trend = gm.has("Trend") ? gm.get("Trend").asInt() : 0;
+                int trend = LibreLinkUpTrend.readTrendCode(gm);
                 if (valueMgDl > 0 && !ts.isEmpty()) {
                     Date gmDate = parseTimestamp(ts);
                     boolean isNewer = readings.isEmpty()

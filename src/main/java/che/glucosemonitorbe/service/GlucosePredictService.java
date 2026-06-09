@@ -45,6 +45,14 @@ public class GlucosePredictService {
     private static final double  TARGET_GLUCOSE      = 5.5;   // mmol/L
     private static final int[]   PREBOLUS_CANDIDATES = {0, 5, 10, 15, 20, 25, 30};
 
+    // ── Fat-Protein Unit (FPU) slow-glucose modelling ─────────────────────────
+    /** Onset delay for protein gluconeogenesis / fat-delayed absorption [min]. */
+    private static final int    FPU_ONSET_MIN    = 90;
+    /** Carb-equivalent per FPU (Warsaw Protocol: 1 FPU ≈ 10 g slow carbs). */
+    private static final double FPU_CARB_EQUIV_G = 10.0;
+    /** Minimum FPU-equiv carbs [g] to emit a secondary entry (≈ 0.2 FPU threshold). */
+    private static final double FPU_MIN_EQUIV_G  = 2.0;
+
     private final HovorkaGlucosePredictionService hovorkaService;
     private final HovorkaParameterService         paramService;
     private final UserService                     userService;
@@ -99,6 +107,22 @@ public class GlucosePredictService {
                     .timestamp(now)
                     .carbs(carbsG).protein(proteinG).fat(fatG).fiber(fiberG)
                     .mealType("predict").userId(userId)
+                    .build());
+        }
+
+        // ── 3b. Add FPU-equivalent slow glucose from protein/fat ─────────────
+        // Protein gluconeogenesis (~50% of ingested protein → glucose over 3–5 h) and
+        // fat-delayed gastric emptying cause a secondary glucose rise that is NOT
+        // captured by the carb ODE alone.  The Warsaw Protocol models this as a delayed
+        // slow-carb bolus: 1 FPU (100 kcal non-carb) ≈ 10 g carbs starting at t+90 min.
+        double fpuEquivCarbs = (proteinG * 4.0 + fatG * 9.0) / 100.0 * FPU_CARB_EQUIV_G;
+        if (fpuEquivCarbs >= FPU_MIN_EQUIV_G) {
+            carbsWithMeal.add(CarbsEntry.builder()
+                    .id(UUID.randomUUID())
+                    .timestamp(now.plusMinutes(FPU_ONSET_MIN))
+                    .carbs(fpuEquivCarbs)
+                    .mealType("fpu-equiv")
+                    .userId(userId)
                     .build());
         }
 

@@ -6,12 +6,14 @@ import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -143,6 +145,81 @@ class HovorkaGlucosePredictionServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Gap 1 — K_ABS scaling with tMaxG (FPU gastric-emptying effect)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("high-fat params (tMaxG × 3) → glucose peak appears later than pure-carb params")
+    void highFatTMaxG_glucosePeakShiftsRight() {
+        double baseTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN;      // ≈ 26.8 min (pure carb)
+        double hfTMaxG   = baseTMaxG * 3.0;                        // ≈ 80.4 min (high fat/protein)
+
+        HovorkaParameters baseP = paramsWithTMaxG(baseTMaxG);
+        HovorkaParameters hfP   = paramsWithTMaxG(hfTMaxG);
+
+        // 60 g carbs at t=0; no insulin
+        CarbsEntry meal = CarbsEntry.builder().timestamp(NOW).carbs(60.0).build();
+
+        List<PredictionPointDTO> curveBase = service.buildPredictionPath(
+                baseP, 5.5, NOW, List.of(meal), List.of(), List.of(), USER_ID, 300);
+        List<PredictionPointDTO> curveHF = service.buildPredictionPath(
+                hfP,   5.5, NOW, List.of(meal), List.of(), List.of(), USER_ID, 300);
+
+        int peakMinBase = peakMinute(curveBase);
+        int peakMinHF   = peakMinute(curveHF);
+
+        assertThat(peakMinHF)
+                .as("High-fat tMaxG (%.1f min) must shift the glucose peak right of pure-carb (%.1f min). "
+                    + "Base peak at %d min, HF peak at %d min.",
+                    hfTMaxG, baseTMaxG, peakMinBase, peakMinHF)
+                .isGreaterThan(peakMinBase);
+    }
+
+    @Test
+    @DisplayName("high-fat params → lower early glucose (t=60 min) than pure-carb")
+    void highFatTMaxG_lowerEarlyGlucose() {
+        double baseTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN;
+        double hfTMaxG   = baseTMaxG * 3.0;
+
+        CarbsEntry meal = CarbsEntry.builder().timestamp(NOW).carbs(60.0).build();
+
+        List<PredictionPointDTO> curveBase = service.buildPredictionPath(
+                paramsWithTMaxG(baseTMaxG), 5.5, NOW,
+                List.of(meal), List.of(), List.of(), USER_ID, 300);
+        List<PredictionPointDTO> curveHF = service.buildPredictionPath(
+                paramsWithTMaxG(hfTMaxG), 5.5, NOW,
+                List.of(meal), List.of(), List.of(), USER_ID, 300);
+
+        double gAt60_base = glucoseAt(curveBase, 60);
+        double gAt60_hf   = glucoseAt(curveHF,   60);
+
+        assertThat(gAt60_hf)
+                .as("At t=60 min, slower absorption (tMaxG×3) must yield lower G than fast absorption. "
+                    + "Base G=%.2f, HF G=%.2f", gAt60_base, gAt60_hf)
+                .isLessThan(gAt60_base);
+    }
+
+    @Test
+    @DisplayName("same-tMaxG params produce the same curve (K_ABS scaling is deterministic)")
+    void sameTMaxG_identicalCurves() {
+        double tMaxG = DallaManGutModel.BASE_T_MAX_G_MIN * 2.0;
+        CarbsEntry meal = CarbsEntry.builder().timestamp(NOW).carbs(50.0).build();
+
+        List<PredictionPointDTO> curve1 = service.buildPredictionPath(
+                paramsWithTMaxG(tMaxG), 6.0, NOW,
+                List.of(meal), List.of(), List.of(), USER_ID, 240);
+        List<PredictionPointDTO> curve2 = service.buildPredictionPath(
+                paramsWithTMaxG(tMaxG), 6.0, NOW,
+                List.of(meal), List.of(), List.of(), USER_ID, 240);
+
+        assertThat(curve1).hasSameSizeAs(curve2);
+        for (int i = 0; i < curve1.size(); i++) {
+            assertThat(curve1.get(i).getPredictedGlucose())
+                    .isEqualTo(curve2.get(i).getPredictedGlucose());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Regression guard: EGP suppression still active when basal IS logged
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -168,5 +245,37 @@ class HovorkaGlucosePredictionServiceTest {
                 assertThat(pt.getPredictedGlucose())
                         .as("G at %s (basal logged 6h ago)", pt.getTimestamp())
                         .isBetween(5.7, 8.7));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Build params with a given tMaxG and all other fields at population defaults. */
+    private HovorkaParameters paramsWithTMaxG(double tMaxG) {
+        double weight = 70.0;
+        return new HovorkaParameters(
+                HovorkaParameters.VG_PER_KG  * weight,
+                HovorkaParameters.F01_PER_KG * weight,
+                HovorkaParameters.F01_PER_KG * weight,   // egpNet = f01 (steady state)
+                HovorkaParameters.K12_POP,
+                HovorkaParameters.K21_POP,
+                tMaxG, 0.80, 2.2, weight);
+    }
+
+    /** Index of the prediction point with the highest glucose value [minutes from NOW]. */
+    private int peakMinute(List<PredictionPointDTO> curve) {
+        return curve.stream()
+                .max(Comparator.comparingDouble(PredictionPointDTO::getPredictedGlucose))
+                .map(pt -> (int) java.time.Duration.between(NOW, pt.getTimestamp()).toMinutes())
+                .orElse(0);
+    }
+
+    /** Predicted glucose at exactly t = minutesFromNow, or NaN if the point is not emitted. */
+    private double glucoseAt(List<PredictionPointDTO> curve, int minutesFromNow) {
+        return curve.stream()
+                .filter(pt -> pt.getTimestamp().equals(NOW.plusMinutes(minutesFromNow)))
+                .mapToDouble(PredictionPointDTO::getPredictedGlucose)
+                .findFirst().orElse(Double.NaN);
     }
 }

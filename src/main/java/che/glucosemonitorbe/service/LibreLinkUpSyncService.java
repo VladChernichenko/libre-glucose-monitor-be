@@ -6,6 +6,7 @@ import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.dto.LibreAuthRequest;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
+import che.glucosemonitorbe.service.libre.LibreLinkUpTrend;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -186,7 +187,8 @@ public class LibreLinkUpSyncService {
                 long epochMs = reading.getTimestamp().getTime();
                 // Convert mmol/L back to mg/dL for storage (NightscoutEntryDto uses mg/dL).
                 int sgv = (int) Math.round(reading.getValue() * 18.0);
-                String direction = trendToDirection(reading.getTrend());
+                String direction = LibreLinkUpTrend.toNightscoutDirection(
+                        reading.getTrend() != null ? reading.getTrend() : 0);
                 String id = "llu-" + cfg.getLibrePatientId().replace("-", "") + "-" + epochMs;
                 NightscoutEntryDto entry = new NightscoutEntryDto(
                         id, sgv, epochMs,
@@ -233,15 +235,4 @@ public class LibreLinkUpSyncService {
         }
     }
 
-    /** Direction string from LibreLinkUp trend int (mirrors iOS NightscoutEntry.directionArrow). */
-    private static String trendToDirection(int trend) {
-        switch (trend) {
-            case 1:  return "SingleUp";
-            case 2:  return "FortyFiveUp";
-            case 3:  return "Flat";
-            case 4:  return "FortyFiveDown";
-            case 5:  return "SingleDown";
-            default: return "Flat";
-        }
-    }
 }

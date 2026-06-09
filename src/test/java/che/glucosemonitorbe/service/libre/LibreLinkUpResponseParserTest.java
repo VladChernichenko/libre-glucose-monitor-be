@@ -43,26 +43,24 @@ class LibreLinkUpResponseParserTest {
 
     // ── trendToArrow ──────────────────────────────────────────────────────────
 
-    @ParameterizedTest(name = "trend {0} → {1}")
+    @ParameterizedTest(name = "trend {0} -> {1}")
     @CsvSource({
-        "1, ↑↑",
-        "2, ↑",
-        "3, ↗",
-        "4, →",
-        "5, ↘",
-        "6, ↓",
-        "7, ↓↓"
+        "1, \u2193\u2193",
+        "2, \u2198",
+        "3, \u2192",
+        "4, \u2197",
+        "5, \u2191"
     })
-    @DisplayName("trendToArrow — correct arrow for all 7 LLU trend codes")
-    void trendToArrow_allSevenCodes(int trend, String expected) {
+    @DisplayName("trendToArrow - LLU TrendArrow 1-5")
+    void trendToArrow_lluCodes(int trend, String expected) {
         assertThat(parser.trendToArrow(trend)).isEqualTo(expected);
     }
 
-    @ParameterizedTest(name = "unknown trend {0} defaults to →")
-    @ValueSource(ints = {0, 8, -1, 99})
-    @DisplayName("trendToArrow — unknown code defaults to flat arrow")
+    @ParameterizedTest(name = "unknown trend {0} defaults to flat")
+    @ValueSource(ints = {0, 6, 8, -1, 99})
+    @DisplayName("trendToArrow - unknown code defaults to flat arrow")
     void trendToArrow_unknownCode_defaultsToFlat(int trend) {
-        assertThat(parser.trendToArrow(trend)).isEqualTo("→");
+        assertThat(parser.trendToArrow(trend)).isEqualTo("\u2192");
     }
 
     // ── glucoseStatus ─────────────────────────────────────────────────────────
@@ -186,9 +184,22 @@ class LibreLinkUpResponseParserTest {
         LibreGlucoseReading r = data.getData().get(0);
         assertThat(r.getValue()).isEqualTo(10.0);      // 180 / 18.0
         assertThat(r.getTrend()).isEqualTo(3);
-        assertThat(r.getTrendArrow()).isEqualTo("↗");
+        assertThat(r.getTrendArrow()).isEqualTo("\u2192");
         assertThat(r.getStatus()).isEqualTo("high");   // 10.0 mmol/L
         assertThat(r.getUnit()).isEqualTo("mmol/L");
+    }
+
+    @Test
+    @DisplayName("toGlucoseData - reads TrendArrow field from live measurement")
+    void toGlucoseData_readsTrendArrowField() {
+        LibreGlucoseData data = parser.toGlucoseData(json(
+                "{\"data\":{\"connection\":{\"glucoseMeasurement\":{"
+                        + "\"ValueInMgPerDl\":108,\"FactoryTimestamp\":\"2025-01-14T22:22:33Z\","
+                        + "\"TrendArrow\":5}}}}"), "p1");
+
+        assertThat(data.getData()).hasSize(1);
+        assertThat(data.getData().get(0).getTrend()).isEqualTo(5);
+        assertThat(data.getData().get(0).getTrendArrow()).isEqualTo("\u2191");
     }
 
     @Test
@@ -203,7 +214,7 @@ class LibreLinkUpResponseParserTest {
         assertThat(data.getData()).hasSize(2);
         LibreGlucoseReading last = data.getData().get(1);
         assertThat(last.getValue()).isEqualTo(7.0);    // 126 / 18.0
-        assertThat(last.getTrendArrow()).isEqualTo("↑");
+        assertThat(last.getTrendArrow()).isEqualTo("\u2198");
     }
 
     @Test
