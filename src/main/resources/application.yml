@@ -100,6 +100,9 @@ app:
       model: ${QWEN_MODEL:qwen-plus}
       vision-model: ${QWEN_VISION_MODEL:gpt-4o-mini}
       api-key: ${QWEN_API_KEY:}
+    yolo:
+      url: ${YOLO_SERVICE_URL:http://localhost:8001}
+      confidence-threshold: ${YOLO_CONFIDENCE_THRESHOLD:0.35}
   version:
     version: "1.0.0"
     api-version: "v1"
