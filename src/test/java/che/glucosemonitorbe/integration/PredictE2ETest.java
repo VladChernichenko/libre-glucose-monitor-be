@@ -146,8 +146,8 @@ class PredictE2ETest {
                 "curve[0].predictedGlucose must be present");
         assertFalse(firstPoint.path("timestamp").isMissingNode(),
                 "curve[0].timestamp must be present");
-        assertEquals("HOVORKA_2COMP", firstPoint.path("absorptionMode").asText(),
-                "absorptionMode must be HOVORKA_2COMP");
+        assertEquals("DALLA_MAN_3COMP", firstPoint.path("absorptionMode").asText(),
+                "absorptionMode must be DALLA_MAN_3COMP");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

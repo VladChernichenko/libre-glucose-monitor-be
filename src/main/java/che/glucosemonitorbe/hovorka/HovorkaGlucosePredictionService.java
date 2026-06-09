@@ -60,10 +60,11 @@ public class HovorkaGlucosePredictionService {
     private static final int SPARSE_STEP_MIN  = 10;
     private static final int DENSE_LIMIT_MIN  = 240;
 
-    private final HovorkaParameterService   paramService;
-    private final HovorkaOdeSolver          odeSolver;
-    private final BasalInsulinResolver      basalResolver;
+    private final HovorkaParameterService       paramService;
+    private final HovorkaOdeSolver              odeSolver;
+    private final BasalInsulinResolver          basalResolver;
     private final UserInsulinPreferencesService insulinPrefsService;
+    private final DallaManGutModel              gutModel;
 
     /**
      * Build the full prediction path using the Hovorka ODE model.
@@ -178,7 +179,7 @@ public class HovorkaGlucosePredictionService {
 
             if (min == nextEmit) {
                 double gPred = state.glucoseMmolL(pAdj);
-                double carbEffect  = state.ra(pAdj) * DENSE_STEP_MIN;
+                double carbEffect  = gutModel.ra(state.qgut()) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
                 points.add(PredictionPointDTO.builder()
@@ -186,7 +187,7 @@ public class HovorkaGlucosePredictionService {
                         .predictedGlucose(Math.round(gPred * 10.0) / 10.0)
                         .carbAbsorptionEffect(Math.round(carbEffect * 100.0) / 100.0)
                         .insulinActivityEffect(Math.round(insulinEff * 100.0) / 100.0)
-                        .absorptionMode("HOVORKA_2COMP")
+                        .absorptionMode("DALLA_MAN_3COMP")
                         .build());
 
                 nextEmit += (min < DENSE_LIMIT_MIN ? DENSE_STEP_MIN : SPARSE_STEP_MIN);
@@ -199,12 +200,13 @@ public class HovorkaGlucosePredictionService {
     // ── State warm-up ─────────────────────────────────────────────────────────
 
     /**
-     * Initialises [Q1, Q2, D1, D2] reflecting the current physiological state.
+     * Initialises the extended state reflecting the current physiological state.
      *
      * <ul>
      *   <li>Q1, Q2 — from current CGM glucose (steady-state approximation).</li>
-     *   <li>D1, D2 — by replaying each past meal through the gut ODE up to "now".
-     *       This gives accurate gamma-distributed absorption state without shortcuts.</li>
+     *   <li>Qsto1, Qsto2, Qgut — by replaying each past meal through the
+     *       Dalla Man gut ODE up to "now". This gives accurate nonlinear
+     *       absorption state without shortcuts.</li>
      * </ul>
      */
     private HovorkaState buildWarmState(
@@ -213,35 +215,45 @@ public class HovorkaGlucosePredictionService {
             LocalDateTime now,
             HovorkaParameters p) {
 
-        // Start from steady-state glucose compartments
         HovorkaState warm = HovorkaState.steadyState(currentGlucose, p);
 
-        // Replay each past carb entry through the gut ODE to get accurate D1, D2
         for (CarbsEntry entry : pastCarbs) {
             if (entry.getTimestamp() == null) continue;
             long minsAgo = Duration.between(entry.getTimestamp(), now).toMinutes();
-            if (minsAgo <= 0) continue; // future event — not a warm-up candidate
+            if (minsAgo <= 0) continue;
 
             int ageMin = (int) Math.min(minsAgo, 480);
             double carbMmol = toCarbMmol(entry, p);
             if (carbMmol <= 0) continue;
 
-            // Simulate gut ODE from meal time to now with no insulin or glucose coupling
-            double d1 = carbMmol;
-            double d2 = 0.0;
+            // Replay this meal's Dalla Man gut ODE (isolated from glucose compartment)
+            double qsto1 = carbMmol;
+            double qsto2 = 0.0;
+            double qgut  = 0.0;
+            double mealMmolRef = carbMmol;
+
             for (int m = 0; m < ageMin; m++) {
-                double dd1 = -d1 / p.tMaxG();
-                double dd2 = d1 / p.tMaxG() - d2 / p.tMaxG();
-                d1 = Math.max(0.0, d1 + dd1);
-                d2 = Math.max(0.0, d2 + dd2);
+                double qsto  = qsto1 + qsto2;
+                double kempt = gutModel.kEmpt(qsto, mealMmolRef);
+                double dQsto1 = -DallaManGutModel.K_GRI * qsto1;
+                double dQsto2 = DallaManGutModel.K_GRI * qsto1 - kempt * qsto2;
+                double dQgut  = kempt * qsto2 - DallaManGutModel.K_ABS * qgut;
+                qsto1 = Math.max(0.0, qsto1 + dQsto1);
+                qsto2 = Math.max(0.0, qsto2 + dQsto2);
+                qgut  = Math.max(0.0, qgut  + dQgut);
             }
 
-            // Accumulate gut compartments from all past meals
-            warm = new HovorkaState(warm.q1(), warm.q2(), warm.d1() + d1, warm.d2() + d2);
+            warm = new HovorkaState(
+                    warm.q1(), warm.q2(),
+                    warm.qsto1() + qsto1,
+                    warm.qsto2() + qsto2,
+                    warm.qgut()  + qgut,
+                    warm.inc(),
+                    warm.mealMmol() + carbMmol);
         }
 
-        log.debug("Hovorka warm state: G={}mmol/L Q1={} Q2={} D1={} D2={}",
-                currentGlucose, warm.q1(), warm.q2(), warm.d1(), warm.d2());
+        log.debug("Dalla Man warm state: G={}mmol/L Q1={} Qsto1={} Qsto2={} Qgut={}",
+                currentGlucose, warm.q1(), warm.qsto1(), warm.qsto2(), warm.qgut());
         return warm;
     }
 
