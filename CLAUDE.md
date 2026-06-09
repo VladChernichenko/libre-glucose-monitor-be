@@ -30,6 +30,29 @@
 - Use event sourcing for state changes
 - Ensure input validation at system boundaries
 
+## Database Schema
+
+The canonical schema is defined in `src/main/resources/db/migration/`:
+
+| File | Contents |
+|------|----------|
+| `V1__baseline_schema.sql` | Core tables: `users`, `notes`, `cob_settings`, `user_insulin_preferences`, `cgm_readings`, `revoked_tokens`, `user_data_source_config` |
+| `V2__seed_insulin_catalog.sql` | Insulin catalog seed data |
+| `V3__seed_glycemic_response_patterns.sql` | Glycemic response pattern seed data |
+| `V4__seed_clinical_knowledge.sql` | Clinical knowledge seed data |
+| `V5__experiments.sql` | `experiments`, `experiment_readings` tables |
+| `V6__verification_events.sql` | `verification_events` table |
+| `V7__isf_meal_window_snapshots.sql` | `isf_meal_window_snapshots` table (per-user meal-window ISF cache) |
+
+**Always read the relevant migration file(s) before writing any query, entity, or repository — the schema is the source of truth for column names, types, constraints, and indexes.**
+
+### Schema Change Rules
+
+- **NEVER use `ALTER TABLE` in a new migration file** for changes to existing tables/columns/indexes/sequences
+- **ALWAYS edit the existing migration file** that owns the table (e.g. edit `V1__baseline_schema.sql` to add a column to `notes`, not create `V8__alter_notes_add_column.sql`)
+- A new `V{n+1}__` file is only justified when introducing a **brand-new table** with no prior migration file
+- Assumes the dev workflow runs from a clean DB (Flyway checksum changes against a populated DB require `flyway repair` — flag this if relevant)
+
 ### Project Config
 
 - **Topology**: hierarchical-mesh

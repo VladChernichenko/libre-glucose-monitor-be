@@ -226,7 +226,7 @@ class BaselineSchemaMigrationTest {
                 assertThat(rs.getBoolean("success")).isTrue();
                 versions.add(rs.getString("version"));
             }
-            assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6");
+            assertThat(versions).containsExactly("1", "2", "3", "4", "5", "6", "7");
         }
     }
 

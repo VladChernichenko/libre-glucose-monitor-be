@@ -135,6 +135,8 @@ app:
     glucose-calculations-enabled: true
     user-configuration-enabled: false
     nutrition-aware-prediction-enabled: ${APP_FEATURES_NUTRITION_AWARE_PREDICTION_ENABLED:true}
+    # Hovorka 2-compartment ODE model — off by default, enable per-env for validation
+    hovorka-model-enabled: ${APP_FEATURES_HOVORKA_MODEL_ENABLED:true}
     food-photo-analysis-enabled: false
     ar-spatial-enabled: false
     cgm-service-external: false

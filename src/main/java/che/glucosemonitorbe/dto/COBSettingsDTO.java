@@ -11,10 +11,13 @@ public class COBSettingsDTO {
     private Double isf;
     private Integer carbHalfLife;
     private Integer maxCOBDuration;
-    
+    /** Body weight in kg — used for Hovorka model VG/VI scaling. NULL = 70 kg population default. */
+    private Double bodyWeightKg;
+
     // Constructors
     public COBSettingsDTO() {}
-    
+
+    /** Legacy 6-arg constructor — bodyWeightKg defaults to null (population 70 kg). */
     public COBSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
         this.id = id;
         this.userId = userId;
@@ -22,6 +25,17 @@ public class COBSettingsDTO {
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;
+        this.bodyWeightKg = null;
+    }
+
+    public COBSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration, Double bodyWeightKg) {
+        this.id = id;
+        this.userId = userId;
+        this.carbRatio = carbRatio;
+        this.isf = isf;
+        this.carbHalfLife = carbHalfLife;
+        this.maxCOBDuration = maxCOBDuration;
+        this.bodyWeightKg = bodyWeightKg;
     }
     
     // Getters and Setters
@@ -68,8 +82,16 @@ public class COBSettingsDTO {
     public Integer getMaxCOBDuration() {
         return maxCOBDuration;
     }
-    
+
     public void setMaxCOBDuration(Integer maxCOBDuration) {
         this.maxCOBDuration = maxCOBDuration;
+    }
+
+    public Double getBodyWeightKg() {
+        return bodyWeightKg;
+    }
+
+    public void setBodyWeightKg(Double bodyWeightKg) {
+        this.bodyWeightKg = bodyWeightKg;
     }
 }

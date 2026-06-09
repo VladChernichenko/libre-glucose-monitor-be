@@ -99,12 +99,14 @@ public class COBSettingsService {
         if (settingsDTO.getMaxCOBDuration() != null) {
             settings.setMaxCOBDuration(settingsDTO.getMaxCOBDuration());
         }
+        // bodyWeightKg is optional — only update if explicitly provided
+        if (settingsDTO.getBodyWeightKg() != null) {
+            settings.setBodyWeightKg(settingsDTO.getBodyWeightKg());
+        }
     }
-    
+
     /**
-     * Convert entity to DTO
-     * @param settings the settings entity
-     * @return the settings DTO
+     * Convert entity to DTO.
      */
     private COBSettingsDTO convertToDTO(COBSettings settings) {
         return new COBSettingsDTO(
@@ -113,7 +115,8 @@ public class COBSettingsService {
             settings.getCarbRatio(),
             settings.getIsf(),
             settings.getCarbHalfLife(),
-            settings.getMaxCOBDuration()
+            settings.getMaxCOBDuration(),
+            settings.getBodyWeightKg()
         );
     }
 }

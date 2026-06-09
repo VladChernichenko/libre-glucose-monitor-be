@@ -176,6 +176,9 @@ public class NotesService {
         if (request.getAbsorptionMode() != null) {
             existingNote.setAbsorptionMode(request.getAbsorptionMode());
         }
+        if (request.getNutritionProfile() != null && !request.getNutritionProfile().isBlank()) {
+            existingNote.setNutritionProfile(request.getNutritionProfile());
+        }
         enrichNutrition(existingNote);
         
         Note updatedNote = noteRepository.save(existingNote);

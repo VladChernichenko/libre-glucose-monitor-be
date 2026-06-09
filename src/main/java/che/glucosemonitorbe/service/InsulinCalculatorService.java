@@ -62,8 +62,9 @@ public class InsulinCalculatorService {
 
     /**
      * Port of OpenAPS oref0 {@code iobCalcExponential} IOB term.
+     * Public so the Hovorka prediction service can reuse the same curve.
      */
-    static double iobOpenApsExponential(double insulinUnits, double minsAgo, double diaHours, double peakMinutes) {
+    public static double iobOpenApsExponential(double insulinUnits, double minsAgo, double diaHours, double peakMinutes) {
         double end = diaHours * 60.0;
         double peak = peakMinutes;
 

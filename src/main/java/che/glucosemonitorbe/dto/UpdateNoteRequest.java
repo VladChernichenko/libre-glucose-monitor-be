@@ -23,6 +23,9 @@ public class UpdateNoteRequest {
     /** Note category: "normal" or "long_acting". Null leaves the existing value unchanged. */
     private String type;
 
+    /** Serialised nutrition-profile JSON. When non-blank, stored directly on the note (same path as create). */
+    private String nutritionProfile;
+
     // Constructors
     public UpdateNoteRequest() {}
     
@@ -113,5 +116,13 @@ public class UpdateNoteRequest {
 
     public void setType(String type) {
         this.type = type;
+    }
+
+    public String getNutritionProfile() {
+        return nutritionProfile;
+    }
+
+    public void setNutritionProfile(String nutritionProfile) {
+        this.nutritionProfile = nutritionProfile;
     }
 }

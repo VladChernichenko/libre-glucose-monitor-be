@@ -11,11 +11,13 @@ import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -57,6 +59,13 @@ public class GlucoseCalculationsService {
     // Sparse step applies beyond 4 h (HFHP / Dual Wave tail) — 10 min is fine for that region.
     private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 10;
     private final COBSettingsService cOBSettingsService;
+
+    /**
+     * Optional: injected only when Hovorka model is on the classpath and enabled.
+     * Using field injection to keep @RequiredArgsConstructor clean.
+     */
+    @Autowired(required = false)
+    private HovorkaGlucosePredictionService hovorkaService;
 
     /**
      * Calculate comprehensive glucose calculations including COB, IOB, and predictions
@@ -195,6 +204,19 @@ public class GlucoseCalculationsService {
             RapidInsulinIobParameters rapidIob,
             Double currentTrendMmolPerMin
     ) {
+        // ── Hovorka 2-compartment ODE model (feature-flagged) ─────────────────
+        if (featureToggleConfig.isHovorkaModelEnabled() && hovorkaService != null) {
+            // Long-acting notes — load from a 36h window so Lantus taken yesterday is included
+            List<Note> longActingNotes = getLongActingNotes(userUUID, currentTime);
+            int pathMinutes = resolvePathDurationMinutes(carbsEntries);
+            log.debug("Using Hovorka ODE model for user={} pathMinutes={}", userUUID, pathMinutes);
+            return hovorkaService.buildPredictionPath(
+                    currentGlucose, currentTime,
+                    carbsEntries, insulinEntries,
+                    longActingNotes, userUUID, pathMinutes);
+        }
+
+        // ── OpenAPS exponential model (default) ───────────────────────────────
         double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
@@ -410,6 +432,24 @@ public class GlucoseCalculationsService {
         return Math.max(CONFIDENCE_LOW, confidence);
     }
     
+    /**
+     * Load long-acting (basal) insulin notes from the last 36 hours.
+     * Lantus/Tresiba have a DIA of ~24–28 h, so a dose taken yesterday must be included
+     * for accurate EGP suppression modelling in the Hovorka path.
+     */
+    private List<Note> getLongActingNotes(UUID userId, LocalDateTime currentTime) {
+        try {
+            LocalDateTime since = currentTime.minusHours(36);
+            return noteRepository.findByUserIdAndTimestampBetween(userId, since, currentTime)
+                    .stream()
+                    .filter(Note::isLongActing)
+                    .toList();
+        } catch (Exception e) {
+            log.warn("Failed to fetch long-acting notes for user {}: {}", userId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
     /**
      * Get recent notes for a user from the last 8 hours.
      * BUG P1 fix: accepts UUID directly so getUserByUsername is only called once per request.

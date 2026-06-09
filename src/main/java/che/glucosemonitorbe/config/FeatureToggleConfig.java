@@ -23,6 +23,10 @@ public class FeatureToggleConfig {
     // Experiments — ISF / Carb Ratio determination (on by default)
     private boolean experimentsEnabled = true;
 
+    // Hovorka 2-compartment ODE model (replaces OpenAPS exponential path when enabled)
+    // Off by default — toggle on per-environment after validation
+    private boolean hovorkaModelEnabled = false;
+
     // Phase 2–4 integration gates (all off by default — toggle on per feature-flag)
     private boolean foodPhotoAnalysisEnabled = false;
     private boolean arSpatialEnabled = false;
