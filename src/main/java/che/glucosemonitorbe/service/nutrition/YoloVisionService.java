@@ -33,10 +33,10 @@ public class YoloVisionService {
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
 
-    @Value("${app.ai.yolo.url}")
+    @Value("${app.ai.yolo.url:http://localhost:8001}")
     private String yoloServiceUrl;
 
-    @Value("${app.ai.yolo.confidence-threshold}")
+    @Value("${app.ai.yolo.confidence-threshold:0.35}")
     private double confidenceThreshold;
 
     public YoloVisionService(ObjectMapper objectMapper) {
