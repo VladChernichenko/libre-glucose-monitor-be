@@ -18,7 +18,7 @@ public final class LibreLinkUpTrend {
             case 2 -> "FortyFiveDown";
             case 3 -> "Flat";
             case 4 -> "FortyFiveUp";
-            case 5 -> "SingleUp";
+            case 5 -> "DoubleUp";
             default -> "Flat";
         };
     }
@@ -30,7 +30,7 @@ public final class LibreLinkUpTrend {
             case 2 -> "\u2198";
             case 3 -> "\u2192";
             case 4 -> "\u2197";
-            case 5 -> "\u2191";
+            case 5 -> "\u2191\u2191";
             default -> "\u2192";
         };
     }

@@ -49,7 +49,7 @@ class LibreLinkUpResponseParserTest {
         "2, \u2198",
         "3, \u2192",
         "4, \u2197",
-        "5, \u2191"
+        "5, \u2191\u2191"
     })
     @DisplayName("trendToArrow - LLU TrendArrow 1-5")
     void trendToArrow_lluCodes(int trend, String expected) {
@@ -199,7 +199,7 @@ class LibreLinkUpResponseParserTest {
 
         assertThat(data.getData()).hasSize(1);
         assertThat(data.getData().get(0).getTrend()).isEqualTo(5);
-        assertThat(data.getData().get(0).getTrendArrow()).isEqualTo("\u2191");
+        assertThat(data.getData().get(0).getTrendArrow()).isEqualTo("\u2191\u2191");
     }
 
     @Test
@@ -234,15 +234,19 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toGlucoseData — does NOT append live measurement older than last graph point")
-    void toGlucoseData_skipsLiveMeasurementWhenOlder() {
+    @DisplayName("toGlucoseData — patches trend from live measurement even when older than last graph point")
+    void toGlucoseData_patchesTrendWhenLiveMeasurementOlder() {
+        // glucoseMeasurement (22:15) is older than the last graph point (22:30).
+        // Graph points never have TrendArrow so we always take the live trend.
         LibreGlucoseData data = parser.toGlucoseData(json(
                 "{\"data\":{"
-                        + "\"graphData\":[{\"ValueInMgPerDl\":90,\"FactoryTimestamp\":\"2025-01-14T22:30:00Z\",\"Trend\":4}],"
+                        + "\"graphData\":[{\"ValueInMgPerDl\":90,\"FactoryTimestamp\":\"2025-01-14T22:30:00Z\"}],"
                         + "\"connection\":{\"glucoseMeasurement\":{\"ValueInMgPerDl\":126,"
-                        + "\"FactoryTimestamp\":\"2025-01-14T22:15:00Z\",\"Trend\":2}}}}"), "p1");
+                        + "\"FactoryTimestamp\":\"2025-01-14T22:15:00Z\",\"TrendArrow\":2}}}}"), "p1");
 
         assertThat(data.getData()).hasSize(1);
+        assertThat(data.getData().get(0).getTrend()).isEqualTo(2);
+        assertThat(data.getData().get(0).getTrendArrow()).isEqualTo("↘");
     }
 
     @Test

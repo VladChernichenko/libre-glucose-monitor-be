@@ -251,9 +251,10 @@ public class LibreLinkUpResponseParser {
                             ));
                             logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
                                 valueMgDl, trend, patientId);
-                        } else if (!gmDate.before(last.getTimestamp()) && trend > 0) {
-                            // Same timestamp as the last graph point: graph points lack TrendArrow,
-                            // so patch the trend from the live measurement instead of discarding it.
+                        } else if (trend > 0) {
+                            // glucoseMeasurement is same-time or older than the newest graph point.
+                            // Graph points never carry TrendArrow (trend=0), so always patch the
+                            // live trend onto the most recent reading regardless of timestamp order.
                             last.setTrend(trend);
                             last.setTrendArrow(trendToArrow(trend));
                             logger.info("Patched trend={} from glucoseMeasurement onto last graph point for patient {}",

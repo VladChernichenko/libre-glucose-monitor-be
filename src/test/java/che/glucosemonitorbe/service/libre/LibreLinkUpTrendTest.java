@@ -18,7 +18,7 @@ class LibreLinkUpTrendTest {
             "2, \u2198, FortyFiveDown",
             "3, \u2192, Flat",
             "4, \u2197, FortyFiveUp",
-            "5, \u2191, SingleUp"
+            "5, \u2191\u2191, DoubleUp"
     })
     @DisplayName("LLU TrendArrow 1-5 maps to arrow and Nightscout direction")
     void mapsTrendCodes(int trend, String expectedArrow, String expectedDirection) {
