@@ -206,6 +206,49 @@ class HovorkaOdeSolverTest {
         assertThat(dy[5]).isCloseTo(0.0, within(1e-6)); // dInc/dt   = 0
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 9: Physics documentation — uncompensated EGP causes glucose rise
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void noCobNoIob_uncompensatedEgp_glucoseRisesOver4h() {
+        // When egpNet = EGP0 (full hepatic production, no basal suppression) the ODE
+        // correctly drives glucose up even without food or insulin. This test documents
+        // the physics the prediction service must guard against.
+        double g0   = 7.2;
+        double egp0 = HovorkaParameters.EGP0_PER_KG * params.weightKg(); // 0.0161 * 70
+        HovorkaParameters unstable = new HovorkaParameters(
+                params.vG(), params.f01(), egp0,   // egpNet = full EGP0 > f01
+                HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
+                params.tMaxG(), params.aG(), params.isf(), params.weightKg());
+
+        HovorkaState state = HovorkaState.steadyState(g0, unstable);
+        for (int m = 0; m < 240; m++) {
+            state = solver.step(state, unstable, 0.0, 0.0);
+        }
+
+        double rise = state.glucoseMmolL(unstable) - g0;
+        // EGP0 - f01 = (0.0161 - 0.0097) * 70 = 0.448 mmol/min → ~7 mmol rise in 4h (clamped)
+        assertThat(rise).isGreaterThan(3.0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 10: Steady-state EGP — glucose is stable at any euglycaemic level
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void noCobNoIob_steadyStateEgpEqualsF01_glucoseRemainsFlat() {
+        // When egpNet = f01 (basal at steady state), glucose must stay flat.
+        // This is the CORRECT behaviour the prediction service must produce.
+        double g0 = 7.2;
+        // params already has egpNet = f01 (set in setUp() as the SS identity)
+        HovorkaState state = HovorkaState.steadyState(g0, params);
+        for (int m = 0; m < 240; m++) {
+            state = solver.step(state, params, 0.0, 0.0);
+        }
+        assertThat(state.glucoseMmolL(params)).isCloseTo(g0, within(0.15));
+    }
+
     // ── Helper: OpenAPS IOB (same formula as InsulinCalculatorService) ────────
 
     private static double iobExponential(double units, double minsAgo, double diaMin, double peak) {

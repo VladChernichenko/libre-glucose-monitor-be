@@ -145,6 +145,11 @@ public class HovorkaGlucosePredictionService {
         double x3Basal  = basalResolver.resolveEgpSuppression(longActingNotes, currentTime);
         double egp0Abs  = HovorkaParameters.EGP0_PER_KG * p.weightKg();
         double egpNow   = basalResolver.netEgp(p.f01(), egp0Abs, x3Basal);
+        // No basal logged → assume fasting steady state (T1D on continuous unlogged background basal).
+        // Without this guard, egpNow = EGP0 >> f01 and glucose rises ~9 mmol/L in 4 h with no COB/IOB.
+        if (longActingNotes == null || longActingNotes.isEmpty()) {
+            egpNow = p.f01();
+        }
         // Re-parameterise: swap egpNet in p with the basal-adjusted value
         HovorkaParameters pAdj = new HovorkaParameters(
                 p.vG(), p.f01(), egpNow, p.k12(), p.k21(),
@@ -316,8 +321,10 @@ public class HovorkaGlucosePredictionService {
             long minsAgo = Duration.between(entry.getTimestamp(), now).toMinutes();
             if (minsAgo > 0) continue; // past — captured in warm-up
 
-            // Future or current event: minute = |minsAgo|
-            int futureMin = (int) Math.abs(minsAgo);
+            // Future or current event: minute = |minsAgo|.
+            // Clamp to 1: minsAgo=0 (meal logged at exactly "now") must still enter the ODE loop,
+            // which starts at min=1 — storing at key=0 would cause the meal to be silently dropped.
+            int futureMin = Math.max(1, (int) Math.abs(minsAgo));
             double carbMmol = toCarbMmol(entry, p);
             if (carbMmol > 0) {
                 timeline.merge(futureMin, carbMmol, Double::sum);

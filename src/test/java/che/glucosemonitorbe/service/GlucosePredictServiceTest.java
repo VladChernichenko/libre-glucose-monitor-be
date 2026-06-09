@@ -317,6 +317,331 @@ class GlucosePredictServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Prospective meal lifecycle (regression for "flat curve" bug)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("when carbs > 0 a prospective meal entry is added to carbsWithMeal")
+    void carbsInRequest_prospectiveMealIncludedInCarbsPassedToOde() {
+        PredictRequest req = simpleRequest(7.0, 0, 35, 0, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        List<CarbsEntry> captured = carbsCaptor.getValue();
+        // At least the prospective meal must be present
+        assertThat(captured).isNotEmpty();
+        // Its carbs must match the request value
+        assertThat(captured.stream().anyMatch(e -> e.getCarbs() != null && e.getCarbs() == 35.0))
+                .as("prospective meal with carbs=35 must appear in the list passed to ODE")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("when carbs = 0, no prospective meal entry is added")
+    void noCarbsInRequest_noProsectiveMealAddedToList() {
+        PredictRequest req = simpleRequest(7.0, 0, 0, 0, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        // No DB notes in setUp, no carbsG → list must be empty
+        assertThat(carbsCaptor.getValue()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("prospective meal entry has a non-null timestamp (never null → never skipped in ODE)")
+    void prospectiveMealEntry_hasNonNullTimestamp() {
+        PredictRequest req = simpleRequest(5.8, 0, 35, 0, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        carbsCaptor.getValue().forEach(e ->
+                assertThat(e.getTimestamp())
+                        .as("carb entry timestamp must not be null — a null timestamp is silently skipped by the ODE warm-up")
+                        .isNotNull());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Null-safe macro inputs
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("null macro fields are treated as zero — no NullPointerException")
+    void nullMacroFields_treatedAsZeroNoException() {
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .insulinDose(null)   // null → safe() → 0
+                .carbs(null)
+                .protein(null)
+                .fat(null)
+                .fiber(null)
+                .horizonMinutes(300)
+                .build();
+
+        // Must not throw
+        PredictResponse resp = sut.predict(req, USERNAME);
+
+        assertThat(resp).isNotNull();
+        assertThat(resp.getPreBolusMinutes()).isEqualTo(0); // no insulin dose
+    }
+
+    @Test
+    @DisplayName("negative macro values are clamped to zero by safe()")
+    void negativeMacroValues_clampedToZero() {
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .insulinDose(-1.0)
+                .carbs(-5.0)
+                .protein(-3.0)
+                .fat(-2.0)
+                .horizonMinutes(300)
+                .build();
+
+        PredictResponse resp = sut.predict(req, USERNAME);
+
+        assertThat(resp.getPreBolusMinutes()).isEqualTo(0); // negative insulin treated as 0
+        // No prospective meal entry (carbsG ≤ 0)
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+        assertThat(carbsCaptor.getValue()).isEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Horizon clamping
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("null horizon → uses default 300 min")
+    void nullHorizon_usesDefault300() {
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(40.0)
+                .horizonMinutes(null)  // absent
+                .build();
+
+        sut.predict(req, USERNAME);
+
+        ArgumentCaptor<Integer> horizonCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(), anyList(), anyList(), anyList(), any(),
+                horizonCaptor.capture());
+
+        assertThat(horizonCaptor.getValue()).isEqualTo(300);
+    }
+
+    @Test
+    @DisplayName("horizon 30 (below minimum) → clamped to 60")
+    void horizon_belowMinimum_clampedTo60() {
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(40.0)
+                .horizonMinutes(30)
+                .build();
+
+        sut.predict(req, USERNAME);
+
+        ArgumentCaptor<Integer> horizonCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(), anyList(), anyList(), anyList(), any(),
+                horizonCaptor.capture());
+
+        assertThat(horizonCaptor.getValue()).isEqualTo(60);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: History → ODE plumbing
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("past insulin note becomes an InsulinDose passed to the ODE engine")
+    void pastInsulinNote_passedAsInsulinDose() {
+        Note bolusNote = new Note(USER_ID, LocalDateTime.now().minusMinutes(30), 0.0, 4.0, "Bolus");
+        bolusNote.setId(UUID.randomUUID());
+        bolusNote.setType(Note.TYPE_NORMAL);
+
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(bolusNote));
+
+        sut.predict(simpleRequest(7.0, 0, 40, 0, 0, 0), USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<InsulinDose>> dosesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(), anyList(),
+                dosesCaptor.capture(), anyList(), any(), anyInt());
+
+        assertThat(dosesCaptor.getValue())
+                .as("past bolus note must appear as an InsulinDose in the ODE call")
+                .anyMatch(d -> d.getUnits() != null && d.getUnits() == 4.0);
+    }
+
+    @Test
+    @DisplayName("long-acting note is excluded from InsulinDose list (not a bolus)")
+    void longActingNote_excludedFromInsulinDoses() {
+        Note basalNote = new Note(USER_ID, LocalDateTime.now().minusHours(10), 0.0, 20.0, "Tresiba");
+        basalNote.setId(UUID.randomUUID());
+        basalNote.setType(Note.TYPE_LONG_ACTING);
+
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(basalNote));
+
+        sut.predict(simpleRequest(7.0, 0, 40, 0, 0, 0), USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<InsulinDose>> dosesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(), anyList(),
+                dosesCaptor.capture(), anyList(), any(), anyInt());
+
+        // Long-acting insulin must NOT appear in bolus doses list
+        assertThat(dosesCaptor.getValue())
+                .as("long-acting note must not appear as a bolus InsulinDose")
+                .noneMatch(d -> d.getUnits() != null && d.getUnits() == 20.0);
+    }
+
+    @Test
+    @DisplayName("long-acting note is passed to ODE in the longActingNotes argument")
+    void longActingNote_passedInLongActingNotesArgument() {
+        Note basalNote = new Note(USER_ID, LocalDateTime.now().minusHours(8), 0.0, 15.0, "Lantus");
+        basalNote.setId(UUID.randomUUID());
+        basalNote.setType(Note.TYPE_LONG_ACTING);
+
+        // Both the 8h and 36h windows return the long-acting note
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(basalNote));
+
+        sut.predict(simpleRequest(7.0, 0, 40, 0, 0, 0), USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Note>> longActingCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(), anyList(), anyList(),
+                longActingCaptor.capture(), any(), anyInt());
+
+        assertThat(longActingCaptor.getValue())
+                .as("long-acting note must appear in the longActingNotes argument to the ODE")
+                .anyMatch(n -> n.getType().equals(Note.TYPE_LONG_ACTING));
+    }
+
+    @Test
+    @DisplayName("note with null carbs is not added to carbsEntries")
+    void noteWithNullCarbs_filteredOut() {
+        Note noCarbs = new Note(USER_ID, LocalDateTime.now().minusMinutes(60), null, 3.0, "Bolus only");
+        noCarbs.setId(UUID.randomUUID());
+
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(noCarbs));
+
+        sut.predict(simpleRequest(7.0, 0, 0, 0, 0, 0), USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(),
+                carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
+
+        assertThat(carbsCaptor.getValue())
+                .as("note with null carbs must not appear as a CarbsEntry")
+                .isEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Exception resilience
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("repository throws → gracefully falls back to empty history, prediction still runs")
+    void repositoryThrows_gracefulFallback_predictionStillReturns() {
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
+                .thenThrow(new RuntimeException("DB connection lost"));
+
+        // Must not propagate — service swallows it and returns an empty history
+        PredictResponse resp = sut.predict(simpleRequest(7.2, 0, 35, 0, 0, 0), USERNAME);
+
+        assertThat(resp).isNotNull();
+        assertThat(resp.getCurve()).isNotEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Prospective insulin bolus timing
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("with insulin dose > 0, a prospective dose is added at now + bestPause")
+    void withInsulinDose_prospectiveDoseAddedAtCorrectOffset() {
+        // Make optimizer always return pause=0 by returning a flat high-cost curve
+        // regardless of timing (it picks the first candidate with equal cost → pause=0)
+        PredictRequest req = simpleRequest(7.0, 3.0, 50, 0, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<InsulinDose>> dosesCaptor = ArgumentCaptor.forClass(List.class);
+        // Grab the LAST call (the final curve call after optimisation)
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(), anyList(),
+                dosesCaptor.capture(), anyList(), any(), anyInt());
+
+        // The final call must include the prospective bolus
+        List<List<InsulinDose>> allCaptures = dosesCaptor.getAllValues();
+        List<InsulinDose> finalDoses = allCaptures.get(allCaptures.size() - 1);
+        assertThat(finalDoses)
+                .as("final ODE call must contain the prospective 3u bolus")
+                .anyMatch(d -> d.getUnits() != null && d.getUnits() == 3.0);
+    }
+
+    @Test
+    @DisplayName("insulin dose = 0 → no prospective bolus entry in finalDoses")
+    void zeroDose_noProspectiveBolus() {
+        PredictRequest req = simpleRequest(7.0, 0.0, 50, 0, 0, 0);
+
+        sut.predict(req, USERNAME);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<InsulinDose>> dosesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class),
+                anyDouble(), any(), anyList(),
+                dosesCaptor.capture(), anyList(), any(), anyInt());
+
+        List<InsulinDose> finalDoses = dosesCaptor.getAllValues().get(dosesCaptor.getAllValues().size() - 1);
+        assertThat(finalDoses)
+                .as("zero dose must not add a prospective bolus entry")
+                .isEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
