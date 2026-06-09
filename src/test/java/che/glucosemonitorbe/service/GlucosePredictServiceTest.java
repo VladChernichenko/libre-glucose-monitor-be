@@ -618,8 +618,9 @@ class GlucosePredictServiceTest {
                 .findFirst();
         assertThat(fpuEntry).isPresent();
         assertThat(fpuEntry.get().getCarbs())
-                .as("FPU-equiv carbs = (25×4 + 30×9) / 100 × 10 = 37 g")
-                .isCloseTo(37.0, org.assertj.core.api.Assertions.within(0.5));
+                .as("FPU-equiv carbs = (25×4×0.50 + 30×9) / 100 × 10 = 32 g "
+                    + "(default 50 %% gluconeogenic fraction; no lctFatG override so all fat counts as LCT)")
+                .isCloseTo(32.0, org.assertj.core.api.Assertions.within(0.5));
     }
 
     @Test

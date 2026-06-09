@@ -49,6 +49,29 @@ public class PredictRequest {
     @Min(60) @Max(480)
     private Integer horizonMinutes;
 
+    // ── FPU type-aware fields (populated by the YOLO vision service) ──────────
+
+    /**
+     * Effective LCT-fat grams after excluding MCT fat [g].
+     * When absent, falls back to {@code fat} (conservative: all fat counted as LCT).
+     */
+    @DecimalMin(value = "0.0", message = "lctFatG must be non-negative")
+    private Double lctFatG;
+
+    /**
+     * Protein-weighted FPU onset delay [min].
+     * When absent, falls back to the server-side default of 90 min (Warsaw Protocol).
+     */
+    @Min(0) @Max(480)
+    private Integer fpuOnsetMin;
+
+    /**
+     * Protein-weighted gluconeogenic fraction [0.0–1.0].
+     * When absent, falls back to 0.50 (50 % of protein kcal → slow glucose).
+     */
+    @DecimalMin(value = "0.0", message = "gluconeogenicFraction must be non-negative")
+    private Double gluconeogenicFraction;
+
     /** IANA timezone string (e.g. "Europe/Berlin"). Used for timestamp alignment. */
     private String clientTimezone;
 }

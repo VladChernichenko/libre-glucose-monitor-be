@@ -98,6 +98,12 @@ public class CgmReadingService {
         for (NightscoutEntryDto entry : candidates) {
             if (StringUtils.hasText(entry.getId())) {
                 if (alreadyStoredIds.contains(entry.getId())) {
+                    // Back-fill trend when the stored record was written from a graph point
+                    // that had no TrendArrow (trend=0) and the incoming entry now carries one.
+                    if (entry.getTrend() != null && entry.getTrend() > 0) {
+                        repository.updateTrendIfZero(userId, dataSource, entry.getId(),
+                                entry.getTrend(), entry.getDirection());
+                    }
                     skippedAlreadyStored++;
                     continue;
                 }

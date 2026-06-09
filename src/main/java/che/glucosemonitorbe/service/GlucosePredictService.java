@@ -111,15 +111,25 @@ public class GlucosePredictService {
         }
 
         // ── 3b. Add FPU-equivalent slow glucose from protein/fat ─────────────
-        // Protein gluconeogenesis (~50% of ingested protein → glucose over 3–5 h) and
-        // fat-delayed gastric emptying cause a secondary glucose rise that is NOT
-        // captured by the carb ODE alone.  The Warsaw Protocol models this as a delayed
-        // slow-carb bolus: 1 FPU (100 kcal non-carb) ≈ 10 g carbs starting at t+90 min.
-        double fpuEquivCarbs = (proteinG * 4.0 + fatG * 9.0) / 100.0 * FPU_CARB_EQUIV_G;
+        // Protein gluconeogenesis and fat-delayed gastric emptying cause a secondary
+        // glucose rise not captured by the carb ODE.  The Warsaw Protocol models this
+        // as a delayed slow-carb bolus: 1 FPU (100 kcal non-carb) ≈ 10 g carbs.
+        //
+        // When the YOLO vision service supplies type-aware fields, we use:
+        //   lctFatG            — excludes MCT fat (oxidised directly, no portal glucose)
+        //   gluconeogenicFrac  — weighted by protein type (ANIMAL 50%, PLANT 35%, etc.)
+        //   fpuOnset           — weighted protein-type onset (CASEIN 120 min, WHEY 60 min…)
+        double lctFatG       = req.getLctFatG() != null ? safe(req.getLctFatG()) : fatG;
+        double glucFrac      = req.getGluconeogenicFraction() != null
+                               ? req.getGluconeogenicFraction() : 0.50;
+        int    fpuOnset      = req.getFpuOnsetMin() != null
+                               ? req.getFpuOnsetMin() : FPU_ONSET_MIN;
+
+        double fpuEquivCarbs = (proteinG * 4.0 * glucFrac + lctFatG * 9.0) / 100.0 * FPU_CARB_EQUIV_G;
         if (fpuEquivCarbs >= FPU_MIN_EQUIV_G) {
             carbsWithMeal.add(CarbsEntry.builder()
                     .id(UUID.randomUUID())
-                    .timestamp(now.plusMinutes(FPU_ONSET_MIN))
+                    .timestamp(now.plusMinutes(fpuOnset))
                     .carbs(fpuEquivCarbs)
                     .mealType("fpu-equiv")
                     .userId(userId)

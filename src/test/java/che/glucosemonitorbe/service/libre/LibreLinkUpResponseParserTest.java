@@ -218,6 +218,22 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
+    @DisplayName("toGlucoseData — patches trend from live measurement when timestamps are equal (graph points lack TrendArrow)")
+    void toGlucoseData_patchesTrendWhenSameTimestamp() {
+        // Graph data point has no TrendArrow (trend=0); glucoseMeasurement has same timestamp but valid trend.
+        LibreGlucoseData data = parser.toGlucoseData(json(
+                "{\"data\":{"
+                        + "\"graphData\":[{\"ValueInMgPerDl\":126,\"FactoryTimestamp\":\"2025-01-14T22:15:00Z\"}],"
+                        + "\"connection\":{\"glucoseMeasurement\":{\"ValueInMgPerDl\":126,"
+                        + "\"FactoryTimestamp\":\"2025-01-14T22:15:00Z\",\"TrendArrow\":4}}}}"), "p1");
+
+        assertThat(data.getData()).hasSize(1);
+        LibreGlucoseReading r = data.getData().get(0);
+        assertThat(r.getTrend()).isEqualTo(4);
+        assertThat(r.getTrendArrow()).isEqualTo("↗");
+    }
+
+    @Test
     @DisplayName("toGlucoseData — does NOT append live measurement older than last graph point")
     void toGlucoseData_skipsLiveMeasurementWhenOlder() {
         LibreGlucoseData data = parser.toGlucoseData(json(

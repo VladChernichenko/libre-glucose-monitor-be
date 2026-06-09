@@ -80,4 +80,19 @@ public interface CgmReadingRepository extends JpaRepository<CgmReading, UUID> {
     List<Long> findExistingDateTimestamps(@Param("userId") UUID userId,
                                           @Param("dataSource") CgmReading.DataSource dataSource,
                                           @Param("timestamps") List<Long> timestamps);
+
+    /**
+     * Patches trend and direction on an already-stored reading only when the stored trend is 0 or
+     * null (i.e. the entry was written from a graph point that had no TrendArrow). Used to back-fill
+     * the correct trend from the live glucoseMeasurement on the next LLU sync.
+     */
+    @Modifying
+    @Query("UPDATE CgmReading r SET r.trend = :trend, r.direction = :direction " +
+           "WHERE r.userId = :userId AND r.dataSource = :dataSource AND r.externalId = :externalId " +
+           "AND (r.trend IS NULL OR r.trend = 0)")
+    int updateTrendIfZero(@Param("userId") UUID userId,
+                          @Param("dataSource") CgmReading.DataSource dataSource,
+                          @Param("externalId") String externalId,
+                          @Param("trend") Integer trend,
+                          @Param("direction") String direction);
 }

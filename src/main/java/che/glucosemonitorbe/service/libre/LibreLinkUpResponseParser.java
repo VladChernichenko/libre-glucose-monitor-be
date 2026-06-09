@@ -221,6 +221,7 @@ public class LibreLinkUpResponseParser {
         }
 
         // connection.glucoseMeasurement is the live reading and can be newer than the last graphData entry.
+        // Graph data points do not include TrendArrow — the live measurement is the only reliable trend source.
         if (dataEnvelope != null) {
             JsonNode conn = dataEnvelope.get("connection");
             JsonNode gm = conn != null ? conn.get("glucoseMeasurement") : null;
@@ -232,16 +233,32 @@ public class LibreLinkUpResponseParser {
                 int trend = LibreLinkUpTrend.readTrendCode(gm);
                 if (valueMgDl > 0 && !ts.isEmpty()) {
                     Date gmDate = parseTimestamp(ts);
-                    boolean isNewer = readings.isEmpty()
-                            || gmDate.after(readings.get(readings.size() - 1).getTimestamp());
-                    if (isNewer) {
+                    if (readings.isEmpty()) {
                         double mmol = valueMgDl / 18.0;
                         readings.add(new LibreGlucoseReading(
                             gmDate, mmol, trend, trendToArrow(trend),
                             glucoseStatus(mmol), "mmol/L", gmDate
                         ));
-                        logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
+                        logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as only reading for patient {}",
                             valueMgDl, trend, patientId);
+                    } else {
+                        LibreGlucoseReading last = readings.get(readings.size() - 1);
+                        if (gmDate.after(last.getTimestamp())) {
+                            double mmol = valueMgDl / 18.0;
+                            readings.add(new LibreGlucoseReading(
+                                gmDate, mmol, trend, trendToArrow(trend),
+                                glucoseStatus(mmol), "mmol/L", gmDate
+                            ));
+                            logger.info("Added glucoseMeasurement ({} mg/dL, trend={}) as latest reading for patient {}",
+                                valueMgDl, trend, patientId);
+                        } else if (!gmDate.before(last.getTimestamp()) && trend > 0) {
+                            // Same timestamp as the last graph point: graph points lack TrendArrow,
+                            // so patch the trend from the live measurement instead of discarding it.
+                            last.setTrend(trend);
+                            last.setTrendArrow(trendToArrow(trend));
+                            logger.info("Patched trend={} from glucoseMeasurement onto last graph point for patient {}",
+                                trend, patientId);
+                        }
                     }
                 }
             }
