@@ -392,6 +392,39 @@ class HovorkaGlucosePredictionServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Regression guard: logging today's long-acting dose must not itself trigger
+    // a rising forecast
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void noCobNoIob_longActingLoggedMinutesAgo_doesNotTriggerRise() {
+        // A long-acting (Tresiba) note injected 42 min ago. Before the fix, the ramp-up
+        // arm of suppressionCurve() returned ~0.14 (instead of the plateau 0.40), so
+        // egpNow > f01 and the forecast rose by several mmol/L over 4 h — even though
+        // the user just took their normal daily basal dose.
+        //
+        // After the fix: a freshly logged dose is in the plateau region from t=0,
+        // so egpNow ≈ f01 and glucose stays flat — same as the no-notes default.
+        double g0 = 4.6;
+
+        che.glucosemonitorbe.entity.Note longActing = new che.glucosemonitorbe.entity.Note();
+        longActing.setTimestamp(NOW.minusMinutes(42));
+        longActing.setInsulin(22.0);
+        longActing.setType(che.glucosemonitorbe.entity.Note.TYPE_LONG_ACTING);
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, NOW,
+                List.of(), List.of(), List.of(longActing),
+                USER_ID, 240);
+
+        assertThat(curve).isNotEmpty();
+        curve.forEach(pt ->
+                assertThat(pt.getPredictedGlucose())
+                        .as("G at %s (basal logged 42min ago)", pt.getTimestamp())
+                        .isBetween(3.1, 6.1));   // g0 ± 1.5 mmol/L
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 

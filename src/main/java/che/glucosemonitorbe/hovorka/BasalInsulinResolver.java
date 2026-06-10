@@ -20,10 +20,17 @@ import java.util.List;
  *
  * <h3>EGP suppression curve</h3>
  * <ul>
- *   <li>0–2 h after injection: ramping up from 0 to max (linear ramp)</li>
- *   <li>2–20 h: full suppression maintained (plateau)</li>
- *   <li>20–30 h: waning (linear taper)</li>
+ *   <li>0–20 h after injection: full suppression maintained (plateau)</li>
+ *   <li>20–28 h: waning (linear taper)</li>
  * </ul>
+ * <p>There is deliberately no ramp-up phase: a freshly logged dose is assumed to
+ * continue the steady-state coverage already established by the user's regular
+ * dosing routine — the same assumption used when no long-acting note is logged
+ * at all (see {@code egpNow = f01} fallback in
+ * {@link HovorkaGlucosePredictionService}). Without this, logging today's dose
+ * a few minutes ago would make the model <em>more</em> pessimistic about EGP
+ * suppression than logging nothing at all, producing a spurious rising forecast
+ * right after a routine injection.</p>
  * The peak suppression fraction {@link #PEAK_X3_BASAL} (0.40) is derived from the
  * steady-state identity EGP0 × (1 - x3) = F01 → x3 = 1 - F01/EGP0 = 1 - 0.0097/0.0161 ≈ 0.40.
  */
@@ -35,9 +42,6 @@ public class BasalInsulinResolver {
 
     /** Duration after which long-acting insulin has fully cleared [hours]. */
     public static final double BASAL_DIA_HOURS = 28.0;
-
-    /** Hours after injection when plateau begins. */
-    private static final double RAMP_UP_HOURS  = 2.0;
 
     /** Hours after injection when waning begins. */
     private static final double WANE_START_HOURS = 20.0;
@@ -75,17 +79,13 @@ public class BasalInsulinResolver {
      * EGP suppression profile as a function of hours since injection.
      *
      * <pre>
-     *   0 → ramp_up : linear 0 → PEAK_X3_BASAL
-     *   ramp_up → wane_start : plateau at PEAK_X3_BASAL
+     *   0 → wane_start : plateau at PEAK_X3_BASAL
      *   wane_start → DIA : linear PEAK_X3_BASAL → 0
      *   > DIA : 0
      * </pre>
      */
     double suppressionCurve(double hoursAgo) {
         if (hoursAgo < 0 || hoursAgo > BASAL_DIA_HOURS) return 0.0;
-        if (hoursAgo < RAMP_UP_HOURS) {
-            return PEAK_X3_BASAL * (hoursAgo / RAMP_UP_HOURS);
-        }
         if (hoursAgo <= WANE_START_HOURS) {
             return PEAK_X3_BASAL;
         }
