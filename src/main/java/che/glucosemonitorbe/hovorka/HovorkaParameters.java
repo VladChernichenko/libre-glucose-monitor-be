@@ -27,7 +27,10 @@ package che.glucosemonitorbe.hovorka;
  * @param k12       Intercompartmental transfer rate Q1→Q2 [/min] (population 0.066)
  * @param k21       Intercompartmental transfer rate Q2→Q1 [/min] (population 0.066)
  * @param tMaxG     Gut absorption time constant [min] = carbHalfLife / 1.68
- * @param aG        Carbohydrate bioavailability factor [dimensionless, 0.6–1.0]
+ * @param aG        Per-user meal-magnitude calibration trim [dimensionless, centred on 1.0].
+ *                  NOT a bioavailability factor — physiological carb bioavailability (~0.90) is
+ *                  applied once, downstream, by {@code DallaManGutModel.F}. Must not be derived
+ *                  from the carb ratio (an insulin-dosing quantity).
  * @param isf       Insulin sensitivity factor [mmol/L per unit] — from user experiment
  * @param weightKg  Body weight [kg] — from cob_settings or 70 kg default
  */

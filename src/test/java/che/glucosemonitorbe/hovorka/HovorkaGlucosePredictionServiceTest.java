@@ -4,6 +4,7 @@ import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -174,6 +175,84 @@ class HovorkaGlucosePredictionServiceTest {
                     + "is near its activity peak and should be lowering glucose immediately, "
                     + "not held flat for ~35 min.", g0)
                 .isLessThan(g0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Regression: prospective insulin dose (minsAgoDose < 0) must not act early
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("future-timestamped insulin dose: prediction matches no-dose curve until delivery, "
+                  + "then diverges lower")
+    void prospectiveInsulinDose_matchesBaselineUntilDelivery_thenDivergesLower() {
+        // A bolus dosed 20 min in the future (minsAgoDose = -20) must contribute zero
+        // IOB/activity until its delivery minute — mirroring
+        // pastCarbEntry_minsAgoNegative_deliveredAtCorrectFutureMinute for carbs.
+        double g0 = 8.0;
+
+        InsulinDose futureDose = InsulinDose.builder()
+                .timestamp(NOW.plusMinutes(20))
+                .units(3.0)
+                .build();
+
+        List<PredictionPointDTO> withDose = service.buildPredictionPath(
+                params, g0, NOW, List.of(), List.of(futureDose), List.of(), USER_ID, 60);
+        List<PredictionPointDTO> noDose = service.buildPredictionPath(
+                params, g0, NOW, List.of(), List.of(), List.of(), USER_ID, 60);
+
+        // Before delivery (t=5,15min): identical to the no-dose curve — the prospective
+        // dose must contribute zero IOB/activity before its delivery minute.
+        assertThat(glucoseAt(withDose, 5))
+                .as("G at t=5min must match the no-dose curve — dose is not delivered for 20 more minutes")
+                .isEqualTo(glucoseAt(noDose, 5));
+        assertThat(glucoseAt(withDose, 15))
+                .as("G at t=15min must match the no-dose curve — dose is not delivered for 5 more minutes")
+                .isEqualTo(glucoseAt(noDose, 15));
+
+        // After delivery (t=60min): the dose has been active ~40 min and must lower
+        // glucose relative to the no-dose curve.
+        assertThat(glucoseAt(withDose, 60))
+                .as("G at t=60min must be lower than the no-dose curve — dose delivered at t=20min "
+                    + "has been active ~40 min")
+                .isLessThan(glucoseAt(noDose, 60));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Regression: IOB activity rate must align with the simulation step it's applied to
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("regression: insulin activity rate at step `min` reflects IOB decay during "
+                  + "[min-1,min], not [min,min+1]")
+    void iobActivityRate_alignedWithSimulationStep_notOneMinuteAhead() {
+        double g0 = 8.0;
+        double units = 3.0;
+        long minsAgoDose = 20;
+        double diaHours = 4.5;
+        double peakMinutes = 55.0;
+
+        InsulinDose dose = InsulinDose.builder()
+                .timestamp(NOW.minusMinutes(minsAgoDose))
+                .units(units)
+                .build();
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, NOW, List.of(), List.of(dose), List.of(), USER_ID, 60);
+
+        // First emitted point is at min=5 (DENSE_STEP_MIN). iob[m] = IOB at "now + m minutes".
+        double iob4 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 4, diaHours, peakMinutes);
+        double iob5 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 5, diaHours, peakMinutes);
+
+        // The activity applied during the step that produces the t=5min point (step min=5)
+        // must be the IOB decay during [now+4,now+5] — iob[4]-iob[5] — not [now+5,now+6].
+        double activityRate = Math.max(0.0, iob4 - iob5);
+        double insulinEffect = params.isf() * params.effectiveInsulinVolume() * activityRate;
+        double insulinEff = -insulinEffect * 5; // DENSE_STEP_MIN
+        double expected = Math.round(insulinEff * 100.0) / 100.0;
+
+        assertThat(curve.get(0).getInsulinActivityEffect())
+                .as("insulinActivityEffect at t=5min must reflect IOB decay during [now+4,now+5]")
+                .isEqualTo(expected);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -19,7 +19,6 @@ import java.util.UUID;
  * Builds {@link HovorkaParameters} for a specific user by combining:
  * <ul>
  *   <li>ISF from {@code cob_settings.isf} (measured by {@code ISF_ONE_UNIT} experiment)</li>
- *   <li>Carb ratio from {@code cob_settings.carb_ratio} (measured by {@code CARB_FACTOR} experiment)</li>
  *   <li>Carb half-life from {@code cob_settings.carb_half_life} → {@code tMaxG}</li>
  *   <li>Body weight from {@code cob_settings.body_weight_kg} (or population default 70 kg)</li>
  *   <li>EGP0 estimated from last stable {@code BASAL_CHECK} fasting readings</li>
@@ -31,8 +30,17 @@ import java.util.UUID;
  *   F01          = F01_PER_KG × weight                  [mmol/min]
  *   tMaxG        = carbHalfLife / 1.68                  [min]
  *                  (1.68 = 2-compartment half-time factor)
- *   A_G          = clamp(0.8 × (carbRatio / CR_DEFAULT), 0.5, 0.95)
+ *   A_G          = A_G_CALIBRATION (= 1.0, per-user meal-magnitude trim)
  * </pre>
+ *
+ * <h3>Carbohydrate bioavailability (single application)</h3>
+ * <p>Physiological carb bioavailability (~0.90) is applied <b>once</b>, downstream, by
+ * {@link DallaManGutModel#ra} via {@code F = 0.90}. {@code A_G} here is <b>not</b> a second
+ * bioavailability factor — it is a dimensionless per-user meal-magnitude calibration trim,
+ * centred on 1.0. It must not be derived from the carb ratio (an insulin-dosing quantity with
+ * no relation to the absorbed fraction); doing so previously double-discounted carbs
+ * (A_G × F ≈ 0.8 × 0.9 = 0.72, i.e. ~28 % of carbs silently vanished) and corrupted meal
+ * magnitude per user. See {@link HovorkaGlucosePredictionService#toCarbMmol}.</p>
  */
 @Slf4j
 @Service
@@ -42,14 +50,16 @@ public class HovorkaParameterService {
     /** Default ISF when user has no experiment result [mmol/L per unit]. */
     private static final double DEFAULT_ISF       = 2.2;
 
-    /** Default carb ratio when user has no experiment result [mmol/L per 10 g]. */
-    private static final double DEFAULT_CR        = 2.0;
-
     /**
-     * Population carb bioavailability (A_G = 0.8 → 80% of ingested carbs reach bloodstream).
-     * Scales with user's carb ratio relative to the default.
+     * Per-user meal-magnitude calibration trim {@code A_G} [dimensionless, centred on 1.0].
+     *
+     * <p>This is <b>not</b> a bioavailability factor. Physiological carb bioavailability (~0.90)
+     * is applied exactly once, downstream, by {@link DallaManGutModel#ra} ({@code F = 0.90}).
+     * {@code A_G} exists only to let a future per-user calibration (e.g. a meal-rise experiment)
+     * scale total meal magnitude around 1.0. It must <b>never</b> be derived from the carb ratio —
+     * that coupling double-discounted carbs (0.8 × 0.9 = 0.72) and had no physiological basis.</p>
      */
-    private static final double A_G_POPULATION   = 0.80;
+    private static final double A_G_CALIBRATION  = 1.00;
 
     /**
      * Factor converting exponential COB half-life to Hovorka 2-compartment tMaxG.
@@ -92,12 +102,11 @@ public class HovorkaParameterService {
                 : 45;
         double tMaxG = halfLife / HALF_LIFE_TO_TMAX_G;
 
-        // ── Carb bioavailability A_G from carb ratio ──────────────────────────
-        double cr = (settings.getCarbRatio() != null && settings.getCarbRatio() > 0)
-                ? settings.getCarbRatio()
-                : DEFAULT_CR;
-        // Scale A_G proportionally: if CR > default, more carbs reach blood per gram → higher A_G
-        double aG = Math.max(0.50, Math.min(0.95, A_G_POPULATION * (cr / DEFAULT_CR)));
+        // ── Carb meal-magnitude calibration A_G ───────────────────────────────
+        // A_G is a per-user trim centred on 1.0 — NOT a bioavailability factor (that is applied
+        // once downstream as DallaManGutModel.F = 0.90). It is deliberately independent of the
+        // carb ratio: coupling them double-discounted carbs and corrupted meal magnitude.
+        double aG = A_G_CALIBRATION;
 
         // ── ISF from experiment result ────────────────────────────────────────
         double isf = (settings.getIsf() != null && settings.getIsf() > 0)

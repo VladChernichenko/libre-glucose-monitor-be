@@ -104,13 +104,20 @@ public class DallaManGutModel {
      * This re-connects {@link MacroNutrientGastricModel}'s tMaxG output to the
      * actual ODE integration.</p>
      *
-     * <p>Scale: K_ABS_eff = K_ABS × min(1, BASE_T_MAX_G / tMaxG).
-     * The clamp at 1 prevents speeding up absorption beyond the baseline.</p>
+     * <p>Scale: K_ABS_eff = K_ABS × clamp(BASE_T_MAX_G / tMaxG, MIN, MAX).
+     * Slow meals (high tMaxG: fat/protein) reduce the intestinal drain so the Ra peak
+     * shifts right; fast meals (low tMaxG: juice, glucose tabs, hypo treatment) raise it
+     * so the rapid spike is captured. Previously the factor was clamped at 1, which made
+     * the model unable to absorb fast carbs faster than an average mixed meal — a
+     * systematic under-prediction of the early spike for liquid/simple-sugar meals.</p>
      *
      * @param tMaxGMin  macro-modulated tMaxG [min] — from {@link HovorkaParameters#tMaxG()}
      * @return effective K_ABS [min⁻¹]
      */
     public static double effectiveKAbs(double tMaxGMin) {
-        return K_ABS * Math.min(1.0, BASE_T_MAX_G_MIN / Math.max(tMaxGMin, 1.0));
+        double factor = BASE_T_MAX_G_MIN / Math.max(tMaxGMin, 1.0);
+        // Physiological bounds: never slower than 0.2× nor faster than 2.5× baseline K_ABS.
+        factor = Math.max(0.2, Math.min(2.5, factor));
+        return K_ABS * factor;
     }
 }

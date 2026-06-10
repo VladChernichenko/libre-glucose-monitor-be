@@ -52,14 +52,27 @@ public class HovorkaOdeSolver {
             double carbMmolNow,
             double insulinEffect) {
 
-        // Carbs are an impulse input: add to Qsto1 and update the reference meal dose.
-        HovorkaState s0 = carbMmolNow > 0
-                ? new HovorkaState(
-                        state.q1(), state.q2(),
-                        state.qsto1() + carbMmolNow,
-                        state.qsto2(), state.qgut(), state.inc(),
-                        state.mealMmol() + carbMmolNow)
-                : state;
+        // Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
+        //
+        // D (mealMmol) is the saturation reference for k_empt — it must be the stomach
+        // content of the *current* emptying episode, NOT the cumulative sum of every meal
+        // ever eaten. Using a cumulative sum made a fresh meal that lands on top of a
+        // partly-digested earlier meal be treated as a half-full large meal, throttling
+        // k_empt toward K_MIN and badly delaying absorption. This is hit by virtually every
+        // mixed meal because GlucosePredictService injects a second (FPU-equivalent) carb
+        // entry. Refresh D to the post-ingestion stomach load so a new meal empties from the
+        // "full stomach → near K_MAX" branch as the physiology requires.
+        HovorkaState s0;
+        if (carbMmolNow > 0) {
+            double newQsto1   = state.qsto1() + carbMmolNow;
+            double stomachLoad = newQsto1 + state.qsto2();
+            s0 = new HovorkaState(
+                    state.q1(), state.q2(),
+                    newQsto1, state.qsto2(), state.qgut(), state.inc(),
+                    stomachLoad);
+        } else {
+            s0 = state;
+        }
 
         double mealMmol = s0.mealMmol();   // constant throughout this RK4 step
 

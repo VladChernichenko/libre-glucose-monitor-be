@@ -172,8 +172,10 @@ public class HovorkaGlucosePredictionService {
         int nextEmit = DENSE_STEP_MIN;
 
         for (int min = 1; min <= pathMinutes; min++) {
-            // IOB activity rate: how many units/min the insulin is "working" right now
-            double iobActivityRate = iobActivityRate(iobTimeline, min);
+            // IOB activity rate: how many units/min the insulin is "working" during the
+            // step that advances state from t=now+(min-1) to t=now+min, i.e. the IOB
+            // decay during [min-1, min] — NOT [min, min+1].
+            double iobActivityRate = iobActivityRate(iobTimeline, min - 1);
 
             // insulinEffect: mmol of glucose removed from Q1 per minute.
             // effectiveInsulinVolume = 2×VG corrects for the 2-compartment distribution factor
@@ -223,46 +225,57 @@ public class HovorkaGlucosePredictionService {
             LocalDateTime now,
             HovorkaParameters p) {
 
-        HovorkaState warm = HovorkaState.steadyState(currentGlucose, p);
+        HovorkaState ss = HovorkaState.steadyState(currentGlucose, p);
 
         // Same macro-modulated drain rate as the forward RK4 integration (HovorkaOdeSolver),
         // so a meal's Qgut carries over consistently across the warm-up/forward boundary.
         double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
 
+        // Collect past meals (delivered before "now") as age-in-minutes → carb mmol.
+        // We replay ALL of them through ONE shared gut chain in chronological order — not
+        // isolated per-meal chains — so the k_empt D reference is refreshed to the stomach
+        // load at each ingestion exactly like HovorkaOdeSolver.step. This makes stacked
+        // history meals (e.g. snack then dinner) carry the same emptying dynamics into the
+        // forward integration as the forward path itself, and keeps a single fresh meal
+        // consistent with a continuous run that started at the meal.
+        Map<Integer, Double> mealsByAge = new HashMap<>();
+        int oldestAge = 0;
         for (CarbsEntry entry : pastCarbs) {
             if (entry.getTimestamp() == null) continue;
-            long minsAgo = Duration.between(entry.getTimestamp(), now).toMinutes();
+            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
             if (minsAgo <= 0) continue;
-
             int ageMin = (int) Math.min(minsAgo, 480);
             double carbMmol = toCarbMmol(entry, p);
             if (carbMmol <= 0) continue;
-
-            // Replay this meal's Dalla Man gut ODE (isolated from glucose compartment)
-            double qsto1 = carbMmol;
-            double qsto2 = 0.0;
-            double qgut  = 0.0;
-            double mealMmolRef = carbMmol;
-
-            for (int m = 0; m < ageMin; m++) {
-                double qsto  = qsto1 + qsto2;
-                double kempt = gutModel.kEmpt(qsto, mealMmolRef);
-                double dQsto1 = -DallaManGutModel.K_GRI * qsto1;
-                double dQsto2 = DallaManGutModel.K_GRI * qsto1 - kempt * qsto2;
-                double dQgut  = kempt * qsto2 - kAbsEff * qgut;
-                qsto1 = Math.max(0.0, qsto1 + dQsto1);
-                qsto2 = Math.max(0.0, qsto2 + dQsto2);
-                qgut  = Math.max(0.0, qgut  + dQgut);
-            }
-
-            warm = new HovorkaState(
-                    warm.q1(), warm.q2(),
-                    warm.qsto1() + qsto1,
-                    warm.qsto2() + qsto2,
-                    warm.qgut()  + qgut,
-                    warm.inc(),
-                    warm.mealMmol() + carbMmol);
+            mealsByAge.merge(ageMin, carbMmol, Double::sum);
+            oldestAge = Math.max(oldestAge, ageMin);
         }
+
+        if (mealsByAge.isEmpty()) {
+            return ss;
+        }
+
+        double qsto1 = 0.0, qsto2 = 0.0, qgut = 0.0, dRef = 0.0;
+        // Tick down from the oldest meal's age to 1 minute ago. At each tick, ingest any
+        // meal whose age equals the current tick, then advance the gut ODE by one minute.
+        for (int age = oldestAge; age >= 1; age--) {
+            Double carbMmol = mealsByAge.get(age);
+            if (carbMmol != null) {
+                qsto1 += carbMmol;
+                dRef   = qsto1 + qsto2;   // refresh D = stomach load, like step()
+            }
+            double qsto  = qsto1 + qsto2;
+            double kempt = dRef > 0 ? gutModel.kEmpt(qsto, dRef) : 0.0;
+            double dQsto1 = -DallaManGutModel.K_GRI * qsto1;
+            double dQsto2 = DallaManGutModel.K_GRI * qsto1 - kempt * qsto2;
+            double dQgut  = kempt * qsto2 - kAbsEff * qgut;
+            qsto1 = Math.max(0.0, qsto1 + dQsto1);
+            qsto2 = Math.max(0.0, qsto2 + dQsto2);
+            qgut  = Math.max(0.0, qgut  + dQgut);
+        }
+
+        HovorkaState warm = new HovorkaState(
+                ss.q1(), ss.q2(), qsto1, qsto2, qgut, 0.0, dRef);
 
         log.debug("Dalla Man warm state: G={}mmol/L Q1={} Qsto1={} Qsto2={} Qgut={}",
                 currentGlucose, warm.q1(), warm.qsto1(), warm.qsto2(), warm.qgut());
@@ -283,24 +296,32 @@ public class HovorkaGlucosePredictionService {
 
         int size = pathMinutes + 2;
         double[] iob = new double[size];
-        for (int m = 0; m < size; m++) {
-            double totalIob = 0.0;
-            for (InsulinDose dose : doses) {
-                if (dose.getTimestamp() == null || dose.getUnits() == null) continue;
-                double minsAgoDose = Duration.between(dose.getTimestamp(), now).toMinutes();
+        for (InsulinDose dose : doses) {
+            if (dose.getTimestamp() == null || dose.getUnits() == null) continue;
+            double minsAgoDose = minsAgoFromNow(dose.getTimestamp(), now);
+            for (int m = 0; m < size; m++) {
                 // Elapsed time since this dose at prediction step m. For past doses
                 // (minsAgoDose > 0), more time has passed by step m, so IOB must keep
                 // decaying — NOT fold back toward the full dose. For prospective doses
                 // (minsAgoDose < 0), this is negative until m reaches the delivery
                 // minute; iobOpenApsExponential returns 0 for negative input.
                 double minsAgoAtStep = minsAgoDose + m;
-                totalIob += InsulinCalculatorService.iobOpenApsExponential(
+                iob[m] += InsulinCalculatorService.iobOpenApsExponential(
                         dose.getUnits(), minsAgoAtStep,
                         rapidIob.diaHours(), rapidIob.peakMinutes());
             }
-            iob[m] = totalIob;
         }
         return iob;
+    }
+
+    /**
+     * Minutes elapsed from {@code eventTimestamp} to {@code now}: positive when the
+     * event is in the past, negative when it is still ahead (a prospective entry).
+     * Shared by the warm-up replay, IOB timeline, and future-carb timeline so all
+     * three use the same "elapsed time since event" sign convention.
+     */
+    private long minsAgoFromNow(LocalDateTime eventTimestamp, LocalDateTime now) {
+        return Duration.between(eventTimestamp, now).toMinutes();
     }
 
     /**
@@ -326,7 +347,7 @@ public class HovorkaGlucosePredictionService {
         Map<Integer, Double> timeline = new HashMap<>();
         for (CarbsEntry entry : carbsEntries) {
             if (entry.getTimestamp() == null) continue;
-            long minsAgo = Duration.between(entry.getTimestamp(), now).toMinutes();
+            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
             if (minsAgo > 0) continue; // past — captured in warm-up
 
             // Future or current event: minute = |minsAgo|.
@@ -347,7 +368,13 @@ public class HovorkaGlucosePredictionService {
      *   carbMmol = grams × A_G / 0.18
      * </pre>
      * where 0.18 is the molar mass of glucose (g/mmol, MW = 180 g/mol / 1000).
-     * A_G from parameters (calibrated from CR) accounts for incomplete absorption.
+     *
+     * <p>{@code A_G} is a per-user meal-magnitude calibration trim (≈ 1.0), <b>not</b> a
+     * bioavailability factor. Physiological carb bioavailability (~0.90) is applied exactly
+     * once, downstream, by {@link DallaManGutModel#ra} ({@code F = 0.90}): the full meal dose
+     * D = grams × A_G / 0.18 enters the stomach, and only {@code F} of it ultimately appears
+     * in blood. Applying a second sub-1.0 factor here (as the old CR-coupled A_G did) would
+     * double-discount carbs and systematically under-predict the post-meal rise.</p>
      */
     private double toCarbMmol(CarbsEntry entry, HovorkaParameters p) {
         if (entry.getCarbs() == null || entry.getCarbs() <= 0) return 0.0;

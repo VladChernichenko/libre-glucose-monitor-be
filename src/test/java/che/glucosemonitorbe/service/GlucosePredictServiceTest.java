@@ -760,6 +760,43 @@ class GlucosePredictServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // MARK: Pre-bolus optimiser is hypo-aware (safety)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("optimiser rejects a pre-bolus that predicts hypoglycaemia even when its ∫(G−5.5)² is smaller")
+    void preBolusOptimiser_avoidsHypo_despiteLowerSymmetricCost() {
+        // Curve depends on the prospective bolus pause:
+        //   pause < 15 min → glucose bottoms at 3.5 mmol/L (HYPO, below 3.9)
+        //   pause ≥ 15 min → glucose sits at 8.0 mmol/L (mild high, but SAFE)
+        // Symmetric ∫(G−5.5)²: hypo curve = (2.0)²·2 = 8.0  <  safe curve = (2.5)²·2 = 12.5,
+        // so an unweighted optimiser would pick the HYPO pause (0). The hypo-weighted cost
+        // must instead pick a safe pause (≥ 15).
+        when(hovorkaService.buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                anyList(), anyList(), anyList(), eq(USER_ID), anyInt()))
+                .thenAnswer(inv -> {
+                    LocalDateTime now = inv.getArgument(2);
+                    List<InsulinDose> doses = inv.getArgument(4);
+                    int pause = doses.stream()
+                            .filter(d -> d.getType() == InsulinDose.InsulinType.BOLUS && d.getTimestamp() != null)
+                            .mapToInt(d -> (int) java.time.Duration.between(now, d.getTimestamp()).toMinutes())
+                            .max().orElse(0);
+                    double g = pause < 15 ? 3.5 : 8.0;
+                    return List.of(
+                            PredictionPointDTO.builder().timestamp(now.plusMinutes(5)).predictedGlucose(g).build(),
+                            PredictionPointDTO.builder().timestamp(now.plusMinutes(10)).predictedGlucose(g).build());
+                });
+
+        PredictRequest req = simpleRequest(7.0, 4.0, 50, 0, 0, 0);
+        PredictResponse resp = sut.predict(req, USERNAME);
+
+        assertThat(resp.getPreBolusMinutes())
+                .as("optimiser must choose a pre-bolus that avoids the predicted hypo")
+                .isGreaterThanOrEqualTo(15);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 

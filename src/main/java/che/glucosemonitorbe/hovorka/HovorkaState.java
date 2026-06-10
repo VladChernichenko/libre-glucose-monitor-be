@@ -15,10 +15,11 @@ package che.glucosemonitorbe.hovorka;
  *
  * <p><b>Non-differential tracking field:</b></p>
  * <ul>
- *   <li><b>mealMmol</b> — cumulative reference meal dose [mmol]; used by
- *       {@link DallaManGutModel#kEmpt} to calibrate the nonlinear saturation
- *       thresholds. Updated discretely when new carbs are added; never
- *       integrated by the ODE solver.</li>
+ *   <li><b>mealMmol</b> — Dalla Man D reference [mmol] = stomach load of the current
+ *       emptying episode; used by {@link DallaManGutModel#kEmpt} to calibrate the
+ *       nonlinear saturation thresholds. Refreshed to the post-ingestion stomach
+ *       content when new carbs arrive (NOT a cumulative sum of all past meals);
+ *       never integrated by the ODE solver.</li>
  * </ul>
  *
  * <p>Blood glucose: G = q1 / vG [mmol/L].</p>

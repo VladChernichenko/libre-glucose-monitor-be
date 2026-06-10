@@ -91,34 +91,48 @@ class HovorkaParameterServiceTest {
         assertThat(p.tMaxG()).isCloseTo(60.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, within(0.001));
     }
 
-    // ── CarbRatio / A_G fallback ───────────────────────────────────────────────
+    // ── A_G meal-magnitude calibration ─────────────────────────────────────────
+    //
+    // RECALIBRATION (carb-bioavailability double-discount fix):
+    //   Previously A_G = clamp(0.8 × carbRatio/CR_DEFAULT, 0.5, 0.95). That had two defects:
+    //     (1) It was a SECOND bioavailability discount on top of DallaManGutModel.F = 0.90,
+    //         so net carbs reaching blood were A_G × F ≈ 0.8 × 0.9 = 0.72 — ~28% vanished,
+    //         systematically under-predicting the post-meal rise.
+    //     (2) It was derived from the carb RATIO (an insulin-dosing quantity), which has no
+    //         physiological relation to the absorbed carb fraction — corrupting meal magnitude
+    //         per user with no basis.
+    //   Fix: bioavailability is applied ONCE downstream (F = 0.90). A_G is now a pure per-user
+    //   meal-magnitude trim centred on 1.0, INDEPENDENT of carb ratio. These tests guard that
+    //   decoupling: A_G must be 1.0 regardless of the configured carb ratio.
 
     @Test
-    void buildForUser_nullCarbRatio_usesPopulationAg() {
+    void buildForUser_nullCarbRatio_agIsCalibrationDefault() {
         when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(null));
         HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.aG()).isCloseTo(0.80, within(0.01)); // A_G_POPULATION × (default_CR/default_CR)
+        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
     @Test
-    void buildForUser_zeroCarbRatio_usesPopulationAg() {
+    void buildForUser_zeroCarbRatio_agIsCalibrationDefault() {
         when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.aG()).isCloseTo(0.80, within(0.01));
+        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
     @Test
-    void buildForUser_largeCarbRatio_clampedAt095() {
+    void buildForUser_largeCarbRatio_agUnchanged_decoupledFromCarbRatio() {
         when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(10.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.aG()).isCloseTo(0.95, within(0.001));
+        // A_G no longer scales with carb ratio — a large CR must NOT inflate meal magnitude.
+        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
     @Test
-    void buildForUser_smallCarbRatio_clampedAt050() {
+    void buildForUser_smallCarbRatio_agUnchanged_decoupledFromCarbRatio() {
         when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.1));
         HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.aG()).isCloseTo(0.50, within(0.001));
+        // A_G no longer scales with carb ratio — a small CR must NOT shrink meal magnitude.
+        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
     // ── ISF fallback ──────────────────────────────────────────────────────────

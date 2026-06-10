@@ -45,6 +45,13 @@ public class GlucosePredictService {
     private static final double  TARGET_GLUCOSE      = 5.5;   // mmol/L
     private static final int[]   PREBOLUS_CANDIDATES = {0, 5, 10, 15, 20, 25, 30};
 
+    /** Predicted glucose below this [mmol/L] is treated as a hypo and penalised hard. */
+    private static final double  HYPO_THRESHOLD       = 3.9;
+    /** Extra quadratic penalty weight applied per (3.9 − G)² below the hypo threshold. */
+    private static final double  HYPO_PENALTY_WEIGHT  = 50.0;
+    /** Mild multiplier for points between the hypo threshold and target (low side of 5.5). */
+    private static final double  LOW_SIDE_WEIGHT      = 2.0;
+
     // ── Fat-Protein Unit (FPU) slow-glucose modelling ─────────────────────────
     /** Onset delay for protein gluconeogenesis / fat-delayed absorption [min]. */
     private static final int    FPU_ONSET_MIN    = 90;
@@ -218,7 +225,17 @@ public class GlucosePredictService {
             double cost = sim.stream().mapToDouble(pt -> {
                 double g   = pt.getPredictedGlucose() != null ? pt.getPredictedGlucose() : currentGlucose;
                 double err = g - TARGET_GLUCOSE;
-                return err * err;
+                double base = err * err;
+                // Asymmetric, clinically-weighted penalty: an aggressive pre-bolus that drives
+                // a predicted hypo is far more dangerous than mild residual hyperglycaemia, so
+                // a symmetric ∫(G−5.5)² could happily recommend a pause that bottoms out at 3.0.
+                if (g < HYPO_THRESHOLD) {
+                    double below = HYPO_THRESHOLD - g;
+                    base += HYPO_PENALTY_WEIGHT * below * below;
+                } else if (g < TARGET_GLUCOSE) {
+                    base *= LOW_SIDE_WEIGHT;   // gently bias away from the low side of target
+                }
+                return base;
             }).sum();
 
             if (cost < bestCost) {
