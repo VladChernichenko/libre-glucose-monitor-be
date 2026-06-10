@@ -200,6 +200,39 @@ class HovorkaGlucosePredictionServiceTest {
     }
 
     @Test
+    @DisplayName("buildWarmState replays Qgut drain with the same kAbsEff as forward integration")
+    void warmStateReplay_usesSameKAbsEffAsForwardIntegration_forHighFatMeal() {
+        // High-fat/protein meal: tMaxG x3 -> kAbsEff = K_ABS / 3 (much slower Qgut drain).
+        double hfTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN * 3.0;
+        HovorkaParameters hfP = paramsWithTMaxG(hfTMaxG);
+
+        // Reference: continuous run starting at the meal time.
+        CarbsEntry mealAtZero = CarbsEntry.builder().timestamp(NOW).carbs(60.0).build();
+        List<PredictionPointDTO> reference = service.buildPredictionPath(
+                hfP, 5.5, NOW, List.of(mealAtZero), List.of(), List.of(), USER_ID, 120);
+
+        // Replay: same meal, but "now" is 60 min after the meal -> buildWarmState replays
+        // the Dalla Man gut ODE for 60 min before the forward integration begins.
+        LocalDateTime laterNow = NOW.plusMinutes(60);
+        List<PredictionPointDTO> replay = service.buildPredictionPath(
+                hfP, 5.5, laterNow, List.of(mealAtZero), List.of(), List.of(), USER_ID, 60);
+
+        // Qgut (and thus carbAbsorptionEffect) is decoupled from the glucose compartments,
+        // so "60 min after the meal" should report the same absorption effect whether
+        // reached via continuous forward integration (reference @ t=65) or via
+        // warm-up replay + 5 min forward (replay @ t=5).
+        double refEffectAt65   = carbEffectAt(reference, 65);
+        double replayEffectAt5 = carbEffectAt(replay, 5);
+
+        assertThat(replayEffectAt5)
+                .as("Warm-up replay must drain Qgut with the same kAbsEff as forward "
+                    + "integration. reference(t=65min from meal)=%.4f, "
+                    + "replay(t=5min after 60min warm-up)=%.4f",
+                    refEffectAt65, replayEffectAt5)
+                .isCloseTo(refEffectAt65, org.assertj.core.data.Percentage.withPercentage(20));
+    }
+
+    @Test
     @DisplayName("same-tMaxG params produce the same curve (K_ABS scaling is deterministic)")
     void sameTMaxG_identicalCurves() {
         double tMaxG = DallaManGutModel.BASE_T_MAX_G_MIN * 2.0;
@@ -276,6 +309,15 @@ class HovorkaGlucosePredictionServiceTest {
         return curve.stream()
                 .filter(pt -> pt.getTimestamp().equals(NOW.plusMinutes(minutesFromNow)))
                 .mapToDouble(PredictionPointDTO::getPredictedGlucose)
+                .findFirst().orElse(Double.NaN);
+    }
+
+    /** Carb absorption effect at t = minutesFromStart of the curve, or NaN if not emitted. */
+    private double carbEffectAt(List<PredictionPointDTO> curve, int minutesFromStart) {
+        LocalDateTime start = curve.get(0).getTimestamp().minusMinutes(5); // first point is at +5min
+        return curve.stream()
+                .filter(pt -> pt.getTimestamp().equals(start.plusMinutes(minutesFromStart)))
+                .mapToDouble(PredictionPointDTO::getCarbAbsorptionEffect)
                 .findFirst().orElse(Double.NaN);
     }
 }

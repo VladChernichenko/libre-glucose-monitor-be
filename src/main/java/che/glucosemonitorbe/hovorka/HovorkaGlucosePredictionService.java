@@ -225,6 +225,10 @@ public class HovorkaGlucosePredictionService {
 
         HovorkaState warm = HovorkaState.steadyState(currentGlucose, p);
 
+        // Same macro-modulated drain rate as the forward RK4 integration (HovorkaOdeSolver),
+        // so a meal's Qgut carries over consistently across the warm-up/forward boundary.
+        double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
+
         for (CarbsEntry entry : pastCarbs) {
             if (entry.getTimestamp() == null) continue;
             long minsAgo = Duration.between(entry.getTimestamp(), now).toMinutes();
@@ -245,7 +249,7 @@ public class HovorkaGlucosePredictionService {
                 double kempt = gutModel.kEmpt(qsto, mealMmolRef);
                 double dQsto1 = -DallaManGutModel.K_GRI * qsto1;
                 double dQsto2 = DallaManGutModel.K_GRI * qsto1 - kempt * qsto2;
-                double dQgut  = kempt * qsto2 - DallaManGutModel.K_ABS * qgut;
+                double dQgut  = kempt * qsto2 - kAbsEff * qgut;
                 qsto1 = Math.max(0.0, qsto1 + dQsto1);
                 qsto2 = Math.max(0.0, qsto2 + dQsto2);
                 qgut  = Math.max(0.0, qgut  + dQgut);
