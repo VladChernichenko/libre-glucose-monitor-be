@@ -288,11 +288,12 @@ public class HovorkaGlucosePredictionService {
             for (InsulinDose dose : doses) {
                 if (dose.getTimestamp() == null || dose.getUnits() == null) continue;
                 double minsAgoDose = Duration.between(dose.getTimestamp(), now).toMinutes();
-                double minsAgoAtStep = minsAgoDose - m; // negative = future dose (not yet injected)
-                if (minsAgoAtStep < 0) {
-                    // Future prospective dose (minutesAgo was set negative) — deliver at the right minute
-                    minsAgoAtStep = -minsAgoAtStep;
-                }
+                // Elapsed time since this dose at prediction step m. For past doses
+                // (minsAgoDose > 0), more time has passed by step m, so IOB must keep
+                // decaying — NOT fold back toward the full dose. For prospective doses
+                // (minsAgoDose < 0), this is negative until m reaches the delivery
+                // minute; iobOpenApsExponential returns 0 for negative input.
+                double minsAgoAtStep = minsAgoDose + m;
                 totalIob += InsulinCalculatorService.iobOpenApsExponential(
                         dose.getUnits(), minsAgoAtStep,
                         rapidIob.diaHours(), rapidIob.peakMinutes());

@@ -145,6 +145,38 @@ class HovorkaGlucosePredictionServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Regression: IOB timeline must not "fold" a past dose back toward full IOB
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("past insulin dose: glucose falls from the first prediction point (no flat 'fold' artifact)")
+    void pastInsulinDose_glucoseFallsImmediately_noFlatFoldArtifact() {
+        // Bolus given 35 min ago, no carbs, no long-acting basal logged.
+        // Bug: minsAgoAtStep = minsAgoDose - m made IOB *rise* toward the full
+        // dose for m in [0, 35), so iobActivityRate = max(0, IOB[m]-IOB[m+1]) was
+        // 0 for the first ~35 min — a flat prediction even though insulin (already
+        // near its activity peak) should be lowering glucose immediately.
+        double g0 = 8.3;
+
+        InsulinDose dose = InsulinDose.builder()
+                .timestamp(NOW.minusMinutes(35))
+                .units(3.0)
+                .build();
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, NOW,
+                List.of(), List.of(dose), List.of(),
+                USER_ID, 60);
+
+        assertThat(curve).isNotEmpty();
+        assertThat(curve.get(0).getPredictedGlucose())
+                .as("G at t=5min must already be below baseline (%.1f) — insulin given 35 min ago "
+                    + "is near its activity peak and should be lowering glucose immediately, "
+                    + "not held flat for ~35 min.", g0)
+                .isLessThan(g0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // MARK: Gap 1 — K_ABS scaling with tMaxG (FPU gastric-emptying effect)
     // ─────────────────────────────────────────────────────────────────────────
 
