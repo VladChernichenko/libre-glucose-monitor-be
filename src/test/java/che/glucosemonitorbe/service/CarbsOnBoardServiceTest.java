@@ -8,6 +8,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -584,6 +586,147 @@ class CarbsOnBoardServiceTest {
         double natural2 = 20.0 * Math.pow(0.5, 235.0 / 45.0);
 
         assertThat(totalTapered).isLessThan((natural1 + natural2) * 0.25);
+    }
+
+    // ── null user-settings fields fall back to defaults ──────────────────────
+
+    @Test
+    void nullMaxCobDuration_fallsBackToSpeedClassDefault() {
+        when(settingsService.getCOBSettings(USER_ID))
+                .thenReturn(new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, null));
+        // maxCOBDuration null → SLOW speed-class default = 240 → still active at 200 min
+        CarbsEntry e = carbEntry(now.minusMinutes(200), 60.0, "SLOW", null);
+        assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
+    }
+
+    @Test
+    void nullCarbHalfLife_fallsBackToDefault45Minutes() {
+        when(settingsService.getCOBSettings(USER_ID))
+                .thenReturn(new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, null, 240));
+        // carbHalfLife null → default 45 min → at t=45 min remaining ≈ 50%
+        CarbsEntry e = carbEntry(now.minusMinutes(45), 50.0, "SLOW", null);
+        assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isCloseTo(25.0, within(3.0));
+    }
+
+    // ── GI_GL_ENHANCED with unset macros falls back to defaults ───────────────
+
+    @Test
+    void enhancedMode_nullMacros_usesDefaultsAndStaysBounded() {
+        CarbsEntry e = CarbsEntry.builder()
+                .timestamp(now.minusMinutes(40))
+                .carbs(60.0)
+                .build();
+        e.setAbsorptionMode("GI_GL_ENHANCED");
+        e.setAbsorptionSpeedClass("MEDIUM");
+        // estimatedGi/fiber/protein/fat all left null → defaults (gi=55, others=0)
+        double remaining = service.calculateRemainingCarbs(e, now, USER_ID);
+        assertThat(remaining).isBetween(0.0, 60.0);
+    }
+
+    // ── batch overload with pre-loaded settings (no DB lookup) ────────────────
+
+    @Test
+    void totalCob_preloadedSettings_nullList_returnsZeroWithoutLookup() {
+        COBSettingsDTO settings = new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        assertThat(service.calculateTotalCarbsOnBoard((List<CarbsEntry>) null, now, settings)).isEqualTo(0.0);
+    }
+
+    @Test
+    void totalCob_preloadedSettings_emptyList_returnsZeroWithoutLookup() {
+        COBSettingsDTO settings = new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        assertThat(service.calculateTotalCarbsOnBoard(List.of(), now, settings)).isEqualTo(0.0);
+    }
+
+    @Test
+    void totalCob_preloadedSettings_filtersNullAndZeroCarbEntries() {
+        COBSettingsDTO settings = new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        // Real-life: 30g Snack entry, plus a zero-carb and a null-carbs entry that must be skipped
+        CarbsEntry valid = carbEntry(now.minusMinutes(30), 30.0, "MEDIUM", null);
+        CarbsEntry zeroCarbs = carbEntry(now.minusMinutes(30), 0.0, "MEDIUM", null);
+        CarbsEntry nullCarbs = CarbsEntry.builder().timestamp(now.minusMinutes(30)).build();
+        nullCarbs.setCarbs(null);
+
+        List<CarbsEntry> entries = new ArrayList<>();
+        entries.add(valid);
+        entries.add(zeroCarbs);
+        entries.add(nullCarbs);
+        entries.add(null);
+
+        double total = service.calculateTotalCarbsOnBoard(entries, now, settings);
+
+        assertThat(total).isGreaterThan(0.0);
+        // Pre-loaded settings → no DB round-trip
+        verifyNoInteractions(settingsService);
+    }
+
+    // ── getCOBTimeline ─────────────────────────────────────────────────────────
+
+    @Test
+    void getCOBTimeline_returnsStartAndEndPoints() {
+        // Real-life: 40g entry logged "now"
+        CarbsEntry e = carbEntry(now, 40.0, "MEDIUM", null);
+
+        List<CarbsOnBoardService.COBPoint> timeline = service.getCOBTimeline(e, 3);
+
+        assertThat(timeline).hasSize(2);
+        assertThat(timeline.get(0).getTimestamp()).isEqualTo(e.getTimestamp());
+        assertThat(timeline.get(0).getCarbsOnBoard()).isEqualTo(40.0);
+        assertThat(timeline.get(1).getTimestamp()).isEqualTo(e.getTimestamp().plusHours(3));
+        assertThat(timeline.get(1).getCarbsOnBoard()).isEqualTo(0.0);
+    }
+
+    // ── calculateCOB ────────────────────────────────────────────────────────────
+
+    @Test
+    void calculateCOB_nullRequest_returnsNoCarbsToCalculate() {
+        CarbsOnBoardService.COBCalculationResponse response = service.calculateCOB(null);
+
+        assertThat(response.getCarbsOnBoard()).isEqualTo(0.0);
+        assertThat(response.getMessage()).isEqualTo("No carbs to calculate");
+        assertThat(response.getStatus()).isEqualTo("success");
+        assertThat(response.getCalculationTime()).isNotNull();
+    }
+
+    @Test
+    void calculateCOB_zeroCarbsRequest_returnsNoCarbsToCalculate() {
+        CarbsOnBoardService.COBCalculationRequest request = new CarbsOnBoardService.COBCalculationRequest();
+        request.setCarbs(0.0);
+        request.setUserId(USER_ID);
+
+        CarbsOnBoardService.COBCalculationResponse response = service.calculateCOB(request);
+
+        assertThat(response.getCarbsOnBoard()).isEqualTo(0.0);
+        assertThat(response.getMessage()).isEqualTo("No carbs to calculate");
+        assertThat(response.getStatus()).isEqualTo("success");
+    }
+
+    @Test
+    void calculateCOB_realLifeMeal_usesBiExponentialDecay() {
+        // Real-life: 30g Snack entry logged 20 minutes ago
+        CarbsOnBoardService.COBCalculationRequest request = new CarbsOnBoardService.COBCalculationRequest();
+        request.setCarbs(30.0);
+        request.setTimestamp(now.minusMinutes(20));
+        request.setUserId(USER_ID);
+
+        CarbsOnBoardService.COBCalculationResponse response = service.calculateCOB(request);
+
+        assertThat(response.getCarbsOnBoard()).isBetween(0.0, 30.0);
+        assertThat(response.getMessage()).isEqualTo("COB calculated using bi-exponential decay model");
+        assertThat(response.getStatus()).isEqualTo("success");
+        assertThat(response.getCalculationTime()).isNotNull();
+    }
+
+    @Test
+    void calculateCOB_nullTimestamp_defaultsToNow() {
+        // Real-life: 25g Snack entry, no timestamp provided → defaults to "now" → near-full COB
+        CarbsOnBoardService.COBCalculationRequest request = new CarbsOnBoardService.COBCalculationRequest();
+        request.setCarbs(25.0);
+        request.setTimestamp(null);
+        request.setUserId(USER_ID);
+
+        CarbsOnBoardService.COBCalculationResponse response = service.calculateCOB(request);
+
+        assertThat(response.getCarbsOnBoard()).isCloseTo(25.0, within(2.0));
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

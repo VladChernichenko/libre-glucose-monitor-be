@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.5'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
 }
 
 
@@ -65,6 +66,35 @@ jar {
 
 tasks.named('test') {
     useJUnitPlatform()
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    violationRules {
+        rule {
+            element = 'CLASS'
+            includes = [
+                'che.glucosemonitorbe.hovorka.*',
+                'che.glucosemonitorbe.service.InsulinCalculatorService',
+                'che.glucosemonitorbe.service.GlucoseCalculationsService',
+                'che.glucosemonitorbe.service.GlucosePredictService',
+                'che.glucosemonitorbe.service.CarbsOnBoardService'
+            ]
+            limit {
+                counter = 'LINE'
+                minimum = 0.80
+            }
+        }
+    }
 }
 
 
