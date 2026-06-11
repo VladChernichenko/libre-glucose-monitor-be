@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS notes (
     nutrition_profile   JSON,
     absorption_mode     VARCHAR(32),
     type                VARCHAR(20)      NOT NULL DEFAULT 'normal',
+    photo_key           VARCHAR(500),
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_notes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

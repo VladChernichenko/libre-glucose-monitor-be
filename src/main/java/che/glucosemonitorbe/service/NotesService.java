@@ -8,12 +8,14 @@ import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
+import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.time.LocalDate;
@@ -33,6 +35,7 @@ public class NotesService {
     private final GlucoseAlertService glucoseAlertService;
     private final UserService userService;
     private final VerificationService verificationService;
+    private final NotePhotoStorageService notePhotoStorageService;
     
     /**
      * Get all notes for a user.
@@ -43,7 +46,7 @@ public class NotesService {
     public List<NoteDto> getAllNotes(UUID userId) {
         List<Note> notes = noteRepository.findByUserIdOrderByTimestampDesc(userId);
         return notes.stream()
-                .map(noteMapper::toDto)
+                .map(this::toDtoWithPhoto)
                 .collect(Collectors.toList());
     }
     
@@ -53,7 +56,7 @@ public class NotesService {
     public List<NoteDto> getNotesInRange(UUID userId, LocalDateTime startDate, LocalDateTime endDate) {
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, startDate, endDate);
         return notes.stream()
-                .map(noteMapper::toDto)
+                .map(this::toDtoWithPhoto)
                 .collect(Collectors.toList());
     }
     
@@ -63,7 +66,7 @@ public class NotesService {
     public NoteDto getNoteById(UUID userId, UUID noteId) {
         Note note = noteRepository.findByIdAndUserId(noteId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Note not found: " + noteId));
-        return noteMapper.toDto(note);
+        return toDtoWithPhoto(note);
     }
     
     /**
@@ -132,7 +135,7 @@ public class NotesService {
             // Verification enqueue failure must never prevent the note from being saved
         }
 
-        return noteMapper.toDto(savedNote);
+        return toDtoWithPhoto(savedNote);
     }
 
     /**
@@ -182,7 +185,7 @@ public class NotesService {
         enrichNutrition(existingNote);
         
         Note updatedNote = noteRepository.save(existingNote);
-        return noteMapper.toDto(updatedNote);
+        return toDtoWithPhoto(updatedNote);
     }
     
     /**
@@ -243,7 +246,7 @@ public class NotesService {
         
         List<Note> notes = noteRepository.findTodayNotesByUserId(userId, startOfDay, endOfDay);
         return notes.stream()
-                .map(noteMapper::toDto)
+                .map(this::toDtoWithPhoto)
                 .collect(Collectors.toList());
     }
     
@@ -252,6 +255,26 @@ public class NotesService {
      */
     public boolean noteExistsAndBelongsToUser(UUID userId, UUID noteId) {
         return noteRepository.findByIdAndUserId(noteId, userId).isPresent();
+    }
+
+    /**
+     * Upload a meal photo for an existing note, replacing any previous photo.
+     */
+    @CacheEvict(value = "userNotes", key = "#userId")
+    public NoteDto uploadPhoto(UUID userId, UUID noteId, MultipartFile photo) {
+        Note note = noteRepository.findByIdAndUserId(noteId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Note not found: " + noteId));
+        String key = notePhotoStorageService.upload(userId, noteId, photo);
+        note.setPhotoKey(key);
+        Note savedNote = noteRepository.save(note);
+        return toDtoWithPhoto(savedNote);
+    }
+
+    /** Map a note to its DTO, resolving {@code photoKey} to a time-limited {@code photoUrl}. */
+    private NoteDto toDtoWithPhoto(Note note) {
+        NoteDto dto = noteMapper.toDto(note);
+        dto.setPhotoUrl(notePhotoStorageService.presignedUrl(note.getPhotoKey()));
+        return dto;
     }
 
     private void enrichNutrition(Note note) {

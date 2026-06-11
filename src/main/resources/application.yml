@@ -77,6 +77,17 @@ logging:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId}] [%X{userId}] %logger{36} - %msg%n"
 
 app:
+  storage:
+    s3:
+      # MinIO / S3-compatible object storage for note meal photos. Leave ENDPOINT/BUCKET
+      # unset to disable photo upload (NotePhotoStorageService.isEnabled() == false).
+      endpoint: ${S3_ENDPOINT}
+      region: ${S3_REGION:us-east-1}
+      bucket: ${S3_BUCKET}
+      access-key-id: ${S3_ACCESS_KEY_ID}
+      secret-access-key: ${S3_SECRET_ACCESS_KEY:}
+      presigned-url-ttl-minutes: ${S3_PRESIGNED_URL_TTL_MINUTES:60}
+
   openfoodfacts:
     base-url: ${OFF_BASE_URL:https://world.openfoodfacts.org}
     user-agent: ${OFF_USER_AGENT:GlucoseMonitor/1.0 (open-source, contact via GitHub)}

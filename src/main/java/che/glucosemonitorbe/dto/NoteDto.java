@@ -28,6 +28,8 @@ public class NoteDto {
     /** Note category: "normal" (default) or "long_acting". */
     private String type;
     private boolean mockData;
+    /** Time-limited URL for the meal photo, or {@code null} if this note has no photo. */
+    private String photoUrl;
     
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
@@ -158,6 +160,14 @@ public class NoteDto {
 
     public void setType(String type) {
         this.type = type;
+    }
+
+    public String getPhotoUrl() {
+        return photoUrl;
+    }
+
+    public void setPhotoUrl(String photoUrl) {
+        this.photoUrl = photoUrl;
     }
 
     public LocalDateTime getCreatedAt() {

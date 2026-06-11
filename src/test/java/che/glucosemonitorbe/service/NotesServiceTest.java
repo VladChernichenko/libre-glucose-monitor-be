@@ -8,12 +8,15 @@ import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -42,6 +45,9 @@ class NotesServiceTest {
 
     @Mock
     private ObjectMapper objectMapper;
+
+    @Mock
+    private NotePhotoStorageService notePhotoStorageService;
 
     @InjectMocks
     private NotesService notesService;
@@ -339,5 +345,44 @@ class NotesServiceTest {
         // BUG: @NotNull is absent on carbs — this FAILS until the annotation is added
         assertTrue(hasNotNull,
                 "CreateNoteRequest.carbs must be annotated with @NotNull to trigger HTTP 400 validation");
+    }
+
+    // ── Note photo upload (MinIO/S3) ───────────────────────────────────────────
+
+    @Test
+    void uploadPhoto_success_storesKeyAndReturnsPresignedUrl() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
+
+        MultipartFile photo = new MockMultipartFile("photo", "meal.jpg", "image/jpeg", new byte[]{1, 2, 3});
+        String photoKey = "notes/" + userId + "/" + noteId + "/abc.jpg";
+        when(notePhotoStorageService.upload(userId, noteId, photo)).thenReturn(photoKey);
+        when(noteRepository.save(existingNote)).thenReturn(existingNote);
+        when(notePhotoStorageService.presignedUrl(photoKey)).thenReturn("https://minio.example/presigned");
+
+        NoteDto expected = new NoteDto();
+        expected.setId(noteId);
+        when(noteMapper.toDto(existingNote)).thenReturn(expected);
+
+        NoteDto result = notesService.uploadPhoto(userId, noteId, photo);
+
+        assertNotNull(result);
+        assertEquals("https://minio.example/presigned", result.getPhotoUrl());
+        assertEquals(photoKey, existingNote.getPhotoKey());
+    }
+
+    @Test
+    void uploadPhoto_noteNotFound_throwsResourceNotFoundException() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.empty());
+
+        MultipartFile photo = new MockMultipartFile("photo", "meal.jpg", "image/jpeg", new byte[]{1, 2, 3});
+
+        Assertions.assertThatThrownBy(() -> notesService.uploadPhoto(userId, noteId, photo))
+                .isInstanceOf(ResourceNotFoundException.class);
     }
 }

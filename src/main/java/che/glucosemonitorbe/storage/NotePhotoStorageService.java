@@ -1,0 +1,141 @@
+package che.glucosemonitorbe.storage;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.time.Duration;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Stores meal-photo uploads in an S3-compatible object store (MinIO) and generates
+ * time-limited GET URLs for displaying them.
+ *
+ * <p>Object keys are always generated server-side as {@code notes/{userId}/{noteId}/{uuid}.{ext}} —
+ * user-supplied filenames are never used in the key, preventing path traversal.
+ */
+@Slf4j
+@Service
+public class NotePhotoStorageService {
+
+    private static final long MAX_PHOTO_BYTES = 10L * 1024 * 1024; // 10 MB
+
+    private static final Map<String, String> ALLOWED_CONTENT_TYPES = Map.of(
+            "image/jpeg", "jpg",
+            "image/png", "png",
+            "image/heic", "heic",
+            "image/webp", "webp"
+    );
+
+    private final S3StorageProperties properties;
+    private final S3Client s3Client;
+    private final S3Presigner presigner;
+
+    public NotePhotoStorageService(S3StorageProperties properties) {
+        this.properties = properties;
+        if (properties.isEnabled()) {
+            StaticCredentialsProvider credentialsProvider = StaticCredentialsProvider.create(
+                    AwsBasicCredentials.create(properties.getAccessKeyId(), properties.getSecretAccessKey()));
+            S3Configuration pathStyleConfig = S3Configuration.builder()
+                    .pathStyleAccessEnabled(true)
+                    .build();
+            URI endpoint = URI.create(properties.getEndpoint());
+            Region region = Region.of(properties.getRegion());
+
+            this.s3Client = S3Client.builder()
+                    .endpointOverride(endpoint)
+                    .region(region)
+                    .credentialsProvider(credentialsProvider)
+                    .serviceConfiguration(pathStyleConfig)
+                    .build();
+            this.presigner = S3Presigner.builder()
+                    .endpointOverride(endpoint)
+                    .region(region)
+                    .credentialsProvider(credentialsProvider)
+                    .serviceConfiguration(pathStyleConfig)
+                    .build();
+        } else {
+            this.s3Client = null;
+            this.presigner = null;
+        }
+    }
+
+    /** True when MinIO/S3 endpoint, bucket and credentials are all configured. */
+    public boolean isEnabled() {
+        return properties.isEnabled();
+    }
+
+    /**
+     * Validates and uploads {@code file}, returning the object key to persist on the note.
+     *
+     * @throws ResponseStatusException 503 if storage is not configured, 400/413 if the
+     *                                  photo is missing, oversized, or an unsupported type
+     */
+    public String upload(UUID userId, UUID noteId, MultipartFile file) {
+        if (!isEnabled()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Photo storage is not configured");
+        }
+        String extension = validateAndExtensionFor(file);
+        String key = "notes/%s/%s/%s.%s".formatted(userId, noteId, UUID.randomUUID(), extension);
+
+        try {
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(properties.getBucket())
+                            .key(key)
+                            .contentType(file.getContentType())
+                            .build(),
+                    RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read photo upload", e);
+        }
+
+        log.info("Uploaded note photo userId={} noteId={} key={} size={}", userId, noteId, key, file.getSize());
+        return key;
+    }
+
+    /**
+     * Returns a time-limited GET URL for {@code key}, or {@code null} if storage is
+     * disabled or the note has no photo.
+     */
+    public String presignedUrl(String key) {
+        if (!isEnabled() || key == null || key.isBlank()) {
+            return null;
+        }
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(properties.getPresignedUrlTtlMinutes()))
+                .getObjectRequest(b -> b.bucket(properties.getBucket()).key(key))
+                .build();
+        return presigner.presignGetObject(presignRequest).url().toString();
+    }
+
+    private String validateAndExtensionFor(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Photo is empty");
+        }
+        if (file.getSize() > MAX_PHOTO_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Photo exceeds maximum size of 10MB");
+        }
+        String extension = ALLOWED_CONTENT_TYPES.get(file.getContentType());
+        if (extension == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unsupported photo content type: " + file.getContentType());
+        }
+        return extension;
+    }
+}

@@ -11,9 +11,11 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -93,6 +95,18 @@ public class NotesController {
         UUID userId = getUserIdFromAuthentication(authentication);
         boolean deleted = notesService.deleteNote(userId, id);
         return deleted ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    @Operation(summary = "Upload or replace the meal photo for a note")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Photo uploaded"),
+                    @ApiResponse(responseCode = "404", description = "Note not found"),
+                    @ApiResponse(responseCode = "503", description = "Photo storage not configured") })
+    @PostMapping(value = "/{id}/photo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<NoteDto> uploadPhoto(@PathVariable UUID id,
+                                                @RequestParam("photo") MultipartFile photo,
+                                                Authentication authentication) {
+        UUID userId = getUserIdFromAuthentication(authentication);
+        return ResponseEntity.ok(notesService.uploadPhoto(userId, id, photo));
     }
 
     @Operation(summary = "Get notes summary for the authenticated user")

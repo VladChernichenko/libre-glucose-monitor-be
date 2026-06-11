@@ -61,6 +61,10 @@ public class Note {
     @Column(name = "type", nullable = false, length = 20)
     private String type = TYPE_NORMAL;
 
+    /** Object key of the meal photo in S3-compatible storage (MinIO), or {@code null} if none. */
+    @Column(name = "photo_key", length = 500)
+    private String photoKey;
+
     @Column(name = "mock_data", nullable = false)
     private boolean mockData = false;
     
@@ -199,6 +203,14 @@ public class Note {
 
     public void setType(String type) {
         this.type = type;
+    }
+
+    public String getPhotoKey() {
+        return photoKey;
+    }
+
+    public void setPhotoKey(String photoKey) {
+        this.photoKey = photoKey;
     }
 
     /** True when this note is a long-acting (basal) injection — excluded from bolus IOB/predictions. */
