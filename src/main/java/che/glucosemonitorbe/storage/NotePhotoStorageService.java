@@ -7,18 +7,19 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
-import software.amazon.awssdk.services.s3.presigner.S3Presigner;
-import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
-import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 
@@ -42,9 +43,11 @@ public class NotePhotoStorageService {
             "image/webp", "webp"
     );
 
+    /** A downloaded photo's bytes and the content type to serve them with. */
+    public record PhotoObject(byte[] data, String contentType) {}
+
     private final S3StorageProperties properties;
     private final S3Client s3Client;
-    private final S3Presigner presigner;
 
     public NotePhotoStorageService(S3StorageProperties properties) {
         this.properties = properties;
@@ -63,15 +66,8 @@ public class NotePhotoStorageService {
                     .credentialsProvider(credentialsProvider)
                     .serviceConfiguration(pathStyleConfig)
                     .build();
-            this.presigner = S3Presigner.builder()
-                    .endpointOverride(endpoint)
-                    .region(region)
-                    .credentialsProvider(credentialsProvider)
-                    .serviceConfiguration(pathStyleConfig)
-                    .build();
         } else {
             this.s3Client = null;
-            this.presigner = null;
         }
     }
 
@@ -110,18 +106,21 @@ public class NotePhotoStorageService {
     }
 
     /**
-     * Returns a time-limited GET URL for {@code key}, or {@code null} if storage is
-     * disabled or the note has no photo.
+     * Downloads the photo stored at {@code key}, or returns {@code null} if storage is
+     * disabled, the note has no photo, or the object no longer exists in the bucket.
      */
-    public String presignedUrl(String key) {
+    public PhotoObject download(String key) {
         if (!isEnabled() || key == null || key.isBlank()) {
             return null;
         }
-        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofMinutes(properties.getPresignedUrlTtlMinutes()))
-                .getObjectRequest(b -> b.bucket(properties.getBucket()).key(key))
-                .build();
-        return presigner.presignGetObject(presignRequest).url().toString();
+        try (ResponseInputStream<GetObjectResponse> response = s3Client.getObject(
+                GetObjectRequest.builder().bucket(properties.getBucket()).key(key).build())) {
+            return new PhotoObject(response.readAllBytes(), response.response().contentType());
+        } catch (NoSuchKeyException e) {
+            return null;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read photo from storage", e);
+        }
     }
 
     private String validateAndExtensionFor(MultipartFile file) {

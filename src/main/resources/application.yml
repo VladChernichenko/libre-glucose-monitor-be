@@ -86,7 +86,6 @@ app:
       bucket: ${S3_BUCKET}
       access-key-id: ${S3_ACCESS_KEY_ID}
       secret-access-key: ${S3_SECRET_ACCESS_KEY:}
-      presigned-url-ttl-minutes: ${S3_PRESIGNED_URL_TTL_MINUTES:60}
 
   openfoodfacts:
     base-url: ${OFF_BASE_URL:https://world.openfoodfacts.org}

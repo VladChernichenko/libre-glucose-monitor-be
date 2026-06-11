@@ -270,10 +270,26 @@ public class NotesService {
         return toDtoWithPhoto(savedNote);
     }
 
-    /** Map a note to its DTO, resolving {@code photoKey} to a time-limited {@code photoUrl}. */
+    /**
+     * Fetch the meal photo for a note, streamed from storage via the backend so the
+     * object store never needs to be reachable directly from clients.
+     */
+    public NotePhotoStorageService.PhotoObject getPhoto(UUID userId, UUID noteId) {
+        Note note = noteRepository.findByIdAndUserId(noteId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Note not found: " + noteId));
+        NotePhotoStorageService.PhotoObject photo = notePhotoStorageService.download(note.getPhotoKey());
+        if (photo == null) {
+            throw new ResourceNotFoundException("Note has no photo: " + noteId);
+        }
+        return photo;
+    }
+
+    /** Map a note to its DTO, resolving {@code photoKey} to a backend-relative {@code photoUrl}. */
     private NoteDto toDtoWithPhoto(Note note) {
         NoteDto dto = noteMapper.toDto(note);
-        dto.setPhotoUrl(notePhotoStorageService.presignedUrl(note.getPhotoKey()));
+        if (note.getPhotoKey() != null && !note.getPhotoKey().isBlank() && notePhotoStorageService.isEnabled()) {
+            dto.setPhotoUrl("/api/notes/" + note.getId() + "/photo");
+        }
         return dto;
     }
 

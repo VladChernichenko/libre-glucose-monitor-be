@@ -3,6 +3,7 @@ package che.glucosemonitorbe.controller;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.service.NotesService;
 import che.glucosemonitorbe.service.UserService;
+import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -107,6 +108,19 @@ public class NotesController {
                                                 Authentication authentication) {
         UUID userId = getUserIdFromAuthentication(authentication);
         return ResponseEntity.ok(notesService.uploadPhoto(userId, id, photo));
+    }
+
+    @Operation(summary = "Get the meal photo for a note")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Photo returned"),
+                    @ApiResponse(responseCode = "404", description = "Note or photo not found") })
+    @GetMapping("/{id}/photo")
+    public ResponseEntity<byte[]> getPhoto(@PathVariable UUID id, Authentication authentication) {
+        UUID userId = getUserIdFromAuthentication(authentication);
+        NotePhotoStorageService.PhotoObject photo = notesService.getPhoto(userId, id);
+        MediaType mediaType = photo.contentType() != null
+                ? MediaType.parseMediaType(photo.contentType())
+                : MediaType.APPLICATION_OCTET_STREAM;
+        return ResponseEntity.ok().contentType(mediaType).body(photo.data());
     }
 
     @Operation(summary = "Get notes summary for the authenticated user")

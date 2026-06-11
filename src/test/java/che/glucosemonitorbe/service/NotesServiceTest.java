@@ -350,7 +350,7 @@ class NotesServiceTest {
     // ── Note photo upload (MinIO/S3) ───────────────────────────────────────────
 
     @Test
-    void uploadPhoto_success_storesKeyAndReturnsPresignedUrl() {
+    void uploadPhoto_success_storesKeyAndReturnsPhotoUrl() {
         UUID userId = UUID.randomUUID();
         UUID noteId = UUID.randomUUID();
         Note existingNote = new Note();
@@ -361,7 +361,7 @@ class NotesServiceTest {
         String photoKey = "notes/" + userId + "/" + noteId + "/abc.jpg";
         when(notePhotoStorageService.upload(userId, noteId, photo)).thenReturn(photoKey);
         when(noteRepository.save(existingNote)).thenReturn(existingNote);
-        when(notePhotoStorageService.presignedUrl(photoKey)).thenReturn("https://minio.example/presigned");
+        when(notePhotoStorageService.isEnabled()).thenReturn(true);
 
         NoteDto expected = new NoteDto();
         expected.setId(noteId);
@@ -370,7 +370,7 @@ class NotesServiceTest {
         NoteDto result = notesService.uploadPhoto(userId, noteId, photo);
 
         assertNotNull(result);
-        assertEquals("https://minio.example/presigned", result.getPhotoUrl());
+        assertEquals("/api/notes/" + noteId + "/photo", result.getPhotoUrl());
         assertEquals(photoKey, existingNote.getPhotoKey());
     }
 
@@ -383,6 +383,47 @@ class NotesServiceTest {
         MultipartFile photo = new MockMultipartFile("photo", "meal.jpg", "image/jpeg", new byte[]{1, 2, 3});
 
         Assertions.assertThatThrownBy(() -> notesService.uploadPhoto(userId, noteId, photo))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getPhoto_success_returnsPhotoFromStorage() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        existingNote.setPhotoKey("notes/" + userId + "/" + noteId + "/abc.jpg");
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
+
+        NotePhotoStorageService.PhotoObject photo =
+                new NotePhotoStorageService.PhotoObject(new byte[]{1, 2, 3}, "image/jpeg");
+        when(notePhotoStorageService.download(existingNote.getPhotoKey())).thenReturn(photo);
+
+        NotePhotoStorageService.PhotoObject result = notesService.getPhoto(userId, noteId);
+
+        assertEquals(photo, result);
+    }
+
+    @Test
+    void getPhoto_noteNotFound_throwsResourceNotFoundException() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.empty());
+
+        Assertions.assertThatThrownBy(() -> notesService.getPhoto(userId, noteId))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getPhoto_noteHasNoPhoto_throwsResourceNotFoundException() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
+        when(notePhotoStorageService.download(null)).thenReturn(null);
+
+        Assertions.assertThatThrownBy(() -> notesService.getPhoto(userId, noteId))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 }

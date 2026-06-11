@@ -21,7 +21,6 @@ public class S3StorageProperties {
     private String bucket;
     private String accessKeyId;
     private String secretAccessKey;
-    private long presignedUrlTtlMinutes = 60;
 
     public boolean isEnabled() {
         return notBlank(endpoint) && notBlank(bucket) && notBlank(accessKeyId) && notBlank(secretAccessKey);
@@ -69,13 +68,5 @@ public class S3StorageProperties {
 
     public void setSecretAccessKey(String secretAccessKey) {
         this.secretAccessKey = secretAccessKey;
-    }
-
-    public long getPresignedUrlTtlMinutes() {
-        return presignedUrlTtlMinutes;
-    }
-
-    public void setPresignedUrlTtlMinutes(long presignedUrlTtlMinutes) {
-        this.presignedUrlTtlMinutes = presignedUrlTtlMinutes;
     }
 }

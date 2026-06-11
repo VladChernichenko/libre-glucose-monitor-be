@@ -8,7 +8,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -35,10 +34,10 @@ class NotePhotoStorageServiceTest {
     }
 
     @Test
-    void disabled_presignedUrlReturnsNull() {
+    void disabled_downloadReturnsNull() {
         NotePhotoStorageService service = new NotePhotoStorageService(new S3StorageProperties());
 
-        assertNull(service.presignedUrl("notes/some/key.jpg"));
+        assertNull(service.download("notes/some/key.jpg"));
     }
 
     @Test
@@ -76,21 +75,12 @@ class NotePhotoStorageServiceTest {
     }
 
     @Test
-    void enabled_presignedUrl_returnsUrlForKey() {
+    void enabled_download_returnsNullForBlankKey() {
         NotePhotoStorageService service = new NotePhotoStorageService(enabledProperties());
-
-        String url = service.presignedUrl("notes/user-1/note-1/photo.jpg");
 
         assertTrue(service.isEnabled());
-        assertThat(url).isNotNull().contains("notes/user-1/note-1/photo.jpg");
-    }
-
-    @Test
-    void enabled_presignedUrl_returnsNullForBlankKey() {
-        NotePhotoStorageService service = new NotePhotoStorageService(enabledProperties());
-
-        assertNull(service.presignedUrl(null));
-        assertNull(service.presignedUrl(""));
+        assertNull(service.download(null));
+        assertNull(service.download(""));
     }
 
     private static S3StorageProperties enabledProperties() {
