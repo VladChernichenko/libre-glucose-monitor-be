@@ -267,6 +267,8 @@ public class ExperimentService {
                     exp.getType(), minMinutes, elapsed));
         }
 
+        rejectIfInterferingNotesLogged(exp);
+
         ExperimentResultDTO result = switch (exp.getType()) {
             case BASAL_CHECK    -> completeBasalCheck(exp);
             case CARB_FACTOR    -> completeCarbFactor(exp);
@@ -279,6 +281,34 @@ public class ExperimentService {
 
         result.setExperiment(toDTO(exp));
         return result;
+    }
+
+    /**
+     * Rejects completion if rapid-acting insulin or carbs were logged after the experiment
+     * started — such notes invalidate the result (active bolus/food on board confounds the
+     * glucose response being measured). Mirrors the iOS client's auto-abandon check, but as a
+     * server-side gate so a stale/killed app can't bypass it and complete on bad data.
+     */
+    private void rejectIfInterferingNotesLogged(Experiment exp) {
+        if (exp.getStartedAt() == null) return;
+
+        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(
+                exp.getUserId(), exp.getStartedAt(), LocalDateTime.now());
+
+        for (Note note : notes) {
+            if (note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.format(
+                        "%.1fu of rapid-acting insulin was recorded during the experiment. "
+                        + "This invalidates the result — abandon and start a new experiment.",
+                        note.getInsulin()));
+            }
+            if (note.getCarbs() != null && note.getCarbs() > 0) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.format(
+                        "%.0fg of carbs were recorded during the experiment. "
+                        + "This invalidates the result — abandon and start a new experiment.",
+                        note.getCarbs()));
+            }
+        }
     }
 
     private ExperimentResultDTO completeBasalCheck(Experiment exp) {
