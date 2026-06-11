@@ -196,15 +196,17 @@ public class NotesService {
      */
     @CacheEvict(value = "userNotes", key = "#userId")
     public boolean deleteNote(UUID userId, UUID noteId) {
-        if (noteRepository.findByIdAndUserId(noteId, userId).isEmpty()) {
+        Note note = noteRepository.findByIdAndUserId(noteId, userId).orElse(null);
+        if (note == null) {
             return false;
         }
         try {
             noteRepository.deleteByIdAndUserId(noteId, userId);
-            return true;
         } catch (Exception e) {
             return false;
         }
+        notePhotoStorageService.delete(note.getPhotoKey());
+        return true;
     }
     
     /**

@@ -6,6 +6,7 @@ import che.glucosemonitorbe.service.LibreLinkUpSyncService;
 import che.glucosemonitorbe.service.LibreLinkUpSyncService.Outcome;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -14,13 +15,16 @@ import jakarta.annotation.PreDestroy;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Periodically triggers a LibreLinkUp sync for every user with an active LIBRE_LINK_UP
@@ -49,6 +53,10 @@ public class LibreLinkUpGlucoseSyncScheduler {
             MAX_CONCURRENT_SYNCS,
             r -> { Thread t = new Thread(r, "libre-sync"); t.setDaemon(true); return t; }
     );
+
+    /** Safety budget for a whole tick, so a slow batch can't run past the next scheduled tick. */
+    @Value("${app.libre-sync.sync-timeout-ms:240000}")
+    private long syncTimeoutMs;
 
     @PreDestroy
     public void shutdownExecutor() {
@@ -80,39 +88,59 @@ public class LibreLinkUpGlucoseSyncScheduler {
         }
         log.info("LibreLinkUp sync: {} user(s) with active LibreLinkUp config", userIds.size());
 
-        AtomicInteger newData = new AtomicInteger();
-        AtomicInteger noChange = new AtomicInteger();
-        AtomicInteger skippedBackoff = new AtomicInteger();
-        AtomicInteger skippedNoCreds = new AtomicInteger();
-        AtomicInteger inProgress = new AtomicInteger();
-        AtomicInteger errors = new AtomicInteger();
-
-        List<CompletableFuture<Void>> futures = new ArrayList<>(userIds.size());
+        List<CompletableFuture<Outcome>> futures = new ArrayList<>(userIds.size());
         for (UUID userId : userIds) {
-            futures.add(CompletableFuture.runAsync(() -> {
-                Outcome outcome = syncService.syncUser(userId, false);
-                switch (outcome) {
-                    case NEW_DATA         -> newData.incrementAndGet();
-                    case NO_CHANGE        -> noChange.incrementAndGet();
-                    case SKIPPED_BACKOFF  -> skippedBackoff.incrementAndGet();
-                    case SKIPPED_NO_CREDS -> skippedNoCreds.incrementAndGet();
-                    case IN_PROGRESS      -> inProgress.incrementAndGet();
-                    case ERROR            -> errors.incrementAndGet();
-                }
-            }, syncExecutor));
+            futures.add(CompletableFuture.supplyAsync(() -> syncService.syncUser(userId, false), syncExecutor));
         }
 
-        // Wait for all user syncs to finish (4-min safety timeout to stay within fixedDelay).
+        SyncTally tally = awaitAndTally(futures, userIds.size());
+
+        log.info("LibreLinkUp sync summary: users={}, completed={}, newData={}, noChange={}, skippedBackoff={}, "
+                        + "skippedNoCreds={}, inProgress={}, errors={}",
+                userIds.size(), tally.completed(),
+                tally.get(Outcome.NEW_DATA), tally.get(Outcome.NO_CHANGE), tally.get(Outcome.SKIPPED_BACKOFF),
+                tally.get(Outcome.SKIPPED_NO_CREDS), tally.get(Outcome.IN_PROGRESS), tally.get(Outcome.ERROR));
+    }
+
+    /**
+     * Waits for {@code futures} up to {@code syncTimeoutMs}, then tallies only the ones that
+     * completed normally — futures still running at the deadline are excluded from the tally and
+     * cancelled (best-effort: this does not interrupt the underlying sync, which is bounded by
+     * RestTemplate's own connect/read timeouts, but it stops them from racing the result computed
+     * here).
+     */
+    SyncTally awaitAndTally(List<CompletableFuture<Outcome>> futures, int totalUsers) {
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(4, TimeUnit.MINUTES);
-        } catch (Exception e) {
-            log.warn("LibreLinkUp sync: not all user tasks finished within timeout: {}", e.getMessage());
+                    .get(syncTimeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            long pending = futures.stream().filter(f -> !f.isDone()).count();
+            log.warn("LibreLinkUp sync: tick exceeded {}ms budget with {} of {} user sync(s) still in "
+                            + "progress; those will be excluded from this tick's summary",
+                    syncTimeoutMs, pending, totalUsers);
+            futures.stream().filter(f -> !f.isDone()).forEach(f -> f.cancel(true));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("LibreLinkUp sync: interrupted while waiting for user sync tasks", e);
+        } catch (ExecutionException e) {
+            log.warn("LibreLinkUp sync: unexpected error in a user sync task", e.getCause());
         }
 
-        log.info("LibreLinkUp sync summary: users={}, newData={}, noChange={}, skippedBackoff={}, "
-                        + "skippedNoCreds={}, inProgress={}, errors={}",
-                userIds.size(), newData.get(), noChange.get(), skippedBackoff.get(),
-                skippedNoCreds.get(), inProgress.get(), errors.get());
+        Map<Outcome, Long> counts = new EnumMap<>(Outcome.class);
+        long completed = 0;
+        for (CompletableFuture<Outcome> future : futures) {
+            if (future.isDone() && !future.isCompletedExceptionally()) {
+                counts.merge(future.getNow(null), 1L, Long::sum);
+                completed++;
+            }
+        }
+        return new SyncTally(completed, counts);
+    }
+
+    /** Per-tick outcome tally. {@link #counts} only includes futures that completed normally. */
+    record SyncTally(long completed, Map<Outcome, Long> counts) {
+        long get(Outcome outcome) {
+            return counts.getOrDefault(outcome, 0L);
+        }
     }
 }

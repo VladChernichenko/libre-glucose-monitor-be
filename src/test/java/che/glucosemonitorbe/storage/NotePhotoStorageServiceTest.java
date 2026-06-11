@@ -41,6 +41,13 @@ class NotePhotoStorageServiceTest {
     }
 
     @Test
+    void disabled_deleteIsNoOp() {
+        NotePhotoStorageService service = new NotePhotoStorageService(new S3StorageProperties());
+
+        service.delete("notes/some/key.jpg");
+    }
+
+    @Test
     void enabled_emptyFile_throwsBadRequest() {
         NotePhotoStorageService service = new NotePhotoStorageService(enabledProperties());
         MultipartFile photo = new MockMultipartFile("photo", "meal.jpg", "image/jpeg", new byte[0]);
@@ -81,6 +88,14 @@ class NotePhotoStorageServiceTest {
         assertTrue(service.isEnabled());
         assertNull(service.download(null));
         assertNull(service.download(""));
+    }
+
+    @Test
+    void enabled_delete_blankKeyIsNoOp() {
+        NotePhotoStorageService service = new NotePhotoStorageService(enabledProperties());
+
+        service.delete(null);
+        service.delete("");
     }
 
     private static S3StorageProperties enabledProperties() {

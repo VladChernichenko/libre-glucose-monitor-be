@@ -109,6 +109,22 @@ class NotesServiceTest {
 
         boolean deleted = notesService.deleteNote(userId, noteId);
         assertFalse(deleted);
+        verify(notePhotoStorageService, never()).delete(any());
+    }
+
+    @Test
+    void deleteNote_withPhoto_deletesPhotoFromStorage() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        existingNote.setPhotoKey("notes/" + userId + "/" + noteId + "/abc.jpg");
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
+
+        boolean deleted = notesService.deleteNote(userId, noteId);
+
+        assertTrue(deleted);
+        verify(notePhotoStorageService).delete(existingNote.getPhotoKey());
     }
 
     // --- absorptionMode field tests (data-flow fix) ---

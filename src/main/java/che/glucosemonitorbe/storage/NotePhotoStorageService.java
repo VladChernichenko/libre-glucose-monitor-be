@@ -12,6 +12,7 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -120,6 +121,22 @@ public class NotePhotoStorageService {
             return null;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read photo from storage", e);
+        }
+    }
+
+    /**
+     * Deletes the photo stored at {@code key}, if any. Failures are logged and swallowed —
+     * photo cleanup must never prevent a note from being deleted.
+     */
+    public void delete(String key) {
+        if (!isEnabled() || key == null || key.isBlank()) {
+            return;
+        }
+        try {
+            s3Client.deleteObject(DeleteObjectRequest.builder().bucket(properties.getBucket()).key(key).build());
+            log.info("Deleted note photo key={}", key);
+        } catch (Exception e) {
+            log.warn("Failed to delete note photo key={}", key, e);
         }
     }
 
