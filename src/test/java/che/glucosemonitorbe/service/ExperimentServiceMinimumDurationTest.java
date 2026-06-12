@@ -56,7 +56,7 @@ class ExperimentServiceMinimumDurationTest {
     @Mock private CarbsOnBoardService cobService;
     @Mock private InsulinCalculatorService insulinCalculatorService;
     @Mock private COBSettingsService cobSettingsService;
-    @Mock private UserInsulinPreferencesService userInsulinPreferencesService;
+    @Mock private GlucoseCalculationsService calculationsService;
 
     private ExperimentService service;
     private final UUID userId = UUID.randomUUID();
@@ -66,7 +66,7 @@ class ExperimentServiceMinimumDurationTest {
         service = new ExperimentService(
                 experimentRepository, noteRepository,
                 cobService, insulinCalculatorService,
-                cobSettingsService, userInsulinPreferencesService);
+                cobSettingsService, calculationsService);
         when(experimentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -78,7 +78,7 @@ class ExperimentServiceMinimumDurationTest {
         Experiment exp = inProgress(Type.BASAL_CHECK, 62, /* readings */ 7.0, 7.5);
         stubFetch(exp);
 
-        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId))
+        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("minimum")
                 .hasMessageContaining("BASAL_CHECK");
@@ -90,7 +90,7 @@ class ExperimentServiceMinimumDurationTest {
         Experiment exp = inProgress(Type.BASAL_CHECK, 180, 7.0, 7.5);
         stubFetch(exp);
 
-        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId);
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
 
         assertThat(result).isNotNull();
         assertThat(result.getIsStable()).isTrue();
@@ -102,7 +102,7 @@ class ExperimentServiceMinimumDurationTest {
         Experiment exp = inProgress(Type.BASAL_CHECK, 240, 6.5, 7.8);
         stubFetch(exp);
 
-        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId);
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
 
         assertThat(result).isNotNull();
     }
@@ -116,7 +116,7 @@ class ExperimentServiceMinimumDurationTest {
         exp.setGramsConsumed(15.0);
         stubFetch(exp);
 
-        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId))
+        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("minimum")
                 .hasMessageContaining("CARB_FACTOR");
@@ -129,7 +129,7 @@ class ExperimentServiceMinimumDurationTest {
         exp.setGramsConsumed(15.0);
         stubFetch(exp);
 
-        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId);
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
 
         assertThat(result.getComputedCarbRatio()).isGreaterThan(0);
     }
@@ -143,7 +143,7 @@ class ExperimentServiceMinimumDurationTest {
         exp.setUnitsInjected(1.0);
         stubFetch(exp);
 
-        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId))
+        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("minimum")
                 .hasMessageContaining("ISF_ONE_UNIT");
@@ -156,7 +156,7 @@ class ExperimentServiceMinimumDurationTest {
         exp.setUnitsInjected(1.0);
         stubFetch(exp);
 
-        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId);
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
 
         assertThat(result.getComputedIsf()).isGreaterThan(0);
     }
@@ -169,7 +169,7 @@ class ExperimentServiceMinimumDurationTest {
         Experiment exp = inProgress(Type.BASAL_CHECK, 300 /* well past floor */, 7.0);
         stubFetch(exp);
 
-        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId))
+        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("at least 2 readings");
     }
@@ -181,7 +181,7 @@ class ExperimentServiceMinimumDurationTest {
         exp.setStatus(Status.COMPLETED);
         stubFetch(exp);
 
-        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId))
+        assertThatThrownBy(() -> service.completeExperiment(exp.getId(), userId, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("not IN_PROGRESS");
     }

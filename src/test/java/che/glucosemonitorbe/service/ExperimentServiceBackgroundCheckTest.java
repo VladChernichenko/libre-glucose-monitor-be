@@ -1,10 +1,10 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.BackgroundStatusDTO;
 import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
-import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.ExperimentRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,11 +26,16 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link ExperimentService#checkBackground(UUID)}.
+ * Unit tests for {@link ExperimentService#checkBackground(UUID, String)}.
  *
- * <p>Regression coverage for the bug where the old implementation applied
- * {@code carbHalfLife} to insulin (yielding 2.0 u IOB for a 5.5-hour-old bolus
- * instead of 0.0 u), causing false "Not Ready Yet" blocks in the Experiments tab.
+ * <p>checkBackground delegates COB/IOB INPUTS (note fetch + nutrition-aware conversion +
+ * long-acting exclusion) to {@link GlucoseCalculationsService#activeCobIobInputs}, the same
+ * single source of truth the dashboard headline uses. That delegation is what guarantees the
+ * Experiments tab and the dashboard can never show different COB/IOB. These tests therefore
+ * cover what is genuinely ExperimentService's own responsibility: the clean/dirty threshold
+ * decision, the cleanInMinutes forward-sampling, and that IOB is computed with the user's
+ * DIA/peak (regression for the old carbHalfLife-as-DIA bug). Conversion/window/long-acting
+ * coverage lives with the shared method in {@code GlucoseCalculationsServiceTest}.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -41,13 +46,13 @@ class ExperimentServiceBackgroundCheckTest {
     @Mock private CarbsOnBoardService cobService;
     @Mock private InsulinCalculatorService insulinCalculatorService;
     @Mock private COBSettingsService cobSettingsService;
-    @Mock private UserInsulinPreferencesService userInsulinPreferencesService;
+    @Mock private GlucoseCalculationsService calculationsService;
 
     private ExperimentService service;
 
     private final UUID userId = UUID.randomUUID();
 
-    // Mirrors real user settings: carbHalfLife=180 min (the value that triggered the bug)
+    // Mirrors real user settings: carbHalfLife=180 min (the value that triggered the old bug)
     private static final COBSettingsDTO SETTINGS_WITH_SLOW_CARB_HALFLIFE = settings(180);
     // Standard rapid insulin: Fiasp-like, DIA=5h, peak=55min
     private static final RapidInsulinIobParameters RAPID_IOB = new RapidInsulinIobParameters(5.0, 55.0);
@@ -57,22 +62,22 @@ class ExperimentServiceBackgroundCheckTest {
         service = new ExperimentService(
                 experimentRepository, noteRepository,
                 cobService, insulinCalculatorService,
-                cobSettingsService, userInsulinPreferencesService);
+                cobSettingsService, calculationsService);
 
-        when(cobSettingsService.getCOBSettings(userId)).thenReturn(SETTINGS_WITH_SLOW_CARB_HALFLIFE);
-        when(userInsulinPreferencesService.getRapidIobParameters(userId)).thenReturn(RAPID_IOB);
-        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
-                .thenReturn(List.of());
+        // Default: no active entries. The settings + rapid-IOB parameters are carried by the
+        // shared inputs object, exactly as they reach the dashboard.
+        when(calculationsService.activeCobIobInputs(eq(userId), any()))
+                .thenReturn(inputs(List.of(), List.of()));
     }
 
     // ── Clean states ──────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("No recent notes → isClean true, COB=0.0, IOB=0.0, cleanInMinutes=0")
+    @DisplayName("No active entries → isClean true, COB=0.0, IOB=0.0, cleanInMinutes=0")
     void noNotes_isClean() {
         stubClean();
 
-        BackgroundStatusDTO result = service.checkBackground(userId);
+        BackgroundStatusDTO result = service.checkBackground(userId, null);
 
         assertThat(result.isClean()).isTrue();
         assertThat(result.getCobGrams()).isZero();
@@ -87,7 +92,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
-        assertThat(service.checkBackground(userId).isClean()).isTrue();
+        assertThat(service.checkBackground(userId, null).isClean()).isTrue();
     }
 
     @Test
@@ -97,7 +102,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.29);
 
-        assertThat(service.checkBackground(userId).isClean()).isTrue();
+        assertThat(service.checkBackground(userId, null).isClean()).isTrue();
     }
 
     // ── Dirty states ──────────────────────────────────────────────────────────
@@ -109,7 +114,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
-        BackgroundStatusDTO result = service.checkBackground(userId);
+        BackgroundStatusDTO result = service.checkBackground(userId, null);
 
         assertThat(result.isClean()).isFalse();
         assertThat(result.getCobGrams()).isEqualTo(12.3);
@@ -122,7 +127,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(1.5);
 
-        BackgroundStatusDTO result = service.checkBackground(userId);
+        BackgroundStatusDTO result = service.checkBackground(userId, null);
 
         assertThat(result.isClean()).isFalse();
         assertThat(result.getIobUnits()).isEqualTo(1.5);
@@ -135,7 +140,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
-        assertThat(service.checkBackground(userId).isClean()).isFalse();
+        assertThat(service.checkBackground(userId, null).isClean()).isFalse();
     }
 
     @Test
@@ -145,7 +150,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.3);
 
-        assertThat(service.checkBackground(userId).isClean()).isFalse();
+        assertThat(service.checkBackground(userId, null).isClean()).isFalse();
     }
 
     @Test
@@ -155,7 +160,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.5);
 
-        assertThat(service.checkBackground(userId).isClean()).isFalse();
+        assertThat(service.checkBackground(userId, null).isClean()).isFalse();
     }
 
     // ── Regression: insulin must use DIA/peak, not carbHalfLife ─────────────
@@ -168,26 +173,24 @@ class ExperimentServiceBackgroundCheckTest {
          *   7.0 u × 0.5^(330/180) ≈ 2.0 u  → marked as dirty when user was actually clean.
          * After the fix: delegates to InsulinCalculatorService which uses the proper
          *   OpenAPS exponential IOB curve (DIA=5h, peak=55min) → 0.0 u after 5.5h.
+         * The DIA/peak now arrive via the shared inputs (inputs.rapidIob()).
          */
         stubClean();
 
-        service.checkBackground(userId);
+        service.checkBackground(userId, null);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<InsulinDose>> dosesCaptor =
-                ArgumentCaptor.forClass(List.class);
         ArgumentCaptor<Double> diaCaptor   = ArgumentCaptor.forClass(Double.class);
         ArgumentCaptor<Double> peakCaptor  = ArgumentCaptor.forClass(Double.class);
 
         verify(insulinCalculatorService).calculateTotalActiveInsulin(
-                dosesCaptor.capture(), any(), diaCaptor.capture(), peakCaptor.capture());
+                any(), any(), diaCaptor.capture(), peakCaptor.capture());
 
-        // Must use user's insulin parameters, not carbHalfLife
+        // Must use the user's insulin parameters, not carbHalfLife
         assertThat(diaCaptor.getValue())
-                .as("diaHours must come from UserInsulinPreferencesService (5.0), not carbHalfLife (180 min)")
+                .as("diaHours must come from the shared inputs' RapidInsulinIobParameters (5.0), not carbHalfLife (180 min)")
                 .isEqualTo(RAPID_IOB.diaHours());
         assertThat(peakCaptor.getValue())
-                .as("peakMinutes must come from UserInsulinPreferencesService (55), not a half-life calculation")
+                .as("peakMinutes must come from RapidInsulinIobParameters (55), not a half-life calculation")
                 .isEqualTo(RAPID_IOB.peakMinutes());
     }
 
@@ -196,7 +199,7 @@ class ExperimentServiceBackgroundCheckTest {
     void carbHalfLifeValue_notPassedToInsulinCalculator() {
         // If the bug were still present, diaHours would end up as carbHalfLife/60 = 3.0 h
         stubClean();
-        service.checkBackground(userId);
+        service.checkBackground(userId, null);
 
         ArgumentCaptor<Double> diaCaptor = ArgumentCaptor.forClass(Double.class);
         verify(insulinCalculatorService)
@@ -208,69 +211,44 @@ class ExperimentServiceBackgroundCheckTest {
                 .isNotEqualTo(buggyDiaHours);
     }
 
-    // ── Long-acting insulin exclusion ─────────────────────────────────────────
+    // ── Shared-source delegation ──────────────────────────────────────────────
 
     @Test
-    @DisplayName("Long-acting insulin note is excluded from IOB calculation")
-    void longActingInsulin_notPassedToCalculator() {
-        Note longActingNote = note(15.0, null, "long_acting");
-        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
-                .thenReturn(List.of(longActingNote));
+    @DisplayName("COB/IOB inputs come from the shared GlucoseCalculationsService (same source as the dashboard)")
+    void delegatesToSharedCobIobInputs() {
         stubClean();
 
-        service.checkBackground(userId);
+        service.checkBackground(userId, null);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<InsulinDose>> dosesCaptor =
-                ArgumentCaptor.forClass(List.class);
-        verify(insulinCalculatorService)
-                .calculateTotalActiveInsulin(dosesCaptor.capture(), any(), anyDouble(), anyDouble());
-
-        assertThat(dosesCaptor.getValue())
-                .as("Long-acting insulin must be excluded from IOB input")
-                .isEmpty();
+        // The Experiments background check must read its COB/IOB inputs from the exact same
+        // method the dashboard headline uses — that is the whole point of the fix.
+        verify(calculationsService).activeCobIobInputs(eq(userId), any(LocalDateTime.class));
     }
 
     @Test
-    @DisplayName("Normal bolus note IS included in IOB calculation")
-    void bolusInsulin_passedToCalculator() {
-        Note bolusNote = note(3.0, null, "Correction");
-        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
-                .thenReturn(List.of(bolusNote));
+    @DisplayName("The carb/insulin entries from the shared inputs are the ones scored for COB/IOB")
+    void scoresEntriesFromSharedInputs() {
+        CarbsEntry carb = CarbsEntry.builder().id(UUID.randomUUID()).userId(userId)
+                .timestamp(LocalDateTime.now().minusMinutes(30)).carbs(40.0).build();
+        InsulinDose dose = InsulinDose.builder().id(UUID.randomUUID()).userId(userId)
+                .timestamp(LocalDateTime.now().minusMinutes(30)).units(3.0)
+                .type(InsulinDose.InsulinType.BOLUS).build();
+        when(calculationsService.activeCobIobInputs(eq(userId), any()))
+                .thenReturn(inputs(List.of(carb), List.of(dose)));
         stubClean();
 
-        service.checkBackground(userId);
+        service.checkBackground(userId, null);
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<InsulinDose>> dosesCaptor =
-                ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<CarbsEntry>> carbCaptor = ArgumentCaptor.forClass(List.class);
+        verify(cobService).calculateTotalCarbsOnBoard(carbCaptor.capture(), any(), any(COBSettingsDTO.class));
+        assertThat(carbCaptor.getValue()).containsExactly(carb);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<InsulinDose>> doseCaptor = ArgumentCaptor.forClass(List.class);
         verify(insulinCalculatorService)
-                .calculateTotalActiveInsulin(dosesCaptor.capture(), any(), anyDouble(), anyDouble());
-
-        assertThat(dosesCaptor.getValue())
-                .as("Bolus/correction insulin must be included in IOB")
-                .hasSize(1);
-    }
-
-    // ── Repository window ─────────────────────────────────────────────────────
-
-    @Test
-    @DisplayName("Repository is queried with an 8-hour lookback window (matches dashboard)")
-    void repository_queriedWithEightHourWindow() {
-        stubClean();
-
-        LocalDateTime callTime = LocalDateTime.now();
-        service.checkBackground(userId);
-
-        ArgumentCaptor<LocalDateTime> sinceCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
-        verify(noteRepository).findByUserIdAndTimestampBetween(
-                eq(userId), sinceCaptor.capture(), any());
-
-        LocalDateTime since = sinceCaptor.getValue();
-        // Allow ±5 s for test execution overhead
-        assertThat(since)
-                .isBetween(callTime.minusHours(8).minusSeconds(5),
-                           callTime.minusHours(8).plusSeconds(5));
+                .calculateTotalActiveInsulin(doseCaptor.capture(), any(), anyDouble(), anyDouble());
+        assertThat(doseCaptor.getValue()).containsExactly(dose);
     }
 
     // ── cleanInMinutes estimation ─────────────────────────────────────────────
@@ -280,7 +258,7 @@ class ExperimentServiceBackgroundCheckTest {
     void cleanState_cleanInMinutesIsZero() {
         stubClean();
 
-        assertThat(service.checkBackground(userId).getCleanInMinutes()).isZero();
+        assertThat(service.checkBackground(userId, null).getCleanInMinutes()).isZero();
     }
 
     @Test
@@ -293,7 +271,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
-        BackgroundStatusDTO result = service.checkBackground(userId);
+        BackgroundStatusDTO result = service.checkBackground(userId, null);
 
         assertThat(result.isClean()).isFalse();
         assertThat(result.getCleanInMinutes())
@@ -308,7 +286,7 @@ class ExperimentServiceBackgroundCheckTest {
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
-        BackgroundStatusDTO result = service.checkBackground(userId);
+        BackgroundStatusDTO result = service.checkBackground(userId, null);
 
         assertThat(result.getCleanInMinutes())
                 .as("cleanInMinutes must cap at 600 when curves never reach clean state")
@@ -323,16 +301,9 @@ class ExperimentServiceBackgroundCheckTest {
                 .thenReturn(0.0);
     }
 
-    private Note note(double insulin, Double carbs, String type) {
-        Note n = new Note();
-        n.setId(UUID.randomUUID());
-        n.setUserId(userId);
-        n.setTimestamp(LocalDateTime.now().minusHours(1));
-        n.setInsulin(insulin);
-        n.setCarbs(carbs);
-        n.setMeal("Test");
-        if (type != null) n.setType(type);
-        return n;
+    private GlucoseCalculationsService.ActiveCobIobInputs inputs(List<CarbsEntry> carbs, List<InsulinDose> insulin) {
+        return new GlucoseCalculationsService.ActiveCobIobInputs(
+                List.of(), carbs, insulin, SETTINGS_WITH_SLOW_CARB_HALFLIFE, RAPID_IOB);
     }
 
     private static COBSettingsDTO settings(int carbHalfLife) {

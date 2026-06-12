@@ -30,8 +30,6 @@ public class ExperimentService {
     // COB/IOB thresholds for "clean background"
     private static final double MAX_COB_GRAMS = 5.0;
     private static final double MAX_IOB_UNITS = 0.3;
-    // History window: same 8-hour window as the dashboard COB/IOB calculation
-    private static final int HISTORY_HOURS = 8;
 
     /**
      * Minimum wall-clock minutes between {@code startedAt} and {@code completeExperiment}
@@ -53,34 +51,26 @@ public class ExperimentService {
     private final CarbsOnBoardService cobService;
     private final InsulinCalculatorService insulinCalculatorService;
     private final COBSettingsService cobSettingsService;
-    private final UserInsulinPreferencesService userInsulinPreferencesService;
+    /** Owns the single shared COB/IOB calculation used by the dashboard, so both surfaces agree. */
+    private final GlucoseCalculationsService calculationsService;
 
     // ── Background check ─────────────────────────────────────────────────────
 
-    public BackgroundStatusDTO checkBackground(UUID userId) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime since = now.minusHours(HISTORY_HOURS);
+    public BackgroundStatusDTO checkBackground(UUID userId, String clientTimestamp) {
+        LocalDateTime now = resolveNow(clientTimestamp);
 
-        List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(userId, since, now);
+        // Single source of truth: the exact same persisted-note COB/IOB inputs the dashboard
+        // headline uses (same 8-hour window, same nutrition-aware converter, same long-acting
+        // exclusion). Delegating here is what guarantees the Experiments tab and the dashboard
+        // never show different COB/IOB.
+        GlucoseCalculationsService.ActiveCobIobInputs inputs =
+                calculationsService.activeCobIobInputs(userId, now);
+        COBSettingsDTO userSettings = inputs.settings();
+        RapidInsulinIobParameters rapidIob = inputs.rapidIob();
 
-        // Mirror the dashboard's note-to-entry conversion: exclude long-acting insulin from IOB
-        List<CarbsEntry> carbsEntries = recentNotes.stream()
-                .filter(n -> n.getCarbs() != null && n.getCarbs() > 0)
-                .map(this::toCarbsEntry)
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-
-        List<InsulinDose> insulinEntries = recentNotes.stream()
-                .filter(n -> n.getInsulin() != null && n.getInsulin() > 0 && !n.isLongActing())
-                .map(this::toInsulinDose)
-                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-
-        // Use the same services (and user-specific settings) as the dashboard
-        COBSettingsDTO userSettings = cobSettingsService.getCOBSettings(userId);
-        RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userId);
-
-        double cobGrams = cobService.calculateTotalCarbsOnBoard(carbsEntries, now, userSettings);
+        double cobGrams = cobService.calculateTotalCarbsOnBoard(inputs.carbsEntries(), now, userSettings);
         double iobUnits = insulinCalculatorService.calculateTotalActiveInsulin(
-                insulinEntries, now, rapidIob.diaHours(), rapidIob.peakMinutes());
+                inputs.insulinEntries(), now, rapidIob.diaHours(), rapidIob.peakMinutes());
 
         boolean clean = cobGrams < MAX_COB_GRAMS && iobUnits < MAX_IOB_UNITS;
 
@@ -88,7 +78,7 @@ public class ExperimentService {
         if (!clean) {
             // Estimate minutes until both COB and IOB fall below their thresholds by sampling
             // the decay curves forward in time.
-            cleanInMinutes = estimateCleanInMinutes(carbsEntries, insulinEntries, now,
+            cleanInMinutes = estimateCleanInMinutes(inputs.carbsEntries(), inputs.insulinEntries(), now,
                     userSettings, rapidIob);
         }
 
@@ -98,6 +88,25 @@ public class ExperimentService {
                 .iobUnits(Math.round(iobUnits * 100.0) / 100.0)
                 .cleanInMinutes(Math.max(cleanInMinutes, 0))
                 .build();
+    }
+
+    /**
+     * Resolves "now" for comparing against note timestamps, which the client stores as
+     * naive local time matching the user's device clock/timezone. The server's own
+     * {@code LocalDateTime.now()} runs in the deployment's timezone (e.g. UTC), which can
+     * be hours away from the user's — using it here would make recent notes appear to be
+     * "in the future" and silently drop out of the COB/IOB window. Falls back to server
+     * time only if the client didn't send one or it fails to parse.
+     */
+    private LocalDateTime resolveNow(String clientTimestamp) {
+        if (clientTimestamp != null) {
+            try {
+                return LocalDateTime.parse(clientTimestamp);
+            } catch (Exception ignored) {
+                // fall through to server time
+            }
+        }
+        return LocalDateTime.now();
     }
 
     private int estimateCleanInMinutes(List<CarbsEntry> carbsEntries, List<InsulinDose> insulinEntries,
@@ -113,34 +122,6 @@ public class ExperimentService {
             }
         }
         return 600;
-    }
-
-    private CarbsEntry toCarbsEntry(Note note) {
-        CarbsEntry e = CarbsEntry.builder()
-                .id(note.getId())
-                .timestamp(note.getTimestamp())
-                .carbs(note.getCarbs())
-                .insulin(note.getInsulin() != null ? note.getInsulin() : 0.0)
-                .mealType(note.getMeal())
-                .originalCarbs(note.getCarbs())
-                .userId(note.getUserId())
-                .build();
-        e.setAbsorptionMode(note.getAbsorptionMode() != null ? note.getAbsorptionMode() : "DEFAULT_DECAY");
-        return e;
-    }
-
-    private InsulinDose toInsulinDose(Note note) {
-        InsulinDose.InsulinType type = "Correction".equalsIgnoreCase(note.getMeal())
-                ? InsulinDose.InsulinType.CORRECTION
-                : InsulinDose.InsulinType.BOLUS;
-        return InsulinDose.builder()
-                .id(note.getId())
-                .timestamp(note.getTimestamp())
-                .units(note.getInsulin())
-                .type(type)
-                .mealType(note.getMeal())
-                .userId(note.getUserId())
-                .build();
     }
 
     // ── Available experiments ─────────────────────────────────────────────────
@@ -192,9 +173,9 @@ public class ExperimentService {
 
     // ── Start ─────────────────────────────────────────────────────────────────
 
-    public ExperimentDTO startExperiment(UUID userId, StartExperimentRequest req) {
+    public ExperimentDTO startExperiment(UUID userId, StartExperimentRequest req, String clientTimestamp) {
         // Gate 1: background must be clean
-        BackgroundStatusDTO bg = checkBackground(userId);
+        BackgroundStatusDTO bg = checkBackground(userId, clientTimestamp);
         if (!bg.isClean()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Background not clean: COB=" + bg.getCobGrams() + "g, IOB=" + bg.getIobUnits() + "u. " +
@@ -211,11 +192,14 @@ public class ExperimentService {
                     "Complete a successful Basal Rate Check before running " + req.getType());
         }
 
+        // Recorded in the client's local time (matching note timestamps) so elapsed-time
+        // gating and the interfering-notes check below stay consistent even when the
+        // server's clock/timezone differs from the user's device.
         Experiment exp = Experiment.builder()
                 .userId(userId)
                 .type(req.getType())
                 .status(Status.IN_PROGRESS)
-                .startedAt(LocalDateTime.now())
+                .startedAt(resolveNow(clientTimestamp))
                 .gramsConsumed(req.getGramsConsumed())
                 .unitsInjected(req.getUnitsInjected())
                 .build();
@@ -245,7 +229,7 @@ public class ExperimentService {
 
     // ── Complete ──────────────────────────────────────────────────────────────
 
-    public ExperimentResultDTO completeExperiment(UUID experimentId, UUID userId) {
+    public ExperimentResultDTO completeExperiment(UUID experimentId, UUID userId, String clientTimestamp) {
         Experiment exp = getExperimentForUser(experimentId, userId);
         if (exp.getStatus() != Status.IN_PROGRESS) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -258,7 +242,7 @@ public class ExperimentService {
 
         int minMinutes = minElapsedMinutes(exp.getType());
         long elapsed = exp.getStartedAt() != null
-                ? java.time.Duration.between(exp.getStartedAt(), LocalDateTime.now()).toMinutes()
+                ? java.time.Duration.between(exp.getStartedAt(), resolveNow(clientTimestamp)).toMinutes()
                 : Long.MAX_VALUE;
         if (elapsed < minMinutes) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.format(
@@ -267,7 +251,7 @@ public class ExperimentService {
                     exp.getType(), minMinutes, elapsed));
         }
 
-        rejectIfInterferingNotesLogged(exp);
+        rejectIfInterferingNotesLogged(exp, clientTimestamp);
 
         ExperimentResultDTO result = switch (exp.getType()) {
             case BASAL_CHECK    -> completeBasalCheck(exp);
@@ -289,11 +273,11 @@ public class ExperimentService {
      * glucose response being measured). Mirrors the iOS client's auto-abandon check, but as a
      * server-side gate so a stale/killed app can't bypass it and complete on bad data.
      */
-    private void rejectIfInterferingNotesLogged(Experiment exp) {
+    private void rejectIfInterferingNotesLogged(Experiment exp, String clientTimestamp) {
         if (exp.getStartedAt() == null) return;
 
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(
-                exp.getUserId(), exp.getStartedAt(), LocalDateTime.now());
+                exp.getUserId(), exp.getStartedAt(), resolveNow(clientTimestamp));
 
         for (Note note : notes) {
             if (note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing()) {

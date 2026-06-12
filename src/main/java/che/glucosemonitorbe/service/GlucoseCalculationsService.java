@@ -78,26 +78,22 @@ public class GlucoseCalculationsService {
         String userId = request.getUserId();
         
 
-        // Get user-specific COB settings for accurate calculations
         // Convert username to UUID using UserService
         UUID userUUID = userService.getUserByUsername(userId).getId();
-        COBSettingsDTO userSettings = cOBSettingsService.getCOBSettings(userUUID);
-        
-        // Get recent notes/entries for calculations
-        // BUG P1 fix: pass resolved userUUID directly to avoid a second getUserByUsername call
-        List<Note> recentNotes = getRecentNotes(userUUID, currentTime);
-        List<CarbsEntry> carbsEntries = new ArrayList<>(recentNotes.stream()
-                .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
-                .map(this::convertNoteToCarbsEntry)
-                .toList());
-        List<InsulinDose> insulinEntries = new ArrayList<>(recentNotes.stream()
-                // Long-acting (basal) doses are not rapid-acting boluses — exclude from bolus IOB & predictions.
-                .filter(note -> note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing())
-                .map(this::convertNoteToInsulinDose)
-                .toList());
 
-        // Merge any prospective (un-persisted) meal/insulin events — used by the Nutrition
-        // screen to show "what-if" predictions before the user saves the note.
+        // Shared, single source of truth for COB/IOB inputs, built from PERSISTED notes only
+        // (nutrition-aware, long-acting excluded). The Experiments "background check" calls the
+        // very same method, so the dashboard and the Experiments tab can never show different
+        // COB/IOB. See ExperimentService.checkBackground.
+        ActiveCobIobInputs inputs = activeCobIobInputs(userUUID, currentTime);
+        COBSettingsDTO userSettings = inputs.settings();
+        List<Note> recentNotes = inputs.notes();
+
+        // Prospective (un-persisted) what-if events are an OVERLAY: they shape the prediction
+        // path/curve only, never the headline COB/IOB. So a hypothetical meal from the Nutrition
+        // screen can't silently change the "active carbs/insulin" the user sees as fact.
+        List<CarbsEntry> carbsEntries = new ArrayList<>(inputs.carbsEntries());
+        List<InsulinDose> insulinEntries = new ArrayList<>(inputs.insulinEntries());
         if (request.getProspectiveNotes() != null) {
             for (ProspectiveNoteDTO pn : request.getProspectiveNotes()) {
                 int minsAgo = pn.getMinutesAgo() != null ? pn.getMinutesAgo() : 0;
@@ -113,14 +109,15 @@ public class GlucoseCalculationsService {
 
         Double avgBolusToMealMinutes = calculateAverageBolusToMealMinutes(recentNotes);
 
-        RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userUUID);
-        
-        // Calculate active carbs on board
-        double activeCOB = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
-        
+        RapidInsulinIobParameters rapidIob = inputs.rapidIob();
+
+        // Headline COB/IOB = PERSISTED notes only (prospective excluded — see above), so these
+        // are byte-for-byte the same values ExperimentService.checkBackground reports.
+        double activeCOB = cobService.calculateTotalCarbsOnBoard(inputs.carbsEntries(), currentTime, userSettings);
+
         // Calculate active insulin on board (bolus IOB curve from user's rapid insulin catalog)
         double activeIOB = insulinCalculatorService.calculateTotalActiveInsulin(
-                insulinEntries, currentTime, rapidIob.diaHours(), rapidIob.peakMinutes());
+                inputs.insulinEntries(), currentTime, rapidIob.diaHours(), rapidIob.peakMinutes());
         
         // Calculate 2-hour prediction
         double predictionHorizon = request.getPredictionHorizonMinutes() != null ? 
@@ -191,6 +188,42 @@ public class GlucoseCalculationsService {
                 .factors(factors)
                 .predictionPath(predictionPath)
                 .build();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Shared COB/IOB inputs — single source of truth for the dashboard headline
+    // AND the Experiments background check (ExperimentService.checkBackground),
+    // so the two surfaces can never disagree on "active carbs / active insulin".
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** COB/IOB calculation inputs derived from a user's persisted notes. */
+    public record ActiveCobIobInputs(
+            List<Note> notes,
+            List<CarbsEntry> carbsEntries,
+            List<InsulinDose> insulinEntries,
+            COBSettingsDTO settings,
+            RapidInsulinIobParameters rapidIob) {}
+
+    /**
+     * Builds COB/IOB inputs from a user's PERSISTED notes over the standard 8-hour window,
+     * using the same nutrition-aware carb converter and the same long-acting exclusion the
+     * dashboard uses. Both {@link #calculateGlucoseData} and the Experiments readiness check
+     * delegate here, guaranteeing identical COB/IOB on both screens.
+     */
+    public ActiveCobIobInputs activeCobIobInputs(UUID userId, LocalDateTime now) {
+        COBSettingsDTO settings = cOBSettingsService.getCOBSettings(userId);
+        RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userId);
+        List<Note> notes = getRecentNotes(userId, now);
+        List<CarbsEntry> carbsEntries = new ArrayList<>(notes.stream()
+                .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
+                .map(this::convertNoteToCarbsEntry)
+                .toList());
+        List<InsulinDose> insulinEntries = new ArrayList<>(notes.stream()
+                // Long-acting (basal) doses are not rapid-acting boluses — exclude from bolus IOB.
+                .filter(note -> note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing())
+                .map(this::convertNoteToInsulinDose)
+                .toList());
+        return new ActiveCobIobInputs(notes, carbsEntries, insulinEntries, settings, rapidIob);
     }
 
     private List<PredictionPointDTO> buildPredictionPath(

@@ -422,6 +422,59 @@ class GlucoseCalculationsServiceTest {
 
     // ── helper ────────────────────────────────────────────────────────────────
 
+    // ── Shared COB/IOB inputs (single source of truth for dashboard + Experiments tab) ──
+
+    @Test
+    void activeCobIobInputs_excludesLongActingInsulinFromIob() {
+        UUID userId = UUID.randomUUID();
+        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(new COBSettingsDTO());
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+        when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
+
+        Note basal = insulinNote(userId, 15.0, Note.TYPE_LONG_ACTING);
+        Note bolus = insulinNote(userId, 3.0, "Correction");
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
+                .thenReturn(List.of(basal, bolus));
+
+        var inputs = service.activeCobIobInputs(userId, LocalDateTime.now());
+
+        assertThat(inputs.insulinEntries())
+                .as("Long-acting (basal) doses must be excluded from bolus IOB inputs")
+                .hasSize(1);
+        assertThat(inputs.insulinEntries().get(0).getUnits()).isEqualTo(3.0);
+    }
+
+    @Test
+    void activeCobIobInputs_queriesEightHourWindow() {
+        UUID userId = UUID.randomUUID();
+        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(new COBSettingsDTO());
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
+                .thenReturn(List.of());
+
+        LocalDateTime now = LocalDateTime.now();
+        service.activeCobIobInputs(userId, now);
+
+        ArgumentCaptor<LocalDateTime> sinceCaptor = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(noteRepository).findByUserIdAndTimestampBetween(eq(userId), sinceCaptor.capture(), eq(now));
+        assertThat(sinceCaptor.getValue())
+                .as("COB/IOB window is the 8 hours ending at 'now' (shared by dashboard + Experiments tab)")
+                .isEqualTo(now.minusHours(8));
+    }
+
+    private Note insulinNote(UUID userId, double units, String type) {
+        Note n = new Note();
+        n.setId(UUID.randomUUID());
+        n.setUserId(userId);
+        n.setTimestamp(LocalDateTime.now().minusHours(1));
+        n.setInsulin(units);
+        n.setMeal("Test");
+        n.setType(type);
+        return n;
+    }
+
     private void stubFullPipeline(String username, UUID userId) {
         che.glucosemonitorbe.dto.UserDto mockUser = che.glucosemonitorbe.dto.UserDto.builder()
                 .id(userId).username(username).build();

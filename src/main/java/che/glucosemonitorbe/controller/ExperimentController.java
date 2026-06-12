@@ -28,9 +28,11 @@ public class ExperimentController {
 
     @Operation(summary = "Check whether the metabolic background is clean enough to start an experiment")
     @GetMapping("/check-background")
-    public ResponseEntity<BackgroundStatusDTO> checkBackground(Authentication auth) {
+    public ResponseEntity<BackgroundStatusDTO> checkBackground(
+            Authentication auth,
+            @RequestParam(required = false) String clientTimestamp) {
         requireFeature();
-        return ResponseEntity.ok(experimentService.checkBackground(userId(auth)));
+        return ResponseEntity.ok(experimentService.checkBackground(userId(auth), clientTimestamp));
     }
 
     @Operation(summary = "List experiments available to the user with lock/unlock status")
@@ -43,10 +45,11 @@ public class ExperimentController {
     @Operation(summary = "Start a new experiment (background must be clean)")
     @PostMapping
     public ResponseEntity<ExperimentDTO> start(Authentication auth,
-                                               @RequestBody StartExperimentRequest req) {
+                                               @RequestBody StartExperimentRequest req,
+                                               @RequestParam(required = false) String clientTimestamp) {
         requireFeature();
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(experimentService.startExperiment(userId(auth), req));
+                .body(experimentService.startExperiment(userId(auth), req, clientTimestamp));
     }
 
     @Operation(summary = "Get a single experiment with all its readings")
@@ -67,9 +70,10 @@ public class ExperimentController {
 
     @Operation(summary = "Complete an experiment and compute / save the result")
     @PostMapping("/{id}/complete")
-    public ResponseEntity<ExperimentResultDTO> complete(Authentication auth, @PathVariable UUID id) {
+    public ResponseEntity<ExperimentResultDTO> complete(Authentication auth, @PathVariable UUID id,
+                                                         @RequestParam(required = false) String clientTimestamp) {
         requireFeature();
-        return ResponseEntity.ok(experimentService.completeExperiment(id, userId(auth)));
+        return ResponseEntity.ok(experimentService.completeExperiment(id, userId(auth), clientTimestamp));
     }
 
     @Operation(summary = "Abandon an in-progress experiment")
