@@ -12,6 +12,7 @@ import che.glucosemonitorbe.hovorka.HovorkaOdeSolver;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
+import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 
 import java.io.IOException;
@@ -326,9 +327,10 @@ public final class BacktestHarness {
         BasalInsulinResolver basal = new BasalInsulinResolver();
         HovorkaParameterService paramService = mock(HovorkaParameterService.class);
         UserInsulinPreferencesService prefs = mock(UserInsulinPreferencesService.class);
+        COBSettingsService cobSettingsService = mock(COBSettingsService.class);
         when(prefs.getRapidIobParameters(any()))
                 .thenReturn(new RapidInsulinIobParameters(cfg.diaHours, cfg.peakMinutes));
-        return new HovorkaGlucosePredictionService(paramService, solver, basal, prefs, gut);
+        return new HovorkaGlucosePredictionService(paramService, solver, basal, prefs, gut, cobSettingsService);
     }
 
     private static HovorkaParameters buildParams(Config cfg) {

@@ -2,9 +2,11 @@ package che.glucosemonitorbe.hovorka;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +67,7 @@ public class HovorkaGlucosePredictionService {
     private final BasalInsulinResolver          basalResolver;
     private final UserInsulinPreferencesService insulinPrefsService;
     private final DallaManGutModel              gutModel;
+    private final COBSettingsService            cobSettingsService;
 
     /**
      * Build the full prediction path using the Hovorka ODE model.
@@ -90,7 +93,8 @@ public class HovorkaGlucosePredictionService {
 
         HovorkaParameters p      = paramService.buildForUser(userId);
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        return buildWithParams(p, rapidIob, currentGlucose, currentTime,
+        COBSettingsDTO settings  = cobSettingsService.getCOBSettings(userId);
+        return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, pathMinutes);
     }
 
@@ -121,7 +125,8 @@ public class HovorkaGlucosePredictionService {
             int pathMinutes) {
 
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        return buildWithParams(customParams, rapidIob, currentGlucose, currentTime,
+        COBSettingsDTO settings = cobSettingsService.getCOBSettings(userId);
+        return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, pathMinutes);
     }
 
@@ -131,6 +136,7 @@ public class HovorkaGlucosePredictionService {
     private List<PredictionPointDTO> buildWithParams(
             HovorkaParameters p,
             RapidInsulinIobParameters rapidIob,
+            COBSettingsDTO settings,
             double currentGlucose,
             LocalDateTime currentTime,
             List<CarbsEntry> pastCarbsEntries,
@@ -155,9 +161,10 @@ public class HovorkaGlucosePredictionService {
                 p.vG(), p.f01(), egpNow, p.k12(), p.k21(),
                 p.tMaxG(), p.aG(), p.isf(), p.weightKg());
 
-        // ── Pre-compute IOB and its activity rate for each future minute ──────
-        double[] iobTimeline = buildIobTimeline(pastInsulinDoses, currentTime,
-                pathMinutes, rapidIob);
+        // ── Pre-compute per-dose IOB timelines, each tagged with the ISF that ──
+        //    was in effect when that dose was administered ────────────────────
+        List<DoseActivity> doseActivities = buildDoseActivities(pastInsulinDoses, currentTime,
+                pathMinutes, rapidIob, settings, pAdj.isf());
 
         // ── Future carb timeline (prospective notes already in pastCarbsEntries
         //    with future timestamps — carbs at t ≤ now were in the warm-up) ───
@@ -172,15 +179,22 @@ public class HovorkaGlucosePredictionService {
         int nextEmit = DENSE_STEP_MIN;
 
         for (int min = 1; min <= pathMinutes; min++) {
-            // IOB activity rate: how many units/min the insulin is "working" during the
-            // step that advances state from t=now+(min-1) to t=now+min, i.e. the IOB
-            // decay during [min-1, min] — NOT [min, min+1].
-            double iobActivityRate = iobActivityRate(iobTimeline, min - 1);
-
-            // insulinEffect: mmol of glucose removed from Q1 per minute.
-            // effectiveInsulinVolume = 2×VG corrects for the 2-compartment distribution factor
-            // (see HovorkaParameters.effectiveInsulinVolume() for derivation).
-            double insulinEffect = pAdj.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
+            // insulinEffect: mmol of glucose removed from Q1 per minute, summed across all
+            // active doses. effectiveInsulinVolume = 2×VG corrects for the 2-compartment
+            // distribution factor (see HovorkaParameters.effectiveInsulinVolume() for
+            // derivation). Each dose's ISF was resolved once, from the time the dose was
+            // administered — a manual isfBreakfast/isfLunch/isfDinner override applies to a
+            // dose's entire activity curve if the dose was given in that window, even once
+            // most of its activity plays out after the window ends (e.g. a dinner-time
+            // correction bolus peaking after 22:00 still uses isfDinner).
+            double insulinEffect = 0.0;
+            for (DoseActivity dose : doseActivities) {
+                // IOB activity rate: how many units/min this dose is "working" during the
+                // step that advances state from t=now+(min-1) to t=now+min, i.e. the IOB
+                // decay during [min-1, min] — NOT [min, min+1].
+                double iobActivityRate = iobActivityRate(dose.iobTimeline(), min - 1);
+                insulinEffect += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
+            }
 
             // Future carbs delivered to gut D1 at this minute [mmol]
             double carbMmol = futureCarbs.getOrDefault(min, 0.0);
@@ -282,23 +296,35 @@ public class HovorkaGlucosePredictionService {
         return warm;
     }
 
-    // ── IOB timeline ──────────────────────────────────────────────────────────
+    // ── Per-dose IOB timelines ───────────────────────────────────────────────
 
     /**
-     * Pre-computes IOB [units] for each minute 0..pathMinutes+1 from OpenAPS curve.
-     * Index 0 = current time, index m = currentTime + m minutes.
+     * A single insulin dose's IOB [units] timeline (index 0 = current time, index m =
+     * currentTime + m minutes) paired with the ISF [mmol/L per unit] resolved from the
+     * moment the dose was administered.
      */
-    private double[] buildIobTimeline(
+    private record DoseActivity(double[] iobTimeline, double isf) {}
+
+    /**
+     * Pre-computes, for each past or prospective dose, its IOB timeline from the OpenAPS
+     * curve and the ISF in effect when it was administered: the user's manual
+     * isfBreakfast/isfLunch/isfDinner override for the dose's own meal window, or
+     * {@code fallbackIsf} if none applies (e.g. doses given overnight).
+     */
+    private List<DoseActivity> buildDoseActivities(
             List<InsulinDose> doses,
             LocalDateTime now,
             int pathMinutes,
-            RapidInsulinIobParameters rapidIob) {
+            RapidInsulinIobParameters rapidIob,
+            COBSettingsDTO settings,
+            double fallbackIsf) {
 
         int size = pathMinutes + 2;
-        double[] iob = new double[size];
+        List<DoseActivity> activities = new ArrayList<>();
         for (InsulinDose dose : doses) {
             if (dose.getTimestamp() == null || dose.getUnits() == null) continue;
             double minsAgoDose = minsAgoFromNow(dose.getTimestamp(), now);
+            double[] iob = new double[size];
             for (int m = 0; m < size; m++) {
                 // Elapsed time since this dose at prediction step m. For past doses
                 // (minsAgoDose > 0), more time has passed by step m, so IOB must keep
@@ -306,12 +332,28 @@ public class HovorkaGlucosePredictionService {
                 // (minsAgoDose < 0), this is negative until m reaches the delivery
                 // minute; iobOpenApsExponential returns 0 for negative input.
                 double minsAgoAtStep = minsAgoDose + m;
-                iob[m] += InsulinCalculatorService.iobOpenApsExponential(
+                iob[m] = InsulinCalculatorService.iobOpenApsExponential(
                         dose.getUnits(), minsAgoAtStep,
                         rapidIob.diaHours(), rapidIob.peakMinutes());
             }
+            double isf = resolveIsf(settings, fallbackIsf, dose.getTimestamp());
+            activities.add(new DoseActivity(iob, isf));
         }
-        return iob;
+        return activities;
+    }
+
+    /**
+     * Resolves the ISF [mmol/L per unit] in effect at {@code time}: the user's manual
+     * per-meal-window override (isfBreakfast/isfLunch/isfDinner) if one applies to
+     * {@code time}'s meal window, otherwise {@code fallbackIsf} (the Hovorka-calibrated
+     * ISF from {@link HovorkaParameterService#buildForUser}).
+     */
+    private double resolveIsf(COBSettingsDTO settings, double fallbackIsf, LocalDateTime time) {
+        if (settings == null) {
+            return fallbackIsf;
+        }
+        Double effectiveIsf = settings.getEffectiveIsf(time);
+        return effectiveIsf != null ? effectiveIsf : fallbackIsf;
     }
 
     /**

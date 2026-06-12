@@ -2,8 +2,10 @@ package che.glucosemonitorbe.hovorka;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +41,7 @@ class HovorkaGlucosePredictionServiceTest {
 
     @Mock HovorkaParameterService paramService;
     @Mock UserInsulinPreferencesService insulinPrefsService;
+    @Mock COBSettingsService cobSettingsService;
 
     private HovorkaGlucosePredictionService service;
     private HovorkaParameters params;
@@ -52,7 +55,7 @@ class HovorkaGlucosePredictionServiceTest {
         HovorkaOdeSolver solver    = new HovorkaOdeSolver(gutModel);
         BasalInsulinResolver basal = new BasalInsulinResolver();
         service = new HovorkaGlucosePredictionService(
-                paramService, solver, basal, insulinPrefsService, gutModel);
+                paramService, solver, basal, insulinPrefsService, gutModel, cobSettingsService);
 
         double weight = 70.0;
         double vG  = HovorkaParameters.VG_PER_KG * weight;
@@ -253,6 +256,99 @@ class HovorkaGlucosePredictionServiceTest {
         assertThat(curve.get(0).getInsulinActivityEffect())
                 .as("insulinActivityEffect at t=5min must reflect IOB decay during [now+4,now+5]")
                 .isEqualTo(expected);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Regression: manual per-meal-window ISF override (isfBreakfast/isfLunch/isfDinner)
+    // must apply to the Hovorka insulin-effect term, not just the OpenAPS path.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("regression: a dose given in a meal window with an ISF override uses "
+                  + "that override, not a single static ISF resolved once at request time")
+    void insulinEffect_usesPerMealWindowIsfOverride_notStaticIsf() {
+        double g0 = 8.0;
+        double units = 3.0;
+        long minsAgoDose = 20;
+        double diaHours = 4.5;
+        double peakMinutes = 55.0;
+
+        // NOW = 2024-06-01 10:00 -> dose given at 09:40, BREAKFAST (05:00-11:00).
+        InsulinDose dose = InsulinDose.builder()
+                .timestamp(NOW.minusMinutes(minsAgoDose))
+                .units(units)
+                .build();
+
+        COBSettingsDTO settings = new COBSettingsDTO();
+        settings.setIsf(params.isf());   // 2.2, matches the Hovorka-calibrated fallback
+        settings.setIsfBreakfast(0.5);   // manual override for the morning window
+
+        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settings);
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, NOW, List.of(), List.of(dose), List.of(), USER_ID, 60);
+
+        double iob4 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 4, diaHours, peakMinutes);
+        double iob5 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 5, diaHours, peakMinutes);
+        double activityRate = Math.max(0.0, iob4 - iob5);
+
+        // Expected using isfBreakfast(0.5), resolved from the dose's own 09:40 timestamp —
+        // NOT the static Hovorka-calibrated isf (2.2).
+        double expectedEffect = -(0.5 * params.effectiveInsulinVolume() * activityRate) * 5;
+        double expectedRounded = Math.round(expectedEffect * 100.0) / 100.0;
+
+        assertThat(curve.get(0).getInsulinActivityEffect())
+                .as("insulinActivityEffect at t=5min must use isfBreakfast (0.5), resolved "
+                    + "from the dose's 09:40 timestamp, not the static Hovorka-calibrated "
+                    + "isf (%.1f)", params.isf())
+                .isEqualTo(expectedRounded);
+    }
+
+    @Test
+    @DisplayName("regression: a dose's ISF is resolved from its OWN administration time, "
+                  + "not the wall-clock time its insulin activity is later consumed — a "
+                  + "dinner-time correction bolus keeps isfDinner even once its activity "
+                  + "plays out after the dinner window ends")
+    void insulinEffect_resolvesIsfFromDoseTimestamp_evenWhenActivityCrossesIntoNight() {
+        double g0 = 11.1;
+        double units = 1.0;
+        long minsAgoDose = 20;
+        double diaHours = 4.5;
+        double peakMinutes = 55.0;
+
+        // "now" = 21:55 (DINNER, 16:00-21:59). First emitted point is now+5min = 22:00,
+        // which is NIGHT (22:00-04:59, no ISF override) per MealWindow.
+        LocalDateTime now = LocalDateTime.of(2024, 6, 1, 21, 55);
+
+        // Dose given at 21:35 — still within DINNER.
+        InsulinDose dose = InsulinDose.builder()
+                .timestamp(now.minusMinutes(minsAgoDose))
+                .units(units)
+                .build();
+
+        COBSettingsDTO settings = new COBSettingsDTO();
+        settings.setIsf(params.isf());   // 2.2, the NIGHT fallback (no override for NIGHT)
+        settings.setIsfDinner(4.0);      // manual override for the dinner window
+
+        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settings);
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, now, List.of(), List.of(dose), List.of(), USER_ID, 60);
+
+        double iob4 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 4, diaHours, peakMinutes);
+        double iob5 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 5, diaHours, peakMinutes);
+        double activityRate = Math.max(0.0, iob4 - iob5);
+
+        // Expected using isfDinner(4.0), resolved from the dose's 21:35 timestamp — NOT
+        // the NIGHT fallback isf (2.2) that applies at the 22:00 consumption time.
+        double expectedEffect = -(4.0 * params.effectiveInsulinVolume() * activityRate) * 5;
+        double expectedRounded = Math.round(expectedEffect * 100.0) / 100.0;
+
+        assertThat(curve.get(0).getInsulinActivityEffect())
+                .as("insulinActivityEffect at t=22:00 (NIGHT, no override) must still use "
+                    + "isfDinner (4.0) because the dose was given at 21:35 in DINNER, not "
+                    + "the NIGHT fallback isf (%.1f)", params.isf())
+                .isEqualTo(expectedRounded);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

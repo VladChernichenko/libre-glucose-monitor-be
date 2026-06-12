@@ -226,6 +226,16 @@ public class GlucoseCalculationsService {
         return new ActiveCobIobInputs(notes, carbsEntries, insulinEntries, settings, rapidIob);
     }
 
+    /**
+     * Resolves the ISF effective at a specific point in time (per-meal-window manual
+     * override if set, otherwise the autotuned isf), falling back to DEFAULT_ISF if
+     * neither is set.
+     */
+    private double resolveIsf(COBSettingsDTO userSettings, LocalDateTime time) {
+        Double effectiveIsf = userSettings.getEffectiveIsf(time);
+        return effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
+    }
+
     private List<PredictionPointDTO> buildPredictionPath(
             double currentGlucose,
             LocalDateTime currentTime,
@@ -250,8 +260,6 @@ public class GlucoseCalculationsService {
         }
 
         // ── OpenAPS exponential model (default) ───────────────────────────────
-        Double effectiveIsf = userSettings.getEffectiveIsf(currentTime);
-        double userISF = effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
         double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
@@ -270,6 +278,12 @@ public class GlucoseCalculationsService {
         final double peakMinutes = rapidIob.peakMinutes();
         final String pathAbsorptionMode = resolvePathAbsorptionMode(carbsEntries);
 
+        // Per-step IOB/ISF accumulation: ISF can vary by meal window across the path,
+        // so each step's incremental IOB change is priced at the ISF effective for
+        // that step, rather than applying one ISF snapshot to the whole cumulative delta.
+        double previousIob = activeIobNow;
+        double cumulativeInsulinEffect = 0.0;
+
         for (int minute = PREDICTION_PATH_STEP_MINUTES; minute <= pathMinutes; ) {
             LocalDateTime t = currentTime.plusMinutes(minute);
             double cobAtT = cobService.calculateTotalCarbsOnBoard(carbsEntries, t, userSettings);
@@ -277,7 +291,10 @@ public class GlucoseCalculationsService {
                     insulinEntries, t, diaHours, peakMinutes);
 
             double carbsDeliveredEffect = ((activeCobNow - cobAtT) / 10.0) * userCarbRatio;
-            double insulinDeliveredEffect = -((activeIobNow - iobAtT) * userISF);
+            double stepIsf = resolveIsf(userSettings, t);
+            cumulativeInsulinEffect += -((previousIob - iobAtT) * stepIsf);
+            previousIob = iobAtT;
+            double insulinDeliveredEffect = cumulativeInsulinEffect;
             double timingProgress = Math.min(1.0, minute / PREDICTION_HORIZON_MINUTES);
             double timingEffect = preBolusTimingContribution * timingProgress;
 
@@ -315,9 +332,11 @@ public class GlucoseCalculationsService {
             double currentIOB, double futureIOB,
             double horizonMinutes, COBSettingsDTO userSettings, Double avgBolusToMealMinutes,
             List<CarbsEntry> carbsEntries, LocalDateTime currentTime) {
-        // Use user-specific settings instead of defaults
-        Double effectiveIsf = userSettings.getEffectiveIsf(currentTime);
-        double userISF = effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
+        // Use user-specific settings instead of defaults.
+        // insulinContribution represents the IOB consumed by predictionTime, so resolve
+        // ISF for that point in time (its meal window), not the request-time window.
+        LocalDateTime predictionTime = currentTime.plusMinutes((long) horizonMinutes);
+        double userISF = resolveIsf(userSettings, predictionTime);
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         
         // Use delivered effect over horizon (delta now -> horizon), same model as prediction path.

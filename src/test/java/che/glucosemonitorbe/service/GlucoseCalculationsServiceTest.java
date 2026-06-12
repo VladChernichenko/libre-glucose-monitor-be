@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -418,6 +419,99 @@ class GlucoseCalculationsServiceTest {
 
         response.getPredictionPath().forEach(point ->
                 assertThat(point.getPredictedGlucose()).isBetween(1.0, 25.0));
+    }
+
+    // ── Per-meal-window ISF overrides must be time-aware along the prediction curve ──
+
+    /**
+     * buildPredictionPath must apply the ISF effective at EACH prediction step's
+     * timestamp to that step's incremental IOB change, not a single ISF snapshot
+     * resolved once at currentTime. Regression guard for the per-meal-window manual
+     * ISF override feature.
+     */
+    @Test
+    void buildPredictionPath_appliesPerMealWindowIsf_perStep() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        COBSettingsDTO cobSettings = new COBSettingsDTO();
+        cobSettings.setUserId(userId);
+        cobSettings.setCarbRatio(2.0);
+        cobSettings.setIsf(1.0);
+        cobSettings.setIsfBreakfast(1.0);
+        cobSettings.setIsfLunch(3.0);
+        cobSettings.setCarbHalfLife(45);
+        cobSettings.setMaxCOBDuration(240);
+
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(LocalDateTime.class), any(COBSettingsDTO.class)))
+                .thenReturn(0.0);
+        when(featureToggleConfig.isHovorkaModelEnabled()).thenReturn(false);
+
+        // 10:50 is BREAKFAST (05:00-11:00). IOB decreases steadily so each 5-min step
+        // consumes 0.05 U.
+        LocalDateTime currentTime = LocalDateTime.of(2024, 1, 2, 10, 50);
+        when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(LocalDateTime.class), anyDouble(), anyDouble()))
+                .thenAnswer(invocation -> {
+                    LocalDateTime t = invocation.getArgument(1);
+                    long elapsedMinutes = java.time.Duration.between(currentTime, t).toMinutes();
+                    return 10.0 - elapsedMinutes * 0.01;
+                });
+
+        Method method = GlucoseCalculationsService.class.getDeclaredMethod(
+                "buildPredictionPath",
+                double.class, LocalDateTime.class, List.class, List.class, UUID.class,
+                COBSettingsDTO.class, Double.class, RapidInsulinIobParameters.class, Double.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        List<che.glucosemonitorbe.dto.PredictionPointDTO> points =
+                (List<che.glucosemonitorbe.dto.PredictionPointDTO>) method.invoke(
+                        service, 8.0, currentTime, List.<CarbsEntry>of(), List.<InsulinDose>of(),
+                        userId, cobSettings, null, new RapidInsulinIobParameters(4.0, 75.0), null);
+
+        // minute=5 -> 10:55, still BREAKFAST: step delta 0.05 U * isfBreakfast(1.0) = -0.05
+        assertThat(points.get(0).getInsulinActivityEffect()).isCloseTo(-0.05, within(0.001));
+
+        // minute=10 -> 11:00, now LUNCH: cumulative = -0.05 + (0.05 * isfLunch(3.0)) = -0.20.
+        // Before the fix, every step used the isfBreakfast(1.0) snapshot from currentTime,
+        // which would give -0.10 here instead.
+        assertThat(points.get(1).getInsulinActivityEffect())
+                .as("ISF for the 11:00 step must use isfLunch (3.0), not the isfBreakfast (1.0) "
+                        + "snapshot resolved once at currentTime")
+                .isCloseTo(-0.20, within(0.001));
+    }
+
+    /**
+     * calculatePredictionFactors' insulinContribution represents the IOB consumed by
+     * predictionTime (currentTime + horizon) and must be priced using the ISF effective
+     * AT predictionTime, not the ISF effective at currentTime.
+     */
+    @Test
+    void calculatePredictionFactors_resolvesIsfAtPredictionTime_notCurrentTime() throws Exception {
+        COBSettingsDTO cobSettings = new COBSettingsDTO();
+        cobSettings.setCarbRatio(2.0);
+        cobSettings.setIsf(1.0);
+        cobSettings.setIsfBreakfast(1.0);
+        cobSettings.setIsfLunch(3.0);
+
+        // currentTime is BREAKFAST (05:00-11:00); +120 min horizon -> 12:50, LUNCH (11:00-16:00).
+        LocalDateTime currentTime = LocalDateTime.of(2024, 1, 2, 10, 50);
+        double horizonMinutes = 120.0;
+
+        Method method = GlucoseCalculationsService.class.getDeclaredMethod(
+                "calculatePredictionFactors",
+                double.class, double.class, double.class, double.class,
+                double.class, COBSettingsDTO.class, Double.class, List.class, LocalDateTime.class);
+        method.setAccessible(true);
+
+        PredictionFactors factors = (PredictionFactors) method.invoke(
+                service, 0.0, 0.0, 10.0, 8.0, horizonMinutes, cobSettings, null, List.<CarbsEntry>of(), currentTime);
+
+        // currentIOB - futureIOB = 2.0 U consumed by predictionTime (LUNCH window).
+        // Must use isfLunch (3.0) -> -6.0, not isfBreakfast (1.0) -> -2.0.
+        assertThat(factors.getInsulinContribution())
+                .as("insulinContribution must use the ISF for predictionTime's meal window (LUNCH), "
+                        + "not currentTime's (BREAKFAST)")
+                .isCloseTo(-6.0, within(0.001));
     }
 
     // ── helper ────────────────────────────────────────────────────────────────
