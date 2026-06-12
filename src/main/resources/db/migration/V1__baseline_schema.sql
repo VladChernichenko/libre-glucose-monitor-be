@@ -45,11 +45,17 @@ CREATE TABLE IF NOT EXISTS cob_settings (
     carb_half_life      INTEGER          NOT NULL DEFAULT 45,
     max_cob_duration    INTEGER          NOT NULL DEFAULT 240,
     body_weight_kg      DOUBLE PRECISION,                        -- kg; NULL = population default 70 kg
+    isf_breakfast       DOUBLE PRECISION,                        -- manual ISF override for 05:00-11:00; NULL = use autotuned `isf`
+    isf_lunch           DOUBLE PRECISION,                        -- manual ISF override for 11:00-16:00; NULL = use autotuned `isf`
+    isf_dinner          DOUBLE PRECISION,                        -- manual ISF override for 16:00-22:00; NULL = use autotuned `isf`
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_cob_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT chk_cob_settings_carb_ratio_positive CHECK (carb_ratio > 0),
-    CONSTRAINT chk_cob_settings_weight_positive CHECK (body_weight_kg IS NULL OR body_weight_kg > 0)
+    CONSTRAINT chk_cob_settings_weight_positive CHECK (body_weight_kg IS NULL OR body_weight_kg > 0),
+    CONSTRAINT chk_cob_settings_isf_breakfast_positive CHECK (isf_breakfast IS NULL OR isf_breakfast > 0),
+    CONSTRAINT chk_cob_settings_isf_lunch_positive CHECK (isf_lunch IS NULL OR isf_lunch > 0),
+    CONSTRAINT chk_cob_settings_isf_dinner_positive CHECK (isf_dinner IS NULL OR isf_dinner > 0)
 );
 CREATE INDEX IF NOT EXISTS idx_cob_settings_user_id    ON cob_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_cob_settings_created_at ON cob_settings(created_at);

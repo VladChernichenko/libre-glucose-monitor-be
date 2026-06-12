@@ -103,6 +103,16 @@ public class COBSettingsService {
         if (settingsDTO.getBodyWeightKg() != null) {
             settings.setBodyWeightKg(settingsDTO.getBodyWeightKg());
         }
+        // Manual per-meal-window ISF overrides — only update if explicitly provided.
+        if (settingsDTO.getIsfBreakfast() != null) {
+            settings.setIsfBreakfast(settingsDTO.getIsfBreakfast());
+        }
+        if (settingsDTO.getIsfLunch() != null) {
+            settings.setIsfLunch(settingsDTO.getIsfLunch());
+        }
+        if (settingsDTO.getIsfDinner() != null) {
+            settings.setIsfDinner(settingsDTO.getIsfDinner());
+        }
     }
 
     /**
@@ -116,7 +126,10 @@ public class COBSettingsService {
             settings.getIsf(),
             settings.getCarbHalfLife(),
             settings.getMaxCOBDuration(),
-            settings.getBodyWeightKg()
+            settings.getBodyWeightKg(),
+            settings.getIsfBreakfast(),
+            settings.getIsfLunch(),
+            settings.getIsfDinner()
         );
     }
 }

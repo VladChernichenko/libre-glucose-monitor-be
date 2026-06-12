@@ -36,6 +36,18 @@ public class COBSettings {
     @Column(name = "body_weight_kg")
     private Double bodyWeightKg;
 
+    /** Manual ISF override for 05:00-11:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
+    @Column(name = "isf_breakfast")
+    private Double isfBreakfast;
+
+    /** Manual ISF override for 11:00-16:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
+    @Column(name = "isf_lunch")
+    private Double isfLunch;
+
+    /** Manual ISF override for 16:00-22:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
+    @Column(name = "isf_dinner")
+    private Double isfDinner;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -123,6 +135,30 @@ public class COBSettings {
 
     public void setBodyWeightKg(Double bodyWeightKg) {
         this.bodyWeightKg = bodyWeightKg;
+    }
+
+    public Double getIsfBreakfast() {
+        return isfBreakfast;
+    }
+
+    public void setIsfBreakfast(Double isfBreakfast) {
+        this.isfBreakfast = isfBreakfast;
+    }
+
+    public Double getIsfLunch() {
+        return isfLunch;
+    }
+
+    public void setIsfLunch(Double isfLunch) {
+        this.isfLunch = isfLunch;
+    }
+
+    public Double getIsfDinner() {
+        return isfDinner;
+    }
+
+    public void setIsfDinner(Double isfDinner) {
+        this.isfDinner = isfDinner;
     }
 
     public LocalDateTime getCreatedAt() {

@@ -130,7 +130,7 @@ public class GlucoseCalculationsService {
         
         // Calculate prediction factors using user-specific settings
         PredictionFactors factors = calculatePredictionFactors(
-            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes, carbsEntries);
+            activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes, carbsEntries, currentTime);
         
         // Calculate predicted glucose
         double predictedGlucose = calculatePredictedGlucose(
@@ -250,7 +250,8 @@ public class GlucoseCalculationsService {
         }
 
         // ── OpenAPS exponential model (default) ───────────────────────────────
-        double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
+        Double effectiveIsf = userSettings.getEffectiveIsf(currentTime);
+        double userISF = effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
         double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
@@ -310,12 +311,13 @@ public class GlucoseCalculationsService {
      * Calculate prediction factors that contribute to glucose prediction
      */
     private PredictionFactors calculatePredictionFactors(
-            double currentCOB, double futureCOB, 
-            double currentIOB, double futureIOB, 
+            double currentCOB, double futureCOB,
+            double currentIOB, double futureIOB,
             double horizonMinutes, COBSettingsDTO userSettings, Double avgBolusToMealMinutes,
-            List<CarbsEntry> carbsEntries) {
+            List<CarbsEntry> carbsEntries, LocalDateTime currentTime) {
         // Use user-specific settings instead of defaults
-        double userISF = userSettings.getIsf() != null ? userSettings.getIsf() : DEFAULT_ISF;
+        Double effectiveIsf = userSettings.getEffectiveIsf(currentTime);
+        double userISF = effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         
         // Use delivered effect over horizon (delta now -> horizon), same model as prediction path.
