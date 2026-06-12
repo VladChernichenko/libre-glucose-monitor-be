@@ -4,6 +4,7 @@ import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.entity.COBSettings;
 import che.glucosemonitorbe.repository.COBSettingsRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @Transactional
 @RequiredArgsConstructor
@@ -45,10 +47,16 @@ public class COBSettingsService {
      * @param settingsDTO the settings to save
      * @return the saved COB settings DTO
      */
-    @CacheEvict(value = "cobSettings", key = "#userId")
+//    @CacheEvict(value = "cobSettings", key = "#userId")
     public COBSettingsDTO saveCOBSettings(UUID userId, COBSettingsDTO settingsDTO) {
+        log.info("saveCOBSettings request for userId={}: carbRatio={}, isf={}, carbHalfLife={}, " +
+                        "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}",
+                userId, settingsDTO.getCarbRatio(), settingsDTO.getIsf(), settingsDTO.getCarbHalfLife(),
+                settingsDTO.getMaxCOBDuration(), settingsDTO.getBodyWeightKg(),
+                settingsDTO.getIsfBreakfast(), settingsDTO.getIsfLunch(), settingsDTO.getIsfDinner());
+
         Optional<COBSettings> existingSettings = cobSettingsRepository.findByUserId(userId);
-        
+
         COBSettings settings;
         if (existingSettings.isPresent()) {
             settings = existingSettings.get();
@@ -58,8 +66,11 @@ public class COBSettingsService {
             settings.setUserId(userId);
             updateSettings(settings, settingsDTO);
         }
-        
+
         COBSettings savedSettings = cobSettingsRepository.save(settings);
+        log.info("saveCOBSettings persisted for userId={}: isf={}, isfBreakfast={}, isfLunch={}, isfDinner={}",
+                userId, savedSettings.getIsf(), savedSettings.getIsfBreakfast(),
+                savedSettings.getIsfLunch(), savedSettings.getIsfDinner());
         return convertToDTO(savedSettings);
     }
     

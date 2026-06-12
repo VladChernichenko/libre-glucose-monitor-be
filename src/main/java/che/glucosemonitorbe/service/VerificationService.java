@@ -146,7 +146,7 @@ public class VerificationService {
 
     private void refreshSummary(UUID userId, COBSettings cob) {
         List<VerificationEvent> completed = verificationEventRepository.findCompletedByUserId(userId);
-        List<VerificationEvent> window = completed.stream().limit(WINDOW_SIZE).collect(Collectors.toList());
+        List<VerificationEvent> window = completed.stream().limit(WINDOW_SIZE).toList();
 
         VerificationSummary summary = verificationSummaryRepository.findById(userId)
                 .orElse(VerificationSummary.builder().userId(userId).build());
@@ -205,7 +205,7 @@ public class VerificationService {
         VerificationSummary summary = verificationSummaryRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("No verification summary for user " + userId));
 
-        COBSettings cob = cobSettingsRepository.findByUserId(userId).orElse(new COBSettings(userId));
+        COBSettings cob = cobSettingsRepository.findByUserId(userId).orElseThrow();
         if (summary.getSuggestedCarbRatio() != null) cob.setCarbRatio(summary.getSuggestedCarbRatio());
         if (summary.getSuggestedIsf()       != null) cob.setIsf(summary.getSuggestedIsf());
         cobSettingsRepository.save(cob);
