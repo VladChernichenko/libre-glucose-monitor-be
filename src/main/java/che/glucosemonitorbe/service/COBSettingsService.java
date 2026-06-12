@@ -47,7 +47,7 @@ public class COBSettingsService {
      * @param settingsDTO the settings to save
      * @return the saved COB settings DTO
      */
-//    @CacheEvict(value = "cobSettings", key = "#userId")
+    @CacheEvict(value = "cobSettings", key = "#userId")
     public COBSettingsDTO saveCOBSettings(UUID userId, COBSettingsDTO settingsDTO) {
         log.info("saveCOBSettings request for userId={}: carbRatio={}, isf={}, carbHalfLife={}, " +
                         "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}",

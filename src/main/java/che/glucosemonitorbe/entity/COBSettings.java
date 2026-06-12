@@ -1,16 +1,21 @@
 package che.glucosemonitorbe.entity;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+@Setter
+@Getter
 @Entity
 @Table(name = "cob_settings")
 public class COBSettings {
-    
+
+    // Getters and Setters
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -79,101 +84,5 @@ public class COBSettings {
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;
     }
-    
-    // Getters and Setters
-    public UUID getId() {
-        return id;
-    }
-    
-    public void setId(UUID id) {
-        this.id = id;
-    }
-    
-    public UUID getUserId() {
-        return userId;
-    }
-    
-    public void setUserId(UUID userId) {
-        this.userId = userId;
-    }
-    
-    public Double getCarbRatio() {
-        return carbRatio;
-    }
-    
-    public void setCarbRatio(Double carbRatio) {
-        this.carbRatio = carbRatio;
-    }
-    
-    public Double getIsf() {
-        return isf;
-    }
-    
-    public void setIsf(Double isf) {
-        this.isf = isf;
-    }
-    
-    public Integer getCarbHalfLife() {
-        return carbHalfLife;
-    }
-    
-    public void setCarbHalfLife(Integer carbHalfLife) {
-        this.carbHalfLife = carbHalfLife;
-    }
-    
-    public Integer getMaxCOBDuration() {
-        return maxCOBDuration;
-    }
-    
-    public void setMaxCOBDuration(Integer maxCOBDuration) {
-        this.maxCOBDuration = maxCOBDuration;
-    }
 
-    public Double getBodyWeightKg() {
-        return bodyWeightKg;
-    }
-
-    public void setBodyWeightKg(Double bodyWeightKg) {
-        this.bodyWeightKg = bodyWeightKg;
-    }
-
-    public Double getIsfBreakfast() {
-        return isfBreakfast;
-    }
-
-    public void setIsfBreakfast(Double isfBreakfast) {
-        this.isfBreakfast = isfBreakfast;
-    }
-
-    public Double getIsfLunch() {
-        return isfLunch;
-    }
-
-    public void setIsfLunch(Double isfLunch) {
-        this.isfLunch = isfLunch;
-    }
-
-    public Double getIsfDinner() {
-        return isfDinner;
-    }
-
-    public void setIsfDinner(Double isfDinner) {
-        this.isfDinner = isfDinner;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-    
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-    
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-    
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
 }
