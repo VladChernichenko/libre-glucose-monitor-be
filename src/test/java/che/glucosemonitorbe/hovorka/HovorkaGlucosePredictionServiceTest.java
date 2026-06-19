@@ -351,6 +351,63 @@ class HovorkaGlucosePredictionServiceTest {
                 .isEqualTo(expectedRounded);
     }
 
+    @Test
+    @DisplayName("regression: two doses given in different meal windows each use their own "
+                  + "resolved ISF, summed independently — not a single ISF for the whole path")
+    void insulinEffect_multipleDoses_eachUsesOwnDoseTimeIsf_summedIndependently() {
+        double g0 = 8.0;
+        double unitsBreakfast = 2.0;
+        double unitsLunch = 1.0;
+        double diaHours = 4.5;
+        double peakMinutes = 55.0;
+
+        // "now" = 11:05 (LUNCH, 11:00-15:59).
+        LocalDateTime now = LocalDateTime.of(2024, 6, 1, 11, 5);
+
+        // Dose A given at 10:40 — BREAKFAST (05:00-10:59) -> isfBreakfast.
+        long minsAgoA = 25;
+        InsulinDose doseBreakfast = InsulinDose.builder()
+                .timestamp(now.minusMinutes(minsAgoA))
+                .units(unitsBreakfast)
+                .build();
+
+        // Dose B given at 11:00 — LUNCH (11:00-15:59) -> isfLunch.
+        long minsAgoB = 5;
+        InsulinDose doseLunch = InsulinDose.builder()
+                .timestamp(now.minusMinutes(minsAgoB))
+                .units(unitsLunch)
+                .build();
+
+        COBSettingsDTO settings = new COBSettingsDTO();
+        settings.setIsf(params.isf());   // 2.2, fallback (unused here — both doses have overrides)
+        settings.setIsfBreakfast(0.5);
+        settings.setIsfLunch(1.5);
+
+        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settings);
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, now, List.of(), List.of(doseBreakfast, doseLunch), List.of(), USER_ID, 60);
+
+        double iobA4 = InsulinCalculatorService.iobOpenApsExponential(unitsBreakfast, minsAgoA + 4, diaHours, peakMinutes);
+        double iobA5 = InsulinCalculatorService.iobOpenApsExponential(unitsBreakfast, minsAgoA + 5, diaHours, peakMinutes);
+        double activityRateA = Math.max(0.0, iobA4 - iobA5);
+
+        double iobB4 = InsulinCalculatorService.iobOpenApsExponential(unitsLunch, minsAgoB + 4, diaHours, peakMinutes);
+        double iobB5 = InsulinCalculatorService.iobOpenApsExponential(unitsLunch, minsAgoB + 5, diaHours, peakMinutes);
+        double activityRateB = Math.max(0.0, iobB4 - iobB5);
+
+        // Each dose's own ISF (0.5 for the 10:40 BREAKFAST dose, 1.5 for the 11:00 LUNCH
+        // dose) applies to that dose's own activity — neither uses the other's ISF nor
+        // the global fallback (2.2).
+        double expectedEffect = -((0.5 * activityRateA + 1.5 * activityRateB) * params.effectiveInsulinVolume()) * 5;
+        double expectedRounded = Math.round(expectedEffect * 100.0) / 100.0;
+
+        assertThat(curve.get(0).getInsulinActivityEffect())
+                .as("insulinActivityEffect at t=5min must sum each dose's own activity rate "
+                    + "weighted by its own dose-time ISF (0.5 + 1.5), not a single shared ISF")
+                .isEqualTo(expectedRounded);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // MARK: Gap 1 — K_ABS scaling with tMaxG (FPU gastric-emptying effect)
     // ─────────────────────────────────────────────────────────────────────────

@@ -250,6 +250,86 @@ class HovorkaOdeSolverTest {
         assertThat(state.glucoseMmolL(params)).isCloseTo(g0, within(0.15));
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 11: Renal clearance — inactive below 9 mmol/L, active above
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void renalClearance_activatesAboveThreshold_inactiveBelow() {
+        // At SS Q2 balance (k12*Q1 = k21*Q2), gut empty, egpNet=f01:
+        //   dq1 = -f01c - FR + f01 = -FR
+        // So at G=5.5: dq1 ≈ 0 (FR inactive); at G=12: dq1 = -FR < 0.
+        double q2Ratio = HovorkaParameters.K12_POP / HovorkaParameters.K21_POP; // = 1.0
+
+        // Euglycemia (G=5.5 < KE2=9.0) — FR must not fire
+        double q1Low = 5.5 * params.vG();
+        double[] yLow = {q1Low, q2Ratio * q1Low, 0, 0, 0, 0};
+        double[] dyLow = solver.derivatives(yLow, params, 0.0, 0.0);
+        assertThat(dyLow[0]).isCloseTo(0.0, within(1e-4));
+
+        // Hyperglycemia (G=12 > KE2=9.0) — FR fires, pulling Q1 down
+        double q1High = 12.0 * params.vG();
+        double[] yHigh = {q1High, q2Ratio * q1High, 0, 0, 0, 0};
+        double[] dyHigh = solver.derivatives(yHigh, params, 0.0, 0.0);
+        assertThat(dyHigh[0]).isLessThan(0.0);
+
+        // Verify magnitude: FR = ke1 * (G - ke2) * VG
+        double expectedFR = HovorkaOdeSolver.KE1 * (12.0 - HovorkaOdeSolver.KE2) * params.vG();
+        assertThat(dyHigh[0]).isCloseTo(-expectedFR, within(1e-4));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 12: Ileal brake — elevated Inc reduces gastric emptying to the floor
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void ilealBrake_elevatedInc_slowsGastricEmptyingToFloor() {
+        // dqsto2 = K_GRI*qsto1 − kemptEff*qsto2
+        // With qsto1=0: dqsto2 = −kemptEff*qsto2.
+        // kemptEff = kempt × max(MIN_KEMPT_FRACTION, 1 − PHI_GLP1*Inc)
+        // Inc=0   → kemptEff = kempt      → drain = kempt*qsto2
+        // Inc=100 → 1−0.5×100=−49 → floor → kemptEff = kempt×0.20 → drain = kempt×0.20×qsto2
+        // Ratio: dyHigh[3] / dyBase[3] ≈ 0.20 (the floor fraction)
+        HovorkaState ss = HovorkaState.steadyState(5.5, params);
+        double q1 = ss.q1(), q2 = ss.q2();
+        double qsto2Fixed = 50.0;  // mmol fixed in Qsto2
+        double mealMmol   = 100.0; // half-full reference for k_empt
+
+        double[] yBaseInc = {q1, q2, 0, qsto2Fixed, 0, 0.0};
+        double[] yHighInc = {q1, q2, 0, qsto2Fixed, 0, 100.0};
+
+        double[] dyBase = solver.derivatives(yBaseInc, params, mealMmol, 0.0);
+        double[] dyHigh = solver.derivatives(yHighInc, params, mealMmol, 0.0);
+
+        // High Inc → less drainage from Qsto2 → dqsto2 is less negative
+        assertThat(dyHigh[3]).isGreaterThan(dyBase[3]);
+
+        // At floor: ratio of drain rates equals MIN_KEMPT_FRACTION
+        double ratio = dyHigh[3] / dyBase[3];
+        assertThat(ratio).isCloseTo(HovorkaOdeSolver.MIN_KEMPT_FRACTION, within(0.01));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Test 13: GLP-1 incretin accumulates during meal absorption
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @Test
+    void incGlp1_risesDuringMealAbsorption_peaksAboveBaseline() {
+        // dInc/dt = K_INC*Ra − K_DEL*Inc; Ra peaks as Qgut drains.
+        // After a 60 g meal, Inc_peak ≈ K_INC/K_DEL × Ra_peak > 0.
+        HovorkaState state = HovorkaState.steadyState(5.5, params);
+        double carbMmol = 60.0 * params.aG() / 0.18;
+        state = solver.step(state, params, carbMmol, 0.0);
+
+        double maxInc = 0.0;
+        for (int m = 1; m <= 120; m++) {
+            state = solver.step(state, params, 0.0, 0.0);
+            maxInc = Math.max(maxInc, state.inc());
+        }
+
+        assertThat(maxInc).isGreaterThan(0.005);
+    }
+
     // ── Helper: OpenAPS IOB (same formula as InsulinCalculatorService) ────────
 
     private static double iobExponential(double units, double minsAgo, double diaMin, double peak) {

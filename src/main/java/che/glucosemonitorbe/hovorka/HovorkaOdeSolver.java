@@ -31,6 +31,16 @@ public class HovorkaOdeSolver {
     static final double K_DEL    = 0.020;   // clearance rate [/min]  (t½ ≈ 35 min)
     static final double ALPHA_INC = 0.001;  // incretin effect on glucose uptake [/min]
 
+    // ── Renal glucose clearance (Hovorka 2004, eq. 7) ─────────────────────────
+    // FR = ke1 × (Q1 − ke2×VG)  if G > ke2, else 0
+    static final double KE1 = 0.003;   // renal clearance rate [/min]
+    static final double KE2 = 9.0;     // renal glucose threshold [mmol/L]
+
+    // ── Ileal brake: GLP-1 inhibition of gastric emptying ────────────────────
+    // Protein/fat → GLP-1 rises → k_empt × (1 − Φ_GLP1 × Inc) decreases
+    static final double PHI_GLP1           = 0.50;  // inhibition coefficient [per Inc unit]
+    static final double MIN_KEMPT_FRACTION = 0.20;  // floor: k_empt never below 20% of base
+
     private final DallaManGutModel gutModel;
 
     public HovorkaOdeSolver(DallaManGutModel gutModel) {
@@ -112,8 +122,17 @@ public class HovorkaOdeSolver {
         double g    = p.glucoseClamped(q1);
         double f01c = p.f01clamped(g);
 
+        // Renal glucose clearance: piecewise-linear above threshold (Hovorka 2004).
+        // FR = ke1 × (Q1 − ke2×VG) when G > ke2, zero otherwise.
+        double fr = (g > KE2) ? KE1 * (q1 - KE2 * p.vG()) : 0.0;
+
         double qsto  = qsto1 + qsto2;
         double kempt = gutModel.kEmpt(qsto, mealMmol);
+
+        // Ileal brake: elevated GLP-1 (Inc) inhibits gastric emptying.
+        // After protein/fat intake Inc rises via K_INC×Ra, which delays subsequent
+        // carb absorption — the "food sequencing" effect (Palumbo modification).
+        double kemptEff = kempt * Math.max(MIN_KEMPT_FRACTION, 1.0 - PHI_GLP1 * inc);
 
         // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix).
         // A high-fat/protein meal has a longer tMaxG → slower intestinal drain
@@ -122,15 +141,15 @@ public class HovorkaOdeSolver {
         double ra    = gutModel.ra(qgut, kAbsEff);
 
         // Glucose compartments
-        double dq1 = -f01c - p.k12() * q1 + p.k21() * q2
+        double dq1 = -f01c - fr - p.k12() * q1 + p.k21() * q2
                    + ra + p.egpNet() - insulinEffect
                    - ALPHA_INC * inc * q1;
         double dq2 = p.k12() * q1 - p.k21() * q2;
 
-        // Dalla Man gut compartments
+        // Dalla Man gut compartments (use kemptEff to apply ileal brake)
         double dqsto1 = -DallaManGutModel.K_GRI * qsto1;
-        double dqsto2 = DallaManGutModel.K_GRI * qsto1 - kempt * qsto2;
-        double dqgut  = kempt * qsto2 - kAbsEff * qgut;
+        double dqsto2 = DallaManGutModel.K_GRI * qsto1 - kemptEff * qsto2;
+        double dqgut  = kemptEff * qsto2 - kAbsEff * qgut;
 
         // Incretin GLP-1
         double dinc = K_INC * ra - K_DEL * inc;
