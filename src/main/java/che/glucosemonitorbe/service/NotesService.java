@@ -1,8 +1,11 @@
 package che.glucosemonitorbe.service;
 
-import che.glucosemonitorbe.dto.*;
-import che.glucosemonitorbe.exception.ResourceNotFoundException;
+import che.glucosemonitorbe.dto.CreateNoteRequest;
+import che.glucosemonitorbe.dto.NoteDto;
+import che.glucosemonitorbe.dto.NotesSummaryResponse;
+import che.glucosemonitorbe.dto.UpdateNoteRequest;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
@@ -17,8 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;

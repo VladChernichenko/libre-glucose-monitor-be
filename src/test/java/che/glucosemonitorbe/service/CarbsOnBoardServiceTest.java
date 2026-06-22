@@ -1,7 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,12 +15,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for CarbsOnBoardService covering:
@@ -34,13 +29,13 @@ class CarbsOnBoardServiceTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
 
-    private COBSettingsService settingsService;
+    private UserSettingsService settingsService;
     private CarbsOnBoardService service;
     private LocalDateTime now;
 
     @BeforeEach
     void setUp() {
-        settingsService = mock(COBSettingsService.class);
+        settingsService = mock(UserSettingsService.class);
         service = new CarbsOnBoardService(settingsService);
         now = LocalDateTime.now();
         // Default: no user-configured maxCOBDuration (0 → use speed class), halfLife=45 min
@@ -298,11 +293,11 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateTotalCarbsOnBoard(null, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── N+1 fix: getCOBSettings invocation counts ─────────────────────────────
+    // ── N+1 fix: getUserSettings invocation counts ─────────────────────────────
 
     /**
      * Core regression for the N+1 fix:
-     * calculateTotalCarbsOnBoard with N entries must call getCOBSettings exactly once,
+     * calculateTotalCarbsOnBoard with N entries must call getUserSettings exactly once,
      * not once per entry.
      */
     @Test
@@ -317,7 +312,7 @@ class CarbsOnBoardServiceTest {
 
         service.calculateTotalCarbsOnBoard(entries, now, USER_ID);
 
-        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+        verify(settingsService, times(1)).getUserSettings(USER_ID);
     }
 
     @Test
@@ -326,7 +321,7 @@ class CarbsOnBoardServiceTest {
 
         service.calculateTotalCarbsOnBoard(entries, now, USER_ID);
 
-        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+        verify(settingsService, times(1)).getUserSettings(USER_ID);
     }
 
     @Test
@@ -338,7 +333,7 @@ class CarbsOnBoardServiceTest {
         service.calculateTotalCarbsOnBoard(entries, now, USER_ID);
 
         // Must be 1 regardless of list size — the N+1 guarantee
-        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+        verify(settingsService, times(1)).getUserSettings(USER_ID);
     }
 
     /** Empty list returns early — DB should never be hit. */
@@ -346,7 +341,7 @@ class CarbsOnBoardServiceTest {
     void totalCob_emptyList_neverLoadsSettings() {
         service.calculateTotalCarbsOnBoard(List.of(), now, USER_ID);
 
-        verify(settingsService, never()).getCOBSettings(any());
+        verify(settingsService, never()).getUserSettings(any());
     }
 
     /** Null list returns early — DB should never be hit. */
@@ -354,7 +349,7 @@ class CarbsOnBoardServiceTest {
     void totalCob_nullList_neverLoadsSettings() {
         service.calculateTotalCarbsOnBoard(null, now, USER_ID);
 
-        verify(settingsService, never()).getCOBSettings(any());
+        verify(settingsService, never()).getUserSettings(any());
     }
 
     /** Single-entry public API still loads settings exactly once. */
@@ -364,7 +359,7 @@ class CarbsOnBoardServiceTest {
 
         service.calculateRemainingCarbs(e, now, USER_ID);
 
-        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+        verify(settingsService, times(1)).getUserSettings(USER_ID);
     }
 
     /** Null entry guard fires before any settings load. */
@@ -372,7 +367,7 @@ class CarbsOnBoardServiceTest {
     void singleEntry_null_neverLoadsSettings() {
         service.calculateRemainingCarbs(null, now, USER_ID);
 
-        verify(settingsService, never()).getCOBSettings(any());
+        verify(settingsService, never()).getUserSettings(any());
     }
 
     /** Zero-carbs guard fires before any settings load. */
@@ -382,7 +377,7 @@ class CarbsOnBoardServiceTest {
 
         service.calculateRemainingCarbs(e, now, USER_ID);
 
-        verify(settingsService, never()).getCOBSettings(any());
+        verify(settingsService, never()).getUserSettings(any());
     }
 
     /**
@@ -398,7 +393,7 @@ class CarbsOnBoardServiceTest {
 
         service.calculateTotalCarbsOnBoard(List.of(valid1, zero, valid2), now, USER_ID);
 
-        verify(settingsService, times(1)).getCOBSettings(USER_ID);
+        verify(settingsService, times(1)).getUserSettings(USER_ID);
     }
 
     // ── NotebookLM scenario 1: fiber >5g net-carb threshold ──────────────────
@@ -592,8 +587,8 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void nullMaxCobDuration_fallsBackToSpeedClassDefault() {
-        when(settingsService.getCOBSettings(USER_ID))
-                .thenReturn(new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, null));
+        when(settingsService.getUserSettings(USER_ID))
+                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, null));
         // maxCOBDuration null → SLOW speed-class default = 240 → still active at 200 min
         CarbsEntry e = carbEntry(now.minusMinutes(200), 60.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
@@ -601,8 +596,8 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void nullCarbHalfLife_fallsBackToDefault45Minutes() {
-        when(settingsService.getCOBSettings(USER_ID))
-                .thenReturn(new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, null, 240));
+        when(settingsService.getUserSettings(USER_ID))
+                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, null, 240));
         // carbHalfLife null → default 45 min → at t=45 min remaining ≈ 50%
         CarbsEntry e = carbEntry(now.minusMinutes(45), 50.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isCloseTo(25.0, within(3.0));
@@ -627,19 +622,19 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void totalCob_preloadedSettings_nullList_returnsZeroWithoutLookup() {
-        COBSettingsDTO settings = new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
         assertThat(service.calculateTotalCarbsOnBoard((List<CarbsEntry>) null, now, settings)).isEqualTo(0.0);
     }
 
     @Test
     void totalCob_preloadedSettings_emptyList_returnsZeroWithoutLookup() {
-        COBSettingsDTO settings = new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
         assertThat(service.calculateTotalCarbsOnBoard(List.of(), now, settings)).isEqualTo(0.0);
     }
 
     @Test
     void totalCob_preloadedSettings_filtersNullAndZeroCarbEntries() {
-        COBSettingsDTO settings = new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
         // Real-life: 30g Snack entry, plus a zero-carb and a null-carbs entry that must be skipped
         CarbsEntry valid = carbEntry(now.minusMinutes(30), 30.0, "MEDIUM", null);
         CarbsEntry zeroCarbs = carbEntry(now.minusMinutes(30), 0.0, "MEDIUM", null);
@@ -732,8 +727,8 @@ class CarbsOnBoardServiceTest {
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private void stubSettings(int maxCobMinutes, int halfLife) {
-        when(settingsService.getCOBSettings(USER_ID))
-                .thenReturn(new COBSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, halfLife, maxCobMinutes));
+        when(settingsService.getUserSettings(USER_ID))
+                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, halfLife, maxCobMinutes));
     }
 
     private CarbsEntry carbEntry(LocalDateTime timestamp, double carbs, String speedClass, Double patternDuration) {

@@ -1,18 +1,18 @@
 package che.glucosemonitorbe.ai;
 
-import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.CarbsEntry;
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.InsulinDose;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
+import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
-import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -35,7 +35,7 @@ public class ContextAggregatorService {
 
     private final CgmReadingRepository chartDataRepository;
     private final NoteRepository noteRepository;
-    private final COBSettingsService cobSettingsService;
+    private final UserSettingsService userSettingsService;
     private final UserInsulinPreferencesService insulinPreferencesService;
     private final CarbsOnBoardService carbsOnBoardService;
     private final InsulinCalculatorService insulinCalculatorService;
@@ -64,7 +64,7 @@ public class ContextAggregatorService {
                 .sorted(Comparator.comparing(Note::getTimestamp))
                 .toList();
 
-        COBSettingsDTO cob = cobSettingsService.getCOBSettings(userId);
+        UserSettingsDTO cob = userSettingsService.getUserSettings(userId);
         UserInsulinPreferencesDTO insulin = insulinPreferencesService.getPreferences(userId);
         RapidInsulinIobParameters rapidIob = insulinPreferencesService.getRapidIobParameters(userId);
 
@@ -102,7 +102,7 @@ public class ContextAggregatorService {
                 .glucoseValues(glucoseValues)
                 .glucoseTimestamps(glucoseTimes)
                 .notes(notes)
-                .cobSettings(cob)
+                .userSettings(cob)
                 .insulinPreferences(insulin)
                 .minGlucose(min)
                 .maxGlucose(max)

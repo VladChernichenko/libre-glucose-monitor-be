@@ -1,16 +1,16 @@
 package che.glucosemonitorbe.ai;
 
 import che.glucosemonitorbe.domain.CgmReading;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.CarbsOnBoardService;
-import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +36,7 @@ class ContextAggregatorServiceTest {
 
     @Mock CgmReadingRepository chartDataRepository;
     @Mock NoteRepository noteRepository;
-    @Mock COBSettingsService cobSettingsService;
+    @Mock UserSettingsService userSettingsService;
     @Mock UserInsulinPreferencesService insulinPreferencesService;
     @Mock CarbsOnBoardService carbsOnBoardService;
     @Mock InsulinCalculatorService insulinCalculatorService;
@@ -44,20 +44,20 @@ class ContextAggregatorServiceTest {
     @InjectMocks ContextAggregatorService service;
 
     private UUID userId;
-    private COBSettingsDTO defaultCobSettings;
+    private UserSettingsDTO defaultUserSettings;
     private UserInsulinPreferencesDTO defaultInsulinPrefs;
     private RapidInsulinIobParameters defaultRapidIob;
 
     @BeforeEach
     void setUp() {
         userId = UUID.randomUUID();
-        defaultCobSettings = new COBSettingsDTO();
-        defaultCobSettings.setCarbRatio(2.0);
-        defaultCobSettings.setIsf(2.5);
+        defaultUserSettings = new UserSettingsDTO();
+        defaultUserSettings.setCarbRatio(2.0);
+        defaultUserSettings.setIsf(2.5);
         defaultInsulinPrefs = new UserInsulinPreferencesDTO();
         defaultRapidIob = new RapidInsulinIobParameters(4.0, 75);
 
-        when(cobSettingsService.getCOBSettings(userId)).thenReturn(defaultCobSettings);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(defaultUserSettings);
         when(insulinPreferencesService.getPreferences(userId)).thenReturn(defaultInsulinPrefs);
         when(insulinPreferencesService.getRapidIobParameters(userId)).thenReturn(defaultRapidIob);
         when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any())).thenReturn(List.of());

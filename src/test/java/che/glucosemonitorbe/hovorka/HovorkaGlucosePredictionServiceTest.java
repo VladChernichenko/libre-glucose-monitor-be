@@ -2,12 +2,12 @@ package che.glucosemonitorbe.hovorka;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
-import che.glucosemonitorbe.service.COBSettingsService;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,7 +41,7 @@ class HovorkaGlucosePredictionServiceTest {
 
     @Mock HovorkaParameterService paramService;
     @Mock UserInsulinPreferencesService insulinPrefsService;
-    @Mock COBSettingsService cobSettingsService;
+    @Mock UserSettingsService userSettingsService;
 
     private HovorkaGlucosePredictionService service;
     private HovorkaParameters params;
@@ -55,7 +55,7 @@ class HovorkaGlucosePredictionServiceTest {
         HovorkaOdeSolver solver    = new HovorkaOdeSolver(gutModel);
         BasalInsulinResolver basal = new BasalInsulinResolver();
         service = new HovorkaGlucosePredictionService(
-                paramService, solver, basal, insulinPrefsService, gutModel, cobSettingsService);
+                paramService, solver, basal, insulinPrefsService, gutModel, userSettingsService);
 
         double weight = 70.0;
         double vG  = HovorkaParameters.VG_PER_KG * weight;
@@ -279,11 +279,11 @@ class HovorkaGlucosePredictionServiceTest {
                 .units(units)
                 .build();
 
-        COBSettingsDTO settings = new COBSettingsDTO();
+        UserSettingsDTO settings = new UserSettingsDTO();
         settings.setIsf(params.isf());   // 2.2, matches the Hovorka-calibrated fallback
         settings.setIsfBreakfast(0.5);   // manual override for the morning window
 
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settings);
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settings);
 
         List<PredictionPointDTO> curve = service.buildPredictionPath(
                 params, g0, NOW, List.of(), List.of(dose), List.of(), USER_ID, 60);
@@ -326,11 +326,11 @@ class HovorkaGlucosePredictionServiceTest {
                 .units(units)
                 .build();
 
-        COBSettingsDTO settings = new COBSettingsDTO();
+        UserSettingsDTO settings = new UserSettingsDTO();
         settings.setIsf(params.isf());   // 2.2, the NIGHT fallback (no override for NIGHT)
         settings.setIsfDinner(4.0);      // manual override for the dinner window
 
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settings);
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settings);
 
         List<PredictionPointDTO> curve = service.buildPredictionPath(
                 params, g0, now, List.of(), List.of(dose), List.of(), USER_ID, 60);
@@ -378,12 +378,12 @@ class HovorkaGlucosePredictionServiceTest {
                 .units(unitsLunch)
                 .build();
 
-        COBSettingsDTO settings = new COBSettingsDTO();
+        UserSettingsDTO settings = new UserSettingsDTO();
         settings.setIsf(params.isf());   // 2.2, fallback (unused here — both doses have overrides)
         settings.setIsfBreakfast(0.5);
         settings.setIsfLunch(1.5);
 
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settings);
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settings);
 
         List<PredictionPointDTO> curve = service.buildPredictionPath(
                 params, g0, now, List.of(), List.of(doseBreakfast, doseLunch), List.of(), USER_ID, 60);

@@ -2,17 +2,17 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
-import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.FeatureToggleService;
+import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
 
-import jakarta.validation.Valid;
 import java.util.Map;
 
 @Tag(name = "Glucose Calculations", description = "Glucose trend, delta, and 2-hour prediction calculations")

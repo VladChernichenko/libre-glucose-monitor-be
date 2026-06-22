@@ -3,7 +3,10 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.dto.VerificationEventDTO;
 import che.glucosemonitorbe.dto.VerificationSummaryDTO;
-import che.glucosemonitorbe.entity.*;
+import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.entity.UserSettings;
+import che.glucosemonitorbe.entity.VerificationEvent;
+import che.glucosemonitorbe.entity.VerificationSummary;
 import che.glucosemonitorbe.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,7 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,7 +40,7 @@ public class VerificationService {
     private final VerificationEventRepository verificationEventRepository;
     private final VerificationSummaryRepository verificationSummaryRepository;
     private final NoteRepository noteRepository;
-    private final COBSettingsRepository cobSettingsRepository;
+    private final UserSettingsRepository userSettingsRepository;
     private final CgmReadingRepository cgmReadingRepository;
 
     // ── Enqueue a note for verification ──────────────────────────────────────
@@ -113,7 +118,7 @@ public class VerificationService {
         }
 
         // Compute predicted vs actual
-        COBSettings cob = cobSettingsRepository.findByUserId(event.getUserId()).orElse(null);
+        UserSettings cob = userSettingsRepository.findByUserId(event.getUserId()).orElse(null);
         double carbRatio = cob != null && cob.getCarbRatio() != null ? cob.getCarbRatio() : 2.0;
         double isf       = cob != null && cob.getIsf()       != null ? cob.getIsf()       : 1.0;
 
@@ -144,7 +149,7 @@ public class VerificationService {
 
     // ── Rolling summary ───────────────────────────────────────────────────────
 
-    private void refreshSummary(UUID userId, COBSettings cob) {
+    private void refreshSummary(UUID userId, UserSettings cob) {
         List<VerificationEvent> completed = verificationEventRepository.findCompletedByUserId(userId);
         List<VerificationEvent> window = completed.stream().limit(WINDOW_SIZE).toList();
 
@@ -205,10 +210,10 @@ public class VerificationService {
         VerificationSummary summary = verificationSummaryRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("No verification summary for user " + userId));
 
-        COBSettings cob = cobSettingsRepository.findByUserId(userId).orElseThrow();
+        UserSettings cob = userSettingsRepository.findByUserId(userId).orElseThrow();
         if (summary.getSuggestedCarbRatio() != null) cob.setCarbRatio(summary.getSuggestedCarbRatio());
         if (summary.getSuggestedIsf()       != null) cob.setIsf(summary.getSuggestedIsf());
-        cobSettingsRepository.save(cob);
+        userSettingsRepository.save(cob);
 
         // Reset rolling window by marking completed events as stale (re-use skip status)
         List<VerificationEvent> completed = verificationEventRepository.findCompletedByUserId(userId);

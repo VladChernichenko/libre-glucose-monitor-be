@@ -1,8 +1,8 @@
 package che.glucosemonitorbe.service;
 
-import che.glucosemonitorbe.dto.COBSettingsDTO;
-import che.glucosemonitorbe.entity.COBSettings;
-import che.glucosemonitorbe.repository.COBSettingsRepository;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
+import che.glucosemonitorbe.entity.UserSettings;
+import che.glucosemonitorbe.repository.UserSettingsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -17,9 +17,9 @@ import java.util.UUID;
 @Service
 @Transactional
 @RequiredArgsConstructor
-public class COBSettingsService {
+public class UserSettingsService {
 
-    private final COBSettingsRepository cobSettingsRepository;
+    private final UserSettingsRepository userSettingsRepository;
     
     /**
      * Get COB settings for a user, creating default settings if none exist
@@ -28,17 +28,17 @@ public class COBSettingsService {
      */
     /**
      * Get COB settings for a user, returning defaults if none exist.
-     * BUG L3 fix: getCOBSettings must NOT call repository.save — it is a read method
+     * BUG L3 fix: getUserSettings must NOT call repository.save — it is a read method
      * that is decorated with @Cacheable. Calling save from a @Cacheable method creates
      * a write-in-read side-effect that breaks caching semantics and causes unexpected
      * DataIntegrityViolationExceptions under concurrency (see C1).
      * Returns a default DTO (not persisted) when no settings row exists.
      */
-    @Cacheable(value = "cobSettings", key = "#userId")
-    public COBSettingsDTO getCOBSettings(UUID userId) {
-        return cobSettingsRepository.findByUserId(userId)
+    @Cacheable(value = "userSettings", key = "#userId")
+    public UserSettingsDTO getUserSettings(UUID userId) {
+        return userSettingsRepository.findByUserId(userId)
                 .map(this::convertToDTO)
-                .orElseGet(() -> new COBSettingsDTO(null, userId, 2.0, 1.0, 45, 240));
+                .orElseGet(() -> new UserSettingsDTO(null, userId, 2.0, 1.0, 45, 240));
     }
     
     /**
@@ -47,28 +47,28 @@ public class COBSettingsService {
      * @param settingsDTO the settings to save
      * @return the saved COB settings DTO
      */
-    @CacheEvict(value = "cobSettings", key = "#userId")
-    public COBSettingsDTO saveCOBSettings(UUID userId, COBSettingsDTO settingsDTO) {
-        log.info("saveCOBSettings request for userId={}: carbRatio={}, isf={}, carbHalfLife={}, " +
+    @CacheEvict(value = "userSettings", key = "#userId")
+    public UserSettingsDTO saveUserSettings(UUID userId, UserSettingsDTO settingsDTO) {
+        log.info("saveUserSettings request for userId={}: carbRatio={}, isf={}, carbHalfLife={}, " +
                         "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}",
                 userId, settingsDTO.getCarbRatio(), settingsDTO.getIsf(), settingsDTO.getCarbHalfLife(),
                 settingsDTO.getMaxCOBDuration(), settingsDTO.getBodyWeightKg(),
                 settingsDTO.getIsfBreakfast(), settingsDTO.getIsfLunch(), settingsDTO.getIsfDinner());
 
-        Optional<COBSettings> existingSettings = cobSettingsRepository.findByUserId(userId);
+        Optional<UserSettings> existingSettings = userSettingsRepository.findByUserId(userId);
 
-        COBSettings settings;
+        UserSettings settings;
         if (existingSettings.isPresent()) {
             settings = existingSettings.get();
             updateSettings(settings, settingsDTO);
         } else {
-            settings = new COBSettings();
+            settings = new UserSettings();
             settings.setUserId(userId);
             updateSettings(settings, settingsDTO);
         }
 
-        COBSettings savedSettings = cobSettingsRepository.save(settings);
-        log.info("saveCOBSettings persisted for userId={}: isf={}, isfBreakfast={}, isfLunch={}, isfDinner={}",
+        UserSettings savedSettings = userSettingsRepository.save(settings);
+        log.info("saveUserSettings persisted for userId={}: isf={}, isfBreakfast={}, isfLunch={}, isfDinner={}",
                 userId, savedSettings.getIsf(), savedSettings.getIsfBreakfast(),
                 savedSettings.getIsfLunch(), savedSettings.getIsfDinner());
         return convertToDTO(savedSettings);
@@ -78,9 +78,9 @@ public class COBSettingsService {
      * Delete COB settings for a user
      * @param userId the user ID
      */
-    @CacheEvict(value = "cobSettings", key = "#userId")
-    public void deleteCOBSettings(UUID userId) {
-        cobSettingsRepository.deleteByUserId(userId);
+    @CacheEvict(value = "userSettings", key = "#userId")
+    public void deleteUserSettings(UUID userId) {
+        userSettingsRepository.deleteByUserId(userId);
     }
     
     /**
@@ -88,8 +88,8 @@ public class COBSettingsService {
      * @param userId the user ID
      * @return true if settings exist, false otherwise
      */
-    public boolean hasCOBSettings(UUID userId) {
-        return cobSettingsRepository.existsByUserId(userId);
+    public boolean hasUserSettings(UUID userId) {
+        return userSettingsRepository.existsByUserId(userId);
     }
     
     /**
@@ -97,7 +97,7 @@ public class COBSettingsService {
      * @param settings the settings entity to update
      * @param settingsDTO the DTO with new values
      */
-    private void updateSettings(COBSettings settings, COBSettingsDTO settingsDTO) {
+    private void updateSettings(UserSettings settings, UserSettingsDTO settingsDTO) {
         if (settingsDTO.getCarbRatio() != null) {
             settings.setCarbRatio(settingsDTO.getCarbRatio());
         }
@@ -129,8 +129,8 @@ public class COBSettingsService {
     /**
      * Convert entity to DTO.
      */
-    private COBSettingsDTO convertToDTO(COBSettings settings) {
-        return new COBSettingsDTO(
+    private UserSettingsDTO convertToDTO(UserSettings settings) {
+        return new UserSettingsDTO(
             settings.getId(),
             settings.getUserId(),
             settings.getCarbRatio(),

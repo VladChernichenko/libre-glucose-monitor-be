@@ -36,7 +36,7 @@ The canonical schema is defined in `src/main/resources/db/migration/`:
 
 | File | Contents |
 |------|----------|
-| `V1__baseline_schema.sql` | Core tables: `users`, `notes`, `cob_settings`, `user_insulin_preferences`, `cgm_readings`, `revoked_tokens`, `user_data_source_config` |
+| `V1__baseline_schema.sql` | Core tables: `users`, `notes`, `user_settings`, `user_insulin_preferences`, `cgm_readings`, `revoked_tokens`, `user_data_source_config` |
 | `V2__seed_insulin_catalog.sql` | Insulin catalog seed data |
 | `V3__seed_glycemic_response_patterns.sql` | Glycemic response pattern seed data |
 | `V4__seed_clinical_knowledge.sql` | Clinical knowledge seed data |

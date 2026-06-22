@@ -1,13 +1,12 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CgmReading;
-import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.domain.IsfMealWindowSnapshot;
 import che.glucosemonitorbe.domain.MealWindow;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.IsfMealWindowDTO;
 import che.glucosemonitorbe.dto.IsfMealWindowProfileResponse;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.IsfMealWindowSnapshotRepository;
@@ -19,13 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * Computes observational per-meal-window ISF estimates from each user's historical bolus
@@ -81,8 +74,7 @@ public class IsfMealWindowProfileService {
     private final NoteRepository noteRepository;
     private final CgmReadingRepository cgmReadingRepository;
     private final UserInsulinPreferencesService userInsulinPreferencesService;
-    private final COBSettingsService cobSettingsService;
-    private final InsulinCalculatorService insulinCalculatorService;
+    private final UserSettingsService userSettingsService;
     private final CarbsOnBoardService carbsOnBoardService;
     private final IsfMealWindowSnapshotRepository snapshotRepository;
 
@@ -125,9 +117,9 @@ public class IsfMealWindowProfileService {
         List<CgmReading> cgmReadings = loadCgmReadings(userId, since);
 
         RapidInsulinIobParameters rapid = userInsulinPreferencesService.getRapidIobParameters(userId);
-        COBSettingsDTO cobSettings = cobSettingsService.getCOBSettings(userId);
-        double carbRatio = (cobSettings != null && cobSettings.getCarbRatio() != null && cobSettings.getCarbRatio() > 0)
-                ? cobSettings.getCarbRatio()
+        UserSettingsDTO userSettings = userSettingsService.getUserSettings(userId);
+        double carbRatio = (userSettings != null && userSettings.getCarbRatio() != null && userSettings.getCarbRatio() > 0)
+                ? userSettings.getCarbRatio()
                 : DEFAULT_CARB_RATIO;
 
         List<EventEstimate> estimates = new ArrayList<>();
@@ -139,7 +131,7 @@ public class IsfMealWindowProfileService {
             Optional<MealWindow> windowOpt = MealWindow.fromTimestamp(bolus.getTimestamp());
             if (windowOpt.isEmpty()) continue; // night — skip
 
-            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, cobSettings, carbRatio);
+            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, carbRatio);
             if (est != null) {
                 estimates.add(est);
             }
@@ -193,7 +185,7 @@ public class IsfMealWindowProfileService {
             List<Note> allNotes,
             List<CgmReading> cgmReadings,
             RapidInsulinIobParameters rapid,
-            COBSettingsDTO cobSettings,
+            UserSettingsDTO userSettings,
             double carbRatio) {
 
         LocalDateTime t0 = bolus.getTimestamp();
@@ -231,7 +223,7 @@ public class IsfMealWindowProfileService {
         }
 
         // Carbs that remained un-absorbed at tEnd don't contribute to the observed Δglucose.
-        double cobAtEnd = carbsOnBoardService.calculateTotalCarbsOnBoard(carbEntries, tEnd, cobSettings);
+        double cobAtEnd = carbsOnBoardService.calculateTotalCarbsOnBoard(carbEntries, tEnd, userSettings);
         double absorbedGrams = Math.max(0.0, carbsGrams - cobAtEnd);
         double deltaCarbMmol = (absorbedGrams / 10.0) * carbRatio;
         double observedDelta = postCgm - preCgm; // mmol/L change from t0 to tEnd
@@ -319,11 +311,6 @@ public class IsfMealWindowProfileService {
                 .hasData(hasData)
                 .lastUpdated(snap.getLastUpdated())
                 .build();
-    }
-
-    // Test-only access to internal constants for assertions
-    static List<MealWindow> orderedWindows() {
-        return Arrays.asList(MealWindow.values());
     }
 
     /** Per-event ISF estimate prior to bucketing. */

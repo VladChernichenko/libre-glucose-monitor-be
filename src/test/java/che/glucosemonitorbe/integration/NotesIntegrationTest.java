@@ -1,10 +1,6 @@
 package che.glucosemonitorbe.integration;
 
-import che.glucosemonitorbe.dto.AuthRequest;
-import che.glucosemonitorbe.dto.AuthResponse;
-import che.glucosemonitorbe.dto.CreateNoteRequest;
-import che.glucosemonitorbe.dto.NoteDto;
-import che.glucosemonitorbe.dto.RegisterRequest;
+import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -15,12 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;

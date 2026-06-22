@@ -10,11 +10,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
@@ -479,10 +475,10 @@ public class LlmGatewayService {
     private String formatPredictionMath(AnalysisContext context) {
         double carb = context.getActiveCob() == null ? 0.0 : context.getActiveCob();
         double iob = context.getActiveIob() == null ? 0.0 : context.getActiveIob();
-        double isf = context.getCobSettings() != null && context.getCobSettings().getIsf() != null
-                ? context.getCobSettings().getIsf() : 1.0;
-        double carbRatio = context.getCobSettings() != null && context.getCobSettings().getCarbRatio() != null
-                ? context.getCobSettings().getCarbRatio() : 2.0;
+        double isf = context.getUserSettings() != null && context.getUserSettings().getIsf() != null
+                ? context.getUserSettings().getIsf() : 1.0;
+        double carbRatio = context.getUserSettings() != null && context.getUserSettings().getCarbRatio() != null
+                ? context.getUserSettings().getCarbRatio() : 2.0;
         double preBolusTiming = context.getPreBolusTimingContribution() == null ? 0.0 : context.getPreBolusTimingContribution();
         return "predicted2h = clamp(1.0..25.0, latest + carbContribution + insulinContribution + preBolusTimingContribution)\n"
                 + "carbContribution = (activeCOB/10) * carbRatio = (" + carb + "/10) * " + carbRatio + "\n"

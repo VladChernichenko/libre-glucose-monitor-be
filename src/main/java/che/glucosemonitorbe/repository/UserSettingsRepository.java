@@ -1,6 +1,6 @@
 package che.glucosemonitorbe.repository;
 
-import che.glucosemonitorbe.entity.COBSettings;
+import che.glucosemonitorbe.entity.UserSettings;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -8,14 +8,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
-public interface COBSettingsRepository extends JpaRepository<COBSettings, UUID> {
+public interface UserSettingsRepository extends JpaRepository<UserSettings, UUID> {
     
     /**
      * Find COB settings by user ID
      * @param userId the user ID
      * @return Optional containing COB settings if found
      */
-    Optional<COBSettings> findByUserId(UUID userId);
+    Optional<UserSettings> findByUserId(UUID userId);
     
     /**
      * Check if COB settings exist for a user

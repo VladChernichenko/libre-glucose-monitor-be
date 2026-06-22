@@ -1,8 +1,8 @@
 package che.glucosemonitorbe.controller;
 
-import che.glucosemonitorbe.dto.COBSettingsDTO;
-import che.glucosemonitorbe.service.COBSettingsService;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.service.UserService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -16,21 +16,21 @@ import java.util.UUID;
 
 @Tag(name = "COB Settings", description = "Carbs-on-board decay configuration per user")
 @RestController
-@RequestMapping("/api/cob-settings")
+@RequestMapping("/api/user-settings")
 @RequiredArgsConstructor
-public class COBSettingsController {
+public class UserSettingsController {
 
-    private final COBSettingsService cobSettingsService;
+    private final UserSettingsService userSettingsService;
     private final UserService userService;
     
     @Operation(summary = "Get COB settings for the authenticated user")
     @ApiResponses({ @ApiResponse(responseCode = "200", description = "Settings returned"),
                     @ApiResponse(responseCode = "401", description = "Unauthorized") })
     @GetMapping
-    public ResponseEntity<COBSettingsDTO> getCOBSettings(Authentication authentication) {
+    public ResponseEntity<UserSettingsDTO> getUserSettings(Authentication authentication) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
-            COBSettingsDTO settings = cobSettingsService.getCOBSettings(userId);
+            UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
             return ResponseEntity.ok(settings);
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
@@ -40,12 +40,12 @@ public class COBSettingsController {
     @Operation(summary = "Create or update COB settings")
     @ApiResponse(responseCode = "200", description = "Settings saved")
     @PostMapping
-    public ResponseEntity<COBSettingsDTO> saveCOBSettings(
+    public ResponseEntity<UserSettingsDTO> saveUserSettings(
             Authentication authentication,
-            @RequestBody COBSettingsDTO settingsDTO) {
+            @RequestBody UserSettingsDTO settingsDTO) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
-            COBSettingsDTO savedSettings = cobSettingsService.saveCOBSettings(userId, settingsDTO);
+            UserSettingsDTO savedSettings = userSettingsService.saveUserSettings(userId, settingsDTO);
             return ResponseEntity.ok(savedSettings);
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
@@ -59,12 +59,12 @@ public class COBSettingsController {
      * @return the updated COB settings DTO
      */
     @PutMapping
-    public ResponseEntity<COBSettingsDTO> updateCOBSettings(
+    public ResponseEntity<UserSettingsDTO> updateUserSettings(
             Authentication authentication,
-            @RequestBody COBSettingsDTO settingsDTO) {
+            @RequestBody UserSettingsDTO settingsDTO) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
-            COBSettingsDTO updatedSettings = cobSettingsService.saveCOBSettings(userId, settingsDTO);
+            UserSettingsDTO updatedSettings = userSettingsService.saveUserSettings(userId, settingsDTO);
             return ResponseEntity.ok(updatedSettings);
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
@@ -77,10 +77,10 @@ public class COBSettingsController {
      * @return success response
      */
     @DeleteMapping
-    public ResponseEntity<Void> deleteCOBSettings(Authentication authentication) {
+    public ResponseEntity<Void> deleteUserSettings(Authentication authentication) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
-            cobSettingsService.deleteCOBSettings(userId);
+            userSettingsService.deleteUserSettings(userId);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
@@ -93,10 +93,10 @@ public class COBSettingsController {
      * @return true if settings exist, false otherwise
      */
     @GetMapping("/exists")
-    public ResponseEntity<Boolean> hasCOBSettings(Authentication authentication) {
+    public ResponseEntity<Boolean> hasUserSettings(Authentication authentication) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
-            boolean exists = cobSettingsService.hasCOBSettings(userId);
+            boolean exists = userSettingsService.hasUserSettings(userId);
             return ResponseEntity.ok(exists);
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();

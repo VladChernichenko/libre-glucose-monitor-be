@@ -1,7 +1,5 @@
 package che.glucosemonitorbe.repository;
 
-import che.glucosemonitorbe.domain.CgmReading;
-import che.glucosemonitorbe.entity.Note;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Pageable;
 
@@ -10,7 +8,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Structural contract tests for Spring Data repository interfaces.

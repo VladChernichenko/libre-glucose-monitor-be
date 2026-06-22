@@ -1,18 +1,21 @@
 package che.glucosemonitorbe.controller;
 
+import che.glucosemonitorbe.dto.ClientTimeInfo;
 import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
-import che.glucosemonitorbe.dto.ClientTimeInfo;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
-import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.UserService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -25,7 +28,7 @@ import java.util.UUID;
 public class PredictionTestController {
     
     private final GlucoseCalculationsService glucoseCalculationsService;
-    private final COBSettingsService cobSettingsService;
+    private final UserSettingsService userSettingsService;
     private final UserService userService;
     
     /**
@@ -149,7 +152,7 @@ public class PredictionTestController {
         try {
             // Convert username to UUID using UserService
             UUID userUUID = userService.getUserByUsername(userId).getId();
-            COBSettingsDTO userSettings = cobSettingsService.getCOBSettings(userUUID);
+            UserSettingsDTO userSettings = userSettingsService.getUserSettings(userUUID);
             
             // Calculate prediction using user settings
             double carbEffect = (testCOB / 10.0) * userSettings.getCarbRatio();

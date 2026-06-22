@@ -55,7 +55,7 @@ class ExperimentServiceMinimumDurationTest {
     @Mock private NoteRepository noteRepository;
     @Mock private CarbsOnBoardService cobService;
     @Mock private InsulinCalculatorService insulinCalculatorService;
-    @Mock private COBSettingsService cobSettingsService;
+    @Mock private UserSettingsService userSettingsService;
     @Mock private GlucoseCalculationsService calculationsService;
 
     private ExperimentService service;
@@ -66,7 +66,7 @@ class ExperimentServiceMinimumDurationTest {
         service = new ExperimentService(
                 experimentRepository, noteRepository,
                 cobService, insulinCalculatorService,
-                cobSettingsService, calculationsService);
+                userSettingsService, calculationsService);
         when(experimentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 

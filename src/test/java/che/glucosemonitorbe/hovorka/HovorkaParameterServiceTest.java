@@ -1,11 +1,11 @@
 package che.glucosemonitorbe.hovorka;
 
-import che.glucosemonitorbe.dto.COBSettingsDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.entity.ExperimentReading;
 import che.glucosemonitorbe.repository.ExperimentRepository;
-import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class HovorkaParameterServiceTest {
 
-    @Mock COBSettingsService cobSettingsService;
+    @Mock UserSettingsService userSettingsService;
     @Mock UserInsulinPreferencesService insulinPrefsService;
     @Mock ExperimentRepository experimentRepository;
 
@@ -37,7 +37,7 @@ class HovorkaParameterServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new HovorkaParameterService(cobSettingsService, insulinPrefsService, experimentRepository);
+        service = new HovorkaParameterService(userSettingsService, insulinPrefsService, experimentRepository);
         when(experimentRepository.findCompletedByUserIdAndType(any(), any()))
                 .thenReturn(List.of()); // default: no experiments
     }
@@ -46,7 +46,7 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_nullWeight_usesDefaultWeight() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithWeight(null));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithWeight(null));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.weightKg()).isEqualTo(HovorkaParameters.DEFAULT_WEIGHT);
         assertThat(p.vG()).isCloseTo(HovorkaParameters.VG_PER_KG * 70.0, within(0.001));
@@ -55,14 +55,14 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_zeroWeight_usesDefaultWeight() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithWeight(0.0));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithWeight(0.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.weightKg()).isEqualTo(HovorkaParameters.DEFAULT_WEIGHT);
     }
 
     @Test
     void buildForUser_explicitWeight_usesIt() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithWeight(80.0));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithWeight(80.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.weightKg()).isEqualTo(80.0);
         assertThat(p.vG()).isCloseTo(HovorkaParameters.VG_PER_KG * 80.0, within(0.001));
@@ -72,21 +72,21 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_nullCarbHalfLife_usesDefault45() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithHalfLife(null));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithHalfLife(null));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.tMaxG()).isCloseTo(45.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, within(0.001));
     }
 
     @Test
     void buildForUser_zeroCarbHalfLife_usesDefault45() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithHalfLife(0));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithHalfLife(0));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.tMaxG()).isCloseTo(45.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, within(0.001));
     }
 
     @Test
     void buildForUser_explicitCarbHalfLife_usesIt() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithHalfLife(60));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithHalfLife(60));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.tMaxG()).isCloseTo(60.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, within(0.001));
     }
@@ -107,21 +107,21 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_nullCarbRatio_agIsCalibrationDefault() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(null));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(null));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
     @Test
     void buildForUser_zeroCarbRatio_agIsCalibrationDefault() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.0));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
     @Test
     void buildForUser_largeCarbRatio_agUnchanged_decoupledFromCarbRatio() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(10.0));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(10.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
         // A_G no longer scales with carb ratio — a large CR must NOT inflate meal magnitude.
         assertThat(p.aG()).isCloseTo(1.00, within(0.001));
@@ -129,7 +129,7 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_smallCarbRatio_agUnchanged_decoupledFromCarbRatio() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.1));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.1));
         HovorkaParameters p = service.buildForUser(USER_ID);
         // A_G no longer scales with carb ratio — a small CR must NOT shrink meal magnitude.
         assertThat(p.aG()).isCloseTo(1.00, within(0.001));
@@ -139,21 +139,21 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_nullIsf_usesDefault22() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithIsf(null));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithIsf(null));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.isf()).isCloseTo(2.2, within(0.001));
     }
 
     @Test
     void buildForUser_zeroIsf_usesDefault22() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithIsf(0.0));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithIsf(0.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.isf()).isCloseTo(2.2, within(0.001));
     }
 
     @Test
     void buildForUser_explicitIsf_usesIt() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithIsf(3.5));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithIsf(3.5));
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.isf()).isCloseTo(3.5, within(0.001));
     }
@@ -162,7 +162,7 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_noBasalCheck_egpNetEqualsF01() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(defaultSettings());
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
         // experimentRepository returns empty list (set in setUp)
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.egpNet()).isCloseTo(p.f01(), within(1e-6));
@@ -173,7 +173,7 @@ class HovorkaParameterServiceTest {
         ExperimentReading reading = ExperimentReading.builder().glucoseMmol(5.5).build();
         Experiment exp = Experiment.builder().isStable(true).readings(List.of(reading)).build();
 
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(defaultSettings());
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
         when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
                 .thenReturn(List.of(exp));
 
@@ -187,7 +187,7 @@ class HovorkaParameterServiceTest {
         ExperimentReading reading = ExperimentReading.builder().glucoseMmol(3.0).build();
         Experiment exp = Experiment.builder().isStable(true).readings(List.of(reading)).build();
 
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(settingsWithWeight(70.0));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithWeight(70.0));
         when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
                 .thenReturn(List.of(exp));
 
@@ -201,7 +201,7 @@ class HovorkaParameterServiceTest {
         ExperimentReading reading = ExperimentReading.builder().glucoseMmol(5.5).build();
         Experiment exp = Experiment.builder().isStable(false).readings(List.of(reading)).build();
 
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(defaultSettings());
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
         when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
                 .thenReturn(List.of(exp));
 
@@ -214,7 +214,7 @@ class HovorkaParameterServiceTest {
     void buildForUser_basalCheckWithNoReadings_fallsBackToF01() {
         Experiment exp = Experiment.builder().isStable(true).readings(List.of()).build();
 
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(defaultSettings());
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
         when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
                 .thenReturn(List.of(exp));
 
@@ -224,7 +224,7 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_repositoryThrows_egpFallsBackToF01() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(defaultSettings());
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
         when(experimentRepository.findCompletedByUserIdAndType(any(), any()))
                 .thenThrow(new RuntimeException("DB error"));
 
@@ -234,7 +234,7 @@ class HovorkaParameterServiceTest {
 
     @Test
     void buildForUser_populationConstants_k12k21AreSet() {
-        when(cobSettingsService.getCOBSettings(USER_ID)).thenReturn(defaultSettings());
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.k12()).isEqualTo(HovorkaParameters.K12_POP);
         assertThat(p.k21()).isEqualTo(HovorkaParameters.K21_POP);
@@ -242,8 +242,8 @@ class HovorkaParameterServiceTest {
 
     // ── helpers ────────────────────────────────────────────────────────────────
 
-    private static COBSettingsDTO defaultSettings() {
-        COBSettingsDTO dto = new COBSettingsDTO();
+    private static UserSettingsDTO defaultSettings() {
+        UserSettingsDTO dto = new UserSettingsDTO();
         dto.setBodyWeightKg(70.0);
         dto.setCarbHalfLife(45);
         dto.setCarbRatio(2.0);
@@ -251,26 +251,26 @@ class HovorkaParameterServiceTest {
         return dto;
     }
 
-    private static COBSettingsDTO settingsWithWeight(Double weight) {
-        COBSettingsDTO dto = defaultSettings();
+    private static UserSettingsDTO settingsWithWeight(Double weight) {
+        UserSettingsDTO dto = defaultSettings();
         dto.setBodyWeightKg(weight);
         return dto;
     }
 
-    private static COBSettingsDTO settingsWithHalfLife(Integer halfLife) {
-        COBSettingsDTO dto = defaultSettings();
+    private static UserSettingsDTO settingsWithHalfLife(Integer halfLife) {
+        UserSettingsDTO dto = defaultSettings();
         dto.setCarbHalfLife(halfLife);
         return dto;
     }
 
-    private static COBSettingsDTO settingsWithCarbRatio(Double cr) {
-        COBSettingsDTO dto = defaultSettings();
+    private static UserSettingsDTO settingsWithCarbRatio(Double cr) {
+        UserSettingsDTO dto = defaultSettings();
         dto.setCarbRatio(cr);
         return dto;
     }
 
-    private static COBSettingsDTO settingsWithIsf(Double isf) {
-        COBSettingsDTO dto = defaultSettings();
+    private static UserSettingsDTO settingsWithIsf(Double isf) {
+        UserSettingsDTO dto = defaultSettings();
         dto.setIsf(isf);
         return dto;
     }

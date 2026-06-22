@@ -1,9 +1,12 @@
 package che.glucosemonitorbe.ai;
 
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -20,7 +23,7 @@ public class AnalysisContext {
     private List<Double> glucoseValues;
     private List<Long> glucoseTimestamps;
     private List<Note> notes;
-    private COBSettingsDTO cobSettings;
+    private UserSettingsDTO userSettings;
     private UserInsulinPreferencesDTO insulinPreferences;
     private double minGlucose;
     private double maxGlucose;

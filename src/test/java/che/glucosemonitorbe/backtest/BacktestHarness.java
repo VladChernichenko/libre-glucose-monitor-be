@@ -5,24 +5,14 @@ import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
-import che.glucosemonitorbe.hovorka.DallaManGutModel;
-import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
-import che.glucosemonitorbe.hovorka.HovorkaOdeSolver;
-import che.glucosemonitorbe.hovorka.HovorkaParameterService;
-import che.glucosemonitorbe.hovorka.HovorkaParameters;
-import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
-import che.glucosemonitorbe.service.COBSettingsService;
+import che.glucosemonitorbe.hovorka.*;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -327,10 +317,10 @@ public final class BacktestHarness {
         BasalInsulinResolver basal = new BasalInsulinResolver();
         HovorkaParameterService paramService = mock(HovorkaParameterService.class);
         UserInsulinPreferencesService prefs = mock(UserInsulinPreferencesService.class);
-        COBSettingsService cobSettingsService = mock(COBSettingsService.class);
+        UserSettingsService userSettingsService = mock(UserSettingsService.class);
         when(prefs.getRapidIobParameters(any()))
                 .thenReturn(new RapidInsulinIobParameters(cfg.diaHours, cfg.peakMinutes));
-        return new HovorkaGlucosePredictionService(paramService, solver, basal, prefs, gut, cobSettingsService);
+        return new HovorkaGlucosePredictionService(paramService, solver, basal, prefs, gut, userSettingsService);
     }
 
     private static HovorkaParameters buildParams(Config cfg) {

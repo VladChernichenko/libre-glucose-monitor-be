@@ -1,6 +1,9 @@
 package che.glucosemonitorbe.service.libre;
 
-import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.dto.LibreConnection;
+import che.glucosemonitorbe.dto.LibreGlucoseData;
+import che.glucosemonitorbe.dto.LibreGlucoseReading;
+import che.glucosemonitorbe.dto.LibreSensorInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -21,7 +24,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 import java.util.zip.GZIPInputStream;
 
 /**

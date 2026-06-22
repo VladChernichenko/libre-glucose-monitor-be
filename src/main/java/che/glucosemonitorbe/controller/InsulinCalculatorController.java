@@ -2,17 +2,15 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.InsulinCalculationResponse;
-import che.glucosemonitorbe.dto.ActiveInsulinResponse;
-import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.FeatureToggleService;
+import che.glucosemonitorbe.service.InsulinCalculatorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.web.bind.annotation.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 @Tag(name = "Insulin Calculator", description = "Warsaw Method bolus calculation — standard + extended bolus from carbs, fat, protein")

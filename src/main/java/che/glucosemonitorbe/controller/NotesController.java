@@ -1,6 +1,9 @@
 package che.glucosemonitorbe.controller;
 
-import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.dto.CreateNoteRequest;
+import che.glucosemonitorbe.dto.NoteDto;
+import che.glucosemonitorbe.dto.NotesSummaryResponse;
+import che.glucosemonitorbe.dto.UpdateNoteRequest;
 import che.glucosemonitorbe.service.NotesService;
 import che.glucosemonitorbe.service.UserService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;

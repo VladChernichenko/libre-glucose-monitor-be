@@ -32,7 +32,7 @@ package che.glucosemonitorbe.hovorka;
  *                  applied once, downstream, by {@code DallaManGutModel.F}. Must not be derived
  *                  from the carb ratio (an insulin-dosing quantity).
  * @param isf       Insulin sensitivity factor [mmol/L per unit] — from user experiment
- * @param weightKg  Body weight [kg] — from cob_settings or 70 kg default
+ * @param weightKg  Body weight [kg] — from user_settings or 70 kg default
  */
 public record HovorkaParameters(
         double vG,

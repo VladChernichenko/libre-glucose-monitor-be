@@ -50,7 +50,7 @@ public class ExperimentService {
     private final NoteRepository noteRepository;
     private final CarbsOnBoardService cobService;
     private final InsulinCalculatorService insulinCalculatorService;
-    private final COBSettingsService cobSettingsService;
+    private final UserSettingsService userSettingsService;
     /** Owns the single shared COB/IOB calculation used by the dashboard, so both surfaces agree. */
     private final GlucoseCalculationsService calculationsService;
 
@@ -65,7 +65,7 @@ public class ExperimentService {
         // never show different COB/IOB.
         GlucoseCalculationsService.ActiveCobIobInputs inputs =
                 calculationsService.activeCobIobInputs(userId, now);
-        COBSettingsDTO userSettings = inputs.settings();
+        UserSettingsDTO userSettings = inputs.settings();
         RapidInsulinIobParameters rapidIob = inputs.rapidIob();
 
         double cobGrams = cobService.calculateTotalCarbsOnBoard(inputs.carbsEntries(), now, userSettings);
@@ -110,7 +110,7 @@ public class ExperimentService {
     }
 
     private int estimateCleanInMinutes(List<CarbsEntry> carbsEntries, List<InsulinDose> insulinEntries,
-                                       LocalDateTime now, COBSettingsDTO userSettings,
+                                       LocalDateTime now, UserSettingsDTO userSettings,
                                        RapidInsulinIobParameters rapidIob) {
         for (int m = 5; m <= 600; m += 5) {
             LocalDateTime t = now.plusMinutes(m);
@@ -332,7 +332,7 @@ public class ExperimentService {
         exp.setResultNotes("baseline=" + round2(baseline) + ", peak=" + round2(peak) +
                 ", rise=" + round2(rise) + ", grams=" + exp.getGramsConsumed() + ", carbRatio=" + round2(carbRatio));
 
-        // Save to COBSettings
+        // Save to UserSettings
         boolean saved = saveCarbRatioToSettings(exp.getUserId(), round2(carbRatio));
 
         return ExperimentResultDTO.builder()
@@ -406,9 +406,9 @@ public class ExperimentService {
 
     private boolean saveCarbRatioToSettings(UUID userId, double carbRatio) {
         try {
-            COBSettingsDTO current = cobSettingsService.getCOBSettings(userId);
+            UserSettingsDTO current = userSettingsService.getUserSettings(userId);
             current.setCarbRatio(carbRatio);
-            cobSettingsService.saveCOBSettings(userId, current);
+            userSettingsService.saveUserSettings(userId, current);
             return true;
         } catch (Exception e) {
             return false;
@@ -417,9 +417,9 @@ public class ExperimentService {
 
     private boolean saveIsfToSettings(UUID userId, double isf) {
         try {
-            COBSettingsDTO current = cobSettingsService.getCOBSettings(userId);
+            UserSettingsDTO current = userSettingsService.getUserSettings(userId);
             current.setIsf(isf);
-            cobSettingsService.saveCOBSettings(userId, current);
+            userSettingsService.saveUserSettings(userId, current);
             return true;
         } catch (Exception e) {
             return false;

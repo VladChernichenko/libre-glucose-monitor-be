@@ -1,11 +1,6 @@
 package che.glucosemonitorbe.controller;
 
-import che.glucosemonitorbe.dto.AuthRequest;
-import che.glucosemonitorbe.dto.AuthResponse;
-import che.glucosemonitorbe.dto.LogoutRequest;
-import che.glucosemonitorbe.dto.LogoutResponse;
-import che.glucosemonitorbe.dto.RefreshTokenRequest;
-import che.glucosemonitorbe.dto.RegisterRequest;
+import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;

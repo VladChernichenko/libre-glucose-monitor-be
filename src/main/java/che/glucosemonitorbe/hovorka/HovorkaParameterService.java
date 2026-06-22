@@ -1,12 +1,10 @@
 package che.glucosemonitorbe.hovorka;
 
-import che.glucosemonitorbe.dto.COBSettingsDTO;
-import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.entity.ExperimentReading;
 import che.glucosemonitorbe.repository.ExperimentRepository;
-import che.glucosemonitorbe.service.COBSettingsService;
-import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,9 +16,9 @@ import java.util.UUID;
 /**
  * Builds {@link HovorkaParameters} for a specific user by combining:
  * <ul>
- *   <li>ISF from {@code cob_settings.isf} (measured by {@code ISF_ONE_UNIT} experiment)</li>
- *   <li>Carb half-life from {@code cob_settings.carb_half_life} → {@code tMaxG}</li>
- *   <li>Body weight from {@code cob_settings.body_weight_kg} (or population default 70 kg)</li>
+ *   <li>ISF from {@code user_settings.isf} (measured by {@code ISF_ONE_UNIT} experiment)</li>
+ *   <li>Carb half-life from {@code user_settings.carb_half_life} → {@code tMaxG}</li>
+ *   <li>Body weight from {@code user_settings.body_weight_kg} (or population default 70 kg)</li>
  *   <li>EGP0 estimated from last stable {@code BASAL_CHECK} fasting readings</li>
  * </ul>
  *
@@ -40,7 +38,7 @@ import java.util.UUID;
  * centred on 1.0. It must not be derived from the carb ratio (an insulin-dosing quantity with
  * no relation to the absorbed fraction); doing so previously double-discounted carbs
  * (A_G × F ≈ 0.8 × 0.9 = 0.72, i.e. ~28 % of carbs silently vanished) and corrupted meal
- * magnitude per user. See {@link HovorkaGlucosePredictionService#toCarbMmol}.</p>
+ * magnitude per user.</p>
  */
 @Slf4j
 @Service
@@ -68,8 +66,7 @@ public class HovorkaParameterService {
      */
     public static final double HALF_LIFE_TO_TMAX_G = 1.68;
 
-    private final COBSettingsService        cobSettingsService;
-    private final UserInsulinPreferencesService insulinPrefsService;
+    private final UserSettingsService        userSettingsService;
     private final ExperimentRepository      experimentRepository;
 
     /**
@@ -78,7 +75,7 @@ public class HovorkaParameterService {
      */
     @Transactional(readOnly = true)
     public HovorkaParameters buildForUser(UUID userId) {
-        COBSettingsDTO settings = cobSettingsService.getCOBSettings(userId);
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
 
         // ── Body weight ───────────────────────────────────────────────────────
         double weight = (settings.getBodyWeightKg() != null && settings.getBodyWeightKg() > 0)
@@ -147,7 +144,7 @@ public class HovorkaParameterService {
             Experiment lastStable = basalChecks.stream()
                     .filter(e -> Boolean.TRUE.equals(e.getIsStable()))
                     .findFirst()
-                    .orElse(basalChecks.get(0));
+                    .orElse(basalChecks.getFirst());
 
             List<ExperimentReading> readings = lastStable.getReadings();
             if (readings == null || readings.isEmpty()) {

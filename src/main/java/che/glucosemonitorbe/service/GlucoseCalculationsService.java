@@ -1,29 +1,23 @@
 package che.glucosemonitorbe.service;
 
-import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
-import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
-import che.glucosemonitorbe.dto.PredictionFactors;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
-import che.glucosemonitorbe.dto.PredictionPointDTO;
-import che.glucosemonitorbe.dto.ProspectiveNoteDTO;
-import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
+import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import che.glucosemonitorbe.repository.NoteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -58,7 +52,7 @@ public class GlucoseCalculationsService {
     private static final int PREDICTION_PATH_STEP_MINUTES = 5;
     // Sparse step applies beyond 4 h (HFHP / Dual Wave tail) — 10 min is fine for that region.
     private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 10;
-    private final COBSettingsService cOBSettingsService;
+    private final UserSettingsService userSettingsService;
 
     /**
      * Optional: injected only when Hovorka model is on the classpath and enabled.
@@ -86,7 +80,7 @@ public class GlucoseCalculationsService {
         // very same method, so the dashboard and the Experiments tab can never show different
         // COB/IOB. See ExperimentService.checkBackground.
         ActiveCobIobInputs inputs = activeCobIobInputs(userUUID, currentTime);
-        COBSettingsDTO userSettings = inputs.settings();
+        UserSettingsDTO userSettings = inputs.settings();
         List<Note> recentNotes = inputs.notes();
 
         // Prospective (un-persisted) what-if events are an OVERLAY: they shape the prediction
@@ -201,7 +195,7 @@ public class GlucoseCalculationsService {
             List<Note> notes,
             List<CarbsEntry> carbsEntries,
             List<InsulinDose> insulinEntries,
-            COBSettingsDTO settings,
+            UserSettingsDTO settings,
             RapidInsulinIobParameters rapidIob) {}
 
     /**
@@ -211,7 +205,7 @@ public class GlucoseCalculationsService {
      * delegate here, guaranteeing identical COB/IOB on both screens.
      */
     public ActiveCobIobInputs activeCobIobInputs(UUID userId, LocalDateTime now) {
-        COBSettingsDTO settings = cOBSettingsService.getCOBSettings(userId);
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userId);
         List<Note> notes = getRecentNotes(userId, now);
         List<CarbsEntry> carbsEntries = new ArrayList<>(notes.stream()
@@ -231,7 +225,7 @@ public class GlucoseCalculationsService {
      * override if set, otherwise the autotuned isf), falling back to DEFAULT_ISF if
      * neither is set.
      */
-    private double resolveIsf(COBSettingsDTO userSettings, LocalDateTime time) {
+    private double resolveIsf(UserSettingsDTO userSettings, LocalDateTime time) {
         Double effectiveIsf = userSettings.getEffectiveIsf(time);
         return effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
     }
@@ -242,7 +236,7 @@ public class GlucoseCalculationsService {
             List<CarbsEntry> carbsEntries,
             List<InsulinDose> insulinEntries,
             UUID userUUID,
-            COBSettingsDTO userSettings,
+            UserSettingsDTO userSettings,
             Double avgBolusToMealMinutes,
             RapidInsulinIobParameters rapidIob,
             Double currentTrendMmolPerMin
@@ -330,7 +324,7 @@ public class GlucoseCalculationsService {
     private PredictionFactors calculatePredictionFactors(
             double currentCOB, double futureCOB,
             double currentIOB, double futureIOB,
-            double horizonMinutes, COBSettingsDTO userSettings, Double avgBolusToMealMinutes,
+            double horizonMinutes, UserSettingsDTO userSettings, Double avgBolusToMealMinutes,
             List<CarbsEntry> carbsEntries, LocalDateTime currentTime) {
         // Use user-specific settings instead of defaults.
         // insulinContribution represents the IOB consumed by predictionTime, so resolve

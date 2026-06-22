@@ -8,14 +8,13 @@ import che.glucosemonitorbe.nightscout.NightScoutIntegration;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.CgmReadingService;
 import che.glucosemonitorbe.service.UserGlucoseSyncStateService;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-
-import jakarta.annotation.PreDestroy;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;

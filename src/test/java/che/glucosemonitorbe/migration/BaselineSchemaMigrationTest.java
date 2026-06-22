@@ -7,11 +7,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -44,7 +40,7 @@ class BaselineSchemaMigrationTest {
 
             assertThat(tables).contains(
                     "users",
-                    "cob_settings",
+                    "user_settings",
                     "notes",
                     "cgm_readings",
                     "user_data_source_config",
@@ -154,8 +150,8 @@ class BaselineSchemaMigrationTest {
     }
 
     @Test
-    @DisplayName("cob_settings carries the positive carb_ratio check")
-    void cobSettingsHasCarbRatioCheck() throws SQLException {
+    @DisplayName("user_settings carries the positive carb_ratio check")
+    void userSettingsHasCarbRatioCheck() throws SQLException {
         runFlyway();
 
         try (Connection c = jdbc(); Statement s = c.createStatement()) {
@@ -164,10 +160,10 @@ class BaselineSchemaMigrationTest {
             // matches brittle. Naming the constraint in the migration is the stable contract.
             ResultSet rs = s.executeQuery(
                     "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
-                  + "WHERE conrelid = 'cob_settings'::regclass AND contype = 'c' "
-                  + "  AND conname = 'chk_cob_settings_carb_ratio_positive'");
+                  + "WHERE conrelid = 'user_settings'::regclass AND contype = 'c' "
+                  + "  AND conname = 'chk_user_settings_carb_ratio_positive'");
             assertThat(rs.next())
-                    .as("named CHECK constraint chk_cob_settings_carb_ratio_positive exists")
+                    .as("named CHECK constraint chk_user_settings_carb_ratio_positive exists")
                     .isTrue();
             assertThat(rs.getString(2)).contains("carb_ratio");
         }

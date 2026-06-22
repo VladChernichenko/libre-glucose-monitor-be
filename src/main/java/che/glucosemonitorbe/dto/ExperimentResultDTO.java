@@ -16,7 +16,7 @@ public class ExperimentResultDTO {
     private Double computedCarbRatio;
     /** Basal Check result: true = stable (<= 1.7 mmol/L delta). */
     private Boolean isStable;
-    /** Whether result was automatically saved to COBSettings. */
+    /** Whether result was automatically saved to UserSettings. */
     private boolean savedToSettings;
     /** Human-readable explanation of the result. */
     private String explanation;

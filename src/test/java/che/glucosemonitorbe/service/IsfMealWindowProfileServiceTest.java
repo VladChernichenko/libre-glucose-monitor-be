@@ -3,10 +3,10 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.IsfMealWindowSnapshot;
 import che.glucosemonitorbe.domain.MealWindow;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.IsfMealWindowDTO;
 import che.glucosemonitorbe.dto.IsfMealWindowProfileResponse;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.IsfMealWindowSnapshotRepository;
@@ -23,7 +23,6 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,7 +51,7 @@ class IsfMealWindowProfileServiceTest {
     @Mock private NoteRepository noteRepository;
     @Mock private CgmReadingRepository cgmReadingRepository;
     @Mock private UserInsulinPreferencesService userInsulinPreferencesService;
-    @Mock private COBSettingsService cobSettingsService;
+    @Mock private UserSettingsService userSettingsService;
     @Mock private InsulinCalculatorService insulinCalculatorService;
     @Mock private CarbsOnBoardService carbsOnBoardService;
     @Mock private IsfMealWindowSnapshotRepository snapshotRepository;
@@ -63,21 +62,21 @@ class IsfMealWindowProfileServiceTest {
 
     // CR = 2.0 mmol/L per 10g, ISF target = 2.5 mmol/L per unit, DIA = 4.5h, peak = 75min
     private static final RapidInsulinIobParameters RAPID = new RapidInsulinIobParameters(4.5, 75.0);
-    private static final COBSettingsDTO COB_SETTINGS = cobSettings(2.0, 2.5, 45, 240);
+    private static final UserSettingsDTO USER_SETTINGS = userSettings(2.0, 2.5, 45, 240);
 
     @BeforeEach
     void setUp() {
         service = new IsfMealWindowProfileService(
                 noteRepository, cgmReadingRepository,
-                userInsulinPreferencesService, cobSettingsService,
+                userInsulinPreferencesService, userSettingsService,
                 insulinCalculatorService, carbsOnBoardService, snapshotRepository);
 
         when(userInsulinPreferencesService.getRapidIobParameters(userId)).thenReturn(RAPID);
-        when(cobSettingsService.getCOBSettings(userId)).thenReturn(COB_SETTINGS);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(USER_SETTINGS);
         when(snapshotRepository.findByUserIdAndMealWindow(eq(userId), any())).thenReturn(Optional.empty());
         when(snapshotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // By default, all carbs fully absorbed by end of window
-        when(carbsOnBoardService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class)))
+        when(carbsOnBoardService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class)))
                 .thenReturn(0.0);
     }
 
@@ -430,8 +429,8 @@ class IsfMealWindowProfileServiceTest {
                 .orElseThrow(() -> new AssertionError("No snapshot saved for " + window));
     }
 
-    private static COBSettingsDTO cobSettings(double cr, double isf, int halfLife, int maxDuration) {
-        COBSettingsDTO s = new COBSettingsDTO();
+    private static UserSettingsDTO userSettings(double cr, double isf, int halfLife, int maxDuration) {
+        UserSettingsDTO s = new UserSettingsDTO();
         s.setCarbRatio(cr);
         s.setIsf(isf);
         s.setCarbHalfLife(halfLife);

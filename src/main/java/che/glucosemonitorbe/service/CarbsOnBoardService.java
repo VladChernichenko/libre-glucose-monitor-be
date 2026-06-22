@@ -1,8 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
-import java.util.UUID;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -15,7 +14,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CarbsOnBoardService {
     
-    private final COBSettingsService cOBSettingsService;
+    private final UserSettingsService userSettingsService;
 
     /**
      * Calculate remaining carbs on board for a given time.
@@ -26,14 +25,14 @@ public class CarbsOnBoardService {
         if (entry == null || entry.getCarbs() == null || entry.getCarbs() <= 0) {
             return 0.0;
         }
-        COBSettingsDTO cobSettings = cOBSettingsService.getCOBSettings(userId);
-        return calculateRemainingCarbs(entry, currentTime, cobSettings);
+        UserSettingsDTO userSettings = userSettingsService.getUserSettings(userId);
+        return calculateRemainingCarbs(entry, currentTime, userSettings);
     }
 
     /**
      * Inner calculation using pre-loaded settings — avoids a DB round-trip per entry.
      */
-    private double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime, COBSettingsDTO cobSettings) {
+    private double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime, UserSettingsDTO userSettings) {
         long minutesSinceEntry = ChronoUnit.MINUTES.between(entry.getTimestamp(), currentTime);
         if (minutesSinceEntry < 0) {
             return 0.0;
@@ -44,14 +43,14 @@ public class CarbsOnBoardService {
                 ? (int) (entry.getSuggestedDurationHours() * 60) : 0;
         // Base default from user settings; fall back to speed-class baseline when not configured.
         // Evidence: simple carbs absorb 90% within 1–2 h (Hovorka model, 40–80 min time constant).
-        int userDefault = cobSettings.getMaxCOBDuration() != null ? cobSettings.getMaxCOBDuration() : 0;
+        int userDefault = userSettings.getMaxCOBDuration() != null ? userSettings.getMaxCOBDuration() : 0;
         int speedDefault = speedClassDurationMinutes(entry.getAbsorptionSpeedClass());
         int defaultDuration = userDefault > 0 ? userDefault : speedDefault;
         int maxDuration = patternDuration > 0 ? Math.max(patternDuration, defaultDuration) : defaultDuration;
         if (minutesSinceEntry > maxDuration) {
             return 0.0;
         }
-        int halfLife = cobSettings.getCarbHalfLife() != null ? cobSettings.getCarbHalfLife() : 45;
+        int halfLife = userSettings.getCarbHalfLife() != null ? userSettings.getCarbHalfLife() : 45;
         if (halfLife <= 0) {
             return 0.0;
         }
@@ -132,18 +131,18 @@ public class CarbsOnBoardService {
         if (entries == null || entries.isEmpty()) {
             return 0.0;
         }
-        COBSettingsDTO cobSettings = cOBSettingsService.getCOBSettings(userId);
-        return calculateTotalCarbsOnBoard(entries, currentTime, cobSettings);
+        UserSettingsDTO userSettings = userSettingsService.getUserSettings(userId);
+        return calculateTotalCarbsOnBoard(entries, currentTime, userSettings);
     }
 
     /** Batch COB with pre-loaded settings (no per-iteration settings lookup). */
-    public double calculateTotalCarbsOnBoard(List<CarbsEntry> entries, LocalDateTime currentTime, COBSettingsDTO cobSettings) {
+    public double calculateTotalCarbsOnBoard(List<CarbsEntry> entries, LocalDateTime currentTime, UserSettingsDTO userSettings) {
         if (entries == null || entries.isEmpty()) {
             return 0.0;
         }
         return entries.stream()
                 .filter(e -> e != null && e.getCarbs() != null && e.getCarbs() > 0)
-                .mapToDouble(entry -> calculateRemainingCarbs(entry, currentTime, cobSettings))
+                .mapToDouble(entry -> calculateRemainingCarbs(entry, currentTime, userSettings))
                 .sum();
     }
     

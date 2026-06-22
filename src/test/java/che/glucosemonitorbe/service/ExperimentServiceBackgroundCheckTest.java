@@ -3,8 +3,8 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.BackgroundStatusDTO;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.repository.ExperimentRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,7 +23,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link ExperimentService#checkBackground(UUID, String)}.
@@ -45,7 +46,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Mock private NoteRepository noteRepository;
     @Mock private CarbsOnBoardService cobService;
     @Mock private InsulinCalculatorService insulinCalculatorService;
-    @Mock private COBSettingsService cobSettingsService;
+    @Mock private UserSettingsService userSettingsService;
     @Mock private GlucoseCalculationsService calculationsService;
 
     private ExperimentService service;
@@ -53,7 +54,7 @@ class ExperimentServiceBackgroundCheckTest {
     private final UUID userId = UUID.randomUUID();
 
     // Mirrors real user settings: carbHalfLife=180 min (the value that triggered the old bug)
-    private static final COBSettingsDTO SETTINGS_WITH_SLOW_CARB_HALFLIFE = settings(180);
+    private static final UserSettingsDTO SETTINGS_WITH_SLOW_CARB_HALFLIFE = settings(180);
     // Standard rapid insulin: Fiasp-like, DIA=5h, peak=55min
     private static final RapidInsulinIobParameters RAPID_IOB = new RapidInsulinIobParameters(5.0, 55.0);
 
@@ -62,7 +63,7 @@ class ExperimentServiceBackgroundCheckTest {
         service = new ExperimentService(
                 experimentRepository, noteRepository,
                 cobService, insulinCalculatorService,
-                cobSettingsService, calculationsService);
+                userSettingsService, calculationsService);
 
         // Default: no active entries. The settings + rapid-IOB parameters are carried by the
         // shared inputs object, exactly as they reach the dashboard.
@@ -88,7 +89,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("COB just below threshold → isClean true")
     void cobJustBelowThreshold_isClean() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(4.9);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(4.9);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
@@ -98,7 +99,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("IOB just below threshold → isClean true")
     void iobJustBelowThreshold_isClean() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.29);
 
@@ -110,7 +111,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("Active carbs above threshold → isClean false, cobGrams reported")
     void highCOB_isDirty() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(12.3);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(12.3);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
@@ -123,7 +124,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("Active insulin above threshold → isClean false, iobUnits reported")
     void highIOB_isDirty() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(1.5);
 
@@ -136,7 +137,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("COB exactly at threshold (5.0 g) → isClean false (strict less-than)")
     void cobExactlyAtThreshold_isDirty() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(5.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(5.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
@@ -146,7 +147,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("IOB exactly at threshold (0.3 u) → isClean false (strict less-than)")
     void iobExactlyAtThreshold_isDirty() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.3);
 
@@ -156,7 +157,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("Clean COB but dirty IOB → still dirty (both must be below threshold)")
     void cleanCobDirtyIob_isDirty() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(1.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(1.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.5);
 
@@ -241,7 +242,7 @@ class ExperimentServiceBackgroundCheckTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<CarbsEntry>> carbCaptor = ArgumentCaptor.forClass(List.class);
-        verify(cobService).calculateTotalCarbsOnBoard(carbCaptor.capture(), any(), any(COBSettingsDTO.class));
+        verify(cobService).calculateTotalCarbsOnBoard(carbCaptor.capture(), any(), any(UserSettingsDTO.class));
         assertThat(carbCaptor.getValue()).containsExactly(carb);
 
         @SuppressWarnings("unchecked")
@@ -265,7 +266,7 @@ class ExperimentServiceBackgroundCheckTest {
     @DisplayName("cleanInMinutes reflects first forward-sample minute that is clean")
     void cleanInMinutes_forwardSampledFromDecayCurves() {
         // Dirty now; clean at the first forward sample (+5 min)
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class)))
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class)))
                 .thenReturn(7.0)   // t=now  → dirty
                 .thenReturn(2.0);  // t=+5m  → clean
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -282,7 +283,7 @@ class ExperimentServiceBackgroundCheckTest {
     @Test
     @DisplayName("cleanInMinutes caps at 600 when curves never reach threshold within window")
     void cleanInMinutes_capsAt600WhenNeverClean() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(99.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(99.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
@@ -296,7 +297,7 @@ class ExperimentServiceBackgroundCheckTest {
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private void stubClean() {
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
     }
@@ -306,8 +307,8 @@ class ExperimentServiceBackgroundCheckTest {
                 List.of(), carbs, insulin, SETTINGS_WITH_SLOW_CARB_HALFLIFE, RAPID_IOB);
     }
 
-    private static COBSettingsDTO settings(int carbHalfLife) {
-        COBSettingsDTO s = new COBSettingsDTO();
+    private static UserSettingsDTO settings(int carbHalfLife) {
+        UserSettingsDTO s = new UserSettingsDTO();
         s.setIsf(2.0);
         s.setCarbRatio(0.2);
         s.setCarbHalfLife(carbHalfLife);

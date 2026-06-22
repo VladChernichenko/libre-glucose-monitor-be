@@ -1,7 +1,10 @@
 package che.glucosemonitorbe.ai;
 
 import che.glucosemonitorbe.domain.ClinicalKnowledgeChunk;
-import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.dto.AiAnalysisResponse;
+import che.glucosemonitorbe.dto.AiInsightEvidenceDTO;
+import che.glucosemonitorbe.dto.AiPatternDTO;
+import che.glucosemonitorbe.dto.AiRecommendationDTO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;

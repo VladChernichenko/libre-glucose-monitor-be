@@ -1,12 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.User;
-import che.glucosemonitorbe.dto.AuthRequest;
-import che.glucosemonitorbe.dto.AuthResponse;
-import che.glucosemonitorbe.dto.LogoutRequest;
-import che.glucosemonitorbe.dto.LogoutResponse;
-import che.glucosemonitorbe.dto.RefreshTokenRequest;
-import che.glucosemonitorbe.dto.RegisterRequest;
+import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.exception.InvalidTokenException;
 import che.glucosemonitorbe.exception.UsernameAlreadyExistsException;
 import che.glucosemonitorbe.repository.UserRepository;

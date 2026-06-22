@@ -5,8 +5,9 @@ import che.glucosemonitorbe.service.FeatureToggleService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.web.bind.annotation.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
 
 @Tag(name = "Feature Toggles", description = "Feature flag status and per-user migration group checks")

@@ -1,16 +1,16 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.InsulinDose;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
+import che.glucosemonitorbe.dto.ActiveInsulinResponse;
 import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.InsulinCalculationResponse;
-import che.glucosemonitorbe.dto.ActiveInsulinResponse;
-import org.springframework.stereotype.Service;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -20,7 +20,7 @@ public class InsulinCalculatorService {
     /** Safe ISF fallback (mmol/L per unit) used when user has no configured value. */
     private static final double DEFAULT_ISF = 2.2;
 
-    private final COBSettingsService cobSettingsService;
+    private final UserSettingsService userSettingsService;
 
     /** Defaults match catalog {@code FIASP} (user-specific curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}). */
     public static final double DEFAULT_DIA_HOURS = 4.5;
@@ -208,14 +208,14 @@ public class InsulinCalculatorService {
     }
 
     /**
-     * Resolve ISF for a user: reads from COBSettings when userId is present,
+     * Resolve ISF for a user: reads from UserSettings when userId is present,
      * falls back to DEFAULT_ISF (2.2 mmol/L per unit) when not configured.
      */
     private double resolveIsf(String userIdStr) {
         if (userIdStr != null && !userIdStr.isBlank()) {
             try {
                 UUID userId = UUID.fromString(userIdStr);
-                COBSettingsDTO settings = cobSettingsService.getCOBSettings(userId);
+                UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
                 if (settings != null && settings.getIsf() != null && settings.getIsf() > 0) {
                     return settings.getIsf();
                 }
@@ -230,7 +230,7 @@ public class InsulinCalculatorService {
         double recommendedInsulin = request.getCarbs() / 12.0;
 
         if (request.getCurrentGlucose() != null && request.getCurrentGlucose() > request.getTargetGlucose()) {
-            // BE-4 fix: read user-configured ISF from COBSettings instead of hardcoded 1.0
+            // BE-4 fix: read user-configured ISF from UserSettings instead of hardcoded 1.0
             double isf = resolveIsf(request.getUserId());
             double correctionDose = (request.getCurrentGlucose() - request.getTargetGlucose()) / isf;
             recommendedInsulin += correctionDose;

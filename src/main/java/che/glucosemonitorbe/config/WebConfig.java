@@ -10,7 +10,6 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void configurePathMatch(PathMatchConfigurer configurer) {
         // Enable trailing slash matching for all paths
-        // This allows both /api/cob-settings and /api/cob-settings/ to work
         configurer.setUseTrailingSlashMatch(true);
     }
 }

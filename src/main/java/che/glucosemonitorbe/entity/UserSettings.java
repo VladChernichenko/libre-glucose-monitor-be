@@ -12,8 +12,8 @@ import java.util.UUID;
 @Setter
 @Getter
 @Entity
-@Table(name = "cob_settings")
-public class COBSettings {
+@Table(name = "user_settings")
+public class UserSettings {
 
     // Getters and Setters
     @Id
@@ -62,14 +62,14 @@ public class COBSettings {
     private LocalDateTime updatedAt;
     
     // Constructors
-    public COBSettings() {
+    public UserSettings() {
         this.carbRatio = 2.0;
         this.isf = 1.0;
         this.carbHalfLife = 45;
         this.maxCOBDuration = 240;
     }
     
-    public COBSettings(UUID userId) {
+    public UserSettings(UUID userId) {
         this.userId = userId;
         this.carbRatio = 2.0;
         this.isf = 1.0;
@@ -77,7 +77,7 @@ public class COBSettings {
         this.maxCOBDuration = 240;
     }
     
-    public COBSettings(UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
+    public UserSettings(UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
         this.userId = userId;
         this.carbRatio = carbRatio;
         this.isf = isf;

@@ -3,9 +3,10 @@ package che.glucosemonitorbe.integration;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.repository.UserRepository;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,7 +17,8 @@ import org.springframework.http.*;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.*;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -192,7 +194,7 @@ class ExperimentE2ETest {
         assertEquals(0.2, result.getBody().getComputedCarbRatio(), 0.01,
                 "carbRatio should be rise/grams = 3.0/15 = 0.20 mmol/L per gram");
         assertTrue(result.getBody().isSavedToSettings(),
-                "Result should be automatically saved to COBSettings");
+                "Result should be automatically saved to UserSettings");
     }
 
     // ── T6: ISF computation ───────────────────────────────────────────────────
@@ -225,7 +227,7 @@ class ExperimentE2ETest {
         assertEquals(2.5, result.getBody().getComputedIsf(), 0.01,
                 "isf should be drop/units = 2.5/1 = 2.5 mmol/L per unit");
         assertTrue(result.getBody().isSavedToSettings(),
-                "ISF result should be saved to COBSettings");
+                "ISF result should be saved to UserSettings");
     }
 
     // ── T7: Dirty background → 409 ───────────────────────────────────────────

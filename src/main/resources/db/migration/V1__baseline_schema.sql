@@ -10,7 +10,7 @@
 -- Standardizations:
 --   * All timestamps are TIMESTAMPTZ (UTC).
 --   * All user-scoped tables FK users(id) ON DELETE CASCADE.
---   * cob_settings is the single source of truth for COB/ISF/half-life.
+--   * user_settings is the single source of truth for COB/ISF/half-life.
 --   * All CREATE TABLE / CREATE INDEX use IF NOT EXISTS for idempotency.
 -- =============================================================================
 
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- -----------------------------------------------------------------------------
 -- Per-user COB / ISF parameters (single source of truth)
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS cob_settings (
+CREATE TABLE IF NOT EXISTS user_settings (
     id                  UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id             UUID             NOT NULL UNIQUE,
     carb_ratio          DOUBLE PRECISION NOT NULL DEFAULT 2.0,
@@ -50,17 +50,17 @@ CREATE TABLE IF NOT EXISTS cob_settings (
     isf_dinner          DOUBLE PRECISION,                        -- manual ISF override for 16:00-22:00; NULL = use autotuned `isf`
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
-    CONSTRAINT fk_cob_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT chk_cob_settings_carb_ratio_positive CHECK (carb_ratio > 0),
-    CONSTRAINT chk_cob_settings_weight_positive CHECK (body_weight_kg IS NULL OR body_weight_kg > 0),
-    CONSTRAINT chk_cob_settings_isf_breakfast_positive CHECK (isf_breakfast IS NULL OR isf_breakfast > 0),
-    CONSTRAINT chk_cob_settings_isf_lunch_positive CHECK (isf_lunch IS NULL OR isf_lunch > 0),
-    CONSTRAINT chk_cob_settings_isf_dinner_positive CHECK (isf_dinner IS NULL OR isf_dinner > 0)
+    CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT chk_user_settings_carb_ratio_positive CHECK (carb_ratio > 0),
+    CONSTRAINT chk_user_settings_weight_positive CHECK (body_weight_kg IS NULL OR body_weight_kg > 0),
+    CONSTRAINT chk_user_settings_isf_breakfast_positive CHECK (isf_breakfast IS NULL OR isf_breakfast > 0),
+    CONSTRAINT chk_user_settings_isf_lunch_positive CHECK (isf_lunch IS NULL OR isf_lunch > 0),
+    CONSTRAINT chk_user_settings_isf_dinner_positive CHECK (isf_dinner IS NULL OR isf_dinner > 0)
 );
-CREATE INDEX IF NOT EXISTS idx_cob_settings_user_id    ON cob_settings(user_id);
-CREATE INDEX IF NOT EXISTS idx_cob_settings_created_at ON cob_settings(created_at);
+CREATE INDEX IF NOT EXISTS idx_user_settings_user_id    ON user_settings(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_settings_created_at ON user_settings(created_at);
 
-COMMENT ON TABLE cob_settings IS
+COMMENT ON TABLE user_settings IS
     'Per-user COB/ISF/half-life parameters. Replaces legacy user_configurations.';
 
 -- -----------------------------------------------------------------------------

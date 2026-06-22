@@ -2,24 +2,20 @@ package che.glucosemonitorbe.hovorka;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.service.COBSettingsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * Hovorka-based glucose prediction path builder.
@@ -67,7 +63,7 @@ public class HovorkaGlucosePredictionService {
     private final BasalInsulinResolver          basalResolver;
     private final UserInsulinPreferencesService insulinPrefsService;
     private final DallaManGutModel              gutModel;
-    private final COBSettingsService            cobSettingsService;
+    private final UserSettingsService            userSettingsService;
 
     /**
      * Build the full prediction path using the Hovorka ODE model.
@@ -93,7 +89,7 @@ public class HovorkaGlucosePredictionService {
 
         HovorkaParameters p      = paramService.buildForUser(userId);
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        COBSettingsDTO settings  = cobSettingsService.getCOBSettings(userId);
+        UserSettingsDTO settings  = userSettingsService.getUserSettings(userId);
         return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, pathMinutes);
     }
@@ -125,7 +121,7 @@ public class HovorkaGlucosePredictionService {
             int pathMinutes) {
 
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        COBSettingsDTO settings = cobSettingsService.getCOBSettings(userId);
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, pathMinutes);
     }
@@ -136,7 +132,7 @@ public class HovorkaGlucosePredictionService {
     private List<PredictionPointDTO> buildWithParams(
             HovorkaParameters p,
             RapidInsulinIobParameters rapidIob,
-            COBSettingsDTO settings,
+            UserSettingsDTO settings,
             double currentGlucose,
             LocalDateTime currentTime,
             List<CarbsEntry> pastCarbsEntries,
@@ -316,7 +312,7 @@ public class HovorkaGlucosePredictionService {
             LocalDateTime now,
             int pathMinutes,
             RapidInsulinIobParameters rapidIob,
-            COBSettingsDTO settings,
+            UserSettingsDTO settings,
             double fallbackIsf) {
 
         int size = pathMinutes + 2;
@@ -348,7 +344,7 @@ public class HovorkaGlucosePredictionService {
      * {@code time}'s meal window, otherwise {@code fallbackIsf} (the Hovorka-calibrated
      * ISF from {@link HovorkaParameterService#buildForUser}).
      */
-    private double resolveIsf(COBSettingsDTO settings, double fallbackIsf, LocalDateTime time) {
+    private double resolveIsf(UserSettingsDTO settings, double fallbackIsf, LocalDateTime time) {
         if (settings == null) {
             return fallbackIsf;
         }

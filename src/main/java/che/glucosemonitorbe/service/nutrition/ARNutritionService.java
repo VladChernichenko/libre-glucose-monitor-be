@@ -6,8 +6,8 @@ import che.glucosemonitorbe.dto.OFFProductDto;
 import che.glucosemonitorbe.entity.OFFProductDocument;
 import che.glucosemonitorbe.repository.OFFProductRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 

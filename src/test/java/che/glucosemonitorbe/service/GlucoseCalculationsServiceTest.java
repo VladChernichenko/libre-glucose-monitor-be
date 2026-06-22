@@ -3,14 +3,9 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
-import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
-import che.glucosemonitorbe.dto.PredictionFactors;
-import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
-import che.glucosemonitorbe.dto.UserDto;
+import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.service.NotesService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,10 +24,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyDouble;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,7 +39,7 @@ class GlucoseCalculationsServiceTest {
     @Mock private UserInsulinPreferencesService userInsulinPreferencesService;
     @Mock private ObjectMapper objectMapper;
     @Mock private FeatureToggleConfig featureToggleConfig;
-    @Mock private COBSettingsService cOBSettingsService;
+    @Mock private UserSettingsService userSettingsService;
 
     private GlucoseCalculationsService service;
 
@@ -55,7 +48,7 @@ class GlucoseCalculationsServiceTest {
         service = new GlucoseCalculationsService(
                 cobService, insulinCalculatorService, noteRepository,
                 userService, userInsulinPreferencesService, objectMapper,
-                featureToggleConfig, cOBSettingsService);
+                featureToggleConfig, userSettingsService);
     }
 
     @Test
@@ -98,20 +91,20 @@ class GlucoseCalculationsServiceTest {
         when(userService.getUserByUsername(username)).thenReturn(mockUser);
 
         // Stub COB settings to avoid NPE
-        COBSettingsDTO cobSettings = new COBSettingsDTO();
-        cobSettings.setUserId(userId);
-        cobSettings.setCarbRatio(2.0);
-        cobSettings.setIsf(1.0);
-        cobSettings.setCarbHalfLife(45);
-        cobSettings.setMaxCOBDuration(240);
-        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(cobSettings);
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setUserId(userId);
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setCarbHalfLife(45);
+        userSettings.setMaxCOBDuration(240);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(userSettings);
 
         // Stub noteRepository to return empty list
         when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(List.of());
 
         // Stub cobService to return 0.0
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
 
         // Stub insulin preferences and calculator
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
@@ -157,13 +150,13 @@ class GlucoseCalculationsServiceTest {
                 .build();
         when(userService.getUserByUsername(username)).thenReturn(mockUser2);
 
-        COBSettingsDTO cobSettings = new COBSettingsDTO();
-        cobSettings.setUserId(userId);
-        cobSettings.setCarbRatio(2.0);
-        cobSettings.setIsf(1.0);
-        cobSettings.setCarbHalfLife(45);
-        cobSettings.setMaxCOBDuration(480); // 8 hours max for HFHP
-        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(cobSettings);
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setUserId(userId);
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setCarbHalfLife(45);
+        userSettings.setMaxCOBDuration(480); // 8 hours max for HFHP
+        when(userSettingsService.getUserSettings(userId)).thenReturn(userSettings);
 
         // Create a HFHP note from 7.5 hours ago with 60g carbs
         LocalDateTime sevenHoursAgo = LocalDateTime.now().minusHours(7).minusMinutes(30);
@@ -179,7 +172,7 @@ class GlucoseCalculationsServiceTest {
                 .thenReturn(List.of(hfhpNote)); // 8h window includes the HFHP note
 
         ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
-        when(cobService.calculateTotalCarbsOnBoard(carbsCaptor.capture(), any(LocalDateTime.class), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(carbsCaptor.capture(), any(LocalDateTime.class), any(UserSettingsDTO.class))).thenReturn(0.0);
 
         // Required stubs for the calculation pipeline
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
@@ -220,13 +213,13 @@ class GlucoseCalculationsServiceTest {
         when(userService.getUserByUsername(username))
                 .thenReturn(UserDto.builder().id(userId).username(username).build());
 
-        COBSettingsDTO cobSettings = new COBSettingsDTO();
-        cobSettings.setUserId(userId);
-        cobSettings.setCarbRatio(2.0);
-        cobSettings.setIsf(1.0);
-        cobSettings.setCarbHalfLife(45);
-        cobSettings.setMaxCOBDuration(240);
-        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(cobSettings);
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setUserId(userId);
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setCarbHalfLife(45);
+        userSettings.setMaxCOBDuration(240);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(userSettings);
 
         // 20 U of long-acting taken 1 h ago — a massive phantom bolus IOB if mis-classified.
         Note basal = new Note(userId, LocalDateTime.now().minusHours(1), 0.0, 20.0, "Tresiba");
@@ -235,7 +228,7 @@ class GlucoseCalculationsServiceTest {
         when(noteRepository.findByUserIdAndTimestampBetween(any(), any(), any()))
                 .thenReturn(List.of(basal));
 
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
                 .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
         when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
@@ -253,29 +246,29 @@ class GlucoseCalculationsServiceTest {
                 .isEmpty();
     }
 
-    // ── P4: getCOBSettings called O(N) times per prediction path ─────────────
+    // ── P4: getUserSettings called O(N) times per prediction path ─────────────
 
     /**
      * // BUG: P4 — GlucoseCalculationsService.buildPredictionPath calls
      * cobService.calculateTotalCarbsOnBoard once per prediction step (1-minute intervals,
      * up to 480 steps). CarbsOnBoardService.calculateTotalCarbsOnBoard calls
-     * getCOBSettings on EACH invocation, causing 240-480 DB/cache lookups per request.
-     * getCOBSettings must be called exactly ONCE per calculateGlucoseData call.
+     * getUserSettings on EACH invocation, causing 240-480 DB/cache lookups per request.
+     * getUserSettings must be called exactly ONCE per calculateGlucoseData call.
      *
      * This test uses a real CarbsOnBoardService (not mocked) so the prediction loop
-     * actually reaches getCOBSettings. It FAILS against current code because
-     * getCOBSettings is called once per loop iteration.
+     * actually reaches getUserSettings. It FAILS against current code because
+     * getUserSettings is called once per loop iteration.
      */
     @Test
-    void p4_calculateGlucoseData_getCOBSettings_calledExactlyOnce() {
-        COBSettingsService cobSettingsMock = mock(COBSettingsService.class);
-        CarbsOnBoardService realCobService = new CarbsOnBoardService(cobSettingsMock);
+    void p4_calculateGlucoseData_getUserSettings_calledExactlyOnce() {
+        UserSettingsService userSettingsMock = mock(UserSettingsService.class);
+        CarbsOnBoardService realCobService = new CarbsOnBoardService(userSettingsMock);
 
         // Use a fresh service instance wired to the real cobService
         GlucoseCalculationsService svc = new GlucoseCalculationsService(
                 realCobService, insulinCalculatorService, noteRepository,
                 userService, userInsulinPreferencesService, objectMapper,
-                featureToggleConfig, cobSettingsMock);
+                featureToggleConfig, userSettingsMock);
 
         String username = "p4user";
         UUID userId = UUID.randomUUID();
@@ -283,13 +276,13 @@ class GlucoseCalculationsServiceTest {
         UserDto mockUser = UserDto.builder().id(userId).username(username).build();
         when(userService.getUserByUsername(username)).thenReturn(mockUser);
 
-        COBSettingsDTO cobSettings = new COBSettingsDTO();
-        cobSettings.setUserId(userId);
-        cobSettings.setCarbRatio(2.0);
-        cobSettings.setIsf(1.0);
-        cobSettings.setCarbHalfLife(45);
-        cobSettings.setMaxCOBDuration(240);
-        when(cobSettingsMock.getCOBSettings(userId)).thenReturn(cobSettings);
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setUserId(userId);
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setCarbHalfLife(45);
+        userSettings.setMaxCOBDuration(240);
+        when(userSettingsMock.getUserSettings(userId)).thenReturn(userSettings);
 
         when(noteRepository.findByUserIdAndTimestampBetween(any(), any(), any()))
                 .thenReturn(List.of());
@@ -308,8 +301,8 @@ class GlucoseCalculationsServiceTest {
         svc.calculateGlucoseData(request);
 
         // BUG: currently called 240+ times (once per prediction step) — this FAILS
-        verify(cobSettingsMock, times(1))
-                .getCOBSettings(userId);
+        verify(userSettingsMock, times(1))
+                .getUserSettings(userId);
     }
 
     // ── NotebookLM scenario 4: prospective notes null / empty ────────────────
@@ -433,16 +426,16 @@ class GlucoseCalculationsServiceTest {
     void buildPredictionPath_appliesPerMealWindowIsf_perStep() throws Exception {
         UUID userId = UUID.randomUUID();
 
-        COBSettingsDTO cobSettings = new COBSettingsDTO();
-        cobSettings.setUserId(userId);
-        cobSettings.setCarbRatio(2.0);
-        cobSettings.setIsf(1.0);
-        cobSettings.setIsfBreakfast(1.0);
-        cobSettings.setIsfLunch(3.0);
-        cobSettings.setCarbHalfLife(45);
-        cobSettings.setMaxCOBDuration(240);
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setUserId(userId);
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setIsfBreakfast(1.0);
+        userSettings.setIsfLunch(3.0);
+        userSettings.setCarbHalfLife(45);
+        userSettings.setMaxCOBDuration(240);
 
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(LocalDateTime.class), any(COBSettingsDTO.class)))
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(LocalDateTime.class), any(UserSettingsDTO.class)))
                 .thenReturn(0.0);
         when(featureToggleConfig.isHovorkaModelEnabled()).thenReturn(false);
 
@@ -459,14 +452,14 @@ class GlucoseCalculationsServiceTest {
         Method method = GlucoseCalculationsService.class.getDeclaredMethod(
                 "buildPredictionPath",
                 double.class, LocalDateTime.class, List.class, List.class, UUID.class,
-                COBSettingsDTO.class, Double.class, RapidInsulinIobParameters.class, Double.class);
+                UserSettingsDTO.class, Double.class, RapidInsulinIobParameters.class, Double.class);
         method.setAccessible(true);
 
         @SuppressWarnings("unchecked")
         List<che.glucosemonitorbe.dto.PredictionPointDTO> points =
                 (List<che.glucosemonitorbe.dto.PredictionPointDTO>) method.invoke(
                         service, 8.0, currentTime, List.<CarbsEntry>of(), List.<InsulinDose>of(),
-                        userId, cobSettings, null, new RapidInsulinIobParameters(4.0, 75.0), null);
+                        userId, userSettings, null, new RapidInsulinIobParameters(4.0, 75.0), null);
 
         // minute=5 -> 10:55, still BREAKFAST: step delta 0.05 U * isfBreakfast(1.0) = -0.05
         assertThat(points.get(0).getInsulinActivityEffect()).isCloseTo(-0.05, within(0.001));
@@ -487,11 +480,11 @@ class GlucoseCalculationsServiceTest {
      */
     @Test
     void calculatePredictionFactors_resolvesIsfAtPredictionTime_notCurrentTime() throws Exception {
-        COBSettingsDTO cobSettings = new COBSettingsDTO();
-        cobSettings.setCarbRatio(2.0);
-        cobSettings.setIsf(1.0);
-        cobSettings.setIsfBreakfast(1.0);
-        cobSettings.setIsfLunch(3.0);
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setIsfBreakfast(1.0);
+        userSettings.setIsfLunch(3.0);
 
         // currentTime is BREAKFAST (05:00-11:00); +120 min horizon -> 12:50, LUNCH (11:00-16:00).
         LocalDateTime currentTime = LocalDateTime.of(2024, 1, 2, 10, 50);
@@ -500,11 +493,11 @@ class GlucoseCalculationsServiceTest {
         Method method = GlucoseCalculationsService.class.getDeclaredMethod(
                 "calculatePredictionFactors",
                 double.class, double.class, double.class, double.class,
-                double.class, COBSettingsDTO.class, Double.class, List.class, LocalDateTime.class);
+                double.class, UserSettingsDTO.class, Double.class, List.class, LocalDateTime.class);
         method.setAccessible(true);
 
         PredictionFactors factors = (PredictionFactors) method.invoke(
-                service, 0.0, 0.0, 10.0, 8.0, horizonMinutes, cobSettings, null, List.<CarbsEntry>of(), currentTime);
+                service, 0.0, 0.0, 10.0, 8.0, horizonMinutes, userSettings, null, List.<CarbsEntry>of(), currentTime);
 
         // currentIOB - futureIOB = 2.0 U consumed by predictionTime (LUNCH window).
         // Must use isfLunch (3.0) -> -6.0, not isfBreakfast (1.0) -> -2.0.
@@ -521,7 +514,7 @@ class GlucoseCalculationsServiceTest {
     @Test
     void activeCobIobInputs_excludesLongActingInsulinFromIob() {
         UUID userId = UUID.randomUUID();
-        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(new COBSettingsDTO());
+        when(userSettingsService.getUserSettings(userId)).thenReturn(new UserSettingsDTO());
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
                 .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
         when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
@@ -542,7 +535,7 @@ class GlucoseCalculationsServiceTest {
     @Test
     void activeCobIobInputs_queriesEightHourWindow() {
         UUID userId = UUID.randomUUID();
-        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(new COBSettingsDTO());
+        when(userSettingsService.getUserSettings(userId)).thenReturn(new UserSettingsDTO());
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
                 .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
         when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
@@ -574,18 +567,18 @@ class GlucoseCalculationsServiceTest {
                 .id(userId).username(username).build();
         when(userService.getUserByUsername(username)).thenReturn(mockUser);
 
-        COBSettingsDTO cobSettings = new COBSettingsDTO();
-        cobSettings.setUserId(userId);
-        cobSettings.setCarbRatio(2.0);
-        cobSettings.setIsf(1.0);
-        cobSettings.setCarbHalfLife(45);
-        cobSettings.setMaxCOBDuration(240);
-        when(cOBSettingsService.getCOBSettings(userId)).thenReturn(cobSettings);
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setUserId(userId);
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setCarbHalfLife(45);
+        userSettings.setMaxCOBDuration(240);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(userSettings);
 
         when(noteRepository.findByUserIdAndTimestampBetween(
                 any(UUID.class), any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(List.of());
-        when(cobService.calculateTotalCarbsOnBoard(any(), any(LocalDateTime.class), any(COBSettingsDTO.class))).thenReturn(0.0);
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(LocalDateTime.class), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
                 .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))

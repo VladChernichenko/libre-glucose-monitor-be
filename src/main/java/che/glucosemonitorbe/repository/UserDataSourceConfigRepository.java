@@ -1,7 +1,7 @@
 package che.glucosemonitorbe.repository;
 
-import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.User;
+import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;

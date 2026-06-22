@@ -2,11 +2,9 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.ActiveInsulinResponse;
-import che.glucosemonitorbe.dto.COBSettingsDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -14,7 +12,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -23,18 +22,18 @@ class InsulinCalculatorServiceTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
 
-    private COBSettingsService cobSettingsService;
+    private UserSettingsService userSettingsService;
     private InsulinCalculatorService service;
 
     @BeforeEach
     void setUp() {
-        cobSettingsService = mock(COBSettingsService.class);
+        userSettingsService = mock(UserSettingsService.class);
         // Default: carbRatio=1.0, ISF=2.2; halfLife / maxCOB not used in these tests
-        COBSettingsDTO defaultSettings = new COBSettingsDTO(
+        UserSettingsDTO defaultSettings = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, /*carbRatio*/ 1.0, /*isf*/ 2.2, /*halfLife*/ 45, /*maxCob*/ 240);
-        when(cobSettingsService.getCOBSettings(any(UUID.class))).thenReturn(defaultSettings);
+        when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(defaultSettings);
 
-        service = new InsulinCalculatorService(cobSettingsService);
+        service = new InsulinCalculatorService(userSettingsService);
     }
 
     // ── IOB decay basic cases ──────────────────────────────────────────────────
@@ -430,8 +429,8 @@ class InsulinCalculatorServiceTest {
     @Test
     void recommendedInsulin_settingsWithNullIsf_fallsBackToDefault() {
         UUID userId = UUID.randomUUID();
-        when(cobSettingsService.getCOBSettings(userId))
-                .thenReturn(new COBSettingsDTO(UUID.randomUUID(), userId, 1.0, null, 45, 240));
+        when(userSettingsService.getUserSettings(userId))
+                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), userId, 1.0, null, 45, 240));
 
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(60.0);
@@ -446,7 +445,7 @@ class InsulinCalculatorServiceTest {
     @Test
     void recommendedInsulin_settingsNull_fallsBackToDefault() {
         UUID userId = UUID.randomUUID();
-        when(cobSettingsService.getCOBSettings(userId)).thenReturn(null);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(null);
 
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(60.0);
