@@ -111,6 +111,28 @@ public class TokenBlacklistService {
         return token != null && isActive(token);
     }
 
+    /**
+     * Atomically blacklists {@code token} iff it isn't already blacklisted, returning {@code true}
+     * iff this call performed the insert. Two concurrent calls with the same token race on a single
+     * DB-level {@code INSERT ... ON CONFLICT DO NOTHING}: exactly one gets {@code true} (the
+     * "winner"), the other gets {@code false}. This is the race-breaker for refresh-token rotation —
+     * see {@link AuthService#refreshToken}, which must reject the loser instead of also minting a
+     * second valid token pair from the same refresh token.
+     */
+    @Transactional
+    public boolean blacklistTokenIfAbsent(String token) {
+        if (token == null || token.trim().isEmpty()) {
+            return false;
+        }
+        Long expirationTime = extractExpirationTime(token);
+        if (expirationTime == null) {
+            expirationTime = System.currentTimeMillis() + FALLBACK_TTL_MS;
+            log.warn("Token blacklisted with fallback expiration (24h)");
+        }
+        int inserted = repository.insertIfAbsent(sha256Hex(token), Instant.ofEpochMilli(expirationTime));
+        return inserted > 0;
+    }
+
     /** Remove a token from the blacklist (useful for testing). */
     @Transactional
     public void removeFromBlacklist(String token) {

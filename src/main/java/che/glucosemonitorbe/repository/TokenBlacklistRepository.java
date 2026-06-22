@@ -13,6 +13,16 @@ public interface TokenBlacklistRepository extends JpaRepository<RevokedToken, St
     /** True if the hash is present and has not yet expired. */
     boolean existsByTokenHashAndExpiresAtAfter(String tokenHash, Instant now);
 
+    /**
+     * Atomically inserts the hash iff absent; returns the number of rows inserted (1 = this call
+     * won the race and is now the sole owner of the blacklist entry, 0 = someone else already
+     * inserted it first). Used to make refresh-token rotation race-proof: see
+     * {@code TokenBlacklistService#blacklistTokenIfAbsent}.
+     */
+    @Modifying
+    @Query(value = "INSERT INTO token_blacklist (token_hash, expires_at) VALUES (:tokenHash, :expiresAt) ON CONFLICT (token_hash) DO NOTHING", nativeQuery = true)
+    int insertIfAbsent(@Param("tokenHash") String tokenHash, @Param("expiresAt") Instant expiresAt);
+
     /** Housekeeping: drop entries whose expiry has passed. */
     @Modifying
     @Query("delete from RevokedToken r where r.expiresAt < :now")

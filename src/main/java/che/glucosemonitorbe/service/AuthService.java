@@ -84,17 +84,19 @@ public class AuthService {
             throw new InvalidTokenException("Invalid refresh token");
         }
 
-        // Check if refresh token is blacklisted
-        if (tokenBlacklistService.isTokenBlacklisted(request.getRefreshToken())) {
+        // Atomically claim this refresh token for rotation (DB-level INSERT ... ON CONFLICT DO
+        // NOTHING). This replaces a separate check-then-blacklist pair, which raced: two requests
+        // with the same token could both pass the blacklist check before either finished writing,
+        // each minting its own valid token pair from a single refresh token. Claiming the token
+        // *before* minting new ones makes the blacklist insert itself the single point of
+        // arbitration - exactly one concurrent caller can win it.
+        if (!tokenBlacklistService.blacklistTokenIfAbsent(request.getRefreshToken())) {
             throw new InvalidTokenException("Refresh token has been revoked");
         }
 
         String username = tokenProvider.getUsernameFromToken(request.getRefreshToken());
         String accessToken = tokenProvider.generateTokenFromUsername(username);
         String refreshToken = tokenProvider.generateRefreshToken(username);
-
-        // Blacklist the old refresh token
-        tokenBlacklistService.blacklistToken(request.getRefreshToken());
 
         return AuthResponse.builder()
                 .accessToken(accessToken)

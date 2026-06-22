@@ -4,6 +4,7 @@ import che.glucosemonitorbe.dto.AuthRequest;
 import che.glucosemonitorbe.dto.AuthResponse;
 import che.glucosemonitorbe.dto.LogoutRequest;
 import che.glucosemonitorbe.dto.LogoutResponse;
+import che.glucosemonitorbe.dto.RefreshTokenRequest;
 import che.glucosemonitorbe.dto.RegisterRequest;
 import che.glucosemonitorbe.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
@@ -25,7 +27,15 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -110,6 +120,77 @@ class AuthIntegrationTest {
         assertNotNull(body.getRefreshToken());
         assertEquals("Bearer", body.getTokenType());
         assertTrue(body.getExpiresIn() > 0);
+    }
+
+    @Test
+    @DisplayName("Refresh token rotates once; reusing the old refresh token afterwards is rejected")
+    void refresh_reuseOfOldToken_rejected() {
+        RegisterRequest req = validRegister();
+        AuthRequest login = new AuthRequest();
+        login.setUsername(req.getUsername());
+        login.setPassword(req.getPassword());
+        rest.postForEntity("/api/auth/register", json(req), String.class);
+        AuthResponse loginResp = rest.postForEntity("/api/auth/login", json(login), AuthResponse.class).getBody();
+        assertNotNull(loginResp);
+        String oldRefreshToken = loginResp.getRefreshToken();
+
+        RefreshTokenRequest refreshReq = new RefreshTokenRequest();
+        refreshReq.setRefreshToken(oldRefreshToken);
+        ResponseEntity<AuthResponse> first = rest.postForEntity("/api/auth/refresh", json(refreshReq), AuthResponse.class);
+        assertEquals(HttpStatus.OK, first.getStatusCode());
+        assertNotNull(first.getBody());
+        assertNotEquals(oldRefreshToken, first.getBody().getRefreshToken());
+
+        // Reusing the now-rotated old refresh token must be rejected, not silently re-accepted.
+        ResponseEntity<String> reuse = rest.postForEntity("/api/auth/refresh", json(refreshReq), String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, reuse.getStatusCode());
+    }
+
+    @Test
+    @DisplayName("Concurrent refresh with the same refresh token: exactly one request wins, the rest are rejected (BE token-refresh race fix)")
+    void refresh_concurrentSameToken_onlyOneWinner() throws InterruptedException {
+        RegisterRequest req = validRegister();
+        AuthRequest login = new AuthRequest();
+        login.setUsername(req.getUsername());
+        login.setPassword(req.getPassword());
+        rest.postForEntity("/api/auth/register", json(req), String.class);
+        AuthResponse loginResp = rest.postForEntity("/api/auth/login", json(login), AuthResponse.class).getBody();
+        assertNotNull(loginResp);
+        String sharedRefreshToken = loginResp.getRefreshToken();
+
+        int concurrency = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(concurrency);
+        CountDownLatch startGate = new CountDownLatch(1);
+        try {
+            List<Future<HttpStatusCode>> futures = IntStream.range(0, concurrency)
+                    .mapToObj(i -> pool.submit(() -> {
+                        RefreshTokenRequest refreshReq = new RefreshTokenRequest();
+                        refreshReq.setRefreshToken(sharedRefreshToken);
+                        startGate.await();
+                        return rest.postForEntity("/api/auth/refresh", json(refreshReq), String.class).getStatusCode();
+                    }))
+                    .collect(Collectors.toList());
+
+            startGate.countDown();
+            List<HttpStatusCode> results = futures.stream().map(f -> {
+                try {
+                    return f.get(30, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).collect(Collectors.toList());
+
+            long winners = results.stream().filter(s -> s == HttpStatus.OK).count();
+            long rejections = results.stream().filter(s -> s == HttpStatus.UNAUTHORIZED).count();
+
+            // Before the fix, the blacklist check-then-write race let multiple concurrent
+            // requests all pass the "not blacklisted" check and each mint a valid token pair
+            // from the same refresh token. Exactly one request must win the rotation now.
+            assertEquals(1, winners, "Exactly one concurrent refresh should succeed, got results: " + results);
+            assertEquals(concurrency - 1, rejections, "All other concurrent refreshes should be rejected as revoked, got results: " + results);
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

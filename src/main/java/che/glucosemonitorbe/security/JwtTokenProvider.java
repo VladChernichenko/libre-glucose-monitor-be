@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.Optional;
+import java.util.UUID;
 
 @Component
 @Slf4j
@@ -52,6 +53,7 @@ public class JwtTokenProvider {
 
         return Jwts.builder()
                 .subject(username)
+                .id(UUID.randomUUID().toString())
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(getSigningKey(), Jwts.SIG.HS512)
@@ -63,6 +65,13 @@ public class JwtTokenProvider {
         Date expiryDate = new Date(now.getTime() + refreshExpirationInMs);
         return Jwts.builder()
                 .subject(username)
+                // jti: iat/exp serialize to whole-second NumericDate claims and HS512 signing is
+                // deterministic, so two tokens minted for the same user within the same wall-clock
+                // second would otherwise be byte-identical. That collided with the refresh-rotation
+                // fix: a "new" refresh token could equal the one we just blacklisted, handing the
+                // client a token that's already revoked. A random jti guarantees every token is
+                // unique regardless of timing.
+                .id(UUID.randomUUID().toString())
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .claim("type", "refresh")
