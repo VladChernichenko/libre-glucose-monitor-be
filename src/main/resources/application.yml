@@ -150,6 +150,9 @@ app:
     nutrition-aware-prediction-enabled: ${APP_FEATURES_NUTRITION_AWARE_PREDICTION_ENABLED:true}
     # Hovorka 2-compartment ODE model — off by default, enable per-env for validation
     hovorka-model-enabled: ${APP_FEATURES_HOVORKA_MODEL_ENABLED:true}
+    # Per-user digital twin: nightly ML calibration of predictions from predicted-vs-actual error.
+    # Applied to predictions only; each user's twin activates only after beating baseline out-of-sample.
+    digital-twin-enabled: ${APP_FEATURES_DIGITAL_TWIN_ENABLED:true}
     food-photo-analysis-enabled: false
     ar-spatial-enabled: false
     cgm-service-external: false

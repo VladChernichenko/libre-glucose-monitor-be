@@ -69,7 +69,7 @@ class IsfMealWindowProfileServiceTest {
         service = new IsfMealWindowProfileService(
                 noteRepository, cgmReadingRepository,
                 userInsulinPreferencesService, userSettingsService,
-                insulinCalculatorService, carbsOnBoardService, snapshotRepository);
+                carbsOnBoardService, snapshotRepository);
 
         when(userInsulinPreferencesService.getRapidIobParameters(userId)).thenReturn(RAPID);
         when(userSettingsService.getUserSettings(userId)).thenReturn(USER_SETTINGS);

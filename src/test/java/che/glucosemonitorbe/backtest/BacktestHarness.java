@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.*;
+import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
 
@@ -320,7 +321,8 @@ public final class BacktestHarness {
         UserSettingsService userSettingsService = mock(UserSettingsService.class);
         when(prefs.getRapidIobParameters(any()))
                 .thenReturn(new RapidInsulinIobParameters(cfg.diaHours, cfg.peakMinutes));
-        return new HovorkaGlucosePredictionService(paramService, solver, basal, prefs, gut, userSettingsService);
+        return new HovorkaGlucosePredictionService(paramService, solver, basal, prefs, gut,
+                userSettingsService, PredictionResidualProvider.NONE);
     }
 
     private static HovorkaParameters buildParams(Config cfg) {

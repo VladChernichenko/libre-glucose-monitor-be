@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -58,12 +59,24 @@ public class HovorkaGlucosePredictionService {
     private static final int SPARSE_STEP_MIN  = 10;
     private static final int DENSE_LIMIT_MIN  = 240;
 
+    // ── Confidence band ───────────────────────────────────────────────────────
+    /** Confidence covered by [lower, upper]. Prediction is probabilistic, so each point ships a band
+     *  rather than a bare line; the half-width is z·σ(horizon) from the digital-twin uncertainty model. */
+    private static final double BAND_CONFIDENCE = 0.90;
+    /** Normal quantile for {@link #BAND_CONFIDENCE} (two-sided): 90% → 1.6449. */
+    private static final double BAND_Z          = 1.6449;
+    private static final double G_MIN           = 1.0;
+    private static final double G_MAX           = 25.0;
+
     private final HovorkaParameterService       paramService;
     private final HovorkaOdeSolver              odeSolver;
     private final BasalInsulinResolver          basalResolver;
     private final UserInsulinPreferencesService insulinPrefsService;
     private final DallaManGutModel              gutModel;
     private final UserSettingsService            userSettingsService;
+    /** Auto-applies the learned digital-twin residual correction to emitted points (predictions only).
+     *  Use {@link PredictionResidualProvider#NONE} to run the raw model (e.g. during calibration). */
+    private final PredictionResidualProvider    residualProvider;
 
     /**
      * Build the full prediction path using the Hovorka ODE model.
@@ -91,7 +104,7 @@ public class HovorkaGlucosePredictionService {
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
         UserSettingsDTO settings  = userSettingsService.getUserSettings(userId);
         return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
-                pastCarbsEntries, pastInsulinDoses, longActingNotes, pathMinutes);
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes);
     }
 
     /**
@@ -123,7 +136,30 @@ public class HovorkaGlucosePredictionService {
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
-                pastCarbsEntries, pastInsulinDoses, longActingNotes, pathMinutes);
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes);
+    }
+
+    /**
+     * Build the prediction path with pre-built parameters <b>and</b> pre-fetched IOB/settings.
+     *
+     * <p>Hot-path overload for calibration replay: the caller supplies {@code rapidIob} and
+     * {@code settings} once so the inner loop never re-reads them per anchor (the calibrator invokes
+     * this tens of thousands of times). Behaviour is otherwise identical to the DB-fetching overload.</p>
+     */
+    public List<PredictionPointDTO> buildPredictionPath(
+            HovorkaParameters customParams,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes) {
+
+        return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes);
     }
 
     /**
@@ -138,6 +174,7 @@ public class HovorkaGlucosePredictionService {
             List<CarbsEntry> pastCarbsEntries,
             List<InsulinDose> pastInsulinDoses,
             List<Note> longActingNotes,
+            UUID userId,
             int pathMinutes) {
 
         // ── State warm-up ─────────────────────────────────────────────────────
@@ -198,17 +235,34 @@ public class HovorkaGlucosePredictionService {
             state = odeSolver.step(state, pAdj, carbMmol, insulinEffect);
 
             if (min == nextEmit) {
+                LocalDateTime pointTime = currentTime.plusMinutes(min);
                 double gPred = state.glucoseMmolL(pAdj);
+                // Digital-twin residual correction (predictions only): add the learned per-hour bias
+                // that the physiology can't express from logged inputs, then re-clamp to the
+                // physiological range. NONE provider (calibration replay) leaves gPred untouched.
+                double correction = residualProvider.residualMmol(userId, pointTime);
+                double gAdj = Math.max(G_MIN, Math.min(G_MAX, gPred + correction));
                 double carbEffect  = gutModel.ra(state.qgut(), kAbsEff) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
-                points.add(PredictionPointDTO.builder()
-                        .timestamp(currentTime.plusMinutes(min))
-                        .predictedGlucose(Math.round(gPred * 10.0) / 10.0)
+                // Probabilistic band: predicted ± z·σ(horizon), σ from the digital-twin uncertainty
+                // model (personal when calibrated, else population prior; 0 → no band during replay).
+                double sd = residualProvider.uncertaintySdMmol(userId, min);
+                double half = BAND_Z * sd;
+
+                PredictionPointDTO.PredictionPointDTOBuilder pt = PredictionPointDTO.builder()
+                        .timestamp(pointTime)
+                        .predictedGlucose(Math.round(gAdj * 10.0) / 10.0)
                         .carbAbsorptionEffect(Math.round(carbEffect * 100.0) / 100.0)
                         .insulinActivityEffect(Math.round(insulinEff * 100.0) / 100.0)
-                        .absorptionMode("DALLA_MAN_3COMP")
-                        .build());
+                        .absorptionMode("DALLA_MAN_3COMP");
+                if (sd > 0.0) {
+                    pt.predictedGlucoseLower(round1(Math.max(G_MIN, gAdj - half)))
+                      .predictedGlucoseUpper(round1(Math.min(G_MAX, gAdj + half)))
+                      .uncertaintySd(Math.round(sd * 100.0) / 100.0)
+                      .confidenceLevel(BAND_CONFIDENCE);
+                }
+                points.add(pt.build());
 
                 nextEmit += (min < DENSE_LIMIT_MIN ? DENSE_STEP_MIN : SPARSE_STEP_MIN);
             }
@@ -417,5 +471,10 @@ public class HovorkaGlucosePredictionService {
     private double toCarbMmol(CarbsEntry entry, HovorkaParameters p) {
         if (entry.getCarbs() == null || entry.getCarbs() <= 0) return 0.0;
         return entry.getCarbs() * p.aG() / 0.18;
+    }
+
+    /** Round to 1 decimal place [mmol/L] — matches the predictedGlucose precision. */
+    private static double round1(double v) {
+        return Math.round(v * 10.0) / 10.0;
     }
 }

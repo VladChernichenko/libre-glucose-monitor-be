@@ -4,6 +4,7 @@ import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.entity.ExperimentReading;
 import che.glucosemonitorbe.repository.ExperimentRepository;
+import che.glucosemonitorbe.service.DigitalTwinService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,12 +14,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
@@ -31,15 +34,18 @@ class HovorkaParameterServiceTest {
     @Mock UserSettingsService userSettingsService;
     @Mock UserInsulinPreferencesService insulinPrefsService;
     @Mock ExperimentRepository experimentRepository;
+    @Mock DigitalTwinService digitalTwinService;
 
     private HovorkaParameterService service;
     private static final UUID USER_ID = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000001");
 
     @BeforeEach
     void setUp() {
-        service = new HovorkaParameterService(userSettingsService, insulinPrefsService, experimentRepository);
+        service = new HovorkaParameterService(userSettingsService, experimentRepository, digitalTwinService);
         when(experimentRepository.findCompletedByUserIdAndType(any(), any()))
                 .thenReturn(List.of()); // default: no experiments
+        // No active twin by default → buildForUser returns the base parameters unchanged.
+        lenient().when(digitalTwinService.activeScales(any())).thenReturn(Optional.empty());
     }
 
     // ── Weight fallback ────────────────────────────────────────────────────────

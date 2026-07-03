@@ -5,6 +5,7 @@ import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
+import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -55,7 +56,8 @@ class HovorkaGlucosePredictionServiceTest {
         HovorkaOdeSolver solver    = new HovorkaOdeSolver(gutModel);
         BasalInsulinResolver basal = new BasalInsulinResolver();
         service = new HovorkaGlucosePredictionService(
-                paramService, solver, basal, insulinPrefsService, gutModel, userSettingsService);
+                paramService, solver, basal, insulinPrefsService, gutModel, userSettingsService,
+                PredictionResidualProvider.NONE);
 
         double weight = 70.0;
         double vG  = HovorkaParameters.VG_PER_KG * weight;

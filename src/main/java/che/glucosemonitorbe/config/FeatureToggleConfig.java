@@ -27,6 +27,11 @@ public class FeatureToggleConfig {
     // Off by default — toggle on per-environment after validation
     private boolean hovorkaModelEnabled = false;
 
+    // Per-user "digital twin": nightly ML calibration of the prediction model from
+    // predicted-vs-actual CGM error. Applied to PREDICTIONS ONLY (never to dosing settings).
+    // Each user's twin only takes effect once it beats the un-calibrated model out-of-sample.
+    private boolean digitalTwinEnabled = false;
+
     // Phase 2–4 integration gates (all off by default — toggle on per feature-flag)
     private boolean foodPhotoAnalysisEnabled = false;
     private boolean arSpatialEnabled = false;

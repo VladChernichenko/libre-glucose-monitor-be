@@ -3,7 +3,9 @@ package che.glucosemonitorbe.hovorka;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.entity.ExperimentReading;
+import che.glucosemonitorbe.hovorka.learning.TwinScales;
 import che.glucosemonitorbe.repository.ExperimentRepository;
+import che.glucosemonitorbe.service.DigitalTwinService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -68,13 +70,28 @@ public class HovorkaParameterService {
 
     private final UserSettingsService        userSettingsService;
     private final ExperimentRepository      experimentRepository;
+    private final DigitalTwinService         digitalTwinService;
 
     /**
-     * Builds a complete {@link HovorkaParameters} record for the given user.
-     * Falls back to population defaults for any missing measurements.
+     * Builds the user's {@link HovorkaParameters} for <b>predictions</b>, applying the learned
+     * digital-twin scales (ISF, meal magnitude) on top of the base parameters when an active twin
+     * exists. This is the single point where personalised calibration auto-applies to every
+     * prediction consumer. Dosing settings are never affected — only the prediction parameters.
      */
     @Transactional(readOnly = true)
     public HovorkaParameters buildForUser(UUID userId) {
+        HovorkaParameters base = buildRawForUser(userId);
+        return digitalTwinService.activeScales(userId)
+                .map(scales -> applyScales(base, scales))
+                .orElse(base);
+    }
+
+    /**
+     * Builds the base {@link HovorkaParameters} from settings and experiments <b>without</b> any
+     * digital-twin overlay. Used by the calibrator so it fits scales against the un-calibrated model.
+     */
+    @Transactional(readOnly = true)
+    public HovorkaParameters buildRawForUser(UUID userId) {
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
 
         // ── Body weight ───────────────────────────────────────────────────────
@@ -165,5 +182,17 @@ public class HovorkaParameterService {
             log.warn("Could not load BASAL_CHECK for EGP estimation (user={}): {}", userId, e.getMessage());
             return f01Abs;
         }
+    }
+
+    /**
+     * Applies the v1-active digital-twin scales (ISF, meal magnitude A_G) to a base parameter set.
+     * {@code tMaxG} and {@code egpNet} are left untouched — see {@link TwinScales} for why those
+     * scales are reserved rather than wired into the live ODE.
+     */
+    private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {
+        TwinScales c = s.clamped();
+        return new HovorkaParameters(
+                p.vG(), p.f01(), p.egpNet(), p.k12(), p.k21(),
+                p.tMaxG(), p.aG() * c.agScale(), p.isf() * c.isfScale(), p.weightKg());
     }
 }
