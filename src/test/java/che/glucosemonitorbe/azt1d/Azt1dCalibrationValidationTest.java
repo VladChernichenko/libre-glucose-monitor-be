@@ -63,8 +63,11 @@ class Azt1dCalibrationValidationTest {
         List<Azt1dDataset.Subject> subjects = Azt1dDataset.loadAll(root);
         assertThat(subjects).isNotEmpty();
 
+        // Each subject is seeded with their OWN personal settings (weight, ISF, carb ratio, basal)
+        // estimated from their delivery data — then the twin calibrates on top of that realistic prior.
+        System.out.print(renderProfiles(subjects));
+
         HovorkaGlucosePredictionService predictor = rawPredictor();
-        HovorkaParameters baseParams = populationParams();
         RapidInsulinIobParameters rapidIob = new RapidInsulinIobParameters(4.5, 55.0);
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
         cfg.maxAnchors = 120; // keep the 25-subject sweep quick
@@ -72,6 +75,8 @@ class Azt1dCalibrationValidationTest {
         List<Row> rows = new ArrayList<>();
         for (Azt1dDataset.Subject s : subjects) {
             if (s.cgm().size() < MIN_CGM) continue;
+
+            HovorkaParameters baseParams = personalParams(s.profile());
 
             int boundary = (int) Math.floor(s.cgm().size() * TRAIN_FRACTION);
             List<PredictionReplayEngine.Reading> trainCgm = s.cgm().subList(0, boundary);
@@ -181,12 +186,41 @@ class Azt1dCalibrationValidationTest {
                 mock(UserSettingsService.class), PredictionResidualProvider.NONE);
     }
 
-    private static HovorkaParameters populationParams() {
-        double w = 70.0;
+    /**
+     * Build the Hovorka parameter set from a subject's estimated personal profile: body weight scales
+     * the physiological volumes, ISF sets insulin action. tMaxG (45-min carb half-life), A_G (1.0) and
+     * the intercompartmental rates keep their population defaults — the twin refines the rest.
+     */
+    private static HovorkaParameters personalParams(Azt1dDataset.Profile p) {
+        double w = p.weightKg() > 0 ? p.weightKg() : HovorkaParameters.DEFAULT_WEIGHT;
+        double isf = p.isfMmolPerU() > 0 ? p.isfMmolPerU() : 2.2;
         double vG = HovorkaParameters.VG_PER_KG * w;
         double f01 = HovorkaParameters.F01_PER_KG * w;
         return new HovorkaParameters(vG, f01, f01,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
-                45.0 / 1.68, 1.0, 2.2, w);
+                45.0 / 1.68, 1.0, isf, w);
+    }
+
+    /** Per-subject personal-settings table — the "profile" seeded for each test user from their data. */
+    private static String renderProfiles(List<Azt1dDataset.Subject> subjects) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n═══════ AZT1D PER-SUBJECT PROFILES (personal settings seeded from each subject's own AID data) ═══════\n");
+        sb.append(String.format("%-11s %6s %9s %11s %13s %8s %8s %8s %9s %10s %6s%n",
+                "subject", "days", "TDD(U/d)", "basal(U/h)", "ISF(mmol/L·U)",
+                "isf-B", "isf-L", "isf-D", "CR(g/U)", "weight(kg)", "flag"));
+        int flagged = 0;
+        for (Azt1dDataset.Subject s : subjects) {
+            Azt1dDataset.Profile p = s.profile();
+            if (!p.plausible()) flagged++;
+            sb.append(String.format("%-11s %6.1f %9.1f %11.2f %13.2f %8.2f %8.2f %8.2f %9s %10.1f %6s%n",
+                    s.id(), p.days(), p.tddU(), p.basalRateUPerH(), p.isfMmolPerU(),
+                    p.isfBreakfast(), p.isfLunch(), p.isfDinner(),
+                    Double.isNaN(p.carbRatioGPerU()) ? "-" : String.format("%.1f", p.carbRatioGPerU()),
+                    p.weightKg(), p.plausible() ? "ok" : "⚠fb"));
+        }
+        sb.append("ISF = 1800-rule from TDD (model-scaled); isf-B/L/D = ISF × (window CR / overall CR); CR = observed median; weight ≈ TDD/0.55.\n");
+        sb.append(String.format("⚠fb = implausible TDD from corrupt insulin columns → ISF/weight fall back to population defaults (%d subjects).%n", flagged));
+        sb.append("═══════════════════════════════════════════════════════════════════════════════════════════════════\n");
+        return sb.toString();
     }
 }
