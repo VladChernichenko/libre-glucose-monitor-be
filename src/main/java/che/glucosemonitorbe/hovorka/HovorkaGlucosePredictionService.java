@@ -104,7 +104,8 @@ public class HovorkaGlucosePredictionService {
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
         UserSettingsDTO settings  = userSettingsService.getUserSettings(userId);
         return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
-                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes);
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                ActivityProvider.NONE);
     }
 
     /**
@@ -136,7 +137,8 @@ public class HovorkaGlucosePredictionService {
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
-                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes);
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                ActivityProvider.NONE);
     }
 
     /**
@@ -159,7 +161,31 @@ public class HovorkaGlucosePredictionService {
             int pathMinutes) {
 
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
-                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes);
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                ActivityProvider.NONE);
+    }
+
+    /**
+     * Activity-aware overload: same as the hot-path overload but modulated by an {@link ActivityProvider}
+     * supplying {@code a(t) ∈ [0,1]}. With {@link ActivityProvider#NONE} the result is identical to the
+     * un-modulated model. Used by the offline activity-validation harness.
+     */
+    public List<PredictionPointDTO> buildPredictionPath(
+            HovorkaParameters customParams,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider) {
+
+        return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider);
     }
 
     /**
@@ -175,7 +201,8 @@ public class HovorkaGlucosePredictionService {
             List<InsulinDose> pastInsulinDoses,
             List<Note> longActingNotes,
             UUID userId,
-            int pathMinutes) {
+            int pathMinutes,
+            ActivityProvider activityProvider) {
 
         // ── State warm-up ─────────────────────────────────────────────────────
         HovorkaState state = buildWarmState(currentGlucose, pastCarbsEntries, currentTime, p);
@@ -211,6 +238,17 @@ public class HovorkaGlucosePredictionService {
         List<PredictionPointDTO> points = new ArrayList<>();
         int nextEmit = DENSE_STEP_MIN;
 
+        // ── Activity modulation (a(t) → insulin-sensitivity amplification + insulin-independent
+        //    uptake). Inert with the NONE provider — that path is bit-identical to the base model. ──
+        boolean hasActivity = activityProvider != ActivityProvider.NONE;
+        ActivityModulation activity = new ActivityModulation();
+        if (hasActivity) {
+            // Warm-start the post-exercise sensitivity tail from activity just before "now".
+            for (int m = ActivityModulation.WARMUP_MINUTES; m >= 1; m--) {
+                activity.stepSensitivity(activityProvider.intensityAt(currentTime.minusMinutes(m)));
+            }
+        }
+
         for (int min = 1; min <= pathMinutes; min++) {
             // insulinEffect: mmol of glucose removed from Q1 per minute, summed across all
             // active doses. effectiveInsulinVolume = 2×VG corrects for the 2-compartment
@@ -232,7 +270,14 @@ public class HovorkaGlucosePredictionService {
             // Future carbs delivered to gut D1 at this minute [mmol]
             double carbMmol = futureCarbs.getOrDefault(min, 0.0);
 
-            state = odeSolver.step(state, pAdj, carbMmol, insulinEffect);
+            if (hasActivity) {
+                double aInst = activityProvider.intensityAt(currentTime.plusMinutes(min));
+                double aSens = activity.stepSensitivity(aInst);
+                double insulinEffectMod = insulinEffect * activity.insulinSensitivityFactor(aSens);
+                state = odeSolver.step(state, pAdj, carbMmol, insulinEffectMod, activity.uptakeRate(aInst));
+            } else {
+                state = odeSolver.step(state, pAdj, carbMmol, insulinEffect);
+            }
 
             if (min == nextEmit) {
                 LocalDateTime pointTime = currentTime.plusMinutes(min);

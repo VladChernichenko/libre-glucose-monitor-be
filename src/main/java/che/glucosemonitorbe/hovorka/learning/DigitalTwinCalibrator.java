@@ -87,8 +87,9 @@ public final class DigitalTwinCalibrator {
 
     public DigitalTwinCalibrator(Config cfg) {
         this.cfg = cfg;
-        // Bounded LM: FD Jacobian is fine for O(1) scales; cap work so a full calibration stays fast.
-        this.lm = new LmParameterFitter(1e-3, 40, 400);
+        // Bounded LM: FD Jacobian is fine for O(1) scales. Budget is generous enough to converge on
+        // most users; LmParameterFitter degrades gracefully to the start point if a fit still can't.
+        this.lm = new LmParameterFitter(1e-3, 100, 2000);
     }
 
     public DigitalTwinCalibrator() {

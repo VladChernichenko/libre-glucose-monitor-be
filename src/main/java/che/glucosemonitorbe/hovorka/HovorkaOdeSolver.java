@@ -61,6 +61,20 @@ public class HovorkaOdeSolver {
             HovorkaParameters p,
             double carbMmolNow,
             double insulinEffect) {
+        return step(state, p, carbMmolNow, insulinEffect, 0.0);
+    }
+
+    /**
+     * Advance the state by one minute, with an optional insulin-independent activity glucose-uptake
+     * rate {@code activityUptakeRate} [per min] (contraction-mediated clearance during exercise);
+     * 0 = no activity, which reproduces the un-modulated model exactly.
+     */
+    public HovorkaState step(
+            HovorkaState state,
+            HovorkaParameters p,
+            double carbMmolNow,
+            double insulinEffect,
+            double activityUptakeRate) {
 
         // Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
         //
@@ -87,10 +101,10 @@ public class HovorkaOdeSolver {
         double mealMmol = s0.mealMmol();   // constant throughout this RK4 step
 
         double[] y  = toArray(s0);
-        double[] k1 = derivatives(y,                   p, mealMmol, insulinEffect);
-        double[] k2 = derivatives(add(y, scale(k1, 0.5)), p, mealMmol, insulinEffect);
-        double[] k3 = derivatives(add(y, scale(k2, 0.5)), p, mealMmol, insulinEffect);
-        double[] k4 = derivatives(add(y, k3),             p, mealMmol, insulinEffect);
+        double[] k1 = derivatives(y,                   p, mealMmol, insulinEffect, activityUptakeRate);
+        double[] k2 = derivatives(add(y, scale(k1, 0.5)), p, mealMmol, insulinEffect, activityUptakeRate);
+        double[] k3 = derivatives(add(y, scale(k2, 0.5)), p, mealMmol, insulinEffect, activityUptakeRate);
+        double[] k4 = derivatives(add(y, k3),             p, mealMmol, insulinEffect, activityUptakeRate);
 
         double[] yn = new double[6];
         for (int i = 0; i < 6; i++) {
@@ -111,6 +125,15 @@ public class HovorkaOdeSolver {
      */
     double[] derivatives(double[] y, HovorkaParameters p,
                          double mealMmol, double insulinEffect) {
+        return derivatives(y, p, mealMmol, insulinEffect, 0.0);
+    }
+
+    /**
+     * Compute the 6 ODE derivatives, with an insulin-independent activity glucose-uptake rate
+     * {@code activityUptakeRate} [per min] applied as an extra first-order clearance on Q1.
+     */
+    double[] derivatives(double[] y, HovorkaParameters p,
+                         double mealMmol, double insulinEffect, double activityUptakeRate) {
 
         double q1    = Math.max(0.0, y[0]);
         double q2    = Math.max(0.0, y[1]);
@@ -140,10 +163,11 @@ public class HovorkaOdeSolver {
         double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
         double ra    = gutModel.ra(qgut, kAbsEff);
 
-        // Glucose compartments
+        // Glucose compartments (activityUptakeRate = insulin-independent, contraction-mediated uptake)
         double dq1 = -f01c - fr - p.k12() * q1 + p.k21() * q2
                    + ra + p.egpNet() - insulinEffect
-                   - ALPHA_INC * inc * q1;
+                   - ALPHA_INC * inc * q1
+                   - activityUptakeRate * q1;
         double dq2 = p.k12() * q1 - p.k21() * q2;
 
         // Dalla Man gut compartments (use kemptEff to apply ileal brake)
