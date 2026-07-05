@@ -32,6 +32,12 @@ public class FeatureToggleConfig {
     // Each user's twin only takes effect once it beats the un-calibrated model out-of-sample.
     private boolean digitalTwinEnabled = false;
 
+    // Unlogged-event detector: periodic scan flagging windows whose glucose move the logged inputs
+    // don't explain (probable unlogged/under-estimated food or insulin). Feeds user confirmation and
+    // digital-twin calibration down-weighting. Follows the digital-twin convention (off here, enabled
+    // per-environment in application.yml).
+    private boolean unloggedEventDetectionEnabled = false;
+
     // Phase 2–4 integration gates (all off by default — toggle on per feature-flag)
     private boolean foodPhotoAnalysisEnabled = false;
     private boolean arSpatialEnabled = false;

@@ -6,6 +6,7 @@ import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.entity.UnloggedEventFlag;
 import che.glucosemonitorbe.entity.UserDigitalTwin;
 import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.DallaManGutModel;
@@ -61,6 +62,7 @@ public class DigitalTwinCalibrationService {
     private final NoteRepository noteRepository;
     private final UserRepository userRepository;
     private final UserDigitalTwinRepository twinRepository;
+    private final che.glucosemonitorbe.repository.UnloggedEventFlagRepository unloggedEventFlagRepository;
 
     private final HovorkaParameterService paramService;
     private final HovorkaOdeSolver odeSolver;
@@ -138,6 +140,9 @@ public class DigitalTwinCalibrationService {
             if (r.getSgv() == null || r.getDateTimestamp() == null) continue;
             cgm.add(new PredictionReplayEngine.Reading(r.getDateTimestamp(), r.getSgv() / MGDL_PER_MMOL));
         }
+        // Down-weight (exclude) windows the user's log doesn't explain, so an unlogged/mis-logged event
+        // can't bias the fit — unless doing so would starve the fit of data.
+        cgm = excludeFlaggedWindows(userId, cgm);
 
         // ── Load events (meals / boluses / basal) ───────────────────────────────
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, now);
@@ -233,6 +238,46 @@ public class DigitalTwinCalibrationService {
         twin.setFittedAt(now);
 
         twinRepository.save(twin);
+    }
+
+    /**
+     * Remove CGM readings inside an OPEN/CONFIRMED unlogged-event window, so calibration doesn't learn
+     * from a window the user's log can't explain. Falls back to the full set when the exclusion would
+     * drop below {@link #MIN_CGM_READINGS} (fitting on that data beats not fitting at all).
+     */
+    private List<PredictionReplayEngine.Reading> excludeFlaggedWindows(
+            UUID userId, List<PredictionReplayEngine.Reading> cgm) {
+        if (!featureToggleConfig.isUnloggedEventDetectionEnabled()) return cgm;
+        List<UnloggedEventFlag> flags = unloggedEventFlagRepository.findByUserIdAndStateIn(
+                userId, List.of(UnloggedEventFlag.State.OPEN, UnloggedEventFlag.State.CONFIRMED));
+        if (flags.isEmpty()) return cgm;
+
+        long[][] intervals = new long[flags.size()][2];
+        for (int i = 0; i < flags.size(); i++) {
+            intervals[i][0] = toEpochMsUtc(flags.get(i).getWindowStart());
+            intervals[i][1] = toEpochMsUtc(flags.get(i).getWindowEnd());
+        }
+        List<PredictionReplayEngine.Reading> kept = new ArrayList<>(cgm.size());
+        for (PredictionReplayEngine.Reading r : cgm) {
+            boolean flagged = false;
+            for (long[] iv : intervals) {
+                if (r.epochMs() >= iv[0] && r.epochMs() <= iv[1]) { flagged = true; break; }
+            }
+            if (!flagged) kept.add(r);
+        }
+        if (kept.size() == cgm.size()) return cgm;
+        if (kept.size() < MIN_CGM_READINGS) {
+            log.debug("User {}: excluding {} flagged window(s) would drop below {} readings — "
+                    + "calibrating without exclusion", userId, flags.size(), MIN_CGM_READINGS);
+            return cgm;
+        }
+        log.info("User {}: excluded {} CGM reading(s) in {} flagged unlogged-event window(s) from calibration",
+                userId, cgm.size() - kept.size(), flags.size());
+        return kept;
+    }
+
+    private static long toEpochMsUtc(LocalDateTime ldt) {
+        return ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

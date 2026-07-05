@@ -153,6 +153,8 @@ app:
     # Per-user digital twin: nightly ML calibration of predictions from predicted-vs-actual error.
     # Applied to predictions only; each user's twin activates only after beating baseline out-of-sample.
     digital-twin-enabled: ${APP_FEATURES_DIGITAL_TWIN_ENABLED:true}
+    # Unlogged-event detector: periodic scan flagging glucose moves the logged inputs don't explain.
+    unlogged-event-detection-enabled: ${APP_FEATURES_UNLOGGED_EVENT_DETECTION_ENABLED:true}
     food-photo-analysis-enabled: false
     ar-spatial-enabled: false
     cgm-service-external: false

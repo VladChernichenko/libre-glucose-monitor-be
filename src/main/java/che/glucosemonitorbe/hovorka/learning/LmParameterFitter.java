@@ -5,6 +5,7 @@ import org.apache.commons.math3.fitting.leastsquares.LeastSquaresOptimizer;
 import org.apache.commons.math3.fitting.leastsquares.LeastSquaresProblem;
 import org.apache.commons.math3.fitting.leastsquares.LevenbergMarquardtOptimizer;
 import org.apache.commons.math3.fitting.leastsquares.MultivariateJacobianFunction;
+import org.apache.commons.math3.exception.MaxCountExceededException;
 import org.apache.commons.math3.linear.Array2DRowRealMatrix;
 import org.apache.commons.math3.linear.ArrayRealVector;
 import org.apache.commons.math3.linear.RealMatrix;
@@ -114,12 +115,20 @@ public final class LmParameterFitter {
                         new ArrayRealVector(clampToBounds(params.toArray(), lower, upper), false))
                 .build();
 
-        LeastSquaresOptimizer.Optimum opt = new LevenbergMarquardtOptimizer().optimize(problem);
+        try {
+            LeastSquaresOptimizer.Optimum opt = new LevenbergMarquardtOptimizer().optimize(problem);
 
-        double[] fitted = clampToBounds(opt.getPoint().toArray(), lower, upper);
-        double rmse = opt.getRMS();
-        double cost = opt.getCost();                          // ½·Σ residual² in Commons Math
-        return new Result(fitted, rmse, cost, opt.getIterations(), opt.getEvaluations());
+            double[] fitted = clampToBounds(opt.getPoint().toArray(), lower, upper);
+            double rmse = opt.getRMS();
+            double cost = opt.getCost();                      // ½·Σ residual² in Commons Math
+            return new Result(fitted, rmse, cost, opt.getIterations(), opt.getEvaluations());
+        } catch (MaxCountExceededException e) {
+            // LM could not converge within the iteration/evaluation budget (flat or ill-conditioned
+            // objective for this data). Degrade gracefully to the start point instead of throwing, so a
+            // hard-to-fit user falls back to "no personalisation" rather than failing the whole run.
+            double[] fallback = clampToBounds(start0.clone(), lower, upper);
+            return new Result(fallback, Double.NaN, Double.NaN, maxIterations, maxEvaluations);
+        }
     }
 
     /** Project a parameter vector into {@code [lower, upper]} element-wise. */

@@ -75,7 +75,7 @@ tasks.named('test') {
     finalizedBy jacocoTestReport
     // Forward opt-in, data-gated harness properties (AZT1D / backtest CSV paths) from the Gradle
     // invocation to the test JVM. Only forwarded when explicitly set on the command line.
-    ['azt1d.dir', 'backtest.cgm', 'backtest.cgm2', 'backtest.notes', 'backtest.notes2'].each { k ->
+    ['azt1d.dir', 'hupa.dir', 'backtest.cgm', 'backtest.cgm2', 'backtest.notes', 'backtest.notes2'].each { k ->
         if (System.getProperty(k) != null) systemProperty(k, System.getProperty(k))
     }
 }
