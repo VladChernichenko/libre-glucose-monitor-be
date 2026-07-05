@@ -2,6 +2,7 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CgmReading;
+import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
@@ -71,26 +72,45 @@ public class DigitalTwinCalibrationService {
     private final DigitalTwinService digitalTwinService;
     private final FeatureToggleConfig featureToggleConfig;
 
-    /** Calibrate every user (nightly entry point). No-op unless the feature is enabled. */
-    public void calibrateAllUsers() {
+    /**
+     * Seed users are non-loginable AZT1D dataset fixtures ({@code azt1d-subject-N@dataset.local}) —
+     * excluded from real-user batches so we never spend the nightly compute budget calibrating them.
+     */
+    private static final String SEED_EMAIL_PATTERN = "azt1d-subject-%@dataset.local";
+
+    /** Aggregate outcome of a batch calibration pass. */
+    public record BatchSummary(int totalUsers, int attempted, int applied, int skipped, int failed) {}
+
+    /**
+     * Calibrate every real (non-seed) user. Nightly entry point and on-demand backfill trigger.
+     * No-op (empty summary) unless the {@code digital-twin-enabled} feature flag is on.
+     */
+    public BatchSummary calibrateAllRealUsers() {
         if (!featureToggleConfig.isDigitalTwinEnabled()) {
-            log.debug("Digital twin disabled — skipping nightly calibration");
-            return;
+            log.debug("Digital twin disabled — skipping real-user calibration");
+            return new BatchSummary(0, 0, 0, 0, 0);
         }
-        List<UUID> userIds = userRepository.findAll().stream().map(u -> u.getId()).toList();
-        int applied = 0, attempted = 0;
-        for (UUID userId : userIds) {
+        List<User> users = userRepository.findByEmailNotLike(SEED_EMAIL_PATTERN);
+        int attempted = 0, applied = 0, skipped = 0, failed = 0;
+        for (User user : users) {
             try {
-                DigitalTwinCalibrator.Result r = calibrateUser(userId);
-                if (r != null) {
+                DigitalTwinCalibrator.Result r = calibrateUser(user.getId());
+                if (r == null) {
+                    skipped++;   // feature off mid-run or not enough CGM history to attempt a fit
+                } else {
                     attempted++;
                     if (r.improved()) applied++;
                 }
             } catch (Exception e) {
-                log.warn("Digital-twin calibration failed for user {}: {}", userId, e.getMessage());
+                failed++;
+                log.warn("Digital-twin calibration failed for user {}: {}", user.getId(), e.getMessage());
             }
         }
-        log.info("Digital-twin nightly calibration: {} users, {} improved & applied", attempted, applied);
+        BatchSummary summary = new BatchSummary(users.size(), attempted, applied, skipped, failed);
+        log.info("Digital-twin batch (real users): total={}, attempted={}, applied={}, "
+                + "skipped(insufficient data)={}, failed={}",
+                summary.totalUsers(), attempted, applied, skipped, failed);
+        return summary;
     }
 
     /**

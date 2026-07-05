@@ -73,21 +73,25 @@ class DigitalTwinCalibratorTest {
         assertThat(r.status()).contains("insufficient data");
     }
 
-    // ── Squared-loss reference fit (to show Huber's robustness advantage) ───────
+    // ── Plain (non-robust) least-squares reference fit ──────────────────────────
+    // Same LM optimiser as the calibrator but WITHOUT the IRLS/Huber re-weighting, so it shows how
+    // far an un-robust squared-loss fit is dragged by the mis-logged outliers.
 
     private static double squaredLossFit(AnchorSampleSource train) {
-        NelderMead.Result opt = NelderMead.standard().minimize(
-                x -> {
-                    List<AnchorSample> s = train.replay(TwinScales.of(x[0], x[1]));
-                    double sum = 0.0;
-                    for (AnchorSample a : s) sum += a.error() * a.error();
-                    return (s.isEmpty() ? Double.MAX_VALUE : sum / s.size())
-                            + RobustLoss.ridgeToOne(0.05, x[0], x[1]);
-                },
+        LmParameterFitter.ResidualModel model = p -> {
+            List<AnchorSample> s = train.replay(TwinScales.of(p[0], p[1]));
+            double[] r = new double[s.size() + 2];
+            for (int i = 0; i < s.size(); i++) r[i] = s.get(i).error();
+            r[s.size()]     = Math.sqrt(0.05) * (p[0] - 1.0);   // same ridge-to-1.0 as the calibrator
+            r[s.size() + 1] = Math.sqrt(0.05) * (p[1] - 1.0);
+            return r;
+        };
+        LmParameterFitter.Result res = new LmParameterFitter().fit(
+                model,
                 new double[]{1.0, 1.0},
                 new double[]{TwinScales.MIN_SCALE, TwinScales.MIN_SCALE},
-                new double[]{TwinScales.MAX_SCALE, TwinScales.MAX_SCALE}, 0.15);
-        return TwinScales.clamp(opt.point()[0]);
+                new double[]{TwinScales.MAX_SCALE, TwinScales.MAX_SCALE});
+        return TwinScales.clamp(res.params()[0]);
     }
 
     /**

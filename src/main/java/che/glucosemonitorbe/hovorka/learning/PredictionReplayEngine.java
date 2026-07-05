@@ -223,10 +223,10 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
     // ── Parameter helpers ───────────────────────────────────────────────────────
 
-    /** Apply the v1-active scales (ISF, A_G) to a parameter set. Reserved scales are not wired. */
+    /** Apply the active scales (ISF, A_G, EGP₀) to a parameter set. tMaxGScale stays neutral. */
     private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {
         return new HovorkaParameters(
-                p.vG(), p.f01(), p.egpNet(), p.k12(), p.k21(),
+                p.vG(), p.f01(), p.egpNet() * s.egpScale(), p.k12(), p.k21(),
                 p.tMaxG(), p.aG() * s.agScale(), p.isf() * s.isfScale(), p.weightKg());
     }
 

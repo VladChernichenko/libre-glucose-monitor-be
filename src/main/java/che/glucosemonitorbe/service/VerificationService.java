@@ -10,7 +10,6 @@ import che.glucosemonitorbe.entity.VerificationSummary;
 import che.glucosemonitorbe.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,12 +29,17 @@ public class VerificationService {
     private static final int WINDOW_SIZE = 7;
     // Thresholds for triggering a suggestion
     private static final double MEAN_ERROR_THRESHOLD_CR  = 0.5;   // mmol/L
-    private static final double MEAN_ERROR_THRESHOLD_ISF = 0.3;   // mmol/L
     private static final double CONSISTENCY_THRESHOLD    = 0.60;  // 0–1
+    // Below this mean predicted rise the error can't be attributed to the rise coefficient reliably,
+    // so the relative scale would explode — suppress the suggestion instead.
+    private static final double MIN_PREDICTED_RISE       = 0.5;   // mmol/L
 
     // Qualifying meal range
     private static final double MIN_CARBS = 20.0;
     private static final double MAX_CARBS = 80.0;
+
+    // Max distance between a target time (baseline / +2h) and the CGM reading matched to it
+    private static final long CGM_MATCH_TOLERANCE_MS = 20 * 60 * 1000L;  // ±20 minutes
 
     private final VerificationEventRepository verificationEventRepository;
     private final VerificationSummaryRepository verificationSummaryRepository;
@@ -176,22 +180,32 @@ public class VerificationService {
         summary.setMeanError(round2(meanError));
         summary.setConsistencyScore(round2(consistency));
 
+        // Recompute from scratch each pass; clear any stale suggestion first.
+        summary.setSuggestedCarbRatio(null);
+        summary.setSuggestedIsf(null);
+
+        // Attribute a *consistent* systematic error to a single knob. Every qualifying event is a
+        // meal with a bolus (carbs 20–80 g, insulin > 0), so the 2 h net error cannot be split
+        // between the carb-rise coefficient and the model ISF — adjusting both would double-count
+        // the same miss. We therefore correct only the carb ratio (the dominant driver of the
+        // post-meal excursion), scaled *relative* to the mean predicted rise rather than by the
+        // absolute mmol error (a fixed absolute step over/under-corrects small/large meals alike).
+        double meanAbsPredicted = window.stream()
+                .map(VerificationEvent::getPredictedDelta).filter(Objects::nonNull)
+                .mapToDouble(Math::abs).average().orElse(0.0);
+
         boolean ready = false;
-        if (consistency >= CONSISTENCY_THRESHOLD) {
-            // Carbhalf: meanError > threshold → carbRatio too low (actual rise > predicted)
-            if (Math.abs(meanError) >= MEAN_ERROR_THRESHOLD_CR && cob != null) {
-                double curCR = cob.getCarbRatio() != null ? cob.getCarbRatio() : 2.0;
-                // Estimate mean predicted rise from carbRatio component only
-                double scale = (meanError > 0) ? 1.0 + (meanError / 1.0) : 1.0 - (Math.abs(meanError) / 1.0);
-                summary.setSuggestedCarbRatio(round2(curCR * Math.max(0.5, Math.min(2.0, scale))));
-                ready = true;
-            }
-            if (Math.abs(meanError) >= MEAN_ERROR_THRESHOLD_ISF && cob != null) {
-                double curIsf = cob.getIsf() != null ? cob.getIsf() : 1.0;
-                double scale = (meanError < 0) ? 1.0 + (Math.abs(meanError) / 1.0) : 1.0 - (meanError / 1.0);
-                summary.setSuggestedIsf(round2(curIsf * Math.max(0.5, Math.min(2.0, scale))));
-                ready = window.size() >= WINDOW_SIZE;
-            }
+        if (consistency >= CONSISTENCY_THRESHOLD
+                && Math.abs(meanError) >= MEAN_ERROR_THRESHOLD_CR
+                && meanAbsPredicted >= MIN_PREDICTED_RISE
+                && cob != null) {
+            double curCR = cob.getCarbRatio() != null ? cob.getCarbRatio() : 2.0;
+            // meanError > 0 → actual exceeded prediction → predicted rise too low → raise CR;
+            // meanError < 0 → predicted too high → lower CR. relError carries both signs.
+            double relError = meanError / meanAbsPredicted;
+            double scale = Math.max(0.5, Math.min(2.0, 1.0 + relError));
+            summary.setSuggestedCarbRatio(round2(curCR * scale));
+            ready = window.size() >= WINDOW_SIZE;
         }
         summary.setSuggestionReady(ready && window.size() >= WINDOW_SIZE);
         verificationSummaryRepository.save(summary);
@@ -280,15 +294,19 @@ public class VerificationService {
     // ── CGM helper ────────────────────────────────────────────────────────────
 
     private Double findClosestCgm(UUID userId, Long targetMs) {
+        // Fetch only the small window around the target instead of scanning history: an
+        // OrderByDateTimestampAsc page-0 query returns the OLDEST readings, so for any user with
+        // more than a page of history the recent baseline/+2h target was never in range and every
+        // event was wrongly skipped as cgm_data_unavailable.
         List<CgmReading> readings = cgmReadingRepository
-                .findByUserIdOrderByDateTimestampAsc(userId, PageRequest.of(0, 2000))
-                .getContent();
+                .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                        userId, targetMs - CGM_MATCH_TOLERANCE_MS, targetMs + CGM_MATCH_TOLERANCE_MS);
         CgmReading closest = null;
         long minDiff = Long.MAX_VALUE;
         for (CgmReading r : readings) {
             if (r.getDateTimestamp() == null) continue;
             long diff = Math.abs(r.getDateTimestamp() - targetMs);
-            if (diff < minDiff && diff < 20 * 60 * 1000L) {  // within 20 minutes
+            if (diff < minDiff) {  // window already bounds to within tolerance
                 minDiff = diff;
                 closest = r;
             }

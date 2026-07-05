@@ -1,0 +1,16 @@
+# One-shot digital-twin backfill profile (see DigitalTwinBackfillRunner).
+# Binds an ephemeral HTTP port (0) so it can run alongside an already-running instance without
+# competing for the app's port; SecurityConfig still needs a servlet web context, so we keep the
+# web server rather than disabling it. The external CGM sync schedulers are turned off so this
+# short-lived job only performs the calibration and exits.
+server:
+  port: 0
+spring:
+  main:
+    banner-mode: "off"
+  devtools:
+    restart:
+      enabled: false
+app:
+  glucose-sync:
+    enabled: false
