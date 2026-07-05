@@ -55,6 +55,14 @@ public interface CgmReadingRepository extends JpaRepository<CgmReading, UUID> {
     List<CgmReading> findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
             UUID userId, Long dateTimestamp);
 
+    /**
+     * Readings whose epoch-ms timestamp falls within {@code [startTimestamp, endTimestamp]}, oldest
+     * first. Used to locate the CGM reading nearest a target time (e.g. verification baseline / +2h)
+     * via a small indexed window rather than scanning the user's whole history.
+     */
+    List<CgmReading> findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+            UUID userId, Long startTimestamp, Long endTimestamp);
+
     Optional<CgmReading> findByUserIdAndDataSourceAndExternalId(
             UUID userId, CgmReading.DataSource dataSource, String externalId);
 

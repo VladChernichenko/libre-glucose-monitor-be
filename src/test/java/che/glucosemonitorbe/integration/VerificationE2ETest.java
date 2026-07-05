@@ -1,9 +1,12 @@
 package che.glucosemonitorbe.integration;
 
+import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.VerificationEvent;
+import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.repository.VerificationEventRepository;
+import che.glucosemonitorbe.service.VerificationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,13 +18,17 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.*;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -50,6 +57,9 @@ class VerificationE2ETest {
     @Autowired private TestRestTemplate rest;
     @Autowired private UserRepository userRepository;
     @Autowired private VerificationEventRepository verificationEventRepository;
+    @Autowired private CgmReadingRepository cgmReadingRepository;
+    @Autowired private VerificationService verificationService;
+    @Autowired private JdbcTemplate jdbc;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
     private HttpHeaders authHeaders;
@@ -161,7 +171,77 @@ class VerificationE2ETest {
                 "accept-suggestion should be reachable — got: " + resp.getStatusCode());
     }
 
+    // ── T8: large-history regression for the CGM lookup ───────────────────────
+
+    @Test
+    @DisplayName("T8 — evaluatePending matches the near-target CGM reading even with >2000 readings "
+            + "(regression: lookup used to page the OLDEST 2000 and miss recent targets)")
+    void evaluatePending_findsRecentCgm_withLargeHistory() {
+        UUID userId = userRepository.findAll().get(0).getId();
+
+        LocalDateTime noteTime = LocalDateTime.now().minusHours(3);
+        long noteMs = noteTime.toInstant(ZoneOffset.UTC).toEpochMilli();
+        long twoHMs = noteTime.plusHours(2).toInstant(ZoneOffset.UTC).toEpochMilli();
+
+        // Seed >2000 OLD readings (all more than an hour before the note) so that the two recent
+        // target readings are NOT among the oldest 2000 the buggy paged query returned.
+        long step = 5 * 60 * 1000L;
+        long end = noteMs - 60 * 60 * 1000L;   // newest old reading sits an hour before the note
+        List<CgmReading> batch = new ArrayList<>(2003);
+        for (int i = 0; i < 2001; i++) {
+            long t = end - (2001L - i) * step;
+            batch.add(reading(userId, t, 120, "old-" + i));   // 120 mg/dL, far in time from targets
+        }
+        // The two readings evaluateEvent actually needs: baseline at the note time and +2h.
+        batch.add(reading(userId, noteMs, 108, "baseline"));   // 108 mg/dL → 6.0 mmol/L
+        batch.add(reading(userId, twoHMs, 180, "twohour"));    // 180 mg/dL → 10.0 mmol/L
+        cgmReadingRepository.saveAll(batch);
+        assertTrue(cgmReadingRepository.countByUserId(userId) > 2000,
+                "test must seed more than one page of readings to exercise the bug");
+
+        // A qualifying meal note in the past → enqueues a PENDING verification event.
+        postNoteAt(noteTime, 45.0, 4.0, "Lunch");
+        // createdAt is @CreationTimestamp = now, so backdate it past the 2h "ready to evaluate" gate.
+        int updated = jdbc.update(
+                "UPDATE verification_events SET created_at = ? WHERE user_id = ?",
+                Timestamp.valueOf(LocalDateTime.now().minusHours(3)), userId);
+        assertEquals(1, updated, "expected exactly one pending verification event to backdate");
+
+        verificationService.evaluatePending();
+
+        VerificationEvent ev = verificationEventRepository.findByUserIdOrderByCreatedAtDesc(userId)
+                .stream().findFirst().orElseThrow();
+        assertEquals(VerificationEvent.Status.COMPLETED, ev.getStatus(),
+                "event should COMPLETE, not be skipped as cgm_data_unavailable");
+        assertNotNull(ev.getBaselineGlucose(), "baseline glucose must be resolved");
+        assertNotNull(ev.getActualGlucose2h(), "2h glucose must be resolved");
+        assertEquals(6.0, ev.getBaselineGlucose(), 0.2);
+        assertEquals(10.0, ev.getActualGlucose2h(), 0.2);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private CgmReading reading(UUID userId, long epochMs, int sgv, String externalId) {
+        return CgmReading.builder()
+                .userId(userId)
+                .dataSource(CgmReading.DataSource.NIGHTSCOUT)
+                .externalId(externalId)
+                .sgv(sgv)
+                .dateTimestamp(epochMs)
+                .lastUpdated(LocalDateTime.now())
+                .build();
+    }
+
+    private void postNoteAt(LocalDateTime timestamp, double carbs, double insulin, String meal) {
+        CreateNoteRequest note = new CreateNoteRequest();
+        note.setTimestamp(timestamp);
+        note.setCarbs(carbs);
+        note.setInsulin(insulin);
+        note.setMeal(meal);
+        rest.exchange("/api/notes", HttpMethod.POST,
+                new HttpEntity<>(note, authHeaders), NoteDto.class);
+    }
+
 
     private HttpHeaders registerAndLogin() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);

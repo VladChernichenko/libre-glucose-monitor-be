@@ -185,14 +185,16 @@ public class HovorkaParameterService {
     }
 
     /**
-     * Applies the v1-active digital-twin scales (ISF, meal magnitude A_G) to a base parameter set.
-     * {@code tMaxG} and {@code egpNet} are left untouched — see {@link TwinScales} for why those
-     * scales are reserved rather than wired into the live ODE.
+     * Applies the active digital-twin scales (ISF, meal magnitude A_G, and endogenous glucose
+     * production EGP₀) to a base parameter set. {@code egpScale} is fitted by the calibrator from
+     * BASAL_CHECK fasting windows and now flows into the live ODE. {@code tMaxGScale} is still left
+     * neutral here — it is frequently overridden per-meal by {@link che.glucosemonitorbe.hovorka.MacroNutrientGastricModel},
+     * so a global scale would not survive the meal path (see {@link TwinScales}).
      */
     private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {
         TwinScales c = s.clamped();
         return new HovorkaParameters(
-                p.vG(), p.f01(), p.egpNet(), p.k12(), p.k21(),
+                p.vG(), p.f01(), p.egpNet() * c.egpScale(), p.k12(), p.k21(),
                 p.tMaxG(), p.aG() * c.agScale(), p.isf() * c.isfScale(), p.weightKg());
     }
 }
