@@ -14,7 +14,9 @@ import che.glucosemonitorbe.entity.UnloggedEventFlag;
 import che.glucosemonitorbe.entity.UnloggedEventFlag.Category;
 import che.glucosemonitorbe.entity.UnloggedEventFlag.Direction;
 import che.glucosemonitorbe.entity.UnloggedEventFlag.State;
+import che.glucosemonitorbe.hovorka.ActivityProvider;
 import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
+import che.glucosemonitorbe.hovorka.NotesActivityProvider;
 import che.glucosemonitorbe.hovorka.DallaManGutModel;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.HovorkaOdeSolver;
@@ -177,9 +179,13 @@ public class UnloggedEventDetectionService {
         HovorkaParameters baseParams = paramService.buildRawForUser(userId);
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
+        // Make the residual activity-aware so an exercise-driven drop from a logged activity is
+        // explained (not mistaken for unlogged insulin). Inert when activity logging is off.
+        ActivityProvider activity = featureToggleConfig.isActivityLoggingEnabled()
+                ? NotesActivityProvider.fromNotes(notes) : ActivityProvider.NONE;
         List<PredictionPointDTO> predicted = rawPredictor.buildPredictionPath(
                 baseParams, rapidIob, settings, g0, anchorTime, carbs, insulin, longActing,
-                userId, windowMinutes);
+                userId, windowMinutes, activity);
 
         // Align predicted → actual; residual = actual − predicted [mmol/L].
         TreeMap<Long, Double> predByMs = new TreeMap<>();

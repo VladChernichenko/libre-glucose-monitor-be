@@ -172,11 +172,17 @@ public class DigitalTwinCalibrationService {
         List<PredictionReplayEngine.Reading> trainCgm = cgm.subList(0, boundary);
         List<PredictionReplayEngine.Reading> valCgm   = cgm.subList(boundary, cgm.size());
 
+        // Replay accounts for logged activity so calibration isn't biased by exercise-driven moves.
+        che.glucosemonitorbe.hovorka.ActivityProvider activity =
+                featureToggleConfig.isActivityLoggingEnabled()
+                        ? che.glucosemonitorbe.hovorka.NotesActivityProvider.fromNotes(notes)
+                        : che.glucosemonitorbe.hovorka.ActivityProvider.NONE;
+
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
         PredictionReplayEngine train = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg);
+                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity);
         PredictionReplayEngine val = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg);
+                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity);
 
         // ── Fit ─────────────────────────────────────────────────────────────────
         DigitalTwinCalibrator.Result result = new DigitalTwinCalibrator().calibrate(train, val);

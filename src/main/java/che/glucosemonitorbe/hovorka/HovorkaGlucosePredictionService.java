@@ -109,6 +109,28 @@ public class HovorkaGlucosePredictionService {
     }
 
     /**
+     * DB-fetching prediction path that also accounts for logged activity via {@code activityProvider}
+     * (use {@link ActivityProvider#NONE} for the un-modulated model).
+     */
+    public List<PredictionPointDTO> buildPredictionPath(
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider) {
+
+        HovorkaParameters p      = paramService.buildForUser(userId);
+        RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
+        UserSettingsDTO settings  = userSettingsService.getUserSettings(userId);
+        return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider);
+    }
+
+    /**
      * Build the prediction path with pre-built (possibly macro-modulated) parameters.
      *
      * <p>Used by the {@code /api/predict} endpoint where
@@ -139,6 +161,25 @@ public class HovorkaGlucosePredictionService {
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
                 ActivityProvider.NONE);
+    }
+
+    /** Pre-built-parameters prediction path that also accounts for logged activity. */
+    public List<PredictionPointDTO> buildPredictionPath(
+            HovorkaParameters customParams,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider) {
+
+        RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
+        return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider);
     }
 
     /**

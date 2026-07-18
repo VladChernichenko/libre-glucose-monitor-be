@@ -52,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.*;
     "app.features.backend-mode-enabled=true",
     "app.features.unlogged-event-detection-enabled=true",
     "app.features.digital-twin-enabled=true",   // for the calibration-exclusion test
+    "app.features.activity-logging-enabled=true",// for the activity-aware detection test
     "app.glucose-sync.enabled=false"             // keep sync schedulers quiet during the test
 })
 @SuppressWarnings({"resource", "null"})
@@ -335,6 +336,43 @@ class UnloggedEventE2ETest {
         flagRepository.save(flag);
         int dismissed = calibrationService.calibrateUser(userId).trainSamples();
         assertEquals(base, dismissed, "DISMISSED window must keep full weight");
+    }
+
+    // ── T13: a logged activity explains an exercise-driven drop → no false flag ───
+
+    @Test
+    @DisplayName("T13 — logging an activity over a drop shrinks the flagged residual (detector is activity-aware)")
+    void loggedActivity_reducesFlaggedResidual() {
+        UUID userId = userId();
+        long dropStart = seedFallWindow(userId);   // sustained fall, no bolus
+
+        // Without any activity, the drop is unexplained → flagged with a large negative residual.
+        UnloggedEventFlag before = detectionService.scanUser(userId).orElseThrow();
+        assertEquals(Category.UNLOGGED_INSULIN, before.getCategory());
+        double residualBefore = Math.abs(before.getMeanResidualMmol());
+
+        // Log a hard activity spanning the drop; a re-scan updates the same flag with the
+        // activity-aware residual, which must be smaller (the exercise now explains part of the drop).
+        Note act = new Note();
+        act.setUserId(userId);
+        act.setType(Note.TYPE_ACTIVITY);
+        act.setActivityType("RUNNING");
+        act.setIntensity("VERY_HARD");
+        act.setDurationMin(120);
+        act.setCarbs(0.0);
+        act.setInsulin(0.0);
+        act.setMeal("run");
+        act.setTimestamp(toLdt(dropStart).minusMinutes(30));
+        act.setCreatedAt(LocalDateTime.now());
+        act.setUpdatedAt(LocalDateTime.now());
+        noteRepository.save(act);
+
+        detectionService.scanUser(userId);
+        double residualAfter = Math.abs(flagRepository.findById(before.getId()).orElseThrow()
+                .getMeanResidualMmol());
+        assertTrue(residualAfter < residualBefore,
+                "activity should reduce the unexplained residual (before=" + residualBefore
+                        + ", after=" + residualAfter + ")");
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

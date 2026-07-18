@@ -4,6 +4,8 @@ import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.NoteDto;
 import che.glucosemonitorbe.dto.NotesSummaryResponse;
 import che.glucosemonitorbe.dto.UpdateNoteRequest;
+import che.glucosemonitorbe.domain.ActivityIntensity;
+import che.glucosemonitorbe.domain.ActivityType;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.mapper.NoteMapper;
@@ -16,7 +18,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -89,6 +93,7 @@ public class NotesService {
             request.getInsulinDose()
         );
         note.setType(request.getType() != null ? request.getType() : Note.TYPE_NORMAL);
+        applyActivityFields(note, request.getActivityType(), request.getIntensity(), request.getDurationMin());
         note.setMockData(Boolean.TRUE.equals(request.getMockData()));
         if (request.getAbsorptionMode() != null) {
             note.setAbsorptionMode(request.getAbsorptionMode());
@@ -184,6 +189,13 @@ public class NotesService {
         }
         if (request.getNutritionProfile() != null && !request.getNutritionProfile().isBlank()) {
             existingNote.setNutritionProfile(request.getNutritionProfile());
+        }
+        if (request.getActivityType() != null) existingNote.setActivityType(request.getActivityType());
+        if (request.getIntensity() != null)    existingNote.setIntensity(request.getIntensity());
+        if (request.getDurationMin() != null)   existingNote.setDurationMin(request.getDurationMin());
+        if (existingNote.isActivity()) {
+            applyActivityFields(existingNote, existingNote.getActivityType(),
+                    existingNote.getIntensity(), existingNote.getDurationMin());
         }
         enrichNutrition(existingNote);
         
@@ -290,6 +302,36 @@ public class NotesService {
     }
 
     /** Map a note to its DTO, resolving {@code photoKey} to a backend-relative {@code photoUrl}. */
+    /** Sane upper bound for a single logged activity's duration [min]. */
+    private static final int MAX_ACTIVITY_DURATION_MIN = 24 * 60;
+
+    /**
+     * Validate + normalise the activity fields of an activity note (no-op for non-activity notes).
+     * Rejects unknown type/intensity or non-positive/oversized duration, and fills the
+     * NOT-NULL note columns (carbs/insulin/meal) that an activity note otherwise leaves empty.
+     */
+    private void applyActivityFields(Note note, String activityType, String intensity, Integer durationMin) {
+        if (!note.isActivity()) return;
+        ActivityType type = ActivityType.fromName(activityType);
+        ActivityIntensity level = ActivityIntensity.fromName(intensity);
+        if (type == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or missing activity_type");
+        }
+        if (level == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or missing intensity");
+        }
+        if (durationMin == null || durationMin <= 0 || durationMin > MAX_ACTIVITY_DURATION_MIN) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "duration_min must be between 1 and " + MAX_ACTIVITY_DURATION_MIN);
+        }
+        note.setActivityType(type.name());
+        note.setIntensity(level.name());
+        note.setDurationMin(durationMin);
+        if (note.getCarbs() == null) note.setCarbs(0.0);
+        if (note.getInsulin() == null) note.setInsulin(0.0);
+        if (note.getMeal() == null || note.getMeal().isBlank()) note.setMeal(type.name());
+    }
+
     private NoteDto toDtoWithPhoto(Note note) {
         NoteDto dto = noteMapper.toDto(note);
         if (note.getPhotoKey() != null && !note.getPhotoKey().isBlank() && notePhotoStorageService.isEnabled()) {

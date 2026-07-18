@@ -17,6 +17,8 @@ public class Note {
     public static final String TYPE_NORMAL = "normal";
     /** {@link #type} value for long-acting (basal) insulin notes — excluded from bolus IOB/predictions. */
     public static final String TYPE_LONG_ACTING = "long_acting";
+    /** {@link #type} value for a logged physical-activity note (drives the model's activity signal). */
+    public static final String TYPE_ACTIVITY = "activity";
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -64,6 +66,18 @@ public class Note {
     /** Object key of the meal photo in S3-compatible storage (MinIO), or {@code null} if none. */
     @Column(name = "photo_key", length = 500)
     private String photoKey;
+
+    /** Activity type (see {@link che.glucosemonitorbe.domain.ActivityType}); set only for activity notes. */
+    @Column(name = "activity_type", length = 20)
+    private String activityType;
+
+    /** Activity intensity level (see {@link che.glucosemonitorbe.domain.ActivityIntensity}); activity notes only. */
+    @Column(name = "intensity", length = 12)
+    private String intensity;
+
+    /** Activity duration in minutes; the note's {@code timestamp} is the activity start. Activity notes only. */
+    @Column(name = "duration_min")
+    private Integer durationMin;
 
     @Column(name = "mock_data", nullable = false)
     private boolean mockData = false;
@@ -216,6 +230,35 @@ public class Note {
     /** True when this note is a long-acting (basal) injection — excluded from bolus IOB/predictions. */
     public boolean isLongActing() {
         return TYPE_LONG_ACTING.equals(type);
+    }
+
+    /** True when this note logs physical activity. */
+    public boolean isActivity() {
+        return TYPE_ACTIVITY.equals(type);
+    }
+
+    public String getActivityType() {
+        return activityType;
+    }
+
+    public void setActivityType(String activityType) {
+        this.activityType = activityType;
+    }
+
+    public String getIntensity() {
+        return intensity;
+    }
+
+    public void setIntensity(String intensity) {
+        this.intensity = intensity;
+    }
+
+    public Integer getDurationMin() {
+        return durationMin;
+    }
+
+    public void setDurationMin(Integer durationMin) {
+        this.durationMin = durationMin;
     }
 
     public boolean isMockData() {

@@ -73,6 +73,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     private final UserSettingsDTO settings;
     private final UUID userId;
     private final Config cfg;
+    private final che.glucosemonitorbe.hovorka.ActivityProvider activityProvider;
 
     private final long[] cgmT;
     private final double[] cgmG;
@@ -96,12 +97,23 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     public PredictionReplayEngine(HovorkaGlucosePredictionService predicted, HovorkaParameters baseParams,
                                   RapidInsulinIobParameters rapidIob, UserSettingsDTO settings,
                                   UUID userId, List<Reading> cgm, List<Event> events, Config cfg) {
+        this(predicted, baseParams, rapidIob, settings, userId, cgm, events, cfg,
+                che.glucosemonitorbe.hovorka.ActivityProvider.NONE);
+    }
+
+    /** As above, but with an {@link che.glucosemonitorbe.hovorka.ActivityProvider} so the replayed
+     *  predictions account for logged activity (NONE = the un-modulated model). */
+    public PredictionReplayEngine(HovorkaGlucosePredictionService predicted, HovorkaParameters baseParams,
+                                  RapidInsulinIobParameters rapidIob, UserSettingsDTO settings,
+                                  UUID userId, List<Reading> cgm, List<Event> events, Config cfg,
+                                  che.glucosemonitorbe.hovorka.ActivityProvider activityProvider) {
         this.predictor = predicted;
         this.baseParams = baseParams;
         this.rapidIob = rapidIob;
         this.settings = settings;
         this.userId = userId;
         this.cfg = cfg;
+        this.activityProvider = activityProvider;
 
         List<Reading> sorted = new ArrayList<>(cgm);
         sorted.sort((a, b) -> Long.compare(a.epochMs(), b.epochMs()));
@@ -129,7 +141,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
             HovorkaParameters p = applyScales(a.macroParams(), s);
             List<PredictionPointDTO> curve = predictor.buildPredictionPath(
                     p, rapidIob, settings, a.g0(), a.now(), a.carbs(), a.insulin(), a.longActing(),
-                    userId, cfg.horizonMin);
+                    userId, cfg.horizonMin, activityProvider);
             long t0 = a.now().toInstant(ZoneOffset.UTC).toEpochMilli();
             for (PredictionPointDTO pt : curve) {
                 int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();

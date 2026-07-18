@@ -9,8 +9,8 @@ import che.glucosemonitorbe.dto.NightscoutTestResponseDto;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -34,13 +34,23 @@ import java.util.UUID;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class NightScoutIntegration {
     
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final UserDataSourceConfigService userDataSourceConfigService;
     private final CircuitBreakerManager circuitBreakerManager;
+
+    public NightScoutIntegration(
+            @Qualifier("nightscoutRestTemplate") RestTemplate restTemplate,
+            ObjectMapper objectMapper,
+            UserDataSourceConfigService userDataSourceConfigService,
+            CircuitBreakerManager circuitBreakerManager) {
+        this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
+        this.userDataSourceConfigService = userDataSourceConfigService;
+        this.circuitBreakerManager = circuitBreakerManager;
+    }
     
     /**
      * Cached for 30 s per (userId, count). At 1000 RPS this collapses thousands of identical
@@ -72,6 +82,7 @@ public class NightScoutIntegration {
                     if (url == null || url.trim().isEmpty()) {
                         throw new RuntimeException("Nightscout URL is not configured. Please set the URL in Data Source settings.");
                     }
+                    NightscoutUrlValidator.validateSafeForOutboundFetch(url);
                     
                     log.info("Fetching {} glucose entries from Nightscout: {}", count, url);
                     log.info("Config - URL: {}, API Secret present: {}, API Token present: {}", 
@@ -147,6 +158,7 @@ public class NightScoutIntegration {
                     if (url == null || url.trim().isEmpty()) {
                         throw new RuntimeException("Nightscout URL is not configured. Please set the URL in Data Source settings.");
                     }
+                    NightscoutUrlValidator.validateSafeForOutboundFetch(url);
 
                     String startDateStr = startDate.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT);
                     String endDateStr = endDate.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT);
@@ -223,10 +235,11 @@ public class NightScoutIntegration {
                     .build();
         }
         String url = baseUrl.trim().replaceAll("/$", "");
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        String urlError = NightscoutUrlValidator.validationErrorMessage(url);
+        if (urlError != null) {
             return NightscoutTestResponseDto.builder()
                     .ok(false)
-                    .message("URL must start with http:// or https://")
+                    .message(urlError)
                     .build();
         }
 

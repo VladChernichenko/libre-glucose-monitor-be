@@ -185,4 +185,15 @@ public class NoteDto {
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
     }
+
+    private String activityType;
+    private String intensity;
+    private Integer durationMin;
+
+    public String getActivityType() { return activityType; }
+    public void setActivityType(String activityType) { this.activityType = activityType; }
+    public String getIntensity() { return intensity; }
+    public void setIntensity(String intensity) { this.intensity = intensity; }
+    public Integer getDurationMin() { return durationMin; }
+    public void setDurationMin(Integer durationMin) { this.durationMin = durationMin; }
 }

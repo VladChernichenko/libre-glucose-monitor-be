@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.dto;
 
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
+import che.glucosemonitorbe.nightscout.NightscoutUrlValidator;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -44,10 +45,7 @@ public class DataSourceConfigRequestDto {
             if (nightscoutUrl == null || nightscoutUrl.trim().isEmpty()) {
                 throw new IllegalArgumentException("Nightscout URL is required for Nightscout configuration");
             }
-            // Optionally validate URL format
-            if (!nightscoutUrl.startsWith("http://") && !nightscoutUrl.startsWith("https://")) {
-                throw new IllegalArgumentException("Nightscout URL must start with http:// or https://");
-            }
+            NightscoutUrlValidator.validateSafeForOutboundFetch(nightscoutUrl);
         }
     }
 

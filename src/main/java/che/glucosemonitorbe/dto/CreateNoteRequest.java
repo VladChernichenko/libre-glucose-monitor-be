@@ -141,4 +141,15 @@ public class CreateNoteRequest {
     public void setType(String type) {
         this.type = type;
     }
+
+    private String activityType;
+    private String intensity;
+    private Integer durationMin;
+
+    public String getActivityType() { return activityType; }
+    public void setActivityType(String activityType) { this.activityType = activityType; }
+    public String getIntensity() { return intensity; }
+    public void setIntensity(String intensity) { this.intensity = intensity; }
+    public Integer getDurationMin() { return durationMin; }
+    public void setDurationMin(Integer durationMin) { this.durationMin = durationMin; }
 }

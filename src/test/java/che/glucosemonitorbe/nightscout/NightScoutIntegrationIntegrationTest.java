@@ -54,12 +54,13 @@ class NightScoutIntegrationIntegrationTest {
     @Test
     void getGlucoseEntriesShouldParseNightscoutPayload() throws Exception {
         UUID userId = UUID.randomUUID();
+        // example.com resolves publicly; private/local hosts are rejected by NightscoutUrlValidator.
         NightscoutCredentials creds = new NightscoutCredentials(
-                "https://nightscout.example.com", "my-secret", "my-token");
+                "https://example.com", "my-secret", "my-token");
         when(userDataSourceConfigService.getNightscoutCredentials(userId))
                 .thenReturn(Optional.of(creds));
 
-        server.expect(once(), requestTo("https://nightscout.example.com/api/v2/entries.json?count=1"))
+        server.expect(once(), requestTo("https://example.com/api/v2/entries.json?count=1"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("Authorization", "Bearer my-token"))
                 .andExpect(header("api-secret", sha1("my-secret")))
@@ -78,6 +79,15 @@ class NightScoutIntegrationIntegrationTest {
 
         assertFalse(result.isOk());
         assertTrue(result.getMessage().contains("http:// or https://"));
+    }
+
+    @Test
+    void probeNightscoutShouldRejectPrivateIp() {
+        NightscoutTestResponseDto result = integration.probeNightscout("http://127.0.0.1:8080", "", "");
+
+        assertFalse(result.isOk());
+        assertTrue(result.getMessage().toLowerCase().contains("private")
+                || result.getMessage().toLowerCase().contains("local"));
     }
 
     private static String sha1(String value) throws Exception {
