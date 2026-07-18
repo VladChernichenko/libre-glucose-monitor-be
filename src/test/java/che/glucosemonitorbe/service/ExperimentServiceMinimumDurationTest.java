@@ -96,6 +96,17 @@ class ExperimentServiceMinimumDurationTest {
                 .build();
     }
 
+    private static GlucoseCalculationsResponse fallingForecast(double from, double to) {
+        return GlucoseCalculationsResponse.builder()
+                .currentGlucose(from)
+                .fourHourPrediction(to)
+                .predictionTrend("falling")
+                .predictionPath(List.of(
+                        PredictionPointDTO.builder().predictedGlucose(from).build(),
+                        PredictionPointDTO.builder().predictedGlucose(to).build()))
+                .build();
+    }
+
     // -- BASAL_CHECK ----------------------------------------------------------
 
     @Test
@@ -131,6 +142,92 @@ class ExperimentServiceMinimumDurationTest {
         ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
 
         assertThat(result).isNotNull();
+    }
+
+    @Test
+    @DisplayName("BASAL_CHECK flat observed + flat forecast -> stable, no dose change advice")
+    void basalCheck_flat_isStable_noAdjustmentAdvice() {
+        Experiment exp = inProgress(Type.BASAL_CHECK, 240, 7.0, 7.2, 7.1);
+        stubFetch(exp);
+        when(calculationsService.calculateGlucoseData(any())).thenReturn(flatForecast(7.1));
+
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
+
+        assertThat(result.getIsStable()).isTrue();
+        assertThat(result.getExplanation())
+                .containsIgnoringCase("stable")
+                .doesNotContain("increasing")
+                .doesNotContain("decreasing")
+                .doesNotContain("Recheck tomorrow");
+        assertThat(exp.getResultNotes()).contains("advice=review").contains("stable=true");
+    }
+
+    @Test
+    @DisplayName("BASAL_CHECK rising 4h forecast -> unstable, advise +2 U and recheck tomorrow")
+    void basalCheck_risingForecast_advisesIncrease() {
+        // Observed readings stay within 1.7; rising look-ahead fails the check.
+        Experiment exp = inProgress(Type.BASAL_CHECK, 240, 7.0, 7.2, 7.1);
+        stubFetch(exp);
+        when(calculationsService.calculateGlucoseData(any())).thenReturn(risingForecast(7.1, 9.5));
+
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
+
+        assertThat(result.getIsStable()).isFalse();
+        assertThat(result.getExplanation())
+                .contains("not flat enough")
+                .contains("increasing your long-acting basal dose by 2 units")
+                .contains("Recheck tomorrow");
+        assertThat(exp.getResultNotes()).contains("advice=increase").contains("stable=false");
+    }
+
+    @Test
+    @DisplayName("BASAL_CHECK falling 4h forecast -> unstable, advise -2 U and recheck tomorrow")
+    void basalCheck_fallingForecast_advisesDecrease() {
+        Experiment exp = inProgress(Type.BASAL_CHECK, 240, 8.0, 7.9, 7.8);
+        stubFetch(exp);
+        when(calculationsService.calculateGlucoseData(any())).thenReturn(fallingForecast(7.8, 5.5));
+
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
+
+        assertThat(result.getIsStable()).isFalse();
+        assertThat(result.getExplanation())
+                .contains("not flat enough")
+                .contains("decreasing your long-acting basal dose by 2 units")
+                .contains("Recheck tomorrow");
+        assertThat(exp.getResultNotes()).contains("advice=decrease").contains("stable=false");
+    }
+
+    @Test
+    @DisplayName("BASAL_CHECK rising observed drift (flat forecast) -> unstable, advise +2 U")
+    void basalCheck_risingObserved_advisesIncrease() {
+        // Delta 2.5 > 1.7 even with a flat forecast.
+        Experiment exp = inProgress(Type.BASAL_CHECK, 240, 7.0, 8.5, 9.5);
+        stubFetch(exp);
+        when(calculationsService.calculateGlucoseData(any())).thenReturn(flatForecast(9.5));
+
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
+
+        assertThat(result.getIsStable()).isFalse();
+        assertThat(result.getExplanation())
+                .contains("increasing your long-acting basal dose by 2 units")
+                .contains("Recheck tomorrow");
+        assertThat(exp.getResultNotes()).contains("advice=increase");
+    }
+
+    @Test
+    @DisplayName("BASAL_CHECK falling observed drift (flat forecast) -> unstable, advise -2 U")
+    void basalCheck_fallingObserved_advisesDecrease() {
+        Experiment exp = inProgress(Type.BASAL_CHECK, 240, 9.5, 8.0, 7.0);
+        stubFetch(exp);
+        when(calculationsService.calculateGlucoseData(any())).thenReturn(flatForecast(7.0));
+
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
+
+        assertThat(result.getIsStable()).isFalse();
+        assertThat(result.getExplanation())
+                .contains("decreasing your long-acting basal dose by 2 units")
+                .contains("Recheck tomorrow");
+        assertThat(exp.getResultNotes()).contains("advice=decrease");
     }
 
     // -- CARB_FACTOR ----------------------------------------------------------
