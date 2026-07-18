@@ -14,7 +14,7 @@ You do **not** need a local Postgres process if the app uses Neon.
 
 1. In [Neon console](https://console.neon.tech) open the project ? **Connect** ? copy the **JDBC** URL (`jdbc:postgresql://...`, usually with `sslmode=require` and `user` / `password` query params).
 
-2. **Option A — `prod` profile** (matches deployment; recommended if you already run with `prod`):
+2. **Option A - `prod` profile** (matches deployment; recommended if you already run with `prod`):
 
    **IntelliJ:** Run Configuration ? *Modify options* ? **Environment variables**:
 
@@ -32,9 +32,9 @@ You do **not** need a local Postgres process if the app uses Neon.
    ./gradlew bootRun
    ```
 
-3. **Option B — default (non-prod) profile** with Neon as the DB only:
+3. **Option B - default (non-prod) profile** with Neon as the DB only:
 
-   Set `DATABASE_URL` to the same JDBC string. Clear inherited DB user/password so Neon’s URL credentials are used:
+   Set `DATABASE_URL` to the same JDBC string. Clear inherited DB user/password so Neon's URL credentials are used:
 
    - `DB_USERNAME` = *(empty)*
    - `DB_PASSWORD` = *(empty)*
@@ -90,7 +90,7 @@ java -jar build/libs/glucose-monitor-be-*.jar
 ## 5. Pooling and branches
 
 - Neon offers a **pooled** host (often `-pooler` in the hostname) for many short-lived connections; use the connection string Neon labels for your stack (e.g. serverless / pooled).
-- You can use **preview branches** for staging; point `DATABASE_URL` at that branch’s connection string.
+- You can use **preview branches** for staging; point `DATABASE_URL` at that branch's connection string.
 
 ## 6. Verify
 

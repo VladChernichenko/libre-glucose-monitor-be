@@ -1,3 +1,15 @@
-/gradlew text eol=lf
+# Text files are UTF-8. Enforce with EditorConfig charset=utf-8 and scripts/check-utf8.py.
+* text=auto eol=lf
 *.bat text eol=crlf
+*.cmd text eol=crlf
+
 *.jar binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
