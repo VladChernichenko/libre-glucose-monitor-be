@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -57,6 +58,7 @@ public class CircuitBreakerController {
     @Operation(summary = "Reset a specific circuit breaker to CLOSED state")
     @ApiResponses({ @ApiResponse(responseCode = "200", description = "Circuit breaker reset"),
                     @ApiResponse(responseCode = "500", description = "Reset failed") })
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/reset/{serviceName}")
     public ResponseEntity<String> resetCircuitBreaker(@PathVariable String serviceName) {
         try {
@@ -72,6 +74,7 @@ public class CircuitBreakerController {
     /**
      * Reset all circuit breakers
      */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/reset-all")
     public ResponseEntity<String> resetAllCircuitBreakers() {
         try {

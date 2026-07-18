@@ -160,4 +160,29 @@ class InsulinCalculatorIntegrationTest {
         // Should not be 500
         assertNotEquals(HttpStatus.INTERNAL_SERVER_ERROR, resp.getStatusCode());
     }
+
+    @Test
+    @DisplayName("BE-5: foreign userId in body does not cause 4xx/5xx - auth user is used")
+    void calculate_withForeignUserId_stillSucceeds() {
+        RegisterRequest req = validRegister();
+        HttpHeaders headers = authedHeaders(req);
+
+        InsulinCalculationRequest calcReq = InsulinCalculationRequest.builder()
+                .carbs(48.0)
+                .currentGlucose(8.0)
+                .targetGlucose(5.5)
+                .activeInsulin(0.0)
+                .userId(UUID.randomUUID().toString())
+                .build();
+
+        ResponseEntity<Map> resp = rest.exchange(
+                "/api/insulin/calculate",
+                HttpMethod.POST,
+                new HttpEntity<>(calcReq, headers),
+                Map.class);
+
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertNotNull(resp.getBody());
+        assertTrue(resp.getBody().containsKey("featureEnabled"));
+    }
 }

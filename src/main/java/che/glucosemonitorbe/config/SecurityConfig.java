@@ -47,7 +47,7 @@ public class SecurityConfig {
                         // Only liveness/readiness + info are public (for orchestrator probes);
                         // metrics, caches, loggers, env, etc. require authentication.
                         .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
-                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/webjars/**").permitAll()
+                        // Swagger / OpenAPI require authentication (and are disabled entirely under prod).
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/health").permitAll()  // Allow health checks
                         .anyRequest().authenticated()

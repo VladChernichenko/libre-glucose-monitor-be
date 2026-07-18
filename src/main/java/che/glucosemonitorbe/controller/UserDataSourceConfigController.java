@@ -214,22 +214,6 @@ public class UserDataSourceConfigController {
         return runNightscoutProbe(request, authentication);
     }
 
-    /**
-     * Compatibility endpoint for clients that can only issue GET.
-     */
-    @GetMapping("/test-nightscout")
-    public ResponseEntity<NightscoutTestResponseDto> testNightscoutGet(
-            @RequestParam("nightscoutUrl") String nightscoutUrl,
-            @RequestParam(value = "nightscoutApiSecret", required = false) String nightscoutApiSecret,
-            @RequestParam(value = "nightscoutApiToken", required = false) String nightscoutApiToken,
-            Authentication authentication) {
-        NightscoutTestRequestDto request = new NightscoutTestRequestDto();
-        request.setNightscoutUrl(nightscoutUrl);
-        request.setNightscoutApiSecret(nightscoutApiSecret);
-        request.setNightscoutApiToken(nightscoutApiToken);
-        return runNightscoutProbe(request, authentication);
-    }
-
     private ResponseEntity<NightscoutTestResponseDto> runNightscoutProbe(
             NightscoutTestRequestDto request,
             Authentication authentication

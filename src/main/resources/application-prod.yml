@@ -64,3 +64,10 @@ app:
 
 mongodb:
   enabled: false
+
+# Hide OpenAPI / Swagger UI in production (also require auth via SecurityConfig).
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
