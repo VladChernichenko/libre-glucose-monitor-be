@@ -56,6 +56,37 @@ class ResidualBiasModelTest {
         assertThat(ResidualBiasModel.fromCsv("garbage").isNeutral()).isTrue();
     }
 
+    @Test
+    void interpolatesSmoothlyAcrossTheHourInsteadOfStepping() {
+        // Craft a model with a sharp +2 mmol/L bias at hour 6 and 0 at neighbouring hours 5 and 7.
+        List<AnchorSample> samples = new ArrayList<>();
+        for (int i = 0; i < 40; i++) samples.add(sampleAt(6, 8.0, 10.0)); // under-predict by 2 at 06:00
+        for (int h = 0; h < 24; h++) {
+            if (h == 6) continue;
+            for (int i = 0; i < 40; i++) samples.add(sampleAt(h, 7.0, 7.0));
+        }
+        ResidualBiasModel model = ResidualBiasModel.fit(samples);
+
+        // The interpolated value at a bucket centre (:30) equals the stepped value.
+        assertThat(model.correctionAt(6, 30)).isCloseTo(model.correctionAt(6), offset(1e-9));
+
+        // Across the 06:00 boundary the value must be continuous: minute 05:59 and 06:00 differ
+        // only marginally, and both sit roughly halfway between the hour-5 and hour-6 corrections.
+        double before = model.correctionAt(5, 59);
+        double after  = model.correctionAt(6, 0);
+        double midpoint = (model.correctionAt(5) + model.correctionAt(6)) / 2.0;
+        assertThat(after).isCloseTo(midpoint, offset(1e-9));
+        assertThat(Math.abs(after - before)).isLessThan(0.05); // no vertical step at :00
+
+        // Monotone ramp from the low neighbour (hour 5) up to the peak centre (06:30).
+        assertThat(model.correctionAt(6, 0)).isLessThan(model.correctionAt(6, 15));
+        assertThat(model.correctionAt(6, 15)).isLessThan(model.correctionAt(6, 30));
+
+        // Midnight wrap: hour 0 blends with hour 23, hour 23 blends with hour 0 — no exception.
+        assertThat(model.correctionAt(0, 0)).isFinite();
+        assertThat(model.correctionAt(23, 59)).isFinite();
+    }
+
     private static AnchorSample sampleAt(int hour, double predicted, double actual) {
         return new AnchorSample(60, predicted, actual, predicted, Regime.MEAL, hour);
     }
