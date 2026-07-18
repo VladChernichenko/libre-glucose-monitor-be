@@ -295,25 +295,101 @@ public class ExperimentService {
         }
     }
 
+    /**
+     * Basal Rate Check: observed flatness over the run AND a 4-hour Hovorka
+     * look-ahead that must stay flat (clean background - rising/falling forecast implies
+     * basal mismatch).
+     */
     private ExperimentResultDTO completeBasalCheck(Experiment exp) {
         double maxGlucose = exp.getReadings().stream()
                 .mapToDouble(ExperimentReading::getGlucoseMmol).max().orElse(0);
         double minGlucose = exp.getReadings().stream()
                 .mapToDouble(ExperimentReading::getGlucoseMmol).min().orElse(0);
-        double delta = maxGlucose - minGlucose;
-        boolean stable = delta <= 1.7;
-        exp.setIsStable(stable);
-        exp.setResultNotes("maxDelta=" + round2(delta) + " mmol/L, stable=" + stable);
+        double observedDelta = maxGlucose - minGlucose;
+        boolean observedStable = observedDelta <= BASAL_MAX_DELTA_MMOL;
 
-        String explanation = stable
-                ? "Your basal rate is stable. Max glucose drift was " + round2(delta) + " mmol/L (target ≤ 1.7). You can now run ISF and Carb tests."
-                : "Your basal rate may need adjustment. Max glucose drift was " + round2(delta) + " mmol/L (target ≤ 1.7). Discuss with your care team before running ISF/Carb tests.";
+        ExperimentReading latest = exp.getReadings().stream()
+                .max(Comparator.comparing(ExperimentReading::getRecordedAt))
+                .orElseThrow();
+
+        BasalForecastAssessment forecast = assessBasalForecast(exp.getUserId(), latest.getGlucoseMmol());
+        boolean stable = observedStable && forecast.stable();
+
+        exp.setIsStable(stable);
+        exp.setResultNotes(String.format(
+                "observedDelta=%.2f forecastDelta=%.2f forecastTrend=%s fourHour=%.2f stable=%s",
+                round2(observedDelta), round2(forecast.pathDelta()),
+                forecast.trend(), round2(forecast.fourHourGlucose()), stable));
+
+        String explanation;
+        if (stable) {
+            explanation = String.format(
+                    "Your basal rate looks stable. Observed drift was %.2f mmol/L and the 4-hour forecast stays flat (delta %.2f, trend %s). You can now run ISF and Carb tests.",
+                    round2(observedDelta), round2(forecast.pathDelta()), forecast.trend());
+        } else if (!observedStable && !forecast.stable()) {
+            explanation = String.format(
+                    "Your basal rate may need adjustment. Observed drift was %.2f mmol/L (target <= %.1f) and the 4-hour forecast trends %s (delta %.2f). Discuss with your care team before running ISF/Carb tests.",
+                    round2(observedDelta), BASAL_MAX_DELTA_MMOL, forecast.trend(), round2(forecast.pathDelta()));
+        } else if (!observedStable) {
+            explanation = String.format(
+                    "Your basal rate may need adjustment. Observed drift was %.2f mmol/L (target <= %.1f) even though the 4-hour forecast looks flat. Discuss with your care team before running ISF/Carb tests.",
+                    round2(observedDelta), BASAL_MAX_DELTA_MMOL);
+        } else {
+            explanation = String.format(
+                    "Your basal rate may need adjustment. Readings stayed flat (delta %.2f) but the 4-hour forecast trends %s (delta %.2f -> %.2f mmol/L). Discuss with your care team before running ISF/Carb tests.",
+                    round2(observedDelta), forecast.trend(), round2(forecast.pathDelta()),
+                    round2(forecast.fourHourGlucose()));
+        }
 
         return ExperimentResultDTO.builder()
                 .isStable(stable)
                 .savedToSettings(false)
                 .explanation(explanation)
                 .build();
+    }
+
+    private static final double BASAL_MAX_DELTA_MMOL = 1.7;
+    private static final int BASAL_FORECAST_MINUTES = 240;
+
+    private record BasalForecastAssessment(
+            boolean stable, double pathDelta, double fourHourGlucose, String trend) {}
+
+    /**
+     * Runs the shared 4 h prediction path from the latest basal-check reading.
+     * Stable when the forecast excursion and net 4 h change stay within
+     * {@link #BASAL_MAX_DELTA_MMOL}.
+     */
+    private BasalForecastAssessment assessBasalForecast(UUID userId, double currentGlucose) {
+        try {
+            GlucoseCalculationsRequest req = GlucoseCalculationsRequest.builder()
+                    .currentGlucose(currentGlucose)
+                    .userId(userId.toString())
+                    .includePredictionFactors(true)
+                    .predictionHorizonMinutes(BASAL_FORECAST_MINUTES)
+                    .build();
+            GlucoseCalculationsResponse calc = calculationsService.calculateGlucoseData(req);
+            List<PredictionPointDTO> path = calc.getPredictionPath();
+            double fourHour = calc.getFourHourPrediction() != null
+                    ? calc.getFourHourPrediction()
+                    : currentGlucose;
+            double pathMax = currentGlucose;
+            double pathMin = currentGlucose;
+            if (path != null) {
+                for (PredictionPointDTO p : path) {
+                    if (p.getPredictedGlucose() == null) continue;
+                    pathMax = Math.max(pathMax, p.getPredictedGlucose());
+                    pathMin = Math.min(pathMin, p.getPredictedGlucose());
+                }
+            }
+            double pathDelta = pathMax - pathMin;
+            double endDelta = Math.abs(fourHour - currentGlucose);
+            String trend = calc.getPredictionTrend() != null ? calc.getPredictionTrend() : "unknown";
+            boolean stable = pathDelta <= BASAL_MAX_DELTA_MMOL && endDelta <= BASAL_MAX_DELTA_MMOL;
+            return new BasalForecastAssessment(stable, pathDelta, fourHour, trend);
+        } catch (Exception e) {
+            // Don't fail the experiment if prediction is unavailable - fall back to observed-only.
+            return new BasalForecastAssessment(true, 0.0, currentGlucose, "unavailable");
+        }
     }
 
     private ExperimentResultDTO completeCarbFactor(Experiment exp) {

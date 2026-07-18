@@ -1,6 +1,8 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.dto.ExperimentResultDTO;
+import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
+import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.entity.Experiment.Status;
 import che.glucosemonitorbe.entity.Experiment.Type;
@@ -68,6 +70,30 @@ class ExperimentServiceMinimumDurationTest {
                 cobService, insulinCalculatorService,
                 userSettingsService, calculationsService);
         when(experimentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // Default: flat 4h forecast so basal look-ahead does not overturn observed flatness.
+        when(calculationsService.calculateGlucoseData(any())).thenReturn(flatForecast(7.0));
+    }
+
+    private static GlucoseCalculationsResponse flatForecast(double g) {
+        return GlucoseCalculationsResponse.builder()
+                .currentGlucose(g)
+                .fourHourPrediction(g)
+                .predictionTrend("stable")
+                .predictionPath(List.of(
+                        PredictionPointDTO.builder().predictedGlucose(g).build(),
+                        PredictionPointDTO.builder().predictedGlucose(g).build()))
+                .build();
+    }
+
+    private static GlucoseCalculationsResponse risingForecast(double from, double to) {
+        return GlucoseCalculationsResponse.builder()
+                .currentGlucose(from)
+                .fourHourPrediction(to)
+                .predictionTrend("rising")
+                .predictionPath(List.of(
+                        PredictionPointDTO.builder().predictedGlucose(from).build(),
+                        PredictionPointDTO.builder().predictedGlucose(to).build()))
+                .build();
     }
 
     // ── BASAL_CHECK ──────────────────────────────────────────────────────────
