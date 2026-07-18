@@ -315,30 +315,40 @@ public class ExperimentService {
         BasalForecastAssessment forecast = assessBasalForecast(exp.getUserId(), latest.getGlucoseMmol());
         boolean stable = observedStable && forecast.stable();
 
+        ExperimentReading earliest = exp.getReadings().stream()
+                .min(Comparator.comparing(ExperimentReading::getRecordedAt))
+                .orElse(latest);
+        String adviceDirection = basalAdviceDirection(
+                earliest.getGlucoseMmol(), latest.getGlucoseMmol(), forecast);
+
         exp.setIsStable(stable);
         exp.setResultNotes(String.format(
-                "observedDelta=%.2f forecastDelta=%.2f forecastTrend=%s fourHour=%.2f stable=%s",
+                "observedDelta=%.2f forecastDelta=%.2f forecastTrend=%s fourHour=%.2f stable=%s advice=%s",
                 round2(observedDelta), round2(forecast.pathDelta()),
-                forecast.trend(), round2(forecast.fourHourGlucose()), stable));
+                forecast.trend(), round2(forecast.fourHourGlucose()), stable, adviceDirection));
 
         String explanation;
         if (stable) {
             explanation = String.format(
                     "Your basal rate looks stable. Observed drift was %.2f mmol/L and the 4-hour forecast stays flat (delta %.2f, trend %s). You can now run ISF and Carb tests.",
                     round2(observedDelta), round2(forecast.pathDelta()), forecast.trend());
-        } else if (!observedStable && !forecast.stable()) {
-            explanation = String.format(
-                    "Your basal rate may need adjustment. Observed drift was %.2f mmol/L (target <= %.1f) and the 4-hour forecast trends %s (delta %.2f). Discuss with your care team before running ISF/Carb tests.",
-                    round2(observedDelta), BASAL_MAX_DELTA_MMOL, forecast.trend(), round2(forecast.pathDelta()));
-        } else if (!observedStable) {
-            explanation = String.format(
-                    "Your basal rate may need adjustment. Observed drift was %.2f mmol/L (target <= %.1f) even though the 4-hour forecast looks flat. Discuss with your care team before running ISF/Carb tests.",
-                    round2(observedDelta), BASAL_MAX_DELTA_MMOL);
         } else {
-            explanation = String.format(
-                    "Your basal rate may need adjustment. Readings stayed flat (delta %.2f) but the 4-hour forecast trends %s (delta %.2f -> %.2f mmol/L). Discuss with your care team before running ISF/Carb tests.",
-                    round2(observedDelta), forecast.trend(), round2(forecast.pathDelta()),
-                    round2(forecast.fourHourGlucose()));
+            String adjust = basalAdjustmentAdvice(adviceDirection);
+            if (!observedStable && !forecast.stable()) {
+                explanation = String.format(
+                        "Your basal rate is not flat enough. Observed drift was %.2f mmol/L (target <= %.1f) and the 4-hour forecast trends %s (delta %.2f). %s Recheck tomorrow after the change before running ISF/Carb tests.",
+                        round2(observedDelta), BASAL_MAX_DELTA_MMOL, forecast.trend(),
+                        round2(forecast.pathDelta()), adjust);
+            } else if (!observedStable) {
+                explanation = String.format(
+                        "Your basal rate is not flat enough. Observed drift was %.2f mmol/L (target <= %.1f). %s Recheck tomorrow after the change before running ISF/Carb tests.",
+                        round2(observedDelta), BASAL_MAX_DELTA_MMOL, adjust);
+            } else {
+                explanation = String.format(
+                        "Your basal rate is not flat enough. Readings stayed within range (delta %.2f) but the 4-hour forecast trends %s (delta %.2f -> %.2f mmol/L). %s Recheck tomorrow after the change before running ISF/Carb tests.",
+                        round2(observedDelta), forecast.trend(), round2(forecast.pathDelta()),
+                        round2(forecast.fourHourGlucose()), adjust);
+            }
         }
 
         return ExperimentResultDTO.builder()
@@ -350,6 +360,49 @@ public class ExperimentService {
 
     private static final double BASAL_MAX_DELTA_MMOL = 1.7;
     private static final int BASAL_FORECAST_MINUTES = 240;
+    private static final double BASAL_DOSE_STEP_UNITS = 2.0;
+
+    /**
+     * Rising glucose (observed or forecast) -> increase basal; falling -> decrease.
+     * Returns {@code increase}, {@code decrease}, or {@code review}.
+     */
+    private static String basalAdviceDirection(
+            double startGlucose, double endGlucose, BasalForecastAssessment forecast) {
+        String trend = forecast.trend() == null ? "" : forecast.trend().toLowerCase();
+        if (trend.contains("ris")) {
+            return "increase";
+        }
+        if (trend.contains("fall") || trend.contains("drop")) {
+            return "decrease";
+        }
+        double net = endGlucose - startGlucose;
+        if (!forecast.stable() && forecast.fourHourGlucose() != 0) {
+            net = forecast.fourHourGlucose() - endGlucose;
+        }
+        if (net > 0.3) {
+            return "increase";
+        }
+        if (net < -0.3) {
+            return "decrease";
+        }
+        return "review";
+    }
+
+    private static String basalAdjustmentAdvice(String direction) {
+        if ("increase".equals(direction)) {
+            return String.format(
+                    "Try increasing your long-acting basal dose by %.0f units.",
+                    BASAL_DOSE_STEP_UNITS);
+        }
+        if ("decrease".equals(direction)) {
+            return String.format(
+                    "Try decreasing your long-acting basal dose by %.0f units.",
+                    BASAL_DOSE_STEP_UNITS);
+        }
+        return String.format(
+                "Discuss a %.0f-unit basal change with your care team (direction unclear from this run).",
+                BASAL_DOSE_STEP_UNITS);
+    }
 
     private record BasalForecastAssessment(
             boolean stable, double pathDelta, double fourHourGlucose, String trend) {}
