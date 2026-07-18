@@ -24,7 +24,10 @@ public class DigitalTwinResidualProvider implements PredictionResidualProvider {
     @Override
     public double residualMmol(UUID userId, LocalDateTime pointTime) {
         if (userId == null || pointTime == null) return 0.0;
-        return digitalTwinService.activeResidual(userId).correctionAt(pointTime.getHour());
+        // Interpolate across the hour so the residual varies smoothly instead of stepping at :00,
+        // which previously produced vertical jumps in the prediction curve.
+        return digitalTwinService.activeResidual(userId)
+                .correctionAt(pointTime.getHour(), pointTime.getMinute());
     }
 
     @Override

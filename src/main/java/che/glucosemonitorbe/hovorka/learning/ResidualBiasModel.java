@@ -89,6 +89,32 @@ public final class ResidualBiasModel {
         return bias[h];
     }
 
+    /**
+     * Additive correction [mmol/L] interpolated across the hour so the residual varies smoothly
+     * instead of stepping at each clock-hour boundary. The bias for bucket {@code h} is treated as
+     * the value at the bucket's centre (:30); points before the centre blend with the previous
+     * bucket and points after it blend with the next. This eliminates the vertical step in the
+     * prediction curve that a piecewise-constant {@link #correctionAt(int)} produced at every :00.
+     *
+     * @param hourOfDay   0..23 hour component of the prediction point
+     * @param minuteOfHour 0..59 minute component of the prediction point
+     */
+    public double correctionAt(int hourOfDay, int minuteOfHour) {
+        int h = ((hourOfDay % BUCKETS) + BUCKETS) % BUCKETS;
+        // Position within the hour relative to the bucket centre (:30), in [-0.5, 0.5).
+        double offsetFromCentre = (minuteOfHour - 30.0) / 60.0;
+        int neighbour;
+        double w; // weight applied to the neighbour bucket
+        if (offsetFromCentre >= 0.0) {
+            neighbour = (h + 1) % BUCKETS;
+            w = offsetFromCentre;             // 0 at :30 → 0.5 approaching :90 (next centre)
+        } else {
+            neighbour = ((h - 1) % BUCKETS + BUCKETS) % BUCKETS;
+            w = -offsetFromCentre;            // 0 at :30 → 0.5 approaching :-30 (prev centre)
+        }
+        return bias[h] * (1.0 - w) + bias[neighbour] * w;
+    }
+
     /** True if every correction is effectively zero (nothing learned). */
     public boolean isNeutral() {
         for (double b : bias) if (Math.abs(b) > 1e-6) return false;
