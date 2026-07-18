@@ -28,7 +28,7 @@ public class UserSettingsService {
      */
     /**
      * Get COB settings for a user, returning defaults if none exist.
-     * BUG L3 fix: getUserSettings must NOT call repository.save — it is a read method
+     * BUG L3 fix: getUserSettings must NOT call repository.save - it is a read method
      * that is decorated with @Cacheable. Calling save from a @Cacheable method creates
      * a write-in-read side-effect that breaks caching semantics and causes unexpected
      * DataIntegrityViolationExceptions under concurrency (see C1).
@@ -111,11 +111,11 @@ public class UserSettingsService {
         if (settingsDTO.getMaxCOBDuration() != null) {
             settings.setMaxCOBDuration(settingsDTO.getMaxCOBDuration());
         }
-        // bodyWeightKg is optional — only update if explicitly provided
+        // bodyWeightKg is optional - only update if explicitly provided
         if (settingsDTO.getBodyWeightKg() != null) {
             settings.setBodyWeightKg(settingsDTO.getBodyWeightKg());
         }
-        // Manual per-meal-window ISF overrides — only update if explicitly provided.
+        // Manual per-meal-window ISF overrides - only update if explicitly provided.
         if (settingsDTO.getIsfBreakfast() != null) {
             settings.setIsfBreakfast(settingsDTO.getIsfBreakfast());
         }

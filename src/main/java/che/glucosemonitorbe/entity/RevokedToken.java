@@ -9,7 +9,7 @@ import java.time.Instant;
 
 /**
  * A revoked JWT (or a logout-all-devices sentinel), persisted so revocation survives restarts and is
- * shared across instances (BE-H3). The primary key is a SHA-256 hex hash of the token / sentinel —
+ * shared across instances (BE-H3). The primary key is a SHA-256 hex hash of the token / sentinel -
  * the raw token is never stored.
  */
 @Entity

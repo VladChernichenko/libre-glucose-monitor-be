@@ -60,7 +60,7 @@ class HovorkaActivityIntegrationTest {
     @Test
     @DisplayName("an exercise pulse deepens the drop during it, and the effect persists after it ends")
     void extraDropDuringAndPersistentTailAfter() {
-        // Modest bolus + higher start so neither trajectory floors — the tail is visible, not clipped.
+        // Modest bolus + higher start so neither trajectory floors - the tail is visible, not clipped.
         List<InsulinDose> bolus = List.of(InsulinDose.builder()
                 .timestamp(T0).units(2.0).type(InsulinDose.InsulinType.BOLUS).build());
 
@@ -87,7 +87,7 @@ class HovorkaActivityIntegrationTest {
         }
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private List<PredictionPointDTO> predict(double g0, List<InsulinDose> insulin,
                                              ActivityProvider provider, int horizon) {

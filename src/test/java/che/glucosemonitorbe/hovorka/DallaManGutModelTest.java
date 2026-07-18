@@ -7,19 +7,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 /**
- * TDD Red→Green unit tests for {@link DallaManGutModel}.
+ * TDD Red->Green unit tests for {@link DallaManGutModel}.
  *
  * Physiological invariants under test:
  * 1.  k_empt at full stomach ≈ K_MAX   (rapid emptying when stomach is full)
  * 2.  k_empt at half-full ≈ K_MIN      (protective pause at 50% fill)
  * 3.  k_empt at empty ≈ midpoint       (rising back toward K_MAX as stomach empties)
  * 4.  k_empt always in [K_MIN, K_MAX]  (physiological bounds)
- * 5.  k_empt with zero meal reference → K_MIN (degenerate safety case)
+ * 5.  k_empt with zero meal reference -> K_MIN (degenerate safety case)
  * 6.  Ra = 0 when Qgut = 0
  * 7.  Ra > 0 when Qgut > 0
  * 8.  Ra scales linearly with Qgut
- * 9.  Integration — Ra rises from 0, peaks, then decays toward 0
- * 10. Mass conservation — ∫Ra dt ≈ F × D_mmol over 10 hours
+ * 9.  Integration - Ra rises from 0, peaks, then decays toward 0
+ * 10. Mass conservation - ∫Ra dt ≈ F × D_mmol over 10 hours
  * 11. Large meal produces higher peak Ra than small meal
  */
 class DallaManGutModelTest {
@@ -31,9 +31,9 @@ class DallaManGutModelTest {
         model = new DallaManGutModel();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // k_empt shape tests
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void kEmpt_fullStomach_returnsNearKmax() {
@@ -73,9 +73,9 @@ class DallaManGutModelTest {
         assertThat(model.kEmpt(0.0, 0.0)).isCloseTo(DallaManGutModel.K_MIN, within(1e-9));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Ra (glucose appearance) tests
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void ra_emptyIntestine_returnsZero() {
@@ -94,9 +94,9 @@ class DallaManGutModelTest {
         assertThat(ra2).isCloseTo(2.0 * ra1, within(1e-9));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Integration tests
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void integration_mealAbsorbed_raPeaksAndDecaysToNearZero() {
@@ -156,7 +156,7 @@ class DallaManGutModelTest {
         assertThat(peakRaForMeal(400.0)).isGreaterThan(peakRaForMeal(100.0));
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
+    // -- Helper ----------------------------------------------------------------
 
     private double peakRaForMeal(double mealMmol) {
         double qsto1 = mealMmol, qsto2 = 0.0, qgut = 0.0, peak = 0.0;

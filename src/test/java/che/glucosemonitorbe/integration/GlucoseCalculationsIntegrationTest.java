@@ -28,11 +28,11 @@ import static org.junit.jupiter.api.Assertions.*;
  * E2E integration tests for POST /api/glucose-calculations/
  *
  * Covers the 5 critical prediction scenarios identified via NotebookLM:
- *   1. Normal prediction path — response structure and 4h path present
- *   2. Missing currentGlucose — validation rejects request (400)
- *   3. Prospective notes included — no crash, prediction computed
- *   4. Hypo glucose (< 3.0) — confidence is reduced vs normal glucose
- *   5. Feature status endpoint — always returns featureEnabled field
+ *   1. Normal prediction path - response structure and 4h path present
+ *   2. Missing currentGlucose - validation rejects request (400)
+ *   3. Prospective notes included - no crash, prediction computed
+ *   4. Hypo glucose (< 3.0) - confidence is reduced vs normal glucose
+ *   5. Feature status endpoint - always returns featureEnabled field
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -57,7 +57,7 @@ class GlucoseCalculationsIntegrationTest {
         userRepository.deleteAll();
     }
 
-    // ── auth helpers ──────────────────────────────────────────────────────────
+    // -- auth helpers ----------------------------------------------------------
 
     private RegisterRequest validRegister() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
@@ -89,10 +89,10 @@ class GlucoseCalculationsIntegrationTest {
         return new HttpEntity<>(body, h);
     }
 
-    // ── scenario 1: happy path — response structure ───────────────────────────
+    // -- scenario 1: happy path - response structure ---------------------------
 
     @Test
-    @DisplayName("POST /api/glucose-calculations/ — normal glucose returns featureEnabled + backendMode")
+    @DisplayName("POST /api/glucose-calculations/ - normal glucose returns featureEnabled + backendMode")
     void happyPath_normalGlucose_returnsExpectedStructure() {
         RegisterRequest reg = validRegister();
         HttpHeaders headers = authedHeaders(reg);
@@ -113,7 +113,7 @@ class GlucoseCalculationsIntegrationTest {
     }
 
     @Test
-    @DisplayName("POST /api/glucose-calculations/ — backendMode=true response has predictionPath and 4h point")
+    @DisplayName("POST /api/glucose-calculations/ - backendMode=true response has predictionPath and 4h point")
     void backendMode_responseContainsPredictionPath() {
         RegisterRequest reg = validRegister();
         HttpHeaders headers = authedHeaders(reg);
@@ -138,10 +138,10 @@ class GlucoseCalculationsIntegrationTest {
         }
     }
 
-    // ── scenario 2: missing currentGlucose — validation ──────────────────────
+    // -- scenario 2: missing currentGlucose - validation ----------------------
 
     @Test
-    @DisplayName("POST /api/glucose-calculations/ — null currentGlucose → 400")
+    @DisplayName("POST /api/glucose-calculations/ - null currentGlucose -> 400")
     void nullGlucose_returns400() {
         RegisterRequest reg = validRegister();
         HttpHeaders headers = authedHeaders(reg);
@@ -158,10 +158,10 @@ class GlucoseCalculationsIntegrationTest {
         assertEquals(HttpStatus.BAD_REQUEST, resp.getStatusCode());
     }
 
-    // ── scenario 3: prospective notes — no crash ─────────────────────────────
+    // -- scenario 3: prospective notes - no crash -----------------------------
 
     @Test
-    @DisplayName("POST /api/glucose-calculations/ — with prospective notes returns 200")
+    @DisplayName("POST /api/glucose-calculations/ - with prospective notes returns 200")
     void prospectiveNotes_included_doesNotCrash() {
         RegisterRequest reg = validRegister();
         HttpHeaders headers = authedHeaders(reg);
@@ -188,7 +188,7 @@ class GlucoseCalculationsIntegrationTest {
     }
 
     @Test
-    @DisplayName("POST /api/glucose-calculations/ — empty prospective notes list returns 200")
+    @DisplayName("POST /api/glucose-calculations/ - empty prospective notes list returns 200")
     void prospectiveNotesEmpty_returnsOk() {
         RegisterRequest reg = validRegister();
         HttpHeaders headers = authedHeaders(reg);
@@ -206,10 +206,10 @@ class GlucoseCalculationsIntegrationTest {
         assertEquals(HttpStatus.OK, resp.getStatusCode());
     }
 
-    // ── scenario 4: hypoglycemia — confidence reduced ─────────────────────────
+    // -- scenario 4: hypoglycemia - confidence reduced -------------------------
 
     @Test
-    @DisplayName("POST — hypo glucose (<3.0) has lower confidence than normal glucose")
+    @DisplayName("POST - hypo glucose (<3.0) has lower confidence than normal glucose")
     void hypoGlucose_confidenceLowerThanNormal() {
         RegisterRequest reg = validRegister();
         HttpHeaders headers = authedHeaders(reg);
@@ -239,14 +239,14 @@ class GlucoseCalculationsIntegrationTest {
             double normalConf = ((Number) normalData.get("confidence")).doubleValue();
 
             assertTrue(hypoConf <= normalConf,
-                    "Hypo confidence=" + hypoConf + " must be ≤ normal=" + normalConf);
+                    "Hypo confidence=" + hypoConf + " must be <= normal=" + normalConf);
         }
     }
 
-    // ── scenario 5: feature status endpoint ──────────────────────────────────
+    // -- scenario 5: feature status endpoint ----------------------------------
 
     @Test
-    @DisplayName("GET /api/glucose-calculations/status — always returns featureEnabled")
+    @DisplayName("GET /api/glucose-calculations/status - always returns featureEnabled")
     void featureStatus_returnsExpectedFields() {
         RegisterRequest reg = validRegister();
         HttpHeaders headers = authedHeaders(reg);
@@ -265,10 +265,10 @@ class GlucoseCalculationsIntegrationTest {
         assertTrue(rb.containsKey("migrationPercent"), "Must have migrationPercent");
     }
 
-    // ── unauthenticated access blocked ────────────────────────────────────────
+    // -- unauthenticated access blocked ----------------------------------------
 
     @Test
-    @DisplayName("POST without auth token → 401 or 403")
+    @DisplayName("POST without auth token -> 401 or 403")
     void noToken_isRejected() {
         Map<String, Object> body = Map.of("currentGlucose", 6.0);
 

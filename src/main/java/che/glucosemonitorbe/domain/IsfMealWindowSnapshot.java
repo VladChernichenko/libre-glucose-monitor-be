@@ -37,7 +37,7 @@ public class IsfMealWindowSnapshot {
 
     /**
      * mmol/L drop per 1 unit of rapid-acting insulin. {@code null} when not enough samples
-     * (< 7 weighted samples) — front-end treats it as a chart gap.
+     * (< 7 weighted samples) - front-end treats it as a chart gap.
      */
     @Column(name = "isf_mmol_per_u")
     private Double isfMmolPerU;

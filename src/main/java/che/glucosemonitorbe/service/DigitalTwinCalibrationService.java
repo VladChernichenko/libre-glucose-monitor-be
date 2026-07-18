@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
  * against the predicted-vs-actual error, and persists a {@link UserDigitalTwin}.
  *
  * <p>The twin only becomes {@code applied} (active for predictions) when it beats the un-calibrated
- * model on a held-out validation window — otherwise the record is stored with {@code applied=false}
+ * model on a held-out validation window - otherwise the record is stored with {@code applied=false}
  * for observability and predictions are left unchanged.</p>
  */
 @Slf4j
@@ -52,7 +52,7 @@ public class DigitalTwinCalibrationService {
     private static final int LOOKBACK_DAYS = 30;
     /** Fraction of the window used to fit; the remainder scores accuracy out-of-sample. */
     private static final double TRAIN_FRACTION = 0.8;
-    /** Skip users with fewer CGM readings than this — not enough signal to fit against. */
+    /** Skip users with fewer CGM readings than this - not enough signal to fit against. */
     private static final int MIN_CGM_READINGS = 200;
     private static final double MGDL_PER_MMOL = 18.0182;
 
@@ -75,7 +75,7 @@ public class DigitalTwinCalibrationService {
     private final FeatureToggleConfig featureToggleConfig;
 
     /**
-     * Seed users are non-loginable AZT1D dataset fixtures ({@code azt1d-subject-N@dataset.local}) —
+     * Seed users are non-loginable AZT1D dataset fixtures ({@code azt1d-subject-N@dataset.local}) -
      * excluded from real-user batches so we never spend the nightly compute budget calibrating them.
      */
     private static final String SEED_EMAIL_PATTERN = "azt1d-subject-%@dataset.local";
@@ -89,7 +89,7 @@ public class DigitalTwinCalibrationService {
      */
     public BatchSummary calibrateAllRealUsers() {
         if (!featureToggleConfig.isDigitalTwinEnabled()) {
-            log.debug("Digital twin disabled — skipping real-user calibration");
+            log.debug("Digital twin disabled - skipping real-user calibration");
             return new BatchSummary(0, 0, 0, 0, 0);
         }
         List<User> users = userRepository.findByEmailNotLike(SEED_EMAIL_PATTERN);
@@ -127,11 +127,11 @@ public class DigitalTwinCalibrationService {
         LocalDateTime windowStart = now.minusDays(LOOKBACK_DAYS);
         long cutoffMs = windowStart.toInstant(ZoneOffset.UTC).toEpochMilli();
 
-        // ── Load CGM ──────────────────────────────────────────────────────────
+        // -- Load CGM ----------------------------------------------------------
         List<CgmReading> readings = cgmReadingRepository
                 .findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(userId, cutoffMs);
         if (readings.size() < MIN_CGM_READINGS) {
-            log.debug("User {}: only {} CGM readings in last {}d — skipping calibration",
+            log.debug("User {}: only {} CGM readings in last {}d - skipping calibration",
                     userId, readings.size(), LOOKBACK_DAYS);
             return null;
         }
@@ -141,10 +141,10 @@ public class DigitalTwinCalibrationService {
             cgm.add(new PredictionReplayEngine.Reading(r.getDateTimestamp(), r.getSgv() / MGDL_PER_MMOL));
         }
         // Down-weight (exclude) windows the user's log doesn't explain, so an unlogged/mis-logged event
-        // can't bias the fit — unless doing so would starve the fit of data.
+        // can't bias the fit - unless doing so would starve the fit of data.
         cgm = excludeFlaggedWindows(userId, cgm);
 
-        // ── Load events (meals / boluses / basal) ───────────────────────────────
+        // -- Load events (meals / boluses / basal) -------------------------------
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, now);
         List<PredictionReplayEngine.Event> events = new ArrayList<>(notes.size());
         for (Note n : notes) {
@@ -159,7 +159,7 @@ public class DigitalTwinCalibrationService {
                     macro(profile, "protein"), macro(profile, "fat"), macro(profile, "fiber")));
         }
 
-        // ── Build raw predictor + base params + one-time IOB/settings snapshot ──
+        // -- Build raw predictor + base params + one-time IOB/settings snapshot --
         HovorkaParameters baseParams = paramService.buildRawForUser(userId);
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
@@ -167,7 +167,7 @@ public class DigitalTwinCalibrationService {
                 paramService, odeSolver, basalResolver, insulinPrefsService, gutModel,
                 userSettingsService, PredictionResidualProvider.NONE);
 
-        // ── Temporal split: fit on the earlier part, score on the later part ────
+        // -- Temporal split: fit on the earlier part, score on the later part ----
         int boundary = (int) Math.floor(cgm.size() * TRAIN_FRACTION);
         List<PredictionReplayEngine.Reading> trainCgm = cgm.subList(0, boundary);
         List<PredictionReplayEngine.Reading> valCgm   = cgm.subList(boundary, cgm.size());
@@ -184,12 +184,12 @@ public class DigitalTwinCalibrationService {
         PredictionReplayEngine val = new PredictionReplayEngine(
                 rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity);
 
-        // ── Fit ─────────────────────────────────────────────────────────────────
+        // -- Fit -----------------------------------------------------------------
         DigitalTwinCalibrator.Result result = new DigitalTwinCalibrator().calibrate(train, val);
 
         persist(userId, result, now);
         digitalTwinService.invalidate(userId);
-        log.info("Digital-twin calibration user={} → {} (isf×{}, aG×{})",
+        log.info("Digital-twin calibration user={} -> {} (isf×{}, aG×{})",
                 userId, result.status(),
                 round(result.scales().isfScale()), round(result.scales().agScale()));
         return result;
@@ -221,7 +221,7 @@ public class DigitalTwinCalibrationService {
                         .build());
     }
 
-    // ── Persistence ──────────────────────────────────────────────────────────
+    // -- Persistence ----------------------------------------------------------
 
     private void persist(UUID userId, DigitalTwinCalibrator.Result r, LocalDateTime now) {
         UserDigitalTwin twin = twinRepository.findByUserId(userId)
@@ -273,7 +273,7 @@ public class DigitalTwinCalibrationService {
         }
         if (kept.size() == cgm.size()) return cgm;
         if (kept.size() < MIN_CGM_READINGS) {
-            log.debug("User {}: excluding {} flagged window(s) would drop below {} readings — "
+            log.debug("User {}: excluding {} flagged window(s) would drop below {} readings - "
                     + "calibrating without exclusion", userId, flags.size(), MIN_CGM_READINGS);
             return cgm;
         }
@@ -286,7 +286,7 @@ public class DigitalTwinCalibrationService {
         return ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // -- Helpers --------------------------------------------------------------
 
     /** Extract a numeric macro (protein/fat/fiber) from a nutrition_profile JSON blob; 0 if absent. */
     static double macro(String json, String key) {

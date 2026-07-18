@@ -1,7 +1,7 @@
 -- =============================================================================
--- Glucose Monitor — Baseline Schema (V1)
+-- Glucose Monitor - Baseline Schema (V1)
 -- =============================================================================
--- Consolidated from the legacy V1–V25 Flyway chain.
+-- Consolidated from the legacy V1-V25 Flyway chain.
 --
 -- Dropped as dead (no repository, no INSERT/UPDATE anywhere in the codebase):
 --   nightscout_config, carbs_entries, glucose_readings, insulin_doses,
@@ -139,7 +139,7 @@ COMMENT ON COLUMN cgm_readings.data_source  IS 'Origin of the reading: NIGHTSCOU
 COMMENT ON COLUMN cgm_readings.external_id  IS 'Upstream record id from the source (Nightscout _id, Libre measurement id). Null if the source did not supply one.';
 
 -- -----------------------------------------------------------------------------
--- Data source config (Nightscout + LibreLinkUp) — replaces legacy nightscout_config
+-- Data source config (Nightscout + LibreLinkUp) - replaces legacy nightscout_config
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS user_data_source_config (
     id                      UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS ai_analysis_trace (
 CREATE INDEX IF NOT EXISTS idx_ai_analysis_trace_user_created ON ai_analysis_trace(user_id, created_at DESC);
 
 -- -----------------------------------------------------------------------------
--- Glycemic response patterns (reference data — seeded in V3)
+-- Glycemic response patterns (reference data - seeded in V3)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS glycemic_response_patterns (
     id                       SERIAL       PRIMARY KEY,
@@ -282,6 +282,5 @@ CREATE TABLE IF NOT EXISTS token_blacklist (
     expires_at  TIMESTAMPTZ  NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires_at ON token_blacklist(expires_at);
-
 
 

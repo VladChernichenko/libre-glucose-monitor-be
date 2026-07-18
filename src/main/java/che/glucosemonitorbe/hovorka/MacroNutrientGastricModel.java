@@ -5,7 +5,7 @@ package che.glucosemonitorbe.hovorka;
  *
  * <h3>Model sources</h3>
  * <ul>
- *   <li>Caloric density → half-emptying time: t½ = 9 + 27.5·d, d = kcal/mL (Calvert 1989)</li>
+ *   <li>Caloric density -> half-emptying time: t½ = 9 + 27.5*d, d = kcal/mL (Calvert 1989)</li>
  *   <li>Elashoff β shape coefficients: carbs 1.05, protein 1.60, fat 2.20 (Elashoff 1982)</li>
  *   <li>Fiber viscosity: exponential attenuation of mucosal absorption rate</li>
  * </ul>
@@ -18,30 +18,30 @@ package che.glucosemonitorbe.hovorka;
  */
 public final class MacroNutrientGastricModel {
 
-    // ── Elashoff (1982) shape parameters ─────────────────────────────────────
+    // -- Elashoff (1982) shape parameters -------------------------------------
     public static final double BETA_CARBS   = 1.05;
     public static final double BETA_PROTEIN = 1.60;
     public static final double BETA_FAT     = 2.20;
 
-    // ── Calvert/Hunt caloric-density formula for t½ ───────────────────────────
+    // -- Calvert/Hunt caloric-density formula for t½ ---------------------------
     private static final double EMPTYING_INTERCEPT_MIN = 9.0;    // min
-    private static final double EMPTYING_DENSITY_COEFF = 27.5;   // min·mL/kcal
+    private static final double EMPTYING_DENSITY_COEFF = 27.5;   // min*mL/kcal
 
-    // ── Default assumptions ───────────────────────────────────────────────────
+    // -- Default assumptions ---------------------------------------------------
     /** Assumed meal volume for caloric density estimate [mL]. */
     private static final double DEFAULT_MEAL_VOLUME_ML  = 250.0;
     /** Fallback t½ when no macros are provided [min]. */
     private static final double FALLBACK_T_HALF_MIN     = 45.0;
 
-    // ── Fiber viscosity ───────────────────────────────────────────────────────
+    // -- Fiber viscosity -------------------------------------------------------
     /** Per-gram fiber factor for absorption-rate attenuation. */
     private static final double FIBER_VISCOSITY_K = 0.02;
 
-    // ── Physiological clamps ──────────────────────────────────────────────────
+    // -- Physiological clamps --------------------------------------------------
     private static final double T_HALF_MIN_CLAMP = 15.0;   // min
     private static final double T_HALF_MAX_CLAMP = 200.0;  // min
 
-    // ── Bolus strategy thresholds ─────────────────────────────────────────────
+    // -- Bolus strategy thresholds ---------------------------------------------
     private static final double SQUARE_WAVE_FAT_G     = 20.0;
     private static final double SQUARE_WAVE_PROTEIN_G = 15.0;
     private static final double SQUARE_WAVE_PROTEIN_ONLY_G = 40.0;
@@ -54,9 +54,9 @@ public final class MacroNutrientGastricModel {
      * <p>Algorithm:</p>
      * <ol>
      *   <li>Compute caloric density d [kcal/mL] assuming {@value #DEFAULT_MEAL_VOLUME_ML} mL meal volume.</li>
-     *   <li>Base half-emptying time: t½_base = {@value #EMPTYING_INTERCEPT_MIN} + {@value #EMPTYING_DENSITY_COEFF}·d</li>
+     *   <li>Base half-emptying time: t½_base = {@value #EMPTYING_INTERCEPT_MIN} + {@value #EMPTYING_DENSITY_COEFF}*d</li>
      *   <li>Weighted β from macronutrient fractions; normalised to carb-only baseline (β_carbs = {@value #BETA_CARBS}).</li>
-     *   <li>Fiber viscosity: multiply t½ by exp({@value #FIBER_VISCOSITY_K}·fiberG).</li>
+     *   <li>Fiber viscosity: multiply t½ by exp({@value #FIBER_VISCOSITY_K}*fiberG).</li>
      *   <li>Clamp to [{@value #T_HALF_MIN_CLAMP}, {@value #T_HALF_MAX_CLAMP}] min, then divide by halfLifeToTMaxG.</li>
      * </ol>
      *
@@ -80,23 +80,23 @@ public final class MacroNutrientGastricModel {
             return FALLBACK_T_HALF_MIN / halfLifeToTMaxG;
         }
 
-        // Step 1 — caloric density
+        // Step 1 - caloric density
         double d = totalKcal / DEFAULT_MEAL_VOLUME_ML;
 
-        // Step 2 — Calvert base half-life
+        // Step 2 - Calvert base half-life
         double tHalfBase = EMPTYING_INTERCEPT_MIN + EMPTYING_DENSITY_COEFF * d;
 
-        // Step 3 — Elashoff weighted β; normalise to pure-carb baseline
+        // Step 3 - Elashoff weighted β; normalise to pure-carb baseline
         double betaWeighted = (carbKcal * BETA_CARBS
                              + proteinKcal * BETA_PROTEIN
                              + fatKcal * BETA_FAT) / totalKcal;
         double tHalfModulated = tHalfBase * (betaWeighted / BETA_CARBS);
 
-        // Step 4 — fiber viscosity
+        // Step 4 - fiber viscosity
         double fiberFactor = Math.exp(FIBER_VISCOSITY_K * Math.max(0.0, fiberG));
         double tHalfFinal  = tHalfModulated * fiberFactor;
 
-        // Step 5 — clamp and convert
+        // Step 5 - clamp and convert
         tHalfFinal = Math.max(T_HALF_MIN_CLAMP, Math.min(T_HALF_MAX_CLAMP, tHalfFinal));
         return tHalfFinal / halfLifeToTMaxG;
     }
@@ -117,7 +117,7 @@ public final class MacroNutrientGastricModel {
     /**
      * Recommend bolus strategy based on fat and protein content.
      *
-     * <p>SQUARE_WAVE is indicated when a late glucose rise (3–6 h post-meal) is expected
+     * <p>SQUARE_WAVE is indicated when a late glucose rise (3-6 h post-meal) is expected
      * from protein gluconeogenesis or fat-delayed gastric emptying, and a standard
      * meal bolus would under-cover this tail.</p>
      *

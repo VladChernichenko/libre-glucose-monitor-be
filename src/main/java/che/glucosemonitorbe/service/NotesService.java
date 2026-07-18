@@ -121,7 +121,7 @@ public class NotesService {
         
         Note savedNote = noteRepository.save(note);
 
-        // Fire over-injection check asynchronously — does not block the response.
+        // Fire over-injection check asynchronously - does not block the response.
         // Condition: note has insulin AND we have a current glucose reading to anchor the prediction.
         // Long-acting (basal) doses are not boluses, so they never trigger the over-injection alert.
         double insulinUnits = savedNote.getInsulin() != null ? savedNote.getInsulin() : 0.0;
@@ -136,7 +136,7 @@ public class NotesService {
             }
         }
 
-        // Enqueue for real-life verification (fire-and-forget — never blocks save)
+        // Enqueue for real-life verification (fire-and-forget - never blocks save)
         try {
             verificationService.enqueueNote(savedNote.getId(), userId);
         } catch (Exception ignored) {
@@ -206,7 +206,7 @@ public class NotesService {
     /**
      * Delete a note for a user.
      * BUG D1 fix: verify the note belongs to the requesting user before deleting.
-     * The findByIdAndUserId check ensures we return false — not true — when the note
+     * The findByIdAndUserId check ensures we return false - not true - when the note
      * doesn't exist or doesn't belong to this user.
      */
     @CacheEvict(value = "userNotes", key = "#userId")

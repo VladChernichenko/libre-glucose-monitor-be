@@ -53,7 +53,7 @@ class LibreLinkUpServiceTest {
                 responseParser);
     }
 
-    // ── BE-1: per-user token isolation ────────────────────────────────────────
+    // -- BE-1: per-user token isolation ----------------------------------------
 
     @Test
     void be1_tokenStoreIsPerUser_user2TokenDoesNotOverwriteUser1() {
@@ -113,7 +113,7 @@ class LibreLinkUpServiceTest {
     }
 
     @Test
-    @DisplayName("logout — null userId is a no-op (no exception)")
+    @DisplayName("logout - null userId is a no-op (no exception)")
     void logout_nullUserId_isNoop() {
         assertThat(service.isAuthenticated(null)).isFalse();
         service.logout(null); // must not throw
@@ -121,7 +121,7 @@ class LibreLinkUpServiceTest {
     }
 
     @Test
-    @DisplayName("logout — clears all per-user session state")
+    @DisplayName("logout - clears all per-user session state")
     void logout_clearsAllStores() {
         UUID uid = UUID.randomUUID();
         sessionStore.putToken(uid, "tok");
@@ -139,7 +139,7 @@ class LibreLinkUpServiceTest {
         assertThat(sessionStore.baseUrlOrDefault(uid, "https://default")).isEqualTo("https://default");
     }
 
-    // ── Auth-guard branches (public API) ──────────────────────────────────────
+    // -- Auth-guard branches (public API) --------------------------------------
 
     @Test
     void be2_getConnections_requiresAuthentication() {
@@ -178,7 +178,7 @@ class LibreLinkUpServiceTest {
     }
 
     @Test
-    @DisplayName("getSensorInfo — unauthenticated user throws RuntimeException")
+    @DisplayName("getSensorInfo - unauthenticated user throws RuntimeException")
     void getSensorInfo_requiresAuthentication() {
         UUID userId = UUID.randomUUID();
         assertThatThrownBy(() -> service.getSensorInfo("patient-1", userId))
@@ -187,7 +187,7 @@ class LibreLinkUpServiceTest {
     }
 
     @Test
-    @DisplayName("getGlucoseHistory — unauthenticated user throws RuntimeException")
+    @DisplayName("getGlucoseHistory - unauthenticated user throws RuntimeException")
     void getGlucoseHistory_requiresAuthentication() {
         UUID userId = UUID.randomUUID();
         assertThatThrownBy(() -> service.getGlucoseHistory("patient-1", 7, null, null, userId))
@@ -196,7 +196,7 @@ class LibreLinkUpServiceTest {
     }
 
     @Test
-    @DisplayName("getCurrentGlucose — unauthenticated user throws RuntimeException")
+    @DisplayName("getCurrentGlucose - unauthenticated user throws RuntimeException")
     void getCurrentGlucose_requiresAuthentication() {
         UUID userId = UUID.randomUUID();
         assertThatThrownBy(() -> service.getCurrentGlucose("patient-1", userId))
@@ -205,7 +205,7 @@ class LibreLinkUpServiceTest {
     }
 
     @Test
-    @DisplayName("getGlucoseData — unauthenticated user throws RuntimeException")
+    @DisplayName("getGlucoseData - unauthenticated user throws RuntimeException")
     void getGlucoseData_requiresAuthentication() {
         UUID userId = UUID.randomUUID();
         assertThatThrownBy(() -> service.getGlucoseData("patient-1", 1, userId))

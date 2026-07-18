@@ -7,8 +7,8 @@ import org.springframework.stereotype.Component;
  *
  * Replaces the linear Hovorka D1/D2 2-compartment chain with a physiologically
  * accurate nonlinear gastric-emptying model. The key improvement is a
- * sigmoid-shaped k_empt that starts fast (full stomach → rapid emptying),
- * slows at mid-fill (protective pause at 40–80 % full), then rises again as
+ * sigmoid-shaped k_empt that starts fast (full stomach -> rapid emptying),
+ * slows at mid-fill (protective pause at 40-80 % full), then rises again as
  * the stomach nears empty.
  *
  * ODE subsystem (per minute, quantities in mmol):
@@ -22,8 +22,8 @@ import org.springframework.stereotype.Component;
  * k_empt nonlinearity (Dalla Man 2007, eq. 7):
  * <pre>
  *   k_empt(Qsto) = K_MIN + (K_MAX-K_MIN)/2
- *                  × { tanh[α(Qsto − b·D)] − tanh[c(Qsto − d·D)] + 2 }
- *   α = 5 / (2(1−b)D),  c = 5 / (2·d·D),  D = original meal dose [mmol]
+ *                  × { tanh[α(Qsto − b*D)] − tanh[c(Qsto − d*D)] + 2 }
+ *   α = 5 / (2(1−b)D),  c = 5 / (2*d*D),  D = original meal dose [mmol]
  * </pre>
  *
  * Parameters from Dalla Man 2007, Table 1 (population means):
@@ -45,10 +45,10 @@ public class DallaManGutModel {
      * Nonlinear gastric emptying rate k_empt [min⁻¹].
      *
      * Shape: near K_MAX at Qsto = D (full), near K_MIN at Qsto = 0.5×D (half-full),
-     * back toward midpoint as Qsto → 0.
+     * back toward midpoint as Qsto -> 0.
      *
      * @param qstoMmol total stomach content Qsto1 + Qsto2 [mmol]
-     * @param mealMmol original meal dose [mmol] — reference for saturation thresholds
+     * @param mealMmol original meal dose [mmol] - reference for saturation thresholds
      */
     public double kEmpt(double qstoMmol, double mealMmol) {
         if (mealMmol <= 0.0) return K_MIN;
@@ -64,7 +64,7 @@ public class DallaManGutModel {
      * Glucose appearance rate into bloodstream [mmol/min].
      *
      * Ra = F × K_ABS × Qgut.  Qgut is the total intestinal content in mmol
-     * (not per-kg), so no body-weight division is required — the result is
+     * (not per-kg), so no body-weight division is required - the result is
      * already an absolute rate comparable to the Hovorka dQ1/dt terms.
      *
      * @param qgutMmol intestinal compartment content [mmol]
@@ -85,7 +85,7 @@ public class DallaManGutModel {
         return F * kAbsEff * qgutMmol;
     }
 
-    // ── tMaxG → K_ABS scaling ─────────────────────────────────────────────────
+    // -- tMaxG -> K_ABS scaling -------------------------------------------------
 
     /**
      * Baseline tMaxG [min] for a pure-carbohydrate meal
@@ -108,10 +108,10 @@ public class DallaManGutModel {
      * Slow meals (high tMaxG: fat/protein) reduce the intestinal drain so the Ra peak
      * shifts right; fast meals (low tMaxG: juice, glucose tabs, hypo treatment) raise it
      * so the rapid spike is captured. Previously the factor was clamped at 1, which made
-     * the model unable to absorb fast carbs faster than an average mixed meal — a
+     * the model unable to absorb fast carbs faster than an average mixed meal - a
      * systematic under-prediction of the early spike for liquid/simple-sugar meals.</p>
      *
-     * @param tMaxGMin  macro-modulated tMaxG [min] — from {@link HovorkaParameters#tMaxG()}
+     * @param tMaxGMin  macro-modulated tMaxG [min] - from {@link HovorkaParameters#tMaxG()}
      * @return effective K_ABS [min⁻¹]
      */
     public static double effectiveKAbs(double tMaxGMin) {

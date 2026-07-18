@@ -13,7 +13,7 @@ import java.util.List;
 @AllArgsConstructor
 public class IsfMealWindowProfileResponse {
 
-    /** One entry per {@code MealWindow} value (always 3 — BREAKFAST, LUNCH, DINNER) in canonical order. */
+    /** One entry per {@code MealWindow} value (always 3 - BREAKFAST, LUNCH, DINNER) in canonical order. */
     private List<IsfMealWindowDTO> windows;
 
     /** Threshold used to decide whether {@link IsfMealWindowDTO#isHasData()} is true. Mirrors {@code IsfMealWindowProfileService.MIN_WEIGHTED_SAMPLES}. */

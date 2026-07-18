@@ -31,14 +31,14 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li>Client-actionable errors return a specific 4xx with a safe, human-readable message.</li>
  *   <li>Server faults (5xx) are logged in full server-side and return a <em>generic</em> message plus
- *       the request's correlation id — internal exception text is never leaked to the caller.</li>
+ *       the request's correlation id - internal exception text is never leaked to the caller.</li>
  * </ul>
  */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
 
-    // ── 4xx: client-actionable ────────────────────────────────────────────────
+    // -- 4xx: client-actionable ------------------------------------------------
 
     @ExceptionHandler(UsernameAlreadyExistsException.class)
     public ResponseEntity<CustomErrorResponse> handleUserExists(
@@ -132,12 +132,12 @@ public class GlobalExceptionHandler {
         return build(status, status.getReasonPhrase(), reason, request);
     }
 
-    // ── 5xx: server / upstream faults ───────────────────────────────────────────
+    // -- 5xx: server / upstream faults -------------------------------------------
 
     @ExceptionHandler(ExternalServiceException.class)
     public ResponseEntity<CustomErrorResponse> handleExternalService(
             ExternalServiceException ex, HttpServletRequest request) {
-        // Upstream dependency failed — log the cause, tell the client it's a gateway problem.
+        // Upstream dependency failed - log the cause, tell the client it's a gateway problem.
         log.warn("Upstream dependency failure on {} [{}]: {}",
                 request.getRequestURI(), correlationId(), ex.getMessage(), ex);
         return build(HttpStatus.BAD_GATEWAY, "Upstream service unavailable",
@@ -146,7 +146,7 @@ public class GlobalExceptionHandler {
 
     /**
      * Streaming endpoints set Content-Type: application/x-ndjson; once the async context times out the
-     * response is already committed, so we cannot write a JSON body — just set the status if possible.
+     * response is already committed, so we cannot write a JSON body - just set the status if possible.
      */
     @ExceptionHandler(AsyncRequestTimeoutException.class)
     public void handleAsyncTimeout(AsyncRequestTimeoutException ex, HttpServletResponse response) {
@@ -158,7 +158,7 @@ public class GlobalExceptionHandler {
     /**
      * The client closed the connection before the response finished (broken pipe / connection reset):
      * the app was backgrounded, a newer request superseded this one (e.g. pull-to-refresh), or a proxy
-     * timed out. The socket is already gone, so there is nothing to write back — log quietly at DEBUG
+     * timed out. The socket is already gone, so there is nothing to write back - log quietly at DEBUG
      * and swallow. This is <em>not</em> a server fault: logging it as an ERROR 500 is misleading and
      * also fails a second time trying to serialise a body onto the dead connection.
      */
@@ -179,7 +179,7 @@ public class GlobalExceptionHandler {
         return handleInternal(ex, request);
     }
 
-    // ── helpers ─────────────────────────────────────────────────────────────────
+    // -- helpers -----------------------------------------------------------------
 
     /** Logs the full exception server-side and returns a generic body (no internal details leaked). */
     private ResponseEntity<CustomErrorResponse> handleInternal(Exception ex, HttpServletRequest request) {

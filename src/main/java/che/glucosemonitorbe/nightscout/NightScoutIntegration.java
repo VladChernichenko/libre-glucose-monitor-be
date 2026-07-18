@@ -54,11 +54,11 @@ public class NightScoutIntegration {
     
     /**
      * Cached for 30 s per (userId, count). At 1000 RPS this collapses thousands of identical
-     * polls into one upstream Nightscout call — the single biggest protection against DoS-ing
+     * polls into one upstream Nightscout call - the single biggest protection against DoS-ing
      * user-hosted Nightscout instances (many of which are 1-dyno Heroku deployments).
      *
      * The returned list is cached by reference; callers that need to mutate entries (e.g.
-     * applying a request-specific timezone offset) MUST copy first — see the controller.
+     * applying a request-specific timezone offset) MUST copy first - see the controller.
      */
     @Cacheable(value = CacheConfig.CACHE_NIGHTSCOUT_ENTRIES, key = "#userId + ':' + #count")
     public List<NightscoutEntryDto> getGlucoseEntries(UUID userId, int count) {

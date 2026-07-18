@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 /**
  * Recomputes the ISF meal-window profile for every active user once per day at 02:00 UTC,
  * when traffic is lowest. On-bolus refresh is wired through {@link IsfMealWindowProfileService#recomputeForUser}
- * directly from the note-creation path (see {@code NotesService}) — not from here.
+ * directly from the note-creation path (see {@code NotesService}) - not from here.
  */
 @Slf4j
 @Component

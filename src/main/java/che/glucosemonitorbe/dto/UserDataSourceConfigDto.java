@@ -34,4 +34,3 @@ public class UserDataSourceConfigDto {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

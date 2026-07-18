@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
  * Manages revoked JWTs, backed by the {@code token_blacklist} table (BE-H3).
  *
  * <p>Durable across restarts and shared across instances (the previous in-memory map lost all
- * revocations on restart and was per-instance). Tokens are stored as a SHA-256 hex hash — the raw
+ * revocations on restart and was per-instance). Tokens are stored as a SHA-256 hex hash - the raw
  * token is never persisted. Naturally-expired entries are pruned hourly and ignored on lookup.
  */
 @Service
@@ -136,7 +136,7 @@ public class TokenBlacklistService {
      * Atomically blacklists {@code token} iff it isn't already blacklisted, returning {@code true}
      * iff this call performed the insert. Two concurrent calls with the same token race on a single
      * DB-level {@code INSERT ... ON CONFLICT DO NOTHING}: exactly one gets {@code true} (the
-     * "winner"), the other gets {@code false}. This is the race-breaker for refresh-token rotation —
+     * "winner"), the other gets {@code false}. This is the race-breaker for refresh-token rotation -
      * see {@link AuthService#refreshToken}, which must reject the loser instead of also minting a
      * second valid token pair from the same refresh token.
      */

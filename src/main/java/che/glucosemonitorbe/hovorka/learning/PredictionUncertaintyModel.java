@@ -5,29 +5,29 @@ import java.util.List;
 /**
  * The uncertainty layer of the digital twin: how far the prediction is typically off as a function
  * of how far ahead it looks. Prediction is probabilistic, so a single line understates what the model
- * actually knows — this model turns the user's own predicted-vs-actual residuals into a per-horizon
+ * actually knows - this model turns the user's own predicted-vs-actual residuals into a per-horizon
  * standard deviation, which the prediction path renders as a confidence band around each point.
  *
  * <h3>What it learns</h3>
  * <p>For each horizon knot (30/60/90/120 min) it estimates the standard deviation of the residual
- * {@code actual − (predicted + hourlyBias)} — i.e. the spread that remains <em>after</em> the mean
+ * {@code actual − (predicted + hourlyBias)} - i.e. the spread that remains <em>after</em> the mean
  * {@link ResidualBiasModel} correction, so the band is centred on the corrected prediction. The
  * spread naturally grows with horizon: a 30-min forecast is tight, a 4-hour one is wide.</p>
  *
  * <h3>Noise robustness</h3>
  * <ul>
- *   <li><b>Variance shrinkage</b> — each knot's variance is blended toward the pooled variance by
+ *   <li><b>Variance shrinkage</b> - each knot's variance is blended toward the pooled variance by
  *       sample count, so a sparse/noisy horizon bucket doesn't produce an over-confident (too narrow)
  *       or freak-wide band.</li>
- *   <li><b>Floor</b> — never below CGM sensor noise ({@value #SD_FLOOR} mmol/L); we never claim
+ *   <li><b>Floor</b> - never below CGM sensor noise ({@value #SD_FLOOR} mmol/L); we never claim
  *       certainty finer than the sensor.</li>
- *   <li><b>Monotone widening</b> — σ is forced non-decreasing across horizons, so the band is an
+ *   <li><b>Monotone widening</b> - σ is forced non-decreasing across horizons, so the band is an
  *       intuitive widening cone rather than dipping at a lucky horizon.</li>
- *   <li><b>Cap</b> — clamped at {@value #SD_MAX} mmol/L.</li>
+ *   <li><b>Cap</b> - clamped at {@value #SD_MAX} mmol/L.</li>
  * </ul>
  *
- * <p>Beyond the last trained knot (the live path predicts out to 4–8 h but we only calibrate to
- * 2 h), σ is extrapolated with a diffusion-like √-time growth from the last knot — the principled way
+ * <p>Beyond the last trained knot (the live path predicts out to 4-8 h but we only calibrate to
+ * 2 h), σ is extrapolated with a diffusion-like √-time growth from the last knot - the principled way
  * to keep widening the band without inventing data.</p>
  */
 public final class PredictionUncertaintyModel {
@@ -35,7 +35,7 @@ public final class PredictionUncertaintyModel {
     /** Horizon knots [min] at which σ is estimated (mirrors {@link PredictionReplayEngine.Config#sampleHorizons}). */
     public static final int[] HORIZONS = {30, 60, 90, 120};
 
-    /** Sensor-noise floor on σ [mmol/L] — no band is ever tighter than this. */
+    /** Sensor-noise floor on σ [mmol/L] - no band is ever tighter than this. */
     public static final double SD_FLOOR = 0.3;
     /** Safety cap on σ [mmol/L]. */
     public static final double SD_MAX   = 6.0;
@@ -49,11 +49,11 @@ public final class PredictionUncertaintyModel {
     }
 
     /**
-     * A sensible population prior for users without a personal fit yet — typical CGM prediction-error
+     * A sensible population prior for users without a personal fit yet - typical CGM prediction-error
      * growth. Used until a twin is calibrated, or when a twin exists but isn't applied.
      */
     public static PredictionUncertaintyModel populationDefault() {
-        // ~0.8 / 1.4 / 1.9 / 2.3 mmol/L at 30/60/90/120 min — in line with observed open-loop MAE.
+        // ~0.8 / 1.4 / 1.9 / 2.3 mmol/L at 30/60/90/120 min - in line with observed open-loop MAE.
         return new PredictionUncertaintyModel(new double[]{0.8, 1.4, 1.9, 2.3});
     }
 
@@ -125,7 +125,7 @@ public final class PredictionUncertaintyModel {
         return clampSd(sd[k - 1] * Math.sqrt((double) horizonMin / last));
     }
 
-    // ── Serialisation (compact CSV for the text column) ─────────────────────────
+    // -- Serialisation (compact CSV for the text column) -------------------------
 
     /** Serialise the per-knot σ as a comma-separated string. */
     public String toCsv() {
@@ -152,7 +152,7 @@ public final class PredictionUncertaintyModel {
         return new PredictionUncertaintyModel(sd);
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // -- Helpers --------------------------------------------------------------
 
     private static int nearestKnot(int horizonMin) {
         int best = 0;

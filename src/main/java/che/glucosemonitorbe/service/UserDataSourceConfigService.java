@@ -106,7 +106,7 @@ public class UserDataSourceConfigService {
     /**
      * Hot-path lookup for Nightscout credentials. Returns a small immutable record rather than
      * the JPA entity (no lazy fields to trip on outside the tx) and is cached in Caffeine for
-     * 5 minutes — eliminates a DB hit on every single Nightscout proxy call.
+     * 5 minutes - eliminates a DB hit on every single Nightscout proxy call.
      *
      * <p>Cached per-user; evicted automatically on save/activate/deactivate/delete of configs.
      */

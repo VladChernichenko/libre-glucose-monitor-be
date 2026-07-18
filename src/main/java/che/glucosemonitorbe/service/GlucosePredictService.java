@@ -52,7 +52,7 @@ public class GlucosePredictService {
     /** Mild multiplier for points between the hypo threshold and target (low side of 5.5). */
     private static final double  LOW_SIDE_WEIGHT      = 2.0;
 
-    // ── Fat-Protein Unit (FPU) slow-glucose modelling ─────────────────────────
+    // -- Fat-Protein Unit (FPU) slow-glucose modelling -------------------------
     /** Onset delay for protein gluconeogenesis / fat-delayed absorption [min]. */
     private static final int    FPU_ONSET_MIN    = 90;
     /** Carb-equivalent per FPU (Warsaw Protocol: 1 FPU ≈ 10 g slow carbs). */
@@ -76,14 +76,14 @@ public class GlucosePredictService {
         LocalDateTime now    = LocalDateTime.now();
         UUID          userId = userService.getUserByUsername(username).getId();
 
-        // ── 1. Load history ───────────────────────────────────────────────────
+        // -- 1. Load history ---------------------------------------------------
         List<Note> recentNotes     = loadRecentNotes(userId, now);
         List<Note> longActingNotes = loadLongActingNotes(userId, now);
 
         List<CarbsEntry>  pastCarbs = toCarbsEntries(recentNotes, userId);
         List<InsulinDose> pastDoses = toInsulinDoses(recentNotes, userId);
 
-        // ── 2. Build macro-modulated Hovorka params ───────────────────────────
+        // -- 2. Build macro-modulated Hovorka params ---------------------------
         double carbsG   = safe(req.getCarbs());
         double proteinG = safe(req.getProtein());
         double fatG     = safe(req.getFat());
@@ -106,7 +106,7 @@ public class GlucosePredictService {
                 ? Math.max(60, Math.min(480, req.getHorizonMinutes()))
                 : DEFAULT_HORIZON_MIN;
 
-        // ── 3. Add prospective meal at t = 0 ─────────────────────────────────
+        // -- 3. Add prospective meal at t = 0 ---------------------------------
         List<CarbsEntry> carbsWithMeal = new ArrayList<>(pastCarbs);
         if (carbsG > 0) {
             carbsWithMeal.add(CarbsEntry.builder()
@@ -117,15 +117,15 @@ public class GlucosePredictService {
                     .build());
         }
 
-        // ── 3b. Add FPU-equivalent slow glucose from protein/fat ─────────────
+        // -- 3b. Add FPU-equivalent slow glucose from protein/fat -------------
         // Protein gluconeogenesis and fat-delayed gastric emptying cause a secondary
         // glucose rise not captured by the carb ODE.  The Warsaw Protocol models this
         // as a delayed slow-carb bolus: 1 FPU (100 kcal non-carb) ≈ 10 g carbs.
         //
         // When the YOLO vision service supplies type-aware fields, we use:
-        //   lctFatG            — excludes MCT fat (oxidised directly, no portal glucose)
-        //   gluconeogenicFrac  — weighted by protein type (ANIMAL 50%, PLANT 35%, etc.)
-        //   fpuOnset           — weighted protein-type onset (CASEIN 120 min, WHEY 60 min…)
+        //   lctFatG            - excludes MCT fat (oxidised directly, no portal glucose)
+        //   gluconeogenicFrac  - weighted by protein type (ANIMAL 50%, PLANT 35%, etc.)
+        //   fpuOnset           - weighted protein-type onset (CASEIN 120 min, WHEY 60 min...)
         double lctFatG       = req.getLctFatG() != null ? safe(req.getLctFatG()) : fatG;
         double glucFrac      = req.getGluconeogenicFraction() != null
                                ? req.getGluconeogenicFraction() : 0.50;
@@ -143,14 +143,14 @@ public class GlucosePredictService {
                     .build());
         }
 
-        // ── 4. Optimise pre-bolus pause ───────────────────────────────────────
+        // -- 4. Optimise pre-bolus pause ---------------------------------------
         double insulinDose = safe(req.getInsulinDose());
         int bestPause = optimisePreBolus(
                 req.getCurrentGlucose(), now,
                 carbsWithMeal, pastDoses, longActingNotes,
                 userId, mealParams, insulinDose, horizon);
 
-        // ── 5. Final simulation with optimal bolus timing ─────────────────────
+        // -- 5. Final simulation with optimal bolus timing ---------------------
         List<InsulinDose> finalDoses = new ArrayList<>(pastDoses);
         if (insulinDose > 0) {
             finalDoses.add(InsulinDose.builder()
@@ -183,13 +183,13 @@ public class GlucosePredictService {
                 .build();
     }
 
-    // ── Pre-bolus optimisation ────────────────────────────────────────────────
+    // -- Pre-bolus optimisation ------------------------------------------------
 
     /**
      * Finds the pre-bolus pause [min] from {@link #PREBOLUS_CANDIDATES} that minimises
      * the integral of squared deviation from 5.5 mmol/L over the prediction horizon.
      *
-     * <p>Runs at most {@code PREBOLUS_CANDIDATES.length} ODE simulations — each is
+     * <p>Runs at most {@code PREBOLUS_CANDIDATES.length} ODE simulations - each is
      * a few milliseconds, so the total overhead is negligible.</p>
      */
     private int optimisePreBolus(
@@ -246,7 +246,7 @@ public class GlucosePredictService {
         return bestPause;
     }
 
-    // ── Note loaders ─────────────────────────────────────────────────────────
+    // -- Note loaders ---------------------------------------------------------
 
     private List<Note> loadRecentNotes(UUID userId, LocalDateTime now) {
         try {
@@ -267,7 +267,7 @@ public class GlucosePredictService {
         }
     }
 
-    // ── Note converters ───────────────────────────────────────────────────────
+    // -- Note converters -------------------------------------------------------
 
     private List<CarbsEntry> toCarbsEntries(List<Note> notes, UUID userId) {
         return notes.stream()

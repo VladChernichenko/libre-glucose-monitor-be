@@ -14,11 +14,11 @@ import java.util.List;
  * with bolus strategy, expected absorption duration, and meal sequencing priority.
  *
  * Matching uses two-pass specificity ordering to avoid premature GI-only matches:
- *   Pass 1 — fat/protein-constrained patterns (sorted by duration DESC):
- *     Double Wave (8h, fat+protein) → Flat Plateau (5h, protein) →
- *     Moderate FPU (4h) → Light FPU (3h)
- *   Pass 2 — GI-only patterns (sorted by duration DESC):
- *     Slow Climb (3.5h) → Fast Spike (2.5h)
+ *   Pass 1 - fat/protein-constrained patterns (sorted by duration DESC):
+ *     Double Wave (8h, fat+protein) -> Flat Plateau (5h, protein) ->
+ *     Moderate FPU (4h) -> Light FPU (3h)
+ *   Pass 2 - GI-only patterns (sorted by duration DESC):
+ *     Slow Climb (3.5h) -> Fast Spike (2.5h)
  *   Fiber barrier patterns (has_fiber_barrier=true) are always checked in Pass 1
  *   before any GI pattern because they override the expected curve shape.
  */
@@ -45,7 +45,7 @@ public class GlycemicPatternMatchingService {
             return snapshot;
         }
 
-        log.info("[GlycemicPattern] matched '{}' → bolus={} duration={}h seqPriority={}",
+        log.info("[GlycemicPattern] matched '{}' -> bolus={} duration={}h seqPriority={}",
                 match.getPatternName(), match.getBolusStrategy(),
                 match.getSuggestedDurationHours(), match.getMealSequencingPriority());
 
@@ -77,7 +77,7 @@ public class GlycemicPatternMatchingService {
             if (matches(p, gi, gl, fat, protein, fiber)) return p;
         }
 
-        // Pass 2: fat/protein-constrained patterns — sorted longest→shortest so Double Wave (8h)
+        // Pass 2: fat/protein-constrained patterns - sorted longest->shortest so Double Wave (8h)
         // beats Moderate FPU (4h) beats Light FPU (3h) for the same meal.
         for (GlycemicResponsePattern p : patterns.stream()
                 .filter(pat -> !pat.isHasFiberBarrier()
@@ -86,7 +86,7 @@ public class GlycemicPatternMatchingService {
             if (matches(p, gi, gl, fat, protein, fiber)) return p;
         }
 
-        // Pass 3: GI-only patterns (no fat/protein constraints) — Fast Spike, Slow Climb.
+        // Pass 3: GI-only patterns (no fat/protein constraints) - Fast Spike, Slow Climb.
         for (GlycemicResponsePattern p : patterns.stream()
                 .filter(pat -> !pat.isHasFiberBarrier()
                         && pat.getMinFatGrams() == null && pat.getMinProteinGrams() == null)
@@ -101,25 +101,25 @@ public class GlycemicPatternMatchingService {
      * Recommended pre-bolus pause (minutes to wait after injection before eating).
      *
      * Dual Wave: HFHP meal still contains a fast-carb component (e.g. pizza dough).
-     *   The upfront bolus portion (30–50%) must cover that spike, so inject 10–15 min
+     *   The upfront bolus portion (30-50%) must cover that spike, so inject 10-15 min
      *   before eating. Source: ADA/ISPAD Dual-Wave guidelines, Warsaw Method.
      *
      * Extended: pure protein/fat dominant meal with negligible fast-carb peak (e.g. steak).
-     *   Bolus starts at or after meal → 0 min pre-bolus.
+     *   Bolus starts at or after meal -> 0 min pre-bolus.
      *
-     * Normal: GI-driven timing — high-GI food absorbs fastest and needs longest head-start.
+     * Normal: GI-driven timing - high-GI food absorbs fastest and needs longest head-start.
      */
     private int computePreBolusPause(String bolusStrategy, NutritionSnapshot s) {
         if (bolusStrategy == null) return 15;
         return switch (bolusStrategy) {
-            case "Extended" -> 0;            // pure slow absorption — bolus at/after meal start
+            case "Extended" -> 0;            // pure slow absorption - bolus at/after meal start
             case "Dual Wave" -> 15;          // upfront portion covers fast-carb spike in mixed HFHP meal
             default -> {
                 double gi = s.getEstimatedGi() != null ? s.getEstimatedGi() : 55.0;
-                if (gi >= 70) yield 20;      // fast carbs — inject 20 min early
+                if (gi >= 70) yield 20;      // fast carbs - inject 20 min early
                 if (gi >= 55) yield 15;      // medium GI
                 if (gi >= 40) yield 10;      // low-medium GI
-                yield 5;                     // very low GI / high-fiber — minimal pause
+                yield 5;                     // very low GI / high-fiber - minimal pause
             }
         };
     }

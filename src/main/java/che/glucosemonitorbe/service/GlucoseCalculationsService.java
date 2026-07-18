@@ -50,7 +50,7 @@ public class GlucoseCalculationsService {
     private static final int PREDICTION_PATH_MAX_MINUTES = 480;   // ceiling 8 h (HFHP / Dual Wave)
     // BE-P0-1 fix: 5-min dense step reduces per-request COB+IOB iterations from ~240 to ~48 (-80%).
     private static final int PREDICTION_PATH_STEP_MINUTES = 5;
-    // Sparse step applies beyond 4 h (HFHP / Dual Wave tail) — 10 min is fine for that region.
+    // Sparse step applies beyond 4 h (HFHP / Dual Wave tail) - 10 min is fine for that region.
     private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 10;
     private final UserSettingsService userSettingsService;
 
@@ -105,7 +105,7 @@ public class GlucoseCalculationsService {
 
         RapidInsulinIobParameters rapidIob = inputs.rapidIob();
 
-        // Headline COB/IOB = PERSISTED notes only (prospective excluded — see above), so these
+        // Headline COB/IOB = PERSISTED notes only (prospective excluded - see above), so these
         // are byte-for-byte the same values ExperimentService.checkBackground reports.
         double activeCOB = cobService.calculateTotalCarbsOnBoard(inputs.carbsEntries(), currentTime, userSettings);
 
@@ -156,7 +156,7 @@ public class GlucoseCalculationsService {
         Double fourHourPrediction = null;
         Double eightHourPrediction = null;
         if (!predictionPath.isEmpty()) {
-            // Exact 4h mark — clamp to last available if path is shorter
+            // Exact 4h mark - clamp to last available if path is shorter
             int idx4h = Math.min(fourHourIndex, predictionPath.size() - 1);
             fourHourPrediction = predictionPath.get(idx4h).getPredictedGlucose();
             // 8h mark only when path has more points than a plain 4h path (HFHP / Dual Wave extension).
@@ -184,11 +184,11 @@ public class GlucoseCalculationsService {
                 .build();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Shared COB/IOB inputs — single source of truth for the dashboard headline
+    // ---
+    // Shared COB/IOB inputs - single source of truth for the dashboard headline
     // AND the Experiments background check (ExperimentService.checkBackground),
     // so the two surfaces can never disagree on "active carbs / active insulin".
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     /** COB/IOB calculation inputs derived from a user's persisted notes. */
     public record ActiveCobIobInputs(
@@ -213,7 +213,7 @@ public class GlucoseCalculationsService {
                 .map(this::convertNoteToCarbsEntry)
                 .toList());
         List<InsulinDose> insulinEntries = new ArrayList<>(notes.stream()
-                // Long-acting (basal) doses are not rapid-acting boluses — exclude from bolus IOB.
+                // Long-acting (basal) doses are not rapid-acting boluses - exclude from bolus IOB.
                 .filter(note -> note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing())
                 .map(this::convertNoteToInsulinDose)
                 .toList());
@@ -241,9 +241,9 @@ public class GlucoseCalculationsService {
             RapidInsulinIobParameters rapidIob,
             Double currentTrendMmolPerMin
     ) {
-        // ── Hovorka 2-compartment ODE model (feature-flagged) ─────────────────
+        // -- Hovorka 2-compartment ODE model (feature-flagged) -----------------
         if (featureToggleConfig.isHovorkaModelEnabled() && hovorkaService != null) {
-            // Long-acting notes — load from a 36h window so Lantus taken yesterday is included
+            // Long-acting notes - load from a 36h window so Lantus taken yesterday is included
             List<Note> longActingNotes = getLongActingNotes(userUUID, currentTime);
             int pathMinutes = resolvePathDurationMinutes(carbsEntries);
             log.debug("Using Hovorka ODE model for user={} pathMinutes={}", userUUID, pathMinutes);
@@ -259,7 +259,7 @@ public class GlucoseCalculationsService {
                     longActingNotes, userUUID, pathMinutes, activity);
         }
 
-        // ── OpenAPS exponential model (default) ───────────────────────────────
+        // -- OpenAPS exponential model (default) -------------------------------
         double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
         double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
@@ -488,7 +488,7 @@ public class GlucoseCalculationsService {
     
     /**
      * Load long-acting (basal) insulin notes from the last 36 hours.
-     * Lantus/Tresiba have a DIA of ~24–28 h, so a dose taken yesterday must be included
+     * Lantus/Tresiba have a DIA of ~24-28 h, so a dose taken yesterday must be included
      * for accurate EGP suppression modelling in the Hovorka path.
      */
     private List<Note> getLongActingNotes(UUID userId, LocalDateTime currentTime) {
@@ -607,7 +607,7 @@ public class GlucoseCalculationsService {
 
     /**
      * Determine prediction path length in minutes.
-     * For HFHP / Dual Wave meals the delayed glucose tail can persist 8–10 h
+     * For HFHP / Dual Wave meals the delayed glucose tail can persist 8-10 h
      * (Warsaw Method, ADA/ISPAD guidelines). Use the longest suggestedDurationHours
      * across active entries, clamped to [240, 480] minutes.
      */
@@ -621,7 +621,7 @@ public class GlucoseCalculationsService {
                 Math.max(PREDICTION_PATH_MINUTES, maxFromPattern));
     }
 
-    // ── prospective-note builders ─────────────────────────────────────────────
+    // -- prospective-note builders ---------------------------------------------
 
     /**
      * Build a {@link CarbsEntry} from a prospective note DTO.

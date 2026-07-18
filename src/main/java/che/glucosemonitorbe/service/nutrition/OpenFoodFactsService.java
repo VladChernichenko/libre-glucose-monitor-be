@@ -63,9 +63,9 @@ public class OpenFoodFactsService {
     private static final String PRODUCT_FIELDS =
             "code,product_name,nutriments,serving_size,serving_quantity,categories_tags,image_url,brands";
 
-    // -------------------------------------------------------------------------
+    // ---
     // Public API
-    // -------------------------------------------------------------------------
+    // ---
 
     /**
      * Fetch a single product by barcode (EAN-13, UPC-A, etc.).
@@ -210,9 +210,9 @@ public class OpenFoodFactsService {
                 .build();
     }
 
-    // -------------------------------------------------------------------------
+    // ---
     // GI estimation from OFF category tags
-    // -------------------------------------------------------------------------
+    // ---
 
     /**
      * Map OpenFoodFacts taxonomy category tags to approximate GI values.
@@ -286,9 +286,9 @@ public class OpenFoodFactsService {
         return "MEDIUM";
     }
 
-    // -------------------------------------------------------------------------
+    // ---
     // Helpers
-    // -------------------------------------------------------------------------
+    // ---
 
     private HttpEntity<Void> headersEntity() {
         HttpHeaders headers = new HttpHeaders();
@@ -304,9 +304,9 @@ public class OpenFoodFactsService {
         return p.getProductName() != null ? List.of(p.getProductName()) : List.of();
     }
 
-    // -------------------------------------------------------------------------
+    // ---
     // Internal response wrappers (not exposed to the rest of the app)
-    // -------------------------------------------------------------------------
+    // ---
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)

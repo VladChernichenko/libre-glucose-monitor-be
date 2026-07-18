@@ -74,10 +74,10 @@ class NightscoutControllerDateRangeTest {
                 "testuser", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
     }
 
-    // ── BE-10: date-range filter for stored entries ───────────────────────────
+    // -- BE-10: date-range filter for stored entries ---------------------------
 
     /**
-     * BUG: BE-10 — Before the fix, getGlucoseEntriesByDate with useStored=true
+     * BUG: BE-10 - Before the fix, getGlucoseEntriesByDate with useStored=true
      * returned ALL stored entries (chartDataService.getChartDataAsEntries) without
      * filtering by the requested [startDate, endDate] window.
      *
@@ -87,8 +87,8 @@ class NightscoutControllerDateRangeTest {
      *  - Asserts the response contains only the entry within the window (e2)
      *    and not the entries outside it (e1, e3)
      *
-     * Before the fix: all 3 entries are returned → test FAILS.
-     * After the fix: only 1 entry within the window is returned → test PASSES.
+     * Before the fix: all 3 entries are returned -> test FAILS.
+     * After the fix: only 1 entry within the window is returned -> test PASSES.
      */
     @Test
     void be10_dateRange_useStored_mustFilterByRequestedWindow() throws Exception {
@@ -106,7 +106,7 @@ class NightscoutControllerDateRangeTest {
         when(chartDataService.getChartDataAsEntries(userId))
                 .thenReturn(List.of(entry1, entry2, entry3));
 
-        // Request window: 2.5 hours ago to 1.5 hours ago → only entry2 falls inside
+        // Request window: 2.5 hours ago to 1.5 hours ago -> only entry2 falls inside
         LocalDateTime windowStart = now.minusHours(2).minusMinutes(30);
         LocalDateTime windowEnd   = now.minusHours(1).minusMinutes(30);
 
@@ -126,15 +126,15 @@ class NightscoutControllerDateRangeTest {
                 .as("Only entry within the time window (e2) must appear in response")
                 .contains("e2");
         assertThat(body)
-                .as("Entry before the window (e1, 3h ago) must NOT appear — BUG: BE-10")
+                .as("Entry before the window (e1, 3h ago) must NOT appear - BUG: BE-10")
                 .doesNotContain("e1");
         assertThat(body)
-                .as("Entry after the window (e3, 1h ago) must NOT appear — BUG: BE-10")
+                .as("Entry after the window (e3, 1h ago) must NOT appear - BUG: BE-10")
                 .doesNotContain("e3");
     }
 
     /**
-     * BE-10 companion — when no stored entries fall within the window, return
+     * BE-10 companion - when no stored entries fall within the window, return
      * an empty list (not all stored entries).
      */
     @Test
@@ -145,7 +145,7 @@ class NightscoutControllerDateRangeTest {
         NightscoutEntryDto entry = new NightscoutEntryDto("e1", 120, tsYesterday, null, 4, "Flat", "dev", "sgv", 0, null);
         when(chartDataService.getChartDataAsEntries(userId)).thenReturn(List.of(entry));
 
-        // Request a window from 1 hour ago to now — entry from yesterday is outside
+        // Request a window from 1 hour ago to now - entry from yesterday is outside
         LocalDateTime windowStart = now.minusHours(1);
         LocalDateTime windowEnd   = now;
 
@@ -160,11 +160,11 @@ class NightscoutControllerDateRangeTest {
         String body = result.getResponse().getContentAsString();
         // BUG: before fix, "e1" (yesterday) would be in the response
         assertThat(body)
-                .as("Entry from yesterday must not appear when window is last 1h — BUG: BE-10")
+                .as("Entry from yesterday must not appear when window is last 1h - BUG: BE-10")
                 .doesNotContain("e1");
     }
 
-    // ── /api/nightscout/chart-data — since param routing ─────────────────────────
+    // -- /api/nightscout/chart-data - since param routing -------------------------
 
     /**
      * When ?since=<epochMs> is supplied, the controller must delegate to
@@ -223,7 +223,7 @@ class NightscoutControllerDateRangeTest {
     @Test
     void chartData_withSince_doesNotCapCount() throws Exception {
         long sinceMs = 1000L;
-        // Build 150 entries — more than the default count=100
+        // Build 150 entries - more than the default count=100
         List<NightscoutEntryDto> manyEntries = new java.util.ArrayList<>();
         for (int i = 0; i < 150; i++) {
             manyEntries.add(new NightscoutEntryDto("id-" + i, 100 + i, sinceMs + i * 1000L,
@@ -239,7 +239,7 @@ class NightscoutControllerDateRangeTest {
                 .andExpect(status().isOk())
                 .andReturn();
 
-        // All 150 entries must be present — the count cap only applies to full fetches
+        // All 150 entries must be present - the count cap only applies to full fetches
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         java.util.List<?> parsed = mapper.readValue(result.getResponse().getContentAsString(), java.util.List.class);
         assertThat(parsed).hasSize(150);

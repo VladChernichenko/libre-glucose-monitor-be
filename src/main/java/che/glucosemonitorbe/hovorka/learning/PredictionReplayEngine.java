@@ -34,7 +34,7 @@ import java.util.UUID;
  */
 public final class PredictionReplayEngine implements AnchorSampleSource {
 
-    // ── FPU constants (mirror GlucosePredictService / BacktestHarness) ──────────
+    // -- FPU constants (mirror GlucosePredictService / BacktestHarness) ----------
     private static final int    FPU_ONSET_MIN     = 90;
     private static final double FPU_CARB_EQUIV_G  = 10.0;
     private static final double FPU_MIN_EQUIV_G   = 2.0;
@@ -49,10 +49,10 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
     /** Replay configuration. */
     public static final class Config {
-        /** Prediction horizon per anchor [min]. Shorter than the live 4–8 h path keeps the fit fast
+        /** Prediction horizon per anchor [min]. Shorter than the live 4-8 h path keeps the fit fast
          *  and focused on the well-identified early curve. */
         public int    horizonMin      = 120;
-        /** Minutes between anchors. Coarser than the live 5-min cadence — anchors are highly
+        /** Minutes between anchors. Coarser than the live 5-min cadence - anchors are highly
          *  correlated, so a dense stride adds cost without information. */
         public int    strideMin       = 30;
         /** CGM alignment tolerance when matching an anchor or horizon to a reading [ms]. */
@@ -63,7 +63,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         public boolean macroTMaxG     = true;
         /** Add FPU-equivalent slow-carb entries from protein/fat (mirrors GlucosePredictService). */
         public boolean fpuEquiv       = true;
-        /** Horizons (min) to emit samples at — must be a subset of the model's emission schedule. */
+        /** Horizons (min) to emit samples at - must be a subset of the model's emission schedule. */
         public int[]  sampleHorizons  = {30, 60, 90, 120};
     }
 
@@ -155,7 +155,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         return out;
     }
 
-    // ── Anchor preparation ──────────────────────────────────────────────────────
+    // -- Anchor preparation ------------------------------------------------------
 
     private List<AnchorContext> prepareAnchors(List<Event> events) {
         List<AnchorContext> result = new ArrayList<>();
@@ -233,7 +233,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         return result;
     }
 
-    // ── Parameter helpers ───────────────────────────────────────────────────────
+    // -- Parameter helpers -------------------------------------------------------
 
     /** Apply the active scales (ISF, A_G, EGP₀) to a parameter set. tMaxGScale stays neutral. */
     private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {

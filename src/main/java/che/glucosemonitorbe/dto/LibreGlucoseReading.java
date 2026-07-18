@@ -7,7 +7,7 @@ import java.util.Date;
 public class LibreGlucoseReading {
 
     /**
-     * Sensor reading time — always stored as UTC internally.
+     * Sensor reading time - always stored as UTC internally.
      * Serialised with an explicit UTC offset so the iOS JSONDecoder's ISO8601DateFormatter
      * (which requires a timezone marker) parses it correctly regardless of the server's JVM
      * timezone or Spring's global Jackson date-format setting.
@@ -123,4 +123,3 @@ public class LibreGlucoseReading {
                 '}';
     }
 }
-

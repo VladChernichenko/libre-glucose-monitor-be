@@ -67,13 +67,13 @@ class GlucoseCalculationsServiceTest {
         assertEquals("stable", method.invoke(svc, stable, 120.0));
     }
 
-    // ── P1: getUserByUsername called twice per request ────────────────────────
+    // -- P1: getUserByUsername called twice per request ------------------------
 
     /**
-     * BUG: P1 — GlucoseCalculationsService.calculateGlucoseData calls
+     * BUG: P1 - GlucoseCalculationsService.calculateGlucoseData calls
      * userService.getUserByUsername twice: once in the main method body (line ~70)
      * to get the UUID for COB settings, and again inside getRecentNotes (line ~396).
-     * This is an unnecessary N+1 pattern — one lookup per request is sufficient.
+     * This is an unnecessary N+1 pattern - one lookup per request is sufficient.
      *
      * This test verifies that getUserByUsername is called exactly once.
      * It FAILS because the current implementation calls it twice.
@@ -123,14 +123,14 @@ class GlucoseCalculationsServiceTest {
 
         service.calculateGlucoseData(request);
 
-        // BUG: getUserByUsername is currently called TWICE — this FAILS
+        // BUG: getUserByUsername is currently called TWICE - this FAILS
         verify(userService, times(1)).getUserByUsername(username);
     }
 
-    // ── L2: getRecentNotes uses 6-hour window; HFHP meals need 8 hours ───────
+    // -- L2: getRecentNotes uses 6-hour window; HFHP meals need 8 hours -------
 
     /**
-     * BUG: L2 — GlucoseCalculationsService.getRecentNotes fetches notes from only the
+     * BUG: L2 - GlucoseCalculationsService.getRecentNotes fetches notes from only the
      * last 6 hours.  For high-fat/high-protein (HFHP) meals, peak carb absorption can
      * extend to 8 hours.  A note logged 7.5 hours ago with absorptionMode "HFHP" is
      * excluded from the COB calculation, causing an under-estimate.
@@ -199,7 +199,7 @@ class GlucoseCalculationsServiceTest {
                 .anyMatch(e -> e.getCarbs() != null && e.getCarbs() >= 60.0);
     }
 
-    // ── Long-acting (basal) doses must not be treated as bolus IOB ───────────
+    // -- Long-acting (basal) doses must not be treated as bolus IOB -----------
 
     /**
      * A long-acting (basal) note carries an insulin dose but must NEVER be fed into the
@@ -221,7 +221,7 @@ class GlucoseCalculationsServiceTest {
         userSettings.setMaxCOBDuration(240);
         when(userSettingsService.getUserSettings(userId)).thenReturn(userSettings);
 
-        // 20 U of long-acting taken 1 h ago — a massive phantom bolus IOB if mis-classified.
+        // 20 U of long-acting taken 1 h ago - a massive phantom bolus IOB if mis-classified.
         Note basal = new Note(userId, LocalDateTime.now().minusHours(1), 0.0, 20.0, "Tresiba");
         basal.setId(UUID.randomUUID());
         basal.setType(Note.TYPE_LONG_ACTING);
@@ -246,10 +246,10 @@ class GlucoseCalculationsServiceTest {
                 .isEmpty();
     }
 
-    // ── P4: getUserSettings called O(N) times per prediction path ─────────────
+    // -- P4: getUserSettings called O(N) times per prediction path -------------
 
     /**
-     * // BUG: P4 — GlucoseCalculationsService.buildPredictionPath calls
+     * // BUG: P4 - GlucoseCalculationsService.buildPredictionPath calls
      * cobService.calculateTotalCarbsOnBoard once per prediction step (1-minute intervals,
      * up to 480 steps). CarbsOnBoardService.calculateTotalCarbsOnBoard calls
      * getUserSettings on EACH invocation, causing 240-480 DB/cache lookups per request.
@@ -300,12 +300,12 @@ class GlucoseCalculationsServiceTest {
 
         svc.calculateGlucoseData(request);
 
-        // BUG: currently called 240+ times (once per prediction step) — this FAILS
+        // BUG: currently called 240+ times (once per prediction step) - this FAILS
         verify(userSettingsMock, times(1))
                 .getUserSettings(userId);
     }
 
-    // ── NotebookLM scenario 4: prospective notes null / empty ────────────────
+    // -- NotebookLM scenario 4: prospective notes null / empty ----------------
 
     @Test
     void prospectiveNotesNull_doesNotCrash_returnsValidResponse() {
@@ -343,7 +343,7 @@ class GlucoseCalculationsServiceTest {
                 .isEqualTo(respEmpty.getTwoHourPrediction());
     }
 
-    // ── NotebookLM scenario 5: hypoglycemia branch — confidence reduced ───────
+    // -- NotebookLM scenario 5: hypoglycemia branch - confidence reduced -------
 
     @Test
     void confidence_hypoGlucose_reducedBelowNormal() {
@@ -351,7 +351,7 @@ class GlucoseCalculationsServiceTest {
         UUID userId = UUID.randomUUID();
         stubFullPipeline(username, userId);
 
-        // Include a prospective carbs note so carbsEntries.size()=1 → base confidence
+        // Include a prospective carbs note so carbsEntries.size()=1 -> base confidence
         // becomes CONFIDENCE_MEDIUM (0.7) rather than CONFIDENCE_LOW (0.5).
         // Hypo path: 0.7 * 0.8 = 0.56 which is < normal 0.7, and > CONFIDENCE_LOW floor.
         che.glucosemonitorbe.dto.ProspectiveNoteDTO meal =
@@ -379,7 +379,7 @@ class GlucoseCalculationsServiceTest {
 
         var response = service.calculateGlucoseData(request);
 
-        // 0 carbs + 0 insulin entries → CONFIDENCE_LOW = 0.5
+        // 0 carbs + 0 insulin entries -> CONFIDENCE_LOW = 0.5
         assertThat(response.getConfidence()).isLessThanOrEqualTo(0.5);
     }
 
@@ -414,7 +414,7 @@ class GlucoseCalculationsServiceTest {
                 assertThat(point.getPredictedGlucose()).isBetween(1.0, 25.0));
     }
 
-    // ── Per-meal-window ISF overrides must be time-aware along the prediction curve ──
+    // -- Per-meal-window ISF overrides must be time-aware along the prediction curve --
 
     /**
      * buildPredictionPath must apply the ISF effective at EACH prediction step's
@@ -507,9 +507,9 @@ class GlucoseCalculationsServiceTest {
                 .isCloseTo(-6.0, within(0.001));
     }
 
-    // ── helper ────────────────────────────────────────────────────────────────
+    // -- helper ----------------------------------------------------------------
 
-    // ── Shared COB/IOB inputs (single source of truth for dashboard + Experiments tab) ──
+    // -- Shared COB/IOB inputs (single source of truth for dashboard + Experiments tab) --
 
     @Test
     void activeCobIobInputs_excludesLongActingInsulinFromIob() {
@@ -586,10 +586,10 @@ class GlucoseCalculationsServiceTest {
         when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
     }
 
-    // ── P5: NotesService.getAllNotes lacks @Cacheable ─────────────────────────
+    // -- P5: NotesService.getAllNotes lacks @Cacheable -------------------------
 
     /**
-     * // BUG: P5 — NotesService.getAllNotes has no @Cacheable annotation. Every call
+     * // BUG: P5 - NotesService.getAllNotes has no @Cacheable annotation. Every call
      * hits the database, even for the same userId within a short window. High-frequency
      * polling from the iOS app (every 30 s) causes repeated full-table scans.
      *
@@ -599,7 +599,7 @@ class GlucoseCalculationsServiceTest {
     void p5_notesService_getAllNotes_mustHaveCacheableAnnotation() throws Exception {
         Method method = NotesService.class.getMethod("getAllNotes", UUID.class);
 
-        // BUG: method has no @Cacheable — this FAILS
+        // BUG: method has no @Cacheable - this FAILS
         assertThat(method.isAnnotationPresent(Cacheable.class))
                 .as("NotesService.getAllNotes must be @Cacheable to avoid repeated full scans (BUG: P5)")
                 .isTrue();

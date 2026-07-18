@@ -27,16 +27,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Integration tests for {@link CgmReadingRepository} — the shared CGM cache used by both
+ * Integration tests for {@link CgmReadingRepository} - the shared CGM cache used by both
  * Nightscout and LibreLinkUp. These tests run against a real Postgres container because the
  * source-scoped unique constraints rely on partial indexes which H2 does not fully emulate.
  *
  * <p>Focus areas:
  * <ul>
- *   <li>per-source uniqueness — same external id under different data sources must coexist</li>
+ *   <li>per-source uniqueness - same external id under different data sources must coexist</li>
  *   <li>fallback uniqueness on {@code (user_id, data_source, date_timestamp)} when external_id is null</li>
- *   <li>scoped queries — {@code findExisting*} only return matches for the given source</li>
- *   <li>scoped delete — {@code deleteByUserIdAndExternalIds} respects the data source</li>
+ *   <li>scoped queries - {@code findExisting*} only return matches for the given source</li>
+ *   <li>scoped delete - {@code deleteByUserIdAndExternalIds} respects the data source</li>
  * </ul>
  */
 @SpringBootTest
@@ -72,7 +72,7 @@ class CgmReadingRepositoryIntegrationTest {
         otherUserId = newUser("cgmuser2").getId();
     }
 
-    // ── per-source uniqueness ────────────────────────────────────────────────────
+    // -- per-source uniqueness ----------------------------------------------------
 
     @Test
     @DisplayName("Same external_id under different data sources is allowed")
@@ -96,17 +96,17 @@ class CgmReadingRepositoryIntegrationTest {
     @Test
     @DisplayName("Same date_timestamp with null external_id is unique per source")
     void nullExternalId_sameTimestampPerSource() {
-        // First row in each source — both should succeed
+        // First row in each source - both should succeed
         repository.save(reading(userId, CgmReading.DataSource.NIGHTSCOUT,   null, 1_700_000_000L, 120));
         repository.save(reading(userId, CgmReading.DataSource.LIBRE_LINK_UP, null, 1_700_000_000L, 121));
 
-        // Second row in the same source with the same timestamp — must fail
+        // Second row in the same source with the same timestamp - must fail
         assertThatThrownBy(() ->
                 repository.saveAndFlush(reading(userId, CgmReading.DataSource.NIGHTSCOUT, null, 1_700_000_000L, 122))
         ).isInstanceOf(DataIntegrityViolationException.class);
     }
 
-    // ── scoped queries ───────────────────────────────────────────────────────────
+    // -- scoped queries -----------------------------------------------------------
 
     @Test
     @DisplayName("findByUserIdAndDataSourceAndExternalId returns only the row for the requested source")
@@ -150,7 +150,7 @@ class CgmReadingRepositoryIntegrationTest {
         assertThat(ns).containsExactly(1_000L);
     }
 
-    // ── scoped delete ────────────────────────────────────────────────────────────
+    // -- scoped delete ------------------------------------------------------------
 
     @Test
     @DisplayName("deleteByUserIdAndExternalIds removes only rows for the given source")
@@ -187,7 +187,7 @@ class CgmReadingRepositoryIntegrationTest {
         CgmReading old   = repository.saveAndFlush(reading(userId, CgmReading.DataSource.NIGHTSCOUT, "x", 1L, 100));
         CgmReading fresh = repository.saveAndFlush(reading(userId, CgmReading.DataSource.NIGHTSCOUT, "y", 2L, 110));
 
-        // Back-date "old" via JPQL bulk update — @PrePersist/@PreUpdate do not fire for bulk
+        // Back-date "old" via JPQL bulk update - @PrePersist/@PreUpdate do not fire for bulk
         // statements, so this is the only way to inject a historical lastUpdated without
         // removing the lifecycle hook from the production entity.
         em.createQuery("UPDATE CgmReading r SET r.lastUpdated = :ts WHERE r.id = :id")
@@ -205,7 +205,7 @@ class CgmReadingRepositoryIntegrationTest {
                 .isEqualTo(fresh.getExternalId());
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────────────
+    // -- helpers ------------------------------------------------------------------
 
     private User newUser(String prefix) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);

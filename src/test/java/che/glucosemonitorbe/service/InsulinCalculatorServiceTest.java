@@ -36,7 +36,7 @@ class InsulinCalculatorServiceTest {
         service = new InsulinCalculatorService(userSettingsService);
     }
 
-    // ── IOB decay basic cases ──────────────────────────────────────────────────
+    // -- IOB decay basic cases --------------------------------------------------
 
     @Test
     void futureDoseContributesZero() {
@@ -89,7 +89,7 @@ class InsulinCalculatorServiceTest {
         assertTrue(at2h < at0 && at2h > 0, "IOB should decay: at0=" + at0 + " at2h=" + at2h);
     }
 
-    // ── OpenAPS exponential curve unit tests ───────────────────────────────────
+    // -- OpenAPS exponential curve unit tests -----------------------------------
 
     @Test
     void openApsExponential_negativeMins_returnsZero() {
@@ -137,11 +137,11 @@ class InsulinCalculatorServiceTest {
     void openApsExponential_peakIsBeforeHalfDia() {
         double at55min  = InsulinCalculatorService.iobOpenApsExponential(5.0, 55.0,  4.5, 55.0);
         double at100min = InsulinCalculatorService.iobOpenApsExponential(5.0, 100.0, 4.5, 55.0);
-        // After peak, IOB falls → at 100 min should be less than at 55 min
+        // After peak, IOB falls -> at 100 min should be less than at 55 min
         assertThat(at100min).isLessThan(at55min);
     }
 
-    // ── BE-5: activity status expires when insulin is past DIA ─────────────────
+    // -- BE-5: activity status expires when insulin is past DIA -----------------
 
     /**
      * BE-5 regression: status must return "none" once the last dose is beyond DIA,
@@ -155,13 +155,13 @@ class InsulinCalculatorServiceTest {
         LocalDateTime pastDia = doseTime.plusMinutes((long)(diaHours * 60) + 1);
         InsulinDose dose = InsulinDose.builder().timestamp(doseTime).units(4.0).build();
 
-        // Total IOB is 0 — status should not be "falling"
+        // Total IOB is 0 - status should not be "falling"
         String status = service.getInsulinActivityStatus(List.of(dose), pastDia, InsulinCalculatorService.DEFAULT_PEAK_MINUTES);
         double totalIob = service.calculateTotalActiveInsulin(List.of(dose), pastDia, diaHours, InsulinCalculatorService.DEFAULT_PEAK_MINUTES);
 
         assertThat(totalIob).isEqualTo(0.0);
         // With the BE-5 fix applied, status must not be "falling" when IOB=0
-        // (current impl returns "falling" — this test will fail until BE-5 is fixed)
+        // (current impl returns "falling" - this test will fail until BE-5 is fixed)
         assertThat(status).isNotEqualTo("falling");
     }
 
@@ -174,7 +174,7 @@ class InsulinCalculatorServiceTest {
     @Test
     void activityStatus_risingPhase() {
         LocalDateTime now = LocalDateTime.of(2025, 6, 1, 12, 0);
-        // 10 min ago: well before peak (55 min) → "rising"
+        // 10 min ago: well before peak (55 min) -> "rising"
         InsulinDose dose = InsulinDose.builder().timestamp(now.minusMinutes(10)).units(4.0).build();
         assertThat(service.getInsulinActivityStatus(List.of(dose), now))
                 .isEqualTo("rising");
@@ -183,17 +183,17 @@ class InsulinCalculatorServiceTest {
     @Test
     void activityStatus_peakPhase() {
         LocalDateTime now = LocalDateTime.of(2025, 6, 1, 12, 0);
-        // 55 min ago: at peak ± 15 min → "peak"
+        // 55 min ago: at peak ± 15 min -> "peak"
         InsulinDose dose = InsulinDose.builder().timestamp(now.minusMinutes(55)).units(4.0).build();
         assertThat(service.getInsulinActivityStatus(List.of(dose), now))
                 .isEqualTo("peak");
     }
 
-    // ── BE-4: ISF resolved from user settings ─────────────────────────────────
+    // -- BE-4: ISF resolved from user settings ---------------------------------
 
     @Test
     void recommendedInsulin_correctionUsesConfiguredIsf() {
-        // ISF=2.2: correction = (12.0 – 6.0) / 2.2 ≈ 2.73 u; carb bolus = 60/12 = 5 u → total ≈ 7.73
+        // ISF=2.2: correction = (12.0 - 6.0) / 2.2 ≈ 2.73 u; carb bolus = 60/12 = 5 u -> total ≈ 7.73
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(60.0);
         request.setCurrentGlucose(12.0);
@@ -201,13 +201,13 @@ class InsulinCalculatorServiceTest {
         request.setUserId(USER_ID.toString());
 
         var response = service.calculateRecommendedInsulin(request);
-        // With ISF=2.2: correction≈2.73, carb=5 → total≈7.73; with old ISF=1.0: total=11
+        // With ISF=2.2: correction≈2.73, carb=5 -> total≈7.73; with old ISF=1.0: total=11
         assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
     }
 
     @Test
     void recommendedInsulin_noUserIdFallsBackToDefaultIsf() {
-        // No userId → DEFAULT_ISF=2.2 used directly
+        // No userId -> DEFAULT_ISF=2.2 used directly
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(60.0);
         request.setCurrentGlucose(12.0);
@@ -218,13 +218,13 @@ class InsulinCalculatorServiceTest {
         assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
     }
 
-    // ── NotebookLM scenario 3: DIA edge cases ────────────────────────────────
+    // -- NotebookLM scenario 3: DIA edge cases --------------------------------
 
     @Test
     void diaZero_failSafe_returnsZeroNotDivisionByZero() {
         LocalDateTime t = LocalDateTime.of(2025, 6, 1, 12, 0);
         InsulinDose dose = InsulinDose.builder().timestamp(t).units(4.0).build();
-        // diaHours=0 is guarded by the `if (diaHours <= 0)` check → must return 0, not throw
+        // diaHours=0 is guarded by the `if (diaHours <= 0)` check -> must return 0, not throw
         assertEquals(0.0, service.calculateRemainingInsulin(dose, t, 0.0, 55.0), 1e-9);
     }
 
@@ -248,7 +248,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void diaExactBoundary_atEndMinutes_returnsZero() {
-        // t = DIA*60 (exactly at boundary → 0)
+        // t = DIA*60 (exactly at boundary -> 0)
         LocalDateTime doseTime = LocalDateTime.of(2025, 6, 1, 8, 0);
         double diaHours = 5.0;
         LocalDateTime atExpiry = doseTime.plusMinutes((long)(diaHours * 60));
@@ -258,10 +258,10 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void openApsExponential_nearZeroDenominator_fallsBackToLinear() {
-        // denom = 1 - 2*peak/end; when peak = end/2, denom ≈ 0 → linear fallback
+        // denom = 1 - 2*peak/end; when peak = end/2, denom ≈ 0 -> linear fallback
         double diaHours = 4.0;
         double endMin = diaHours * 60.0;          // 240
-        double peakMin = endMin / 2.0;             // 120 → denom = 0
+        double peakMin = endMin / 2.0;             // 120 -> denom = 0
         double units = 5.0;
         double t = 60.0;
 
@@ -273,7 +273,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void openApsExponential_nanGuard_neverReturnsNaN() {
-        // Pathological inputs that could produce NaN — must always get a finite value
+        // Pathological inputs that could produce NaN - must always get a finite value
         for (double peak : new double[]{0.001, 135.0, 269.9}) {
             double iob = InsulinCalculatorService.iobOpenApsExponential(5.0, 60.0, 4.5, peak);
             assertThat(Double.isNaN(iob)).isFalse();
@@ -291,12 +291,12 @@ class InsulinCalculatorServiceTest {
         request.setActiveInsulin(5.0);
         request.setUserId(USER_ID.toString());
 
-        // carb bolus = 30/12 = 2.5; active=5 → max(0, 2.5-5) = 0
+        // carb bolus = 30/12 = 2.5; active=5 -> max(0, 2.5-5) = 0
         var response = service.calculateRecommendedInsulin(request);
         assertThat(response.getRecommendedInsulin()).isEqualTo(0.0);
     }
 
-    // ── calculateRemainingInsulin guard branches ──────────────────────────────
+    // -- calculateRemainingInsulin guard branches ------------------------------
 
     @Test
     void calculateRemainingInsulin_zeroUnits_returnsZero() {
@@ -317,7 +317,7 @@ class InsulinCalculatorServiceTest {
         assertEquals(0.0, service.calculateRemainingInsulin(dose, null), 1e-9);
     }
 
-    // ── getInsulinActivityTimeline (real-life 5u Lunch bolus) ─────────────────
+    // -- getInsulinActivityTimeline (real-life 5u Lunch bolus) -----------------
 
     @Test
     void activityTimeline_realLifeDose_coversFullDurationWithPeak() {
@@ -327,7 +327,7 @@ class InsulinCalculatorServiceTest {
 
         List<ActiveInsulinResponse> timeline = service.getInsulinActivityTimeline(dose, 4.5);
 
-        // 0..4.5h in 0.25h steps, inclusive → 19 points
+        // 0..4.5h in 0.25h steps, inclusive -> 19 points
         assertThat(timeline).hasSize(19);
 
         ActiveInsulinResponse first = timeline.get(0);
@@ -335,7 +335,7 @@ class InsulinCalculatorServiceTest {
         assertThat(first.getRemainingUnits()).isCloseTo(5.0, within(0.05));
         assertThat(first.getPercentageRemaining()).isCloseTo(100.0, within(0.5));
 
-        // 4.5h ≈ DIA → IOB ≈ 0
+        // 4.5h ≈ DIA -> IOB ≈ 0
         ActiveInsulinResponse last = timeline.get(timeline.size() - 1);
         assertThat(last.getRemainingUnits()).isCloseTo(0.0, within(0.5));
 
@@ -348,7 +348,7 @@ class InsulinCalculatorServiceTest {
         }
     }
 
-    // ── getInsulinActivityStatus: future dose & falling phase ─────────────────
+    // -- getInsulinActivityStatus: future dose & falling phase -----------------
 
     @Test
     void activityStatus_futureDose_returnsNone() {
@@ -360,12 +360,12 @@ class InsulinCalculatorServiceTest {
     @Test
     void activityStatus_fallingPhase() {
         LocalDateTime now = LocalDateTime.of(2025, 6, 1, 12, 0);
-        // 100 min ago: past peak+15 (70 min) but well before DIA (270 min) → "falling"
+        // 100 min ago: past peak+15 (70 min) but well before DIA (270 min) -> "falling"
         InsulinDose dose = InsulinDose.builder().timestamp(now.minusMinutes(100)).units(4.0).build();
         assertThat(service.getInsulinActivityStatus(List.of(dose), now)).isEqualTo("falling");
     }
 
-    // ── getInsulinActivityDescription ──────────────────────────────────────────
+    // -- getInsulinActivityDescription ------------------------------------------
 
     @Test
     void activityDescription_noDoses_returnsNoActiveInsulin() {
@@ -385,7 +385,7 @@ class InsulinCalculatorServiceTest {
     @Test
     void activityDescription_risingPhase_formatsActiveUnits() {
         LocalDateTime now = LocalDateTime.of(2025, 6, 1, 12, 0);
-        // Real-life: 4.0u Lunch bolus, 10 min ago → rising
+        // Real-life: 4.0u Lunch bolus, 10 min ago -> rising
         InsulinDose dose = InsulinDose.builder().timestamp(now.minusMinutes(10)).units(4.0).build();
         assertThat(service.getInsulinActivityDescription(List.of(dose), now))
                 .startsWith("Insulin rising - ")
@@ -395,7 +395,7 @@ class InsulinCalculatorServiceTest {
     @Test
     void activityDescription_peakPhase_formatsActiveUnits() {
         LocalDateTime now = LocalDateTime.of(2025, 6, 1, 12, 0);
-        // Real-life: 5.0u Lunch bolus, 55 min ago → peak
+        // Real-life: 5.0u Lunch bolus, 55 min ago -> peak
         InsulinDose dose = InsulinDose.builder().timestamp(now.minusMinutes(55)).units(5.0).build();
         assertThat(service.getInsulinActivityDescription(List.of(dose), now))
                 .startsWith("Insulin at peak - ")
@@ -411,7 +411,7 @@ class InsulinCalculatorServiceTest {
                 .endsWith("u active");
     }
 
-    // ── resolveIsf fallback paths (malformed/missing user settings) ──────────
+    // -- resolveIsf fallback paths (malformed/missing user settings) ----------
 
     @Test
     void recommendedInsulin_malformedUserId_fallsBackToDefaultIsf() {
@@ -422,7 +422,7 @@ class InsulinCalculatorServiceTest {
         request.setUserId("not-a-uuid");
 
         var response = service.calculateRecommendedInsulin(request);
-        // Falls back to DEFAULT_ISF=2.2: correction≈2.73, carb=5 → total≈7.73
+        // Falls back to DEFAULT_ISF=2.2: correction≈2.73, carb=5 -> total≈7.73
         assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
     }
 
@@ -457,12 +457,12 @@ class InsulinCalculatorServiceTest {
         assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
     }
 
-    // ── correction skipped when not hyperglycemic ─────────────────────────────
+    // -- correction skipped when not hyperglycemic -----------------------------
 
     @Test
     void recommendedInsulin_currentGlucoseAtTarget_noCorrectionApplied() {
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
-        // Real-life: 36g carbs, glucose 5.4 mmol/L (in-range), target 6.0 → no correction
+        // Real-life: 36g carbs, glucose 5.4 mmol/L (in-range), target 6.0 -> no correction
         request.setCarbs(36.0);
         request.setCurrentGlucose(5.4);
         request.setTargetGlucose(6.0);

@@ -21,7 +21,7 @@ import java.util.List;
 @AllArgsConstructor
 public class PredictResponse {
 
-    /** Predicted glucose trajectory — one point every 5 min (0–4 h) or 10 min (4–8 h). */
+    /** Predicted glucose trajectory - one point every 5 min (0-4 h) or 10 min (4-8 h). */
     private List<PredictionPointDTO> curve;
 
     /**
@@ -33,9 +33,9 @@ public class PredictResponse {
     /**
      * Recommended bolus strategy:
      * <ul>
-     *   <li>{@code "NORMAL"}      — standard meal bolus</li>
-     *   <li>{@code "SQUARE_WAVE"} — extended / dual-wave bolus for high-fat or high-protein meals
-     *       where a late glucose rise (3–6 h) is expected from gluconeogenesis or delayed emptying</li>
+     *   <li>{@code "NORMAL"}      - standard meal bolus</li>
+     *   <li>{@code "SQUARE_WAVE"} - extended / dual-wave bolus for high-fat or high-protein meals
+     *       where a late glucose rise (3-6 h) is expected from gluconeogenesis or delayed emptying</li>
      * </ul>
      */
     private String bolusStrategy;

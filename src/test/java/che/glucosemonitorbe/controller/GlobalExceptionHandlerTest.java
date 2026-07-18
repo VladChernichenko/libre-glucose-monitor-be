@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Regression tests for GlobalExceptionHandler and GlucoseCalculationsController covering:
  * - BE-11: GlobalExceptionHandler.handleRuntimeException returns HTTP 500 for unhandled
  *          RuntimeExceptions when the GlobalExceptionHandler is installed.
- *          (Regression guard — the handler exists in source; this test confirms it works.)
+ *          (Regression guard - the handler exists in source; this test confirms it works.)
  * - A1:    GlucoseCalculationsController catches ALL exceptions in its own catch block and
  *          returns ResponseEntity.badRequest() (400), even for RuntimeExceptions that are
  *          server errors.  The GlobalExceptionHandler never gets a chance to intervene.
@@ -59,10 +59,10 @@ class GlobalExceptionHandlerTest {
                 .build();
     }
 
-    // ── BE-11 regression guard: GlobalExceptionHandler maps RuntimeException → 500 ────
+    // -- BE-11 regression guard: GlobalExceptionHandler maps RuntimeException -> 500 ----
 
     /**
-     * BE-11 regression test — verifies that the GlobalExceptionHandler's
+     * BE-11 regression test - verifies that the GlobalExceptionHandler's
      * RuntimeException handler (added as the BE-11 fix) returns HTTP 500
      * when an unhandled RuntimeException escapes the controller.
      *
@@ -71,7 +71,7 @@ class GlobalExceptionHandlerTest {
      * is shared across all controllers.
      *
      * When featureToggleService.shouldUseBackend returns false, the controller
-     * returns 200 — no exception propagates. This test verifies the 200 path.
+     * returns 200 - no exception propagates. This test verifies the 200 path.
      */
     @Test
     void be11_featureDisabled_returns200() throws Exception {
@@ -88,10 +88,10 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isOk());
     }
 
-    // ── A1: controller catches ALL exceptions and returns 400 instead of 500 ──
+    // -- A1: controller catches ALL exceptions and returns 400 instead of 500 --
 
     /**
-     * BUG: A1 — GlucoseCalculationsController has a catch(Exception e) block in
+     * BUG: A1 - GlucoseCalculationsController has a catch(Exception e) block in
      * calculateGlucoseData that returns ResponseEntity.badRequest() (HTTP 400) for
      * ALL exceptions, including RuntimeExceptions that indicate server errors.
      *
@@ -125,11 +125,11 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isInternalServerError());
     }
 
-    // ── client disconnect (broken pipe) is benign, not a 500 ──────────────────
+    // -- client disconnect (broken pipe) is benign, not a 500 ------------------
 
     /**
      * When the client closes the connection mid-response (broken pipe), Spring MVC raises
-     * {@link AsyncRequestNotUsableException}. The handler must swallow it quietly (void → no body
+     * {@link AsyncRequestNotUsableException}. The handler must swallow it quietly (void -> no body
      * written to the dead socket) and never rethrow or escalate it to an ERROR 500. Regression guard
      * for /api/nightscout/chart-data broken-pipe noise.
      */

@@ -167,7 +167,7 @@ public class InsulinCalculatorService {
         if (minutesSinceDose < 0) {
             return "none";
         }
-        // BE-5 fix: once the most-recent dose is past its DIA window, IOB is 0 → "none".
+        // BE-5 fix: once the most-recent dose is past its DIA window, IOB is 0 -> "none".
         // Without this guard the status returned "falling" indefinitely.
         if (minutesSinceDose >= diaHours * 60.0) {
             return "none";
@@ -220,7 +220,7 @@ public class InsulinCalculatorService {
                     return settings.getIsf();
                 }
             } catch (IllegalArgumentException ignored) {
-                // malformed userId — fall through to default
+                // malformed userId - fall through to default
             }
         }
         return DEFAULT_ISF;

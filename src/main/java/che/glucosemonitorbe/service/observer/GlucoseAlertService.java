@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Orchestrates alert evaluation and dispatch.
  *
- * <p>All public methods are {@code @Async} — they run on a background thread so
+ * <p>All public methods are {@code @Async} - they run on a background thread so
  * neither note-save nor the CGM sync cycle is blocked.
  *
  * <p>Push delivery is a stub ({@link #deliverAlert}) until Phase 2 APNs
@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * visible in server logs from day one.
  *
  * <p>Cooldown state is kept in-memory. On restart the cooldown resets, which
- * is acceptable — a missed alert after restart is far less harmful than a
+ * is acceptable - a missed alert after restart is far less harmful than a
  * missed hypo. Replace with {@code AlertSuppression} DB table (Phase 2).
  */
 @Service
@@ -45,7 +45,7 @@ public class GlucoseAlertService {
      */
     private final Map<String, LocalDateTime> cooldownMap = new ConcurrentHashMap<>();
 
-    // ── Over-injection check (fired at note-save) ─────────────────────────────
+    // -- Over-injection check (fired at note-save) -----------------------------
 
     /**
      * Run immediately after an insulin note is saved.
@@ -77,7 +77,7 @@ public class GlucoseAlertService {
         }
     }
 
-    // ── Full evaluation (fired by GlucoseAnomalyDetector on CGM cycle) ────────
+    // -- Full evaluation (fired by GlucoseAnomalyDetector on CGM cycle) --------
 
     /**
      * Evaluate all alert types against the latest CGM data for one user.
@@ -108,7 +108,7 @@ public class GlucoseAlertService {
         }
     }
 
-    // ── Dispatch ──────────────────────────────────────────────────────────────
+    // -- Dispatch --------------------------------------------------------------
 
     private void maybeDispatch(GlucoseAlert alert) {
         String key = alert.userId() + ":" + alert.type().name();
@@ -123,7 +123,7 @@ public class GlucoseAlertService {
     }
 
     /**
-     * Stub delivery — logs the alert.
+     * Stub delivery - logs the alert.
      * Replace with APNs / Firebase call in Phase 2.
      *
      * Format kept machine-parseable so log-aggregators (Datadog, Loki) can
@@ -148,7 +148,7 @@ public class GlucoseAlertService {
         // an APNs payload with interruption-level=critical for PREDICTED_HYPO / OVER_INJECTION.
     }
 
-    // ── Calculation helper ────────────────────────────────────────────────────
+    // -- Calculation helper ----------------------------------------------------
 
     private GlucoseCalculationsResponse runCalculations(
             String username, double currentGlucose, LocalDateTime now) {

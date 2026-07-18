@@ -1,4 +1,4 @@
-# Activity logging — Specification
+# Activity logging - Specification
 
 **Status:** Draft
 **Date:** 2026-07-05
@@ -8,9 +8,9 @@
 
 Physical activity strongly changes glucose (raises insulin sensitivity and glucose uptake, with a
 post-exercise tail), and the model already has the ODE machinery to represent it (`ActivityProvider`
-`a(t) ∈ [0,1]` → `ActivityModulation`). What it lacks is a data source: heart-rate/wearable data isn't
-always available. This feature lets users **log an activity as a note** — its type, a chosen intensity,
-and a duration — and makes that log the primary activity signal: it is persisted and retrievable, it
+`a(t) ∈ [0,1]` -> `ActivityModulation`). What it lacks is a data source: heart-rate/wearable data isn't
+always available. This feature lets users **log an activity as a note** - its type, a chosen intensity,
+and a duration - and makes that log the primary activity signal: it is persisted and retrievable, it
 feeds the glucose model, and the digital twin learns a per-user activity response from it.
 
 Success = a user can log "moderate run, 40 min," and (1) it is stored and returned like any note, (2)
@@ -28,7 +28,7 @@ When no activity is logged, behavior is exactly as it is today.
 2. (Must) Users can create, retrieve, update, and delete an activity note through the existing notes
    API/service, supplying type + intensity + duration. These fields are validated at the boundary
    (known type, known intensity level, `duration_min` > 0 and within a sane cap).
-3. (Must) Intensity maps to `a(t)`: LOW→0.25, MODERATE→0.5, HIGH→0.75, VERY_HARD→1.0.
+3. (Must) Intensity maps to `a(t)`: LOW->0.25, MODERATE->0.5, HIGH->0.75, VERY_HARD->1.0.
 4. (Must) Activity type is persisted and available for analysis/learning but does **not** change the
    ODE this round; the effect is driven by intensity + duration via the existing lowering `a(t)` term
    (aerobic-style assumption, documented).
@@ -59,7 +59,7 @@ When no activity is logged, behavior is exactly as it is today.
 
 **Outputs**
 - Persisted activity notes, returned via the notes API (with the new fields).
-- Prediction path modulated by logged activity (`a(t)` → sensitivity amplification + insulin-independent
+- Prediction path modulated by logged activity (`a(t)` -> sensitivity amplification + insulin-independent
   uptake + tail).
 - Unlogged-event detector residuals computed against an activity-aware prediction.
 - Digital-twin calibration that accounts for activity, plus a persisted per-user activity gain (and,
@@ -69,7 +69,7 @@ When no activity is logged, behavior is exactly as it is today.
 
 - Java 21 / Spring Boot backend (`glucose-monitor-be`); PostgreSQL via Flyway. Reuse the existing
   `Note` entity/notes service, `HovorkaGlucosePredictionService`, `ActivityProvider`/`ActivityModulation`,
-  `PredictionReplayEngine`, `DigitalTwinCalibrator`, and the unlogged-event detector — do not
+  `PredictionReplayEngine`, `DigitalTwinCalibrator`, and the unlogged-event detector - do not
   re-implement them.
 - Schema changes via editing the owning migration files (`V1` for `notes`, `V8` for `user_digital_twin`),
   not new `ALTER` migrations.
@@ -80,7 +80,7 @@ When no activity is logged, behavior is exactly as it is today.
 
 ## Edge Cases to Handle
 
-- When an activity note has `duration_min ≤ 0`, an unknown `activity_type`, or an unknown `intensity`,
+- When an activity note has `duration_min <= 0`, an unknown `activity_type`, or an unknown `intensity`,
   the create/update is rejected with a validation error.
 - When two logged activities overlap in time, `a(t)` is the maximum of their mapped intensities (clamped
   to 1), not the sum.
@@ -99,7 +99,7 @@ When no activity is logged, behavior is exactly as it is today.
 ## Out of Scope
 
 - Live heart-rate / wearable ingestion (still deferred; this manual log is the primary source now).
-- Type-specific physiology (e.g. anaerobic/strength transiently *raising* glucose) — type is stored but
+- Type-specific physiology (e.g. anaerobic/strength transiently *raising* glucose) - type is stored but
   does not change the ODE this round.
 - iOS / FE UI and any push notifications/alerts.
 - Per-activity effect analytics endpoints beyond the twin-gain status (nice-to-have only).
@@ -109,7 +109,7 @@ When no activity is logged, behavior is exactly as it is today.
 - [ ] An `ACTIVITY` note with type + intensity + duration can be created and retrieved via the notes API,
       persisted in the new typed columns; update/delete work; invalid type/intensity/duration are
       rejected.
-- [ ] Intensity→`a(t)` mapping is unit-tested (LOW/MODERATE/HIGH/VERY_HARD → 0.25/0.5/0.75/1.0).
+- [ ] Intensity->`a(t)` mapping is unit-tested (LOW/MODERATE/HIGH/VERY_HARD -> 0.25/0.5/0.75/1.0).
 - [ ] The notes-derived `ActivityProvider` is unit-tested: level inside the window, 0 outside, maximum
       on overlap, clamp to [0,1].
 - [ ] With no activity logged, prediction output is bit-identical to the current model (regression test).

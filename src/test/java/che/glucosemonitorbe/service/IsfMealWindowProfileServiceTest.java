@@ -80,14 +80,14 @@ class IsfMealWindowProfileServiceTest {
                 .thenReturn(0.0);
     }
 
-    // ── MealWindow classification ─────────────────────────────────────────────
+    // -- MealWindow classification ---------------------------------------------
 
     @Nested
     @DisplayName("MealWindow.fromHour")
     class WindowClassification {
 
         @Test
-        @DisplayName("Hours 5–10 map to BREAKFAST")
+        @DisplayName("Hours 5-10 map to BREAKFAST")
         void breakfast() {
             for (int h = 5; h <= 10; h++) {
                 assertThat(MealWindow.fromHour(h)).hasValue(MealWindow.BREAKFAST);
@@ -95,7 +95,7 @@ class IsfMealWindowProfileServiceTest {
         }
 
         @Test
-        @DisplayName("Hours 11–15 map to LUNCH")
+        @DisplayName("Hours 11-15 map to LUNCH")
         void lunch() {
             for (int h = 11; h <= 15; h++) {
                 assertThat(MealWindow.fromHour(h)).hasValue(MealWindow.LUNCH);
@@ -103,7 +103,7 @@ class IsfMealWindowProfileServiceTest {
         }
 
         @Test
-        @DisplayName("Hours 16–21 map to DINNER")
+        @DisplayName("Hours 16-21 map to DINNER")
         void dinner() {
             for (int h = 16; h <= 21; h++) {
                 assertThat(MealWindow.fromHour(h)).hasValue(MealWindow.DINNER);
@@ -127,7 +127,7 @@ class IsfMealWindowProfileServiceTest {
         }
     }
 
-    // ── Empty-data behaviour ──────────────────────────────────────────────────
+    // -- Empty-data behaviour --------------------------------------------------
 
     @Test
     @DisplayName("Empty data -> 4 buckets returned, all hasData=false, isfMmolPerU=null")
@@ -150,13 +150,13 @@ class IsfMealWindowProfileServiceTest {
                 .isEqualTo(IsfMealWindowProfileService.MIN_WEIGHTED_SAMPLES);
     }
 
-    // ── Pure correction bolus, no carbs ───────────────────────────────────────
+    // -- Pure correction bolus, no carbs ---------------------------------------
 
     @Test
     @DisplayName("Pure correction bolus with no carbs: ISF = ΔCGM / units, weight = 1.0")
     void correctionBolus_isfFromObservedDrop() {
-        // Bolus 2u at 07:30 (BREAKFAST), CGM 9.0 → 4.0 mmol/L over 4.5h → drop = 5.0 mmol
-        // No carbs → Δcarb = 0 → insulinAttributedDrop = 0 − (4.0 − 9.0) = 5.0
+        // Bolus 2u at 07:30 (BREAKFAST), CGM 9.0 -> 4.0 mmol/L over 4.5h -> drop = 5.0 mmol
+        // No carbs -> Δcarb = 0 -> insulinAttributedDrop = 0 − (4.0 − 9.0) = 5.0
         // ISF = 5.0 / 2 = 2.5 mmol/L per unit
         LocalDateTime t = today(7, 30);
         Note bolus = bolus(t, 2.0);
@@ -170,14 +170,14 @@ class IsfMealWindowProfileServiceTest {
         service.recomputeForUser(userId);
 
         IsfMealWindowSnapshot saved = captureSavedSnapshot(MealWindow.BREAKFAST);
-        // Only 1 sample, weight=1.0 — below threshold (7.0), so isfMmolPerU is null
+        // Only 1 sample, weight=1.0 - below threshold (7.0), so isfMmolPerU is null
         assertThat(saved.getRawSampleCount()).isEqualTo(1);
         assertThat(saved.getWeightedSamples()).isEqualTo(1.0);
         assertThat(saved.getIsfMmolPerU()).isNull();
     }
 
     @Test
-    @DisplayName("7 correction boluses all at ISF=2.5 → bucket reports 2.5 (threshold met)")
+    @DisplayName("7 correction boluses all at ISF=2.5 -> bucket reports 2.5 (threshold met)")
     void sevenCorrectionBoluses_thresholdMet() {
         // 7 identical correction events at 7am on consecutive days, each yielding ISF=2.5
         List<Note> notes = new ArrayList<>();
@@ -195,19 +195,19 @@ class IsfMealWindowProfileServiceTest {
         IsfMealWindowSnapshot saved = captureSavedSnapshot(MealWindow.BREAKFAST);
         assertThat(saved.getRawSampleCount()).isEqualTo(7);
         assertThat(saved.getWeightedSamples()).isEqualTo(7.0);
-        // CGM stored as int mg/dL — 9.0 mmol round-trips as 8.99, etc. Hence ~0.01 mmol slop per
+        // CGM stored as int mg/dL - 9.0 mmol round-trips as 8.99, etc. Hence ~0.01 mmol slop per
         // event, ~0.005 mmol/L/u per ISF estimate. Tolerance reflects that.
         assertThat(saved.getIsfMmolPerU()).isCloseTo(2.5, offset(0.02));
     }
 
-    // ── Meal-attached bolus ───────────────────────────────────────────────────
+    // -- Meal-attached bolus ---------------------------------------------------
 
     @Test
     @DisplayName("Meal-attached bolus uses 0.4 weight and deconvolves carbs via CR")
     void mealBolus_weightedLower_andCarbsDeconvolved() {
         // Bolus 4u + 40g carbs at 13:00 (LUNCH)
-        // Carbs absorbed fully → Δcarb = (40/10) × CR(2.0) = 8.0 mmol/L
-        // CGM 8.0 → 6.0  → observedΔ = −2.0
+        // Carbs absorbed fully -> Δcarb = (40/10) × CR(2.0) = 8.0 mmol/L
+        // CGM 8.0 -> 6.0  -> observedΔ = −2.0
         // insulinAttributedDrop = 8.0 − (−2.0) = 10.0
         // ISF = 10.0 / 4 = 2.5
         LocalDateTime t = today(13, 0);
@@ -225,7 +225,7 @@ class IsfMealWindowProfileServiceTest {
         assertThat(saved.getWeightedSamples()).isEqualTo(0.4); // meal-bolus weight
     }
 
-    // ── Night exclusion ───────────────────────────────────────────────────────
+    // -- Night exclusion -------------------------------------------------------
 
     @Test
     @DisplayName("Bolus at 02:00 is bucketed into NIGHT")
@@ -250,7 +250,7 @@ class IsfMealWindowProfileServiceTest {
         }
     }
 
-    // ── Long-acting exclusion ─────────────────────────────────────────────────
+    // -- Long-acting exclusion -------------------------------------------------
 
     @Test
     @DisplayName("Long-acting basal note is excluded from ISF computation")
@@ -266,7 +266,7 @@ class IsfMealWindowProfileServiceTest {
         assertThat(saved.getRawSampleCount()).isZero();
     }
 
-    // ── Stacked boluses ───────────────────────────────────────────────────────
+    // -- Stacked boluses -------------------------------------------------------
 
     @Test
     @DisplayName("A second bolus within the 4.5h DIA window invalidates the first")
@@ -288,7 +288,7 @@ class IsfMealWindowProfileServiceTest {
         assertThat(saved.getRawSampleCount()).isEqualTo(1); // only the second bolus
     }
 
-    // ── Missing CGM ───────────────────────────────────────────────────────────
+    // -- Missing CGM -----------------------------------------------------------
 
     @Test
     @DisplayName("Bolus with no CGM coverage is dropped silently")
@@ -302,12 +302,12 @@ class IsfMealWindowProfileServiceTest {
         assertThat(saved.getRawSampleCount()).isZero();
     }
 
-    // ── Implausible ISF clamping ──────────────────────────────────────────────
+    // -- Implausible ISF clamping ----------------------------------------------
 
     @Test
     @DisplayName("Negative ISF (glucose rose during a correction bolus) is dropped as implausible")
     void implausibleNegative_dropped() {
-        // 2u correction at 7am, CGM rose from 5.0 to 8.0 — would yield ISF = -1.5
+        // 2u correction at 7am, CGM rose from 5.0 to 8.0 - would yield ISF = -1.5
         LocalDateTime t = today(7, 0);
         stub(
                 List.of(bolus(t, 2.0)),
@@ -323,7 +323,7 @@ class IsfMealWindowProfileServiceTest {
     @Test
     @DisplayName("ISF > 10 mmol/L/u (physiologically absurd) is dropped")
     void implausibleHigh_dropped() {
-        // 0.5u correction, CGM dropped 8 mmol/L → ISF = 16 → dropped
+        // 0.5u correction, CGM dropped 8 mmol/L -> ISF = 16 -> dropped
         LocalDateTime t = today(7, 0);
         stub(
                 List.of(bolus(t, 0.5)),
@@ -336,16 +336,16 @@ class IsfMealWindowProfileServiceTest {
         assertThat(saved.getRawSampleCount()).isZero();
     }
 
-    // ── sgvToMmol conversion ──────────────────────────────────────────────────
+    // -- sgvToMmol conversion --------------------------------------------------
 
     @Test
-    @DisplayName("sgvToMmol: 100 mg/dL → 5.55 mmol/L")
+    @DisplayName("sgvToMmol: 100 mg/dL -> 5.55 mmol/L")
     void sgvConversion() {
         assertThat(IsfMealWindowProfileService.sgvToMmol(100)).isCloseTo(5.55, offset(0.01));
         assertThat(IsfMealWindowProfileService.sgvToMmol(180)).isCloseTo(9.99, offset(0.01));
     }
 
-    // ── getProfile read path ──────────────────────────────────────────────────
+    // -- getProfile read path --------------------------------------------------
 
     @Test
     @DisplayName("getProfile returns all 4 buckets in canonical order, even if DB has only some")
@@ -374,9 +374,9 @@ class IsfMealWindowProfileServiceTest {
         assertThat(response.getWindows().get(3).isHasData()).isFalse();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Test helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     /** A representative "today" anchor that varies the date but pins specific clock times. */
     private LocalDateTime today(int hour, int minute) {

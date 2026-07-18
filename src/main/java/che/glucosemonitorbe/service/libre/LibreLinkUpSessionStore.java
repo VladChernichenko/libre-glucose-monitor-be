@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Per-user LibreLinkUp session state (token, resolved base URL, account-id hash, locale).
  *
  * <p>Extracted from {@code LibreLinkUpService} (BE-M5 decomposition). State is in-memory and
- * per-instance — the same caveat as the previous inline maps. If LibreLinkUp sessions ever need to
+ * per-instance - the same caveat as the previous inline maps. If LibreLinkUp sessions ever need to
  * survive restarts or be shared across instances, this is the single seam to back with Redis/DB
  * (mirroring the token-blacklist work in BE-H3).
  */
@@ -29,7 +29,7 @@ public class LibreLinkUpSessionStore {
         return userId != null ? tokenStore.get(userId) : null;
     }
 
-    /** SHA-256(user.id) stored after login — required as the account-id header (Nov 2024+). */
+    /** SHA-256(user.id) stored after login - required as the account-id header (Nov 2024+). */
     public String accountId(UUID userId) {
         return userId != null ? accountIdStore.get(userId) : null;
     }

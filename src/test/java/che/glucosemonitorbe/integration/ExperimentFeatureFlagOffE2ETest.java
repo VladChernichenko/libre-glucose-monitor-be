@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * T9 — experiments feature flag disabled.
+ * T9 - experiments feature flag disabled.
  *
  * Kept in a separate top-level class because {@code @TestPropertySource} on a {@code @Nested}
  * inner class does not override the parent {@link SpringBootTest} context (the parent already
@@ -59,13 +59,13 @@ class ExperimentFeatureFlagOffE2ETest {
     }
 
     @Test
-    @DisplayName("T9 — GET /experiments/available returns 404 when feature flag is disabled")
+    @DisplayName("T9 - GET /experiments/available returns 404 when feature flag is disabled")
     void experimentsDisabled_returns404() {
         ResponseEntity<String> resp = rest.exchange(
                 "/api/experiments/available", HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class);
         assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode(),
-                "Disabled experiments feature should return 404 — got: " + resp.getBody());
+                "Disabled experiments feature should return 404 - got: " + resp.getBody());
     }
 
     private HttpHeaders registerAndLogin() {

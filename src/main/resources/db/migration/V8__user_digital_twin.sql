@@ -1,6 +1,6 @@
 -- Per-user "digital twin": machine-learned corrections to the Hovorka glucose prediction model,
 -- fitted nightly by DigitalTwinCalibrationScheduler from the user's own predicted-vs-actual CGM
--- history. Exactly one row per user. Applied to PREDICTIONS ONLY — it never modifies the user's
+-- history. Exactly one row per user. Applied to PREDICTIONS ONLY - it never modifies the user's
 -- insulin-dosing settings (user_settings.isf / carb_ratio).
 
 CREATE TABLE IF NOT EXISTS user_digital_twin (

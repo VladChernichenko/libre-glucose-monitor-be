@@ -1,4 +1,4 @@
-# Digital Twin — Machine-Learned Glucose Prediction
+# Digital Twin - Machine-Learned Glucose Prediction
 
 > Per-user machine learning that improves the physiological glucose forecast by comparing what the
 > model **predicted** against what the CGM **actually** recorded, and personalising the model from
@@ -11,19 +11,19 @@ validated, and the design decisions (and caveats) that matter.
 
 ---
 
-## 1. Background — the physiological prediction model
+## 1. Background - the physiological prediction model
 
 The prediction engine lives in `che.glucosemonitorbe.hovorka` and is an integrative Type-1 diabetes
 model combining three published models:
 
 | Model | Role | Key class |
 |-------|------|-----------|
-| **Hovorka (2004)** | Two-compartment glucose–insulin kinetics (the "brain"): plasma/tissue glucose, renal clearance, insulin action. | `HovorkaOdeSolver`, `HovorkaParameters` |
-| **Dalla Man (2007)** | Three-compartment nonlinear gastrointestinal carb absorption (stomach → gut → blood). | `DallaManGutModel` |
+| **Hovorka (2004)** | Two-compartment glucose-insulin kinetics (the "brain"): plasma/tissue glucose, renal clearance, insulin action. | `HovorkaOdeSolver`, `HovorkaParameters` |
+| **Dalla Man (2007)** | Three-compartment nonlinear gastrointestinal carb absorption (stomach -> gut -> blood). | `DallaManGutModel` |
 | **Palumbo / macronutrient** | Macro-modulated gastric emptying (`tMaxG`), incretin (GLP-1) "ileal brake", fat/protein delay. | `MacroNutrientGastricModel` |
 
 The solver integrates a 6-variable ODE system with **RK4 at 1-minute resolution** and emits a
-prediction point every 5 min (0–4 h) / 10 min (4–8 h) as a `PredictionPointDTO`. Per-user parameters
+prediction point every 5 min (0-4 h) / 10 min (4-8 h) as a `PredictionPointDTO`. Per-user parameters
 (ISF, body weight, carb half-life, EGP) come from `HovorkaParameterService`.
 
 This model is **deterministic**: given the same inputs it always produces the same single curve. Its
@@ -41,30 +41,30 @@ The digital twin addresses (1) directly and is engineered to be robust to (2).
 
 Everything lives in two places:
 
-- **`che.glucosemonitorbe.hovorka.learning`** — pure, dependency-free learning logic (unit-testable
+- **`che.glucosemonitorbe.hovorka.learning`** - pure, dependency-free learning logic (unit-testable
   without Spring or a database).
 - **`che.glucosemonitorbe.service.DigitalTwin*`** + `entity.UserDigitalTwin` + `scheduler` +
-  `controller` — Spring wiring, persistence, scheduling, and the API.
+  `controller` - Spring wiring, persistence, scheduling, and the API.
 
 There are **three learning layers**, fitted together during one calibration pass:
 
-### Layer 1 — Physiological parameter scales (`TwinScales`)
+### Layer 1 - Physiological parameter scales (`TwinScales`)
 
 Multiplicative corrections on the physiological parameters, centred on 1.0 (1.0 = no change):
 
-- `isfScale` — corrects systematic insulin over/under-response.
-- `agScale` — corrects systematic meal-magnitude (carb effect) bias.
-- `tMaxGScale`, `egpScale` — **reserved** columns, not yet wired to the live ODE (see §7).
+- `isfScale` - corrects systematic insulin over/under-response.
+- `agScale` - corrects systematic meal-magnitude (carb effect) bias.
+- `tMaxGScale`, `egpScale` - **reserved** columns, not yet wired to the live ODE (see §7).
 
-They are fitted by `DigitalTwinCalibrator` using **Nelder–Mead** optimisation of a **robust Huber
+They are fitted by `DigitalTwinCalibrator` using **Nelder-Mead** optimisation of a **robust Huber
 loss** (down-weights mis-logged outlier anchors) plus a **ridge-to-1.0 prior** (keeps the fit from
 running to extreme values on thin/noisy data). The optimiser repeatedly replays the model over the
 user's history via `PredictionReplayEngine` and scores each candidate scale set.
 
-### Layer 2 — Residual bias grid (`ResidualBiasModel`)
+### Layer 2 - Residual bias grid (`ResidualBiasModel`)
 
 A **24-slot hour-of-day** additive correction `[mmol/L]` learned from the error the calibrated
-physiology *still* leaves behind — dawn phenomenon, an afternoon activity dip, a chronically
+physiology *still* leaves behind - dawn phenomenon, an afternoon activity dip, a chronically
 unlogged snack at a particular hour. Averaged over many days these show up as a stable bias at a
 given clock hour.
 
@@ -73,11 +73,11 @@ user's global mean residual (and the global mean toward zero) by a pseudo-count,
 noisy samples barely moves off the pooled estimate while an hour with many consistent samples earns
 its own value. Every correction is hard-clamped (±2.5 mmol/L).
 
-### Layer 3 — Prediction uncertainty band (`PredictionUncertaintyModel`)
+### Layer 3 - Prediction uncertainty band (`PredictionUncertaintyModel`)
 
 > *"Because of the probabilistic nature of prediction, we should have a band, not a single line."*
 
-This layer learns the **standard deviation of the residual as a function of horizon** — how far off
+This layer learns the **standard deviation of the residual as a function of horizon** - how far off
 the prediction typically is, 30 / 60 / 90 / 120 minutes out. That spread, rendered as a confidence
 interval, is the band. It is measured on the residual left *after* the mean correction, so the band
 is centred on the corrected prediction.
@@ -89,7 +89,7 @@ Design properties (all safety-oriented):
 - **Sensor floor** (0.3 mmol/L): the band is never tighter than CGM noise.
 - **Monotone widening**: σ is forced non-decreasing with horizon, so the band is an intuitive
   widening cone rather than dipping at a lucky horizon.
-- **√-time extrapolation** beyond the last trained knot (the live path predicts to 4–8 h but
+- **√-time extrapolation** beyond the last trained knot (the live path predicts to 4-8 h but
   calibration only trains to 2 h): a diffusion-like growth that keeps widening honestly without
   inventing data.
 - **Cap** at 6.0 mmol/L.
@@ -109,37 +109,37 @@ Orchestrated by `DigitalTwinCalibrationService.calibrateUser(userId)`:
  2. Build raw predictor   HovorkaParameterService.buildRawForUser()  (NO twin overlay)
         │                  + PredictionResidualProvider.NONE          (raw model, no band)
         │
- 3. Temporal split        earlier 80%  →  TRAIN      later 20%  →  VALIDATION (held out)
+ 3. Temporal split        earlier 80%  ->  TRAIN      later 20%  ->  VALIDATION (held out)
         │
  4. PredictionReplayEngine  open-loop replay at strided anchors: at each t0 feed the model the
         │                    inputs it would have had + the meals/insulin that actually happened,
-        │                    compare predicted curve vs. real CGM  →  AnchorSample{horizon,pred,actual}
+        │                    compare predicted curve vs. real CGM  ->  AnchorSample{horizon,pred,actual}
         │
  5. DigitalTwinCalibrator
-        ├─ fit TwinScales               (Nelder–Mead + Huber + ridge, on TRAIN)
-        ├─ fit ResidualBiasModel        (on TRAIN residuals after scaling)
-        ├─ fit PredictionUncertaintyModel (on VALIDATION residuals — honest, out-of-sample σ)
-        └─ score baseline vs calibrated MAE on the held-out VALIDATION window
+        ├- fit TwinScales               (Nelder-Mead + Huber + ridge, on TRAIN)
+        ├- fit ResidualBiasModel        (on TRAIN residuals after scaling)
+        ├- fit PredictionUncertaintyModel (on VALIDATION residuals - honest, out-of-sample σ)
+        └- score baseline vs calibrated MAE on the held-out VALIDATION window
         │
  6. Persist UserDigitalTwin  scales + residual grid + uncertainty grid + diagnostics + applied flag
         │
  7. DigitalTwinService.invalidate(userId)   drop the 60 s hot-path cache
 ```
 
-The whole thing is **open-loop replay** — the DB-driven, main-source counterpart of the offline
+The whole thing is **open-loop replay** - the DB-driven, main-source counterpart of the offline
 `BacktestHarness` test tool.
 
 ### The safety gate
 
 The twin's `applied` flag is set **only if the calibrated model beats the un-calibrated model on the
 held-out validation window** (by a minimum margin, with a minimum sample count). If the fit doesn't
-generalise — e.g. because the training window was dominated by mis-logged data — the record is
+generalise - e.g. because the training window was dominated by mis-logged data - the record is
 stored with `applied = false` and **predictions are left completely unchanged**. This is what lets
 the system learn aggressively without ever shipping a regression.
 
 ---
 
-## 4. How the twin is applied — *predictions only*
+## 4. How the twin is applied - *predictions only*
 
 **A deliberate, explicit product decision: the twin never touches insulin-dosing settings.** The
 user's `user_settings.isf` / `carb_ratio` (used by the bolus calculator) are never written. The twin
@@ -163,8 +163,8 @@ Each `PredictionPointDTO` now carries four additional fields (all null when no b
 during raw replay):
 
 ```java
-Double predictedGlucoseLower;   // predictedGlucose − z·σ(horizon)
-Double predictedGlucoseUpper;   // predictedGlucose + z·σ(horizon)
+Double predictedGlucoseLower;   // predictedGlucose − z*σ(horizon)
+Double predictedGlucoseUpper;   // predictedGlucose + z*σ(horizon)
 Double uncertaintySd;           // σ at this horizon [mmol/L]
 Double confidenceLevel;         // 0.90  (z = 1.6449, two-sided normal)
 ```
@@ -191,7 +191,7 @@ One row per user in **`user_digital_twin`** (`src/main/resources/db/migration/V8
 | `mae_baseline`, `mae_calibrated`, `improvement_pct` | Out-of-sample fit diagnostics. |
 | `train_samples`, `val_samples`, `confidence`, `status`, `fitted_at` | Observability. |
 
-> **Schema rule:** the column set is owned entirely by `V8__…`. Per project convention, changes to
+> **Schema rule:** the column set is owned entirely by `V8__...`. Per project convention, changes to
 > this table are made by **editing `V8`**, not by adding an `ALTER TABLE` migration (assumes a
 > clean-DB dev workflow; a populated DB needs `flyway repair` after a checksum change).
 
@@ -203,7 +203,7 @@ recalibration.
 
 ## 6. Configuration, scheduling & API
 
-**Feature flag** (`application.yml` → `app.features.digital-twin-enabled`):
+**Feature flag** (`application.yml` -> `app.features.digital-twin-enabled`):
 
 ```yaml
 app:
@@ -216,7 +216,7 @@ the raw model.
 
 **Scheduling.** `DigitalTwinCalibrationScheduler.recalibrateAll()` is annotated
 `@Scheduled(cron = "${app.digital-twin.cron:0 15 3 * * *}")` (03:15 daily). ⚠️ The repository does
-**not** currently declare `@EnableScheduling`, so — as with the other schedulers here — the cron does
+**not** currently declare `@EnableScheduling`, so - as with the other schedulers here - the cron does
 not fire on its own; the reliable trigger is the manual endpoint.
 
 **API** (`DigitalTwinController`, base `/api/digital-twin`):
@@ -230,10 +230,10 @@ not fire on its own; the reliable trigger is the manual endpoint.
 
 ## 7. Validation on real-world data (AZT1D 2025)
 
-The learning was validated against the **AZT1D 2025** public dataset — 25 real Type-1 subjects on
+The learning was validated against the **AZT1D 2025** public dataset - 25 real Type-1 subjects on
 automated insulin delivery (AID) pumps, 5-minute CGM with carbs, boluses, and auto-basal.
 
-- **Loader + harness:** `src/test/java/che/glucosemonitorbe/azt1d/` — `Azt1dDataset` (header-driven,
+- **Loader + harness:** `src/test/java/che/glucosemonitorbe/azt1d/` - `Azt1dDataset` (header-driven,
   handles the two column layouts present in the dataset) and `Azt1dCalibrationValidationTest`
   (data-gated: skips cleanly in CI, runs when the dataset path is supplied).
 - **Protocol:** per subject, fit the twin on the earlier 80% and score on the held-out later 20%.
@@ -243,7 +243,7 @@ automated insulin delivery (AID) pumps, 5-minute CGM with carbs, boluses, and au
 ```
 Subjects scored: 25    |    twin applied (beat baseline out-of-sample): 23
 Mean baseline MAE:   2.39 mmol/L
-Mean effective MAE:  1.73 mmol/L      →  ~28% reduction
+Mean effective MAE:  1.73 mmol/L      ->  ~28% reduction
 ```
 
 The 2 subjects where calibration didn't generalise were correctly **not** applied (safety gate). The
@@ -293,7 +293,7 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
    gain on this particular dataset.
 3. **Open-loop replay overstates prospective accuracy.** The harness feeds each subject's *actual*
    future meals/insulin (it measures the physiological model + calibration, not the harder problem of
-   forecasting the user's own future behaviour) — the same caveat as `BacktestHarness`.
+   forecasting the user's own future behaviour) - the same caveat as `BacktestHarness`.
 
 ---
 
@@ -301,32 +301,32 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 
 ```
 src/main/java/che/glucosemonitorbe/
-├── hovorka/
-│   ├── HovorkaGlucosePredictionService.java   # emits points + residual correction + band
-│   ├── HovorkaParameterService.java           # buildForUser (twin overlay) / buildRawForUser
-│   ├── HovorkaOdeSolver.java, DallaManGutModel.java, MacroNutrientGastricModel.java
-│   └── learning/
-│       ├── PredictionReplayEngine.java         # open-loop replay → AnchorSample
-│       ├── DigitalTwinCalibrator.java          # fits all 3 layers + scores + safety gate
-│       ├── TwinScales.java                     # Layer 1: physiological scales
-│       ├── ResidualBiasModel.java              # Layer 2: hour-of-day residual grid
-│       ├── PredictionUncertaintyModel.java     # Layer 3: per-horizon σ → band
-│       ├── RobustLoss.java, NelderMead.java     # optimiser + Huber/ridge objective
-│       └── PredictionResidualProvider.java     # residual + σ hook into the live path
-├── service/
-│   ├── DigitalTwinCalibrationService.java      # orchestration + persistence
-│   ├── DigitalTwinService.java                 # read/apply active twin (cached)
-│   └── DigitalTwinResidualProvider.java        # @Primary provider for the live path
-├── entity/UserDigitalTwin.java
-├── repository/UserDigitalTwinRepository.java
-├── scheduler/DigitalTwinCalibrationScheduler.java
-├── controller/DigitalTwinController.java
-└── dto/PredictionPointDTO.java                 # + band fields; DigitalTwinStatusDTO
+├-- hovorka/
+│   ├-- HovorkaGlucosePredictionService.java   # emits points + residual correction + band
+│   ├-- HovorkaParameterService.java           # buildForUser (twin overlay) / buildRawForUser
+│   ├-- HovorkaOdeSolver.java, DallaManGutModel.java, MacroNutrientGastricModel.java
+│   └-- learning/
+│       ├-- PredictionReplayEngine.java         # open-loop replay -> AnchorSample
+│       ├-- DigitalTwinCalibrator.java          # fits all 3 layers + scores + safety gate
+│       ├-- TwinScales.java                     # Layer 1: physiological scales
+│       ├-- ResidualBiasModel.java              # Layer 2: hour-of-day residual grid
+│       ├-- PredictionUncertaintyModel.java     # Layer 3: per-horizon σ -> band
+│       ├-- RobustLoss.java, NelderMead.java     # optimiser + Huber/ridge objective
+│       └-- PredictionResidualProvider.java     # residual + σ hook into the live path
+├-- service/
+│   ├-- DigitalTwinCalibrationService.java      # orchestration + persistence
+│   ├-- DigitalTwinService.java                 # read/apply active twin (cached)
+│   └-- DigitalTwinResidualProvider.java        # @Primary provider for the live path
+├-- entity/UserDigitalTwin.java
+├-- repository/UserDigitalTwinRepository.java
+├-- scheduler/DigitalTwinCalibrationScheduler.java
+├-- controller/DigitalTwinController.java
+└-- dto/PredictionPointDTO.java                 # + band fields; DigitalTwinStatusDTO
 
 src/main/resources/db/migration/V8__user_digital_twin.sql
 src/test/java/che/glucosemonitorbe/
-├── hovorka/learning/*Test.java                 # unit tests for each layer
-└── azt1d/                                       # AZT1D loader + real-data validation harness
+├-- hovorka/learning/*Test.java                 # unit tests for each layer
+└-- azt1d/                                       # AZT1D loader + real-data validation harness
 ```
 
 ---
@@ -347,7 +347,7 @@ src/test/java/che/glucosemonitorbe/
   ```
 
 - The AZT1D validation and the offline `BacktestHarness` are **data-gated**: they skip unless you
-  pass the dataset path (`-Dazt1d.dir=…` / `-Dbacktest.cgm=…`), which `build.gradle` forwards to the
+  pass the dataset path (`-Dazt1d.dir=...` / `-Dbacktest.cgm=...`), which `build.gradle` forwards to the
   test JVM.
 
 ---

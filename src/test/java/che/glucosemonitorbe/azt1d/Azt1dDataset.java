@@ -17,12 +17,12 @@ import java.util.List;
  * <p>Each subject CSV has columns:
  * {@code EventDateTime, DeviceMode, BolusType, Basal, CorrectionDelivered,
  * TotalBolusInsulinDelivered, FoodDelivered, CarbSize, CGM}. CGM is 5-min mg/dL; carbs
- * ({@code CarbSize}, g) and boluses ({@code TotalBolusInsulinDelivered}, U — includes the pump's
+ * ({@code CarbSize}, g) and boluses ({@code TotalBolusInsulinDelivered}, U - includes the pump's
  * automatic corrections) are sparse event rows.</p>
  *
  * <h3>Modelling choices</h3>
  * <ul>
- *   <li>CGM mg/dL → mmol/L (÷18.0182).</li>
+ *   <li>CGM mg/dL -> mmol/L (÷18.0182).</li>
  *   <li>Discrete meals + boluses become {@link PredictionReplayEngine.Event}s.</li>
  *   <li>The continuous auto-{@code Basal} rate is <b>not</b> injected as insulin: the predictor
  *       already assumes basal balances endogenous glucose at steady state, and the residual layer
@@ -37,7 +37,7 @@ public final class Azt1dDataset {
     private static final double MGDL_PER_MMOL = 18.0182;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    // ── Clinical seeding rules (used to derive personal settings the dataset does not provide) ──
+    // -- Clinical seeding rules (used to derive personal settings the dataset does not provide) --
     /** Correction factor "1800 rule": ISF [mg/dL per U] ≈ 1800 / TDD (rapid-acting analog). */
     private static final double RULE_1800     = 1800.0;
     /**
@@ -47,16 +47,16 @@ public final class Azt1dDataset {
      * seed model-consistent so the un-calibrated baseline is competitive and the twin de-pins from 0.5.
      */
     private static final double MODEL_ISF_SCALE = 0.5;
-    /** "500 rule": carb ratio [g per U] ≈ 500 / TDD — fallback only, when CR can't be observed. */
+    /** "500 rule": carb ratio [g per U] ≈ 500 / TDD - fallback only, when CR can't be observed. */
     private static final double RULE_500      = 500.0;
-    /** Typical Type-1 total daily insulin per kg [U/kg/day] — inverts TDD → body weight. */
+    /** Typical Type-1 total daily insulin per kg [U/kg/day] - inverts TDD -> body weight. */
     private static final double U_PER_KG_DAY  = 0.55;
     private static final double DEFAULT_ISF_MMOL = 2.2;   // matches HovorkaParameterService default
     private static final double DEFAULT_WEIGHT   = 70.0;  // population fallback
     private static final double MIN_WEIGHT       = 40.0;
     private static final double MAX_WEIGHT       = 120.0;
 
-    // ── Delivery-column handling (the AZT1D insulin columns are noisy) ──
+    // -- Delivery-column handling (the AZT1D insulin columns are noisy) --
     /** {@code Basal} is a rate [U/h] sampled every 5 min; delivered units = rate × (5/60) h. */
     private static final double FIVE_MIN_H        = 5.0 / 60.0;
     /** Reject basal-rate rows above this as corrupt (real basal rarely exceeds ~4 U/h; data has 1900+). */
@@ -67,10 +67,10 @@ public final class Azt1dDataset {
     private static final double MIN_PLAUSIBLE_TDD = 15.0;
     private static final double MAX_PLAUSIBLE_TDD = 130.0;
 
-    // ── Meal-window ISF (matches user_settings.isf_breakfast/lunch/dinner windows, local hour) ──
-    private static final int BREAKFAST_START = 5,  BREAKFAST_END = 11;   // 05:00–11:00
-    private static final int LUNCH_START     = 11, LUNCH_END     = 16;   // 11:00–16:00
-    private static final int DINNER_START    = 16, DINNER_END    = 22;   // 16:00–22:00
+    // -- Meal-window ISF (matches user_settings.isf_breakfast/lunch/dinner windows, local hour) --
+    private static final int BREAKFAST_START = 5,  BREAKFAST_END = 11;   // 05:00-11:00
+    private static final int LUNCH_START     = 11, LUNCH_END     = 16;   // 11:00-16:00
+    private static final int DINNER_START    = 16, DINNER_END    = 22;   // 16:00-22:00
     /** Minimum meals observed in a window before its carb ratio is trusted to modulate ISF. */
     private static final int MIN_WINDOW_MEALS = 3;
     /** Clamp the per-window sensitivity ratio so a noisy window CR can't produce an extreme ISF. */
@@ -85,7 +85,7 @@ public final class Azt1dDataset {
                           Profile profile) {}
 
     /**
-     * Per-subject personal settings, estimated from the subject's <em>own</em> AID delivery data —
+     * Per-subject personal settings, estimated from the subject's <em>own</em> AID delivery data -
      * a "digital profile" seeded the way a clinician would before any twin calibration. None of these
      * are given in the AZT1D CSV; they are derived from delivered basal, total boluses, and the
      * carb-to-food-bolus ratio the pump used.
@@ -93,14 +93,14 @@ public final class Azt1dDataset {
      * @param days           record span in days
      * @param tddU           total daily dose (basal + bolus) [U/day]
      * @param basalRateUPerH mean basal delivery rate [U/h]
-     * @param carbRatioGPerU carb ratio [g/U] — observed median of CarbSize/FoodDelivered, else 500-rule
-     * @param isfMmolPerU    insulin sensitivity factor [mmol/L per U] — 1800-rule from TDD
-     * @param weightKg       body weight [kg] — inverted from TDD (≈0.55 U/kg/day), clamped [40,120]
-     * @param plausible      false when TDD fell outside the plausible band (corrupt insulin columns) —
+     * @param carbRatioGPerU carb ratio [g/U] - observed median of CarbSize/FoodDelivered, else 500-rule
+     * @param isfMmolPerU    insulin sensitivity factor [mmol/L per U] - 1800-rule from TDD
+     * @param weightKg       body weight [kg] - inverted from TDD (≈0.55 U/kg/day), clamped [40,120]
+     * @param plausible      false when TDD fell outside the plausible band (corrupt insulin columns) -
      *                       ISF and weight then fall back to population defaults rather than garbage
-     * @param isfBreakfast   ISF for 05:00–11:00 [mmol/L per U] = daily ISF × (window CR / overall CR)
-     * @param isfLunch       ISF for 11:00–16:00 [mmol/L per U] (daily ISF when the window lacks meals)
-     * @param isfDinner      ISF for 16:00–22:00 [mmol/L per U] (daily ISF when the window lacks meals)
+     * @param isfBreakfast   ISF for 05:00-11:00 [mmol/L per U] = daily ISF × (window CR / overall CR)
+     * @param isfLunch       ISF for 11:00-16:00 [mmol/L per U] (daily ISF when the window lacks meals)
+     * @param isfDinner      ISF for 16:00-22:00 [mmol/L per U] (daily ISF when the window lacks meals)
      */
     public record Profile(double days,
                           double tddU,
@@ -142,7 +142,7 @@ public final class Azt1dDataset {
         int cFood  = indexOf(header, h -> h.equalsIgnoreCase("FoodDelivered"));
         if (cTime < 0 || cCgm < 0) return new Subject(id, cgm, events, Profile.defaults());
 
-        // Profile aggregates — accumulated while parsing so we make a single pass over the file.
+        // Profile aggregates - accumulated while parsing so we make a single pass over the file.
         double sumBasal = 0.0, sumBolus = 0.0;
         long firstEpoch = Long.MAX_VALUE, lastEpoch = Long.MIN_VALUE;
         List<Double> crSamples = new ArrayList<>();
@@ -173,11 +173,11 @@ public final class Azt1dDataset {
                         false, 0.0, 0.0, 0.0));
             }
 
-            // ── Personal-settings aggregates (outlier-filtered) ───────────────
+            // -- Personal-settings aggregates (outlier-filtered) ---------------
             if (insulin > 0 && insulin <= MAX_SINGLE_BOLUS) sumBolus += insulin;
             if (cBasal >= 0 && cBasal < f.length) {
                 double bRate = parseD(f[cBasal]);                     // U/h at this timestamp
-                if (bRate > 0 && bRate <= MAX_BASAL_RATE) sumBasal += bRate * FIVE_MIN_H;  // → delivered U
+                if (bRate > 0 && bRate <= MAX_BASAL_RATE) sumBasal += bRate * FIVE_MIN_H;  // -> delivered U
             }
             double food = (cFood >= 0 && cFood < f.length) ? parseD(f[cFood]) : 0.0;
             if (food > 0 && carbs > 0) {
@@ -218,7 +218,7 @@ public final class Azt1dDataset {
                 : DEFAULT_WEIGHT;
 
         // Per-window ISF: modulate the daily ISF by how each window's observed carb ratio (insulin
-        // sensitivity to carbs) compares to the whole-day ratio — captures dawn resistance etc.
+        // sensitivity to carbs) compares to the whole-day ratio - captures dawn resistance etc.
         double isfB = windowIsf(isf, crBreakfast, cr);
         double isfL = windowIsf(isf, crLunch, cr);
         double isfD = windowIsf(isf, crDinner, cr);

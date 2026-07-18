@@ -17,7 +17,7 @@ import java.util.List;
 
 /**
  * Calls the local Python YOLO microservice (yolo-service/main.py) for food detection.
- * Zero external API cost — runs entirely on-device.
+ * Zero external API cost - runs entirely on-device.
  *
  * Start the service before using:
  *   cd yolo-service && uvicorn main:app --host 0.0.0.0 --port 8001
@@ -91,7 +91,7 @@ public class YoloVisionService {
             return parseResponse(objectMapper.readTree(response.getBody()));
 
         } catch (ResourceAccessException e) {
-            log.debug("[YOLO] Service unreachable — skipping YOLO path");
+            log.debug("[YOLO] Service unreachable - skipping YOLO path");
             return null;
         } catch (Exception e) {
             log.warn("[YOLO] Analysis failed: {}", e.getMessage());
@@ -106,7 +106,7 @@ public class YoloVisionService {
         }
 
         if (foods.isEmpty()) {
-            log.info("[YOLO] No foods detected above confidence threshold — falling back");
+            log.info("[YOLO] No foods detected above confidence threshold - falling back");
             return null;
         }
 

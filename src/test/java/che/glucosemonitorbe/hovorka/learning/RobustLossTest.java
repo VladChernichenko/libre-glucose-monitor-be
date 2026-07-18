@@ -12,9 +12,9 @@ class RobustLossTest {
     @Test
     void huberIsQuadraticBelowDeltaAndLinearAbove() {
         double delta = 2.0;
-        // Small residual → 0.5 r²
+        // Small residual -> 0.5 r²
         assertThat(RobustLoss.huber(1.0, delta)).isCloseTo(0.5, offset(1e-9));
-        // Large residual → linear: delta·(|r| − 0.5·delta)
+        // Large residual -> linear: delta*(|r| − 0.5*delta)
         assertThat(RobustLoss.huber(10.0, delta)).isCloseTo(2.0 * (10.0 - 1.0), offset(1e-9));
         // Symmetry
         assertThat(RobustLoss.huber(-10.0, delta)).isEqualTo(RobustLoss.huber(10.0, delta));

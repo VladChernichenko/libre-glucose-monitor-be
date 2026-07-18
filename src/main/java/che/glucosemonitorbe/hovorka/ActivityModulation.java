@@ -5,17 +5,17 @@ package che.glucosemonitorbe.hovorka;
  * on glucose dynamics, from a single intensity:
  *
  * <ul>
- *   <li><b>Insulin-sensitivity amplification</b> — insulin action is scaled by
- *       {@code (1 + gainInsulin·aSens)}. This carries a <b>post-exercise tail</b>: sensitivity stays
+ *   <li><b>Insulin-sensitivity amplification</b> - insulin action is scaled by
+ *       {@code (1 + gainInsulin*aSens)}. This carries a <b>post-exercise tail</b>: sensitivity stays
  *       elevated after activity ends, decaying with a configurable half-life (a leading cause of
  *       delayed post-exercise hypoglycemia).</li>
- *   <li><b>Insulin-independent uptake</b> — a first-order glucose clearance {@code gainIndep·aInst}
+ *   <li><b>Insulin-independent uptake</b> - a first-order glucose clearance {@code gainIndep*aInst}
  *       [per min] that acts on the <em>instantaneous</em> intensity only (contraction-mediated uptake
  *       during exercise), so a drop occurs even when IOB ≈ 0.</li>
  * </ul>
  *
  * <p>Stateful: the tail is a reservoir that charges to the current intensity and decays each minute.
- * One instance per prediction run. Pure math, no Spring — unit-testable.</p>
+ * One instance per prediction run. Pure math, no Spring - unit-testable.</p>
  */
 public final class ActivityModulation {
 
@@ -43,7 +43,7 @@ public final class ActivityModulation {
         this.decayPerMin = Math.pow(0.5, 1.0 / tailHalfLifeMin);
     }
 
-    /** Clamp a raw intensity into {@code [0,1]}; NaN → 0. */
+    /** Clamp a raw intensity into {@code [0,1]}; NaN -> 0. */
     public static double clampIntensity(double a) {
         if (Double.isNaN(a)) return 0.0;
         return Math.max(0.0, Math.min(1.0, a));

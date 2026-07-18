@@ -11,7 +11,7 @@ import static org.assertj.core.data.Offset.offset;
 
 /**
  * Tests the learning machinery against a synthetic user whose "true" parameters are known, so we
- * can assert the calibrator recovers them — and, crucially, that it stays close to the truth even
+ * can assert the calibrator recovers them - and, crucially, that it stays close to the truth even
  * when the training data is contaminated with mis-logged (outlier) anchors.
  */
 class DigitalTwinCalibratorTest {
@@ -55,7 +55,7 @@ class DigitalTwinCalibratorTest {
     @Test
     void safelyDeclinesToApplyWhenDataIsTooContaminated() {
         // At 18% one-sided contamination the fit is biased enough that the calibrated model does
-        // WORSE on the clean held-out window — the temporal-holdout gate must refuse to apply it.
+        // WORSE on the clean held-out window - the temporal-holdout gate must refuse to apply it.
         AnchorSampleSource train = new SyntheticSource(240, 0.18, 3L);
         AnchorSampleSource val   = new SyntheticSource(120, 0.0, 4L);
 
@@ -73,7 +73,7 @@ class DigitalTwinCalibratorTest {
         assertThat(r.status()).contains("insufficient data");
     }
 
-    // ── Plain (non-robust) least-squares reference fit ──────────────────────────
+    // -- Plain (non-robust) least-squares reference fit --------------------------
     // Same LM optimiser as the calibrator but WITHOUT the IRLS/Huber re-weighting, so it shows how
     // far an un-robust squared-loss fit is dragged by the mis-logged outliers.
 

@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Per-cache specs tuned for Nightscout traffic patterns.
- * - nightscoutCredentials: user→config lookups; long TTL, config rarely changes (evicted on write).
+ * - nightscoutCredentials: user->config lookups; long TTL, config rarely changes (evicted on write).
  * - nightscoutEntries: upstream Nightscout responses; short TTL to absorb poll bursts without staleness.
  */
 @Configuration

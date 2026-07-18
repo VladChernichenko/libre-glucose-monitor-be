@@ -16,14 +16,14 @@ import java.util.stream.Stream;
  * Loader for the HUPA-UCM diabetes dataset (~25 Type-1 subjects). Mirrors {@code Azt1dDataset} so the
  * same digital-twin calibration harness can validate against a second, independent real-world cohort.
  *
- * <p>Uses the {@code Preprocessed/HUPA####P.csv} files — semicolon-delimited, 5-min cadence, header:
+ * <p>Uses the {@code Preprocessed/HUPA####P.csv} files - semicolon-delimited, 5-min cadence, header:
  * {@code time;glucose;calories;heart_rate;steps;basal_rate;bolus_volume_delivered;carb_input}.
  * {@code glucose} is mg/dL; {@code carb_input} (g) and {@code bolus_volume_delivered} (U) are the
  * meal/bolus events; {@code basal_rate} is U/h.</p>
  *
  * <h3>Modelling choices (identical to the AZT1D loader)</h3>
  * <ul>
- *   <li>CGM mg/dL → mmol/L (÷18.0182).</li>
+ *   <li>CGM mg/dL -> mmol/L (÷18.0182).</li>
  *   <li>Rows with carbs and/or a bolus become {@link PredictionReplayEngine.Event}s.</li>
  *   <li>Continuous basal is <b>not</b> injected as insulin: the predictor assumes basal balances
  *       endogenous glucose at steady state; the residual layer absorbs its time-of-day modulation.</li>
@@ -38,7 +38,7 @@ public final class HupaUcmDataset {
     private static final DateTimeFormatter TS = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
     private static final String SEP = ";";
 
-    // ── Clinical seeding rules (mirror Azt1dDataset) ──
+    // -- Clinical seeding rules (mirror Azt1dDataset) --
     private static final double RULE_1800       = 1800.0;
     private static final double MODEL_ISF_SCALE  = 0.5;
     private static final double RULE_500        = 500.0;

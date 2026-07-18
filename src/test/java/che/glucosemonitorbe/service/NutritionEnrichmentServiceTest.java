@@ -13,9 +13,9 @@ import static org.assertj.core.api.Assertions.within;
  * Unit tests for NutritionEnrichmentService covering:
  * - input routing (DEFAULT_DECAY vs GI_GL_ENHANCED)
  * - keyword GI estimation across diverse meals
- * - fat+protein GI dampening (Gap #5 — Moghaddam et al., Venn & Green)
+ * - fat+protein GI dampening (Gap #5 - Moghaddam et al., Venn & Green)
  * - GL calculation using net carbs (carbs − fiber)
- * - dampening cap (≤20 GI units) and floor (≥15)
+ * - dampening cap (<=20 GI units) and floor (>=15)
  * - speed class classification
  * - macro population (fat / protein / fiber non-zero for food inputs)
  */
@@ -25,7 +25,7 @@ class NutritionEnrichmentServiceTest {
 
     private final NutritionEnrichmentService service = new NutritionEnrichmentService();
 
-    // ── input routing ─────────────────────────────────────────────────────────
+    // -- input routing ---------------------------------------------------------
 
     @Test
     void pureGramInput_returnsDefaultDecay() {
@@ -84,12 +84,12 @@ class NutritionEnrichmentServiceTest {
                 .isCloseTo(fromInput.getEstimatedGi(), within(1.0));
     }
 
-    // ── pure high-GI carbs (minimal fat/protein → very little dampening) ──────
+    // -- pure high-GI carbs (minimal fat/protein -> very little dampening) ------
 
     @Test
     void whiteRice_highGI_minimalDampening() {
-        // "white rice" matches the high-GI branch → raw GI=75.0 (same as glucose/white bread),
-        // fat=1g, protein=2g → dampening=0.7 → gi≈74.3 (≥70 → FAST)
+        // "white rice" matches the high-GI branch -> raw GI=75.0 (same as glucose/white bread),
+        // fat=1g, protein=2g -> dampening=0.7 -> gi≈74.3 (>=70 -> FAST)
         NutritionSnapshot s = service.enrichFromText("white rice", "", 60.0);
         assertThat(s.getEstimatedGi()).isCloseTo(74.3, within(0.5));
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("FAST");
@@ -97,16 +97,16 @@ class NutritionEnrichmentServiceTest {
 
     @Test
     void plainBread_mediumHighGI_approximatelyUndampened() {
-        // "bread" (without "white") → 65.0, fat=1g, protein=2g → damped≈64.3
+        // "bread" (without "white") -> 65.0, fat=1g, protein=2g -> damped≈64.3
         NutritionSnapshot s = service.enrichFromText("bread with butter", "", 40.0);
-        // butter adds fat=14 → more dampening than plain bread; GI still substantial
+        // butter adds fat=14 -> more dampening than plain bread; GI still substantial
         assertThat(s.getEstimatedGi()).isLessThan(66.0);
         assertThat(s.getEstimatedGi()).isGreaterThan(40.0);
     }
 
     @Test
     void watermelon_fastSpeedClass() {
-        // raw GI=76, fat=1g, protein=2g → dampening≈0.7 → gi≈75.3 ≥ 70 → FAST
+        // raw GI=76, fat=1g, protein=2g -> dampening≈0.7 -> gi≈75.3 >= 70 -> FAST
         NutritionSnapshot s = service.enrichFromText("watermelon", "", 30.0);
         assertThat(s.getEstimatedGi()).isGreaterThan(70.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("FAST");
@@ -126,13 +126,13 @@ class NutritionEnrichmentServiceTest {
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("FAST");
     }
 
-    // ── mixed meals: fat+protein dampening ───────────────────────────────────
+    // -- mixed meals: fat+protein dampening -----------------------------------
 
     @Test
     void chickenWithWhiteRice_giReducedByProtein() {
         NutritionSnapshot pureRice = service.enrichFromText("white rice", "", 60.0);
         NutritionSnapshot mixed    = service.enrichFromText("chicken, white rice", "", 60.0);
-        // chicken adds protein≈25g → significant dampening
+        // chicken adds protein≈25g -> significant dampening
         assertThat(mixed.getEstimatedGi()).isLessThan(pureRice.getEstimatedGi());
         assertThat(mixed.getProtein()).isGreaterThan(10.0);
     }
@@ -140,7 +140,7 @@ class NutritionEnrichmentServiceTest {
     @Test
     void salmonWithBrownRice_substantialDampening() {
         // salmon: fat=10, protein=22; brown rice: GI=50, fat=1, protein=2
-        // rawGi=(55+50)/2=52.5; dampening=11×0.3+24×0.2=3.3+4.8=8.1 → gi≈44.4
+        // rawGi=(55+50)/2=52.5; dampening=11×0.3+24×0.2=3.3+4.8=8.1 -> gi≈44.4
         NutritionSnapshot s = service.enrichFromText("salmon, brown rice", "", 50.0);
         assertThat(s.getEstimatedGi()).isCloseTo(44.4, within(1.0));
         assertThat(s.getFat()).isGreaterThan(5.0);
@@ -149,18 +149,18 @@ class NutritionEnrichmentServiceTest {
 
     @Test
     void pizza_fatDampensGiRelativeToPurePasta() {
-        // pasta: GI=58, fat=1g, protein=2g → minimal dampening
-        // pizza: GI=55 (default), fat=12g → more dampening
+        // pasta: GI=58, fat=1g, protein=2g -> minimal dampening
+        // pizza: GI=55 (default), fat=12g -> more dampening
         NutritionSnapshot pasta = service.enrichFromText("pasta", "", 50.0);
         NutritionSnapshot pizza = service.enrichFromText("pizza", "", 50.0);
-        // pizza fat=12g → dampening=3.6 vs pasta dampening≈0.7
+        // pizza fat=12g -> dampening=3.6 vs pasta dampening≈0.7
         assertThat(pizza.getEstimatedGi()).isLessThan(pasta.getEstimatedGi());
         assertThat(pizza.getFat()).isGreaterThanOrEqualTo(12.0);
     }
 
     @Test
     void beefSteak_highProteinFat_slowAbsorption() {
-        // protein=24g, fat=10g → protein+fat=34 ≥ 20 → SLOW
+        // protein=24g, fat=10g -> protein+fat=34 >= 20 -> SLOW
         NutritionSnapshot s = service.enrichFromText("beef steak", "", 10.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("SLOW");
         assertThat(s.getProtein()).isGreaterThanOrEqualTo(20.0);
@@ -169,7 +169,7 @@ class NutritionEnrichmentServiceTest {
 
     @Test
     void eggs_proteinAndFatDampenGI() {
-        // raw GI=55 (default), fat=5, protein=6 → dampening=1.5+1.2=2.7 → gi≈52.3
+        // raw GI=55 (default), fat=5, protein=6 -> dampening=1.5+1.2=2.7 -> gi≈52.3
         NutritionSnapshot s = service.enrichFromText("eggs", "", 5.0);
         assertThat(s.getEstimatedGi()).isCloseTo(52.3, within(1.0));
     }
@@ -197,15 +197,15 @@ class NutritionEnrichmentServiceTest {
     void chickenWithPasta_higherGiThanChickenWithLentils() {
         NutritionSnapshot withPasta   = service.enrichFromText("chicken, pasta", "", 60.0);
         NutritionSnapshot withLentils = service.enrichFromText("chicken, lentils", "", 60.0);
-        // pasta GI=58 vs lentils GI=30 → pasta meal has higher final GI
+        // pasta GI=58 vs lentils GI=30 -> pasta meal has higher final GI
         assertThat(withPasta.getEstimatedGi()).isGreaterThan(withLentils.getEstimatedGi());
     }
 
-    // ── high-fiber meals ──────────────────────────────────────────────────────
+    // -- high-fiber meals ------------------------------------------------------
 
     @Test
     void lentilsAndBeans_highFiber_slowSpeedClass() {
-        // combined fiber = 7+7 = 14 ≥ 8 → SLOW
+        // combined fiber = 7+7 = 14 >= 8 -> SLOW
         NutritionSnapshot s = service.enrichFromText("lentils, beans", "", 35.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("SLOW");
         assertThat(s.getFiber()).isGreaterThanOrEqualTo(8.0);
@@ -221,11 +221,11 @@ class NutritionEnrichmentServiceTest {
     @Test
     void lentilSoup_lowGlycemicLoad() {
         NutritionSnapshot s = service.enrichFromText("lentil", "", 30.0);
-        // GI=30, protein+fiber dampens further → very low GL
+        // GI=30, protein+fiber dampens further -> very low GL
         assertThat(s.getGlycemicLoad()).isLessThan(10.0);
     }
 
-    // ── GL uses net carbs (carbs − fiber) ────────────────────────────────────
+    // -- GL uses net carbs (carbs − fiber) ------------------------------------
 
     @Test
     void glCalculation_usesNetCarbs_notTotalCarbs() {
@@ -238,7 +238,7 @@ class NutritionEnrichmentServiceTest {
     @Test
     void highFiberMeal_glLowerThanGrossCarbs() {
         NutritionSnapshot s = service.enrichFromText("lentils, beans", "", 40.0);
-        // fiber≈14g → net carbs meaningful difference
+        // fiber≈14g -> net carbs meaningful difference
         double glUsingTotalCarbs = s.getEstimatedGi() * 40.0 / 100.0;
         assertThat(s.getGlycemicLoad()).isLessThan(glUsingTotalCarbs);
     }
@@ -246,12 +246,12 @@ class NutritionEnrichmentServiceTest {
     @Test
     void lowFiberMeal_glApproximatelyTotalCarbsBased() {
         NutritionSnapshot s = service.enrichFromText("watermelon", "", 30.0);
-        // fiber=0.5g → GL ≈ gi * 29.5 / 100
+        // fiber=0.5g -> GL ≈ gi * 29.5 / 100
         double expectedGl = s.getEstimatedGi() * (30.0 - s.getFiber()) / 100.0;
         assertThat(s.getGlycemicLoad()).isCloseTo(expectedGl, within(DELTA));
     }
 
-    // ── dampening cap (max 20 GI units) and floor (min GI = 15) ─────────────
+    // -- dampening cap (max 20 GI units) and floor (min GI = 15) -------------
 
     @Test
     void extremeHFHPMeal_dampeningCappedAt20GiUnits() {
@@ -266,19 +266,19 @@ class NutritionEnrichmentServiceTest {
 
     @Test
     void veryLowGiWithHighFatProtein_flooredAt15() {
-        // nut: GI=15, fat=12, protein=5 → dampening=4.6 → 15-4.6=10.4 → floor=15
+        // nut: GI=15, fat=12, protein=5 -> dampening=4.6 -> 15-4.6=10.4 -> floor=15
         NutritionSnapshot s = service.enrichFromText("nut", "", 15.0);
         assertThat(s.getEstimatedGi()).isEqualTo(15.0);
     }
 
     @Test
     void walnutAlmond_flooredAt15() {
-        // walnut+almond: GI=15+15=15 avg, high fat+protein → floor
+        // walnut+almond: GI=15+15=15 avg, high fat+protein -> floor
         NutritionSnapshot s = service.enrichFromText("walnut, almond", "", 10.0);
         assertThat(s.getEstimatedGi()).isEqualTo(15.0);
     }
 
-    // ── speed class classification ────────────────────────────────────────────
+    // -- speed class classification --------------------------------------------
 
     @Test
     void pureGlucose_fastSpeedClass() {
@@ -288,7 +288,7 @@ class NutritionEnrichmentServiceTest {
 
     @Test
     void chicken_highProtein_slowSpeedClass() {
-        // protein=25, fat=5 → protein+fat=30 ≥ 20 → SLOW
+        // protein=25, fat=5 -> protein+fat=30 >= 20 -> SLOW
         NutritionSnapshot s = service.enrichFromText("chicken", "", 5.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("SLOW");
     }
@@ -301,33 +301,33 @@ class NutritionEnrichmentServiceTest {
 
     @Test
     void banana_mediumSpeedClass() {
-        // GI=60, fat=1, protein=2 → not ≥70, not enough fat/protein → MEDIUM
+        // GI=60, fat=1, protein=2 -> not >=70, not enough fat/protein -> MEDIUM
         NutritionSnapshot s = service.enrichFromText("banana", "", 25.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("MEDIUM");
     }
 
     @Test
     void ryeBread_mediumSpeedClass() {
-        // GI=48 → MEDIUM
+        // GI=48 -> MEDIUM
         NutritionSnapshot s = service.enrichFromText("rye bread", "", 30.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("MEDIUM");
     }
 
     @Test
     void sweetPotato_mediumSpeedClass() {
-        // GI=44, no significant fat/protein → MEDIUM
+        // GI=44, no significant fat/protein -> MEDIUM
         NutritionSnapshot s = service.enrichFromText("sweet potato", "", 30.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("MEDIUM");
     }
 
     @Test
     void lentilsAlone_mediumSpeedClass() {
-        // fiber=7 < 8, protein+fat=9+1=10 < 20, GI=~27 < 70 → MEDIUM
+        // fiber=7 < 8, protein+fat=9+1=10 < 20, GI=~27 < 70 -> MEDIUM
         NutritionSnapshot s = service.enrichFromText("lentils", "", 35.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("MEDIUM");
     }
 
-    // ── macro population ─────────────────────────────────────────────────────
+    // -- macro population -----------------------------------------------------
 
     @Test
     void macroValuesNonZeroForProteinFatRichFood() {
@@ -339,7 +339,7 @@ class NutritionEnrichmentServiceTest {
 
     @Test
     void pureHighCarbMeal_minimalMacros() {
-        // watermelon has no fat/protein in heuristics → minimal values
+        // watermelon has no fat/protein in heuristics -> minimal values
         NutritionSnapshot s = service.enrichFromText("watermelon", "", 30.0);
         assertThat(s.getFat()).isLessThan(5.0);
         assertThat(s.getProtein()).isLessThan(5.0);
@@ -357,7 +357,7 @@ class NutritionEnrichmentServiceTest {
         assertThat(s.getFiber()).isGreaterThanOrEqualTo(3.0);
     }
 
-    // ── dampening invariant: damped GI ≤ raw keyword average ─────────────────
+    // -- dampening invariant: damped GI <= raw keyword average -----------------
 
     /**
      * For any recognized food the effective GI must always be within [15, 78].
@@ -399,7 +399,7 @@ class NutritionEnrichmentServiceTest {
      * For any recognized food GI should not increase after dampening
      * (i.e. dampening only reduces or keeps GI stable).
      */
-    @ParameterizedTest(name = "{0}: mixed meal GI ≤ pure carb equivalent")
+    @ParameterizedTest(name = "{0}: mixed meal GI <= pure carb equivalent")
     @CsvSource({
             "chicken,   white rice",
             "salmon,    pasta",
@@ -419,12 +419,12 @@ class NutritionEnrichmentServiceTest {
         }
     }
 
-    // ── clinical meal scenarios ───────────────────────────────────────────────
+    // -- clinical meal scenarios -----------------------------------------------
 
     @Test
     void scenario_porridgeWithMilk_lowMediumGI() {
-        // oat: GI=55, milk: GI=35 → avg=45; milk fat=3, protein=3; oat protein=2
-        // dampening: fat(3+1=4)×0.3 + protein(3+2=5)×0.2 = 1.2+1.0=2.2 → gi≈42.8
+        // oat: GI=55, milk: GI=35 -> avg=45; milk fat=3, protein=3; oat protein=2
+        // dampening: fat(3+1=4)×0.3 + protein(3+2=5)×0.2 = 1.2+1.0=2.2 -> gi≈42.8
         NutritionSnapshot s = service.enrichFromText("oat, milk", "", 45.0);
         assertThat(s.getEstimatedGi()).isBetween(35.0, 50.0);
         assertThat(s.getAbsorptionSpeedClass()).isEqualTo("MEDIUM");
@@ -460,7 +460,7 @@ class NutritionEnrichmentServiceTest {
     void scenario_almondMilkAndBanana_lowGlycemicImpact() {
         NutritionSnapshot s = service.enrichFromText("almond, banana", "", 25.0);
         // almond: GI=15, fat=12, protein=5; banana: GI=60, fat=1, protein=2
-        // rawGi=(15+60)/2=37.5; dampening=(13×0.3+7×0.2)=3.9+1.4=5.3 → gi≈32.2
+        // rawGi=(15+60)/2=37.5; dampening=(13×0.3+7×0.2)=3.9+1.4=5.3 -> gi≈32.2
         assertThat(s.getEstimatedGi()).isCloseTo(32.2, within(1.5));
         assertThat(s.getGlycemicLoad()).isLessThan(10.0);
     }

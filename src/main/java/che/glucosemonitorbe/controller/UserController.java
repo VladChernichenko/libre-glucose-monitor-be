@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "User", description = "User profile — currently authenticated user details")
+@Tag(name = "User", description = "User profile - currently authenticated user details")
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor

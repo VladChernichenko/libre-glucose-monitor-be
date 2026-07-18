@@ -26,7 +26,7 @@ public class ProspectiveNoteDTO {
     private String meal;
 
     /**
-     * Serialised NutritionSnapshot JSON — same format stored in Note.nutritionProfile.
+     * Serialised NutritionSnapshot JSON - same format stored in Note.nutritionProfile.
      * Provides GI, GL, fiber, fat, protein, absorption class, bolus strategy, etc.
      * Null is allowed; the entry will then use DEFAULT_DECAY absorption.
      */

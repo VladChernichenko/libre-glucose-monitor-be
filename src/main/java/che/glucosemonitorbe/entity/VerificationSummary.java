@@ -29,7 +29,7 @@ public class VerificationSummary {
     @Column(name = "mean_error")
     private Double meanError;
 
-    /** 0–1; values ≥ 0.6 with |meanError| > threshold trigger a suggestion. */
+    /** 0-1; values >= 0.6 with |meanError| > threshold trigger a suggestion. */
     @Column(name = "consistency_score")
     private Double consistencyScore;
 

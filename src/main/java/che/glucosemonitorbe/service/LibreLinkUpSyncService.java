@@ -30,16 +30,16 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>Used by two callers:
  * <ul>
- *   <li>{@code LibreLinkUpGlucoseSyncScheduler} — periodic background sync ({@code force = false},
+ *   <li>{@code LibreLinkUpGlucoseSyncScheduler} - periodic background sync ({@code force = false},
  *       respects per-user backoff).</li>
- *   <li>{@code LibreLinkUpController#syncNow} — on-demand sync triggered by the iOS refresh button
+ *   <li>{@code LibreLinkUpController#syncNow} - on-demand sync triggered by the iOS refresh button
  *       ({@code force = true}, bypasses backoff).</li>
  * </ul>
  *
  * <p><b>Concurrency.</b> Each user has a dedicated {@link ReentrantLock}, so:
  * <ul>
  *   <li>Different users sync fully in parallel (their LLU tokens and DB rows are independent).</li>
- *   <li>The same user never runs two syncs at once — a second request for that user either skips
+ *   <li>The same user never runs two syncs at once - a second request for that user either skips
  *       immediately (scheduler) or waits briefly (on-demand) for the in-flight sync.</li>
  *   <li>Rapid on-demand requests are coalesced: if a forced sync completed within
  *       {@code on-demand-min-interval-seconds}, the next forced request returns the just-synced
@@ -107,7 +107,7 @@ public class LibreLinkUpSyncService {
         ReentrantLock lock = lockFor(userId);
         boolean acquired;
         try {
-            // Scheduler: tryLock(0) — skip instantly if this user is already syncing.
+            // Scheduler: tryLock(0) - skip instantly if this user is already syncing.
             // On-demand: wait up to onDemandWaitSeconds for the in-flight sync to finish.
             acquired = lock.tryLock(force ? onDemandWaitSeconds : 0, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
@@ -121,7 +121,7 @@ public class LibreLinkUpSyncService {
         }
         try {
             // Coalesce rapid on-demand requests: if we just synced this user, the cache is already
-            // fresh — don't hit LibreLinkUp again.
+            // fresh - don't hit LibreLinkUp again.
             if (force) {
                 Instant last = lastForcedSyncAt.get(userId);
                 if (last != null
@@ -164,7 +164,7 @@ public class LibreLinkUpSyncService {
                 return Outcome.SKIPPED_NO_CREDS;
             }
 
-            // Ensure authenticated — re-authenticate if the in-memory token is missing (e.g. restart).
+            // Ensure authenticated - re-authenticate if the in-memory token is missing (e.g. restart).
             if (!libreLinkUpService.isAuthenticated(userId)) {
                 log.info("LibreLinkUp sync user={} re-authenticating (no in-memory token)", userId);
                 LibreAuthRequest authReq = new LibreAuthRequest();
@@ -227,7 +227,7 @@ public class LibreLinkUpSyncService {
             if (msg.contains("401") || msg.toLowerCase().contains("unauthorized")
                     || msg.toLowerCase().contains("not authenticated")) {
                 libreLinkUpService.logout(userId);
-                log.info("LibreLinkUp sync user={} — token rejected (401), evicted for re-auth", userId);
+                log.info("LibreLinkUp sync user={} - token rejected (401), evicted for re-auth", userId);
             }
             syncStateService.markError(userId, now);
             log.warn("LibreLinkUp sync failed for user {}: {}", userId, e.getMessage());

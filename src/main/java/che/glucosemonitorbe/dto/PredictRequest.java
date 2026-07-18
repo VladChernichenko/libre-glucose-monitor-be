@@ -25,13 +25,13 @@ public class PredictRequest {
 
     @NotNull(message = "currentGlucose is required")
     @DecimalMin(value = "0.1", message = "currentGlucose must be positive")
-    private Double currentGlucose;      // mmol/L — current CGM reading
+    private Double currentGlucose;      // mmol/L - current CGM reading
 
     @DecimalMin(value = "0.0", message = "insulinDose must be non-negative")
-    private Double insulinDose;         // units — prospective rapid-acting bolus at t=0
+    private Double insulinDose;         // units - prospective rapid-acting bolus at t=0
 
     @DecimalMin(value = "0.0", message = "carbs must be non-negative")
-    private Double carbs;               // g — digestible carbohydrates
+    private Double carbs;               // g - digestible carbohydrates
 
     @DecimalMin(value = "0.0", message = "protein must be non-negative")
     private Double protein;             // g
@@ -40,7 +40,7 @@ public class PredictRequest {
     private Double fat;                 // g
 
     @DecimalMin(value = "0.0", message = "fiber must be non-negative")
-    private Double fiber;               // g — slows gastric emptying via viscosity
+    private Double fiber;               // g - slows gastric emptying via viscosity
 
     /**
      * Prediction horizon [min]. Defaults to 300.
@@ -49,7 +49,7 @@ public class PredictRequest {
     @Min(60) @Max(480)
     private Integer horizonMinutes;
 
-    // ── FPU type-aware fields (populated by the YOLO vision service) ──────────
+    // -- FPU type-aware fields (populated by the YOLO vision service) ----------
 
     /**
      * Effective LCT-fat grams after excluding MCT fat [g].
@@ -66,8 +66,8 @@ public class PredictRequest {
     private Integer fpuOnsetMin;
 
     /**
-     * Protein-weighted gluconeogenic fraction [0.0–1.0].
-     * When absent, falls back to 0.50 (50 % of protein kcal → slow glucose).
+     * Protein-weighted gluconeogenic fraction [0.0-1.0].
+     * When absent, falls back to 0.50 (50 % of protein kcal -> slow glucose).
      */
     @DecimalMin(value = "0.0", message = "gluconeogenicFraction must be non-negative")
     private Double gluconeogenicFraction;

@@ -10,7 +10,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Unit tests for the intensity→a(t) mapping and the notes-derived activity provider. */
+/** Unit tests for the intensity->a(t) mapping and the notes-derived activity provider. */
 class NotesActivityProviderTest {
 
     private static final LocalDateTime T0 = LocalDateTime.of(2026, 7, 5, 12, 0);
@@ -49,7 +49,7 @@ class NotesActivityProviderTest {
     void overlapTakesMax() {
         ActivityProvider p = NotesActivityProvider.fromNotes(List.of(
                 activity("MODERATE", 60), activityAt(T0.plusMinutes(10), "HIGH", 30)));
-        assertThat(p.intensityAt(T0.plusMinutes(20))).isEqualTo(0.75);   // both cover → max
+        assertThat(p.intensityAt(T0.plusMinutes(20))).isEqualTo(0.75);   // both cover -> max
         assertThat(p.intensityAt(T0.plusMinutes(50))).isEqualTo(0.5);    // only moderate covers
     }
 
@@ -62,7 +62,7 @@ class NotesActivityProviderTest {
                 .intensityAt(T0)).isEqualTo(1.0);   // 0.75 * 2 clamped to 1
     }
 
-    // ── helpers ────────────────────────────────────────────────────────────────
+    // -- helpers ----------------------------------------------------------------
 
     private static Note activity(String intensity, int durationMin) {
         return activityAt(T0, intensity, durationMin);

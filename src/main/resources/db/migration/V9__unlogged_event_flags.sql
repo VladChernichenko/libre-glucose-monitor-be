@@ -1,5 +1,5 @@
 -- Unlogged-event detector: windows where glucose moved in a way the logged inputs (COB/IOB) do not
--- explain — probable unlogged or under-estimated food/insulin. Feeds user confirmation + calibration
+-- explain - probable unlogged or under-estimated food/insulin. Feeds user confirmation + calibration
 -- down-weighting.
 
 CREATE TABLE IF NOT EXISTS unlogged_event_flags (
@@ -27,4 +27,4 @@ CREATE INDEX IF NOT EXISTS idx_unlogged_flags_state      ON unlogged_event_flags
 CREATE INDEX IF NOT EXISTS idx_unlogged_flags_user_state ON unlogged_event_flags(user_id, state);
 
 COMMENT ON TABLE unlogged_event_flags IS
-    'Windows with sustained unexplained residual — probable unlogged/under-estimated food or insulin.';
+    'Windows with sustained unexplained residual - probable unlogged/under-estimated food or insulin.';

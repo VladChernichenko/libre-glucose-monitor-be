@@ -5,10 +5,10 @@ package che.glucosemonitorbe.hovorka.learning;
  * anchors are trustworthy for calibration.
  *
  * <ul>
- *   <li>{@link #FASTING} — no carbs and no bolus active around the anchor. Isolates
+ *   <li>{@link #FASTING} - no carbs and no bolus active around the anchor. Isolates
  *       endogenous glucose production / basal drift.</li>
- *   <li>{@link #MEAL} — carbs logged in the active window. Exercises gut absorption + ISF.</li>
- *   <li>{@link #CORRECTION} — bolus but no carbs. Isolates insulin sensitivity.</li>
+ *   <li>{@link #MEAL} - carbs logged in the active window. Exercises gut absorption + ISF.</li>
+ *   <li>{@link #CORRECTION} - bolus but no carbs. Isolates insulin sensitivity.</li>
  * </ul>
  */
 public enum Regime {

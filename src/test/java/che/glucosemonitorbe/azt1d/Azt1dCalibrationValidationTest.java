@@ -31,7 +31,7 @@ import static org.mockito.Mockito.mock;
  * <p>For each subject it fits the twin on the earlier 80% of the record and scores it on the
  * held-out later 20%, then prints a per-subject and aggregate report of baseline (un-calibrated)
  * vs. calibrated prediction MAE. This is the end-to-end proof that the learning loop improves
- * real predictions — not just synthetic ones.</p>
+ * real predictions - not just synthetic ones.</p>
  *
  * <p>Skipped (not failed) when the dataset is absent. Point it at the data with
  * {@code -Dazt1d.dir="/path/to/AZT1D 2025"}.</p>
@@ -46,7 +46,7 @@ class Azt1dCalibrationValidationTest {
         return Path.of(System.getProperty("azt1d.dir", ""));
     }
 
-    /** 90% two-sided normal quantile — matches the live prediction band. */
+    /** 90% two-sided normal quantile - matches the live prediction band. */
     private static final double BAND_Z = 1.6449;
 
     private record Row(String id, int trainAnchors, int valSamples,
@@ -58,13 +58,13 @@ class Azt1dCalibrationValidationTest {
     void calibratesAndImprovesAcrossRealSubjects() throws Exception {
         Path root = datasetRoot();
         Assumptions.assumeTrue(!root.toString().isBlank() && Files.isDirectory(root.resolve("CGM Records")),
-                "AZT1D dataset not present — set -Dazt1d.dir=\"/path/to/AZT1D 2025\" to run");
+                "AZT1D dataset not present - set -Dazt1d.dir=\"/path/to/AZT1D 2025\" to run");
 
         List<Azt1dDataset.Subject> subjects = Azt1dDataset.loadAll(root);
         assertThat(subjects).isNotEmpty();
 
         // Each subject is seeded with their OWN personal settings (weight, ISF, carb ratio, basal)
-        // estimated from their delivery data — then the twin calibrates on top of that realistic prior.
+        // estimated from their delivery data - then the twin calibrates on top of that realistic prior.
         System.out.print(renderProfiles(subjects));
 
         HovorkaGlucosePredictionService predictor = rawPredictor();
@@ -99,7 +99,7 @@ class Azt1dCalibrationValidationTest {
         System.out.print(render(rows));
 
         // Safety guarantee: the out-of-sample gate must never let a twin ship that is worse than the
-        // un-calibrated model. Effective MAE (what a user would actually get) ≤ baseline for everyone.
+        // un-calibrated model. Effective MAE (what a user would actually get) <= baseline for everyone.
         for (Row row : rows) {
             if (!Double.isNaN(row.maeBaseline())) {
                 assertThat(row.effective()).isLessThanOrEqualTo(row.maeBaseline() + 1e-6);
@@ -114,7 +114,7 @@ class Azt1dCalibrationValidationTest {
         assertThat(rows).isNotEmpty();
     }
 
-    // ── Report rendering ─────────────────────────────────────────────────────
+    // -- Report rendering -----------------------------------------------------
 
     private static String render(List<Row> rows) {
         StringBuilder sb = new StringBuilder();
@@ -140,7 +140,7 @@ class Azt1dCalibrationValidationTest {
             counted++;
             if (r.applied()) { applied++; sumImprApplied += impr; }
         }
-        sb.append("──────────────────────────────────────────────────────────────────────────\n");
+        sb.append("--------------------------------------------------------------------------\n");
         if (counted > 0) {
             sb.append(String.format("Subjects scored: %d   |   twin applied (beat baseline O.O.S.): %d%n", counted, applied));
             sb.append(String.format("Mean baseline MAE:   %.2f mmol/L%n", sumBase / counted));
@@ -152,7 +152,7 @@ class Azt1dCalibrationValidationTest {
             }
         }
 
-        // ── Learned prediction band (90% interval half-width = z·σ) ──────────────
+        // -- Learned prediction band (90% interval half-width = z*σ) --------------
         double[] sumSd = new double[4];
         int bandN = 0;
         for (Row r : rows) {
@@ -161,20 +161,20 @@ class Azt1dCalibrationValidationTest {
             bandN++;
         }
         if (bandN > 0) {
-            sb.append("\n── PROBABILISTIC BAND (mean learned σ and 90% half-width by horizon) ──────\n");
+            sb.append("\n-- PROBABILISTIC BAND (mean learned σ and 90% half-width by horizon) ------\n");
             sb.append(String.format("%-14s %8s %8s %8s %8s%n", "horizon", "30min", "60min", "90min", "120min"));
             sb.append(String.format("%-14s %7.2f  %7.2f  %7.2f  %7.2f %n", "σ (mmol/L)",
                     sumSd[0] / bandN, sumSd[1] / bandN, sumSd[2] / bandN, sumSd[3] / bandN));
             sb.append(String.format("%-14s %7.2f  %7.2f  %7.2f  %7.2f %n", "±90% (mmol/L)",
                     BAND_Z * sumSd[0] / bandN, BAND_Z * sumSd[1] / bandN,
                     BAND_Z * sumSd[2] / bandN, BAND_Z * sumSd[3] / bandN));
-            sb.append("Band widens with horizon → each predicted point ships an interval, not a bare line.\n");
+            sb.append("Band widens with horizon -> each predicted point ships an interval, not a bare line.\n");
         }
         sb.append("══════════════════════════════════════════════════════════════════════════\n");
         return sb.toString();
     }
 
-    // ── Predictor wiring (raw model, no DB) ─────────────────────────────────────
+    // -- Predictor wiring (raw model, no DB) -------------------------------------
 
     private static HovorkaGlucosePredictionService rawPredictor() {
         DallaManGutModel gut = new DallaManGutModel();
@@ -189,7 +189,7 @@ class Azt1dCalibrationValidationTest {
     /**
      * Build the Hovorka parameter set from a subject's estimated personal profile: body weight scales
      * the physiological volumes, ISF sets insulin action. tMaxG (45-min carb half-life), A_G (1.0) and
-     * the intercompartmental rates keep their population defaults — the twin refines the rest.
+     * the intercompartmental rates keep their population defaults - the twin refines the rest.
      */
     private static HovorkaParameters personalParams(Azt1dDataset.Profile p) {
         double w = p.weightKg() > 0 ? p.weightKg() : HovorkaParameters.DEFAULT_WEIGHT;
@@ -201,12 +201,12 @@ class Azt1dCalibrationValidationTest {
                 45.0 / 1.68, 1.0, isf, w);
     }
 
-    /** Per-subject personal-settings table — the "profile" seeded for each test user from their data. */
+    /** Per-subject personal-settings table - the "profile" seeded for each test user from their data. */
     private static String renderProfiles(List<Azt1dDataset.Subject> subjects) {
         StringBuilder sb = new StringBuilder();
         sb.append("\n═══════ AZT1D PER-SUBJECT PROFILES (personal settings seeded from each subject's own AID data) ═══════\n");
         sb.append(String.format("%-11s %6s %9s %11s %13s %8s %8s %8s %9s %10s %6s%n",
-                "subject", "days", "TDD(U/d)", "basal(U/h)", "ISF(mmol/L·U)",
+                "subject", "days", "TDD(U/d)", "basal(U/h)", "ISF(mmol/L*U)",
                 "isf-B", "isf-L", "isf-D", "CR(g/U)", "weight(kg)", "flag"));
         int flagged = 0;
         for (Azt1dDataset.Subject s : subjects) {
@@ -219,7 +219,7 @@ class Azt1dCalibrationValidationTest {
                     p.weightKg(), p.plausible() ? "ok" : "⚠fb"));
         }
         sb.append("ISF = 1800-rule from TDD (model-scaled); isf-B/L/D = ISF × (window CR / overall CR); CR = observed median; weight ≈ TDD/0.55.\n");
-        sb.append(String.format("⚠fb = implausible TDD from corrupt insulin columns → ISF/weight fall back to population defaults (%d subjects).%n", flagged));
+        sb.append(String.format("⚠fb = implausible TDD from corrupt insulin columns -> ISF/weight fall back to population defaults (%d subjects).%n", flagged));
         sb.append("═══════════════════════════════════════════════════════════════════════════════════════════════════\n");
         return sb.toString();
     }

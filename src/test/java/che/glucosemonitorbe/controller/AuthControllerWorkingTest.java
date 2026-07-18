@@ -65,7 +65,7 @@ class AuthControllerWorkingTest {
     }
 
     @Test
-    @DisplayName("Register в†’ 2xx and user persisted")
+    @DisplayName("Register -> 2xx and user persisted")
     void register_ok() {
         RegisterRequest request = validRegister();
         ResponseEntity<String> resp = rest.postForEntity("/api/auth/register", json(request), String.class);
@@ -74,7 +74,7 @@ class AuthControllerWorkingTest {
     }
 
     @Test
-    @DisplayName("Login в†’ returns tokens")
+    @DisplayName("Login -> returns tokens")
     void login_ok() {
         RegisterRequest request = validRegister();
         ResponseEntity<String> reg = rest.postForEntity("/api/auth/register", json(request), String.class);

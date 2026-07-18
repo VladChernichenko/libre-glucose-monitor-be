@@ -36,9 +36,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>Covers scenarios 1-7 (scenario 8: {@link PredictionE2EFeatureFlagOffTest}) plus regression
  * guards for the bugs fixed in the 2026-05-25 pass:
  * <ul>
- *   <li>BE-P0-1 — prediction path step size 1→5 min: a 4 h path must now produce exactly
+ *   <li>BE-P0-1 - prediction path step size 1->5 min: a 4 h path must now produce exactly
  *       48 points (240 min / 5 min/step), not 240.</li>
- *   <li>BE-P0-1 — HFHP (8 h path, Double Wave): 48 dense + 24 sparse = 72 points.</li>
+ *   <li>BE-P0-1 - HFHP (8 h path, Double Wave): 48 dense + 24 sparse = 72 points.</li>
  * </ul>
  *
  * <p>All features are already enabled in {@code application.yml}; {@code @TestPropertySource}
@@ -59,7 +59,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @SuppressWarnings({"resource", "null"})
 class PredictionE2ETest {
 
-    // ── Testcontainers ────────────────────────────────────────────────────────
+    // -- Testcontainers --------------------------------------------------------
 
     @Container
     @ServiceConnection
@@ -69,7 +69,7 @@ class PredictionE2ETest {
                     .withUsername("test")
                     .withPassword("test");
 
-    // ── Spring fixtures ───────────────────────────────────────────────────────
+    // -- Spring fixtures -------------------------------------------------------
 
     @Autowired private TestRestTemplate rest;
     @Autowired private UserRepository userRepository;
@@ -77,7 +77,7 @@ class PredictionE2ETest {
     private final ObjectMapper mapper = new ObjectMapper()
             .registerModule(new JavaTimeModule());
 
-    /** Shared "now" — all notes and the calculation request use the same anchor. */
+    /** Shared "now" - all notes and the calculation request use the same anchor. */
     private LocalDateTime testNow;
     private HttpHeaders authHeaders;
 
@@ -88,7 +88,7 @@ class PredictionE2ETest {
         authHeaders = registerAndLogin();
     }
 
-    // ── Nutrition profile snippets ────────────────────────────────────────────
+    // -- Nutrition profile snippets --------------------------------------------
 
     /** Fast-absorbing high-GI carbs (white bread / rice). */
     private static final String HIGH_GI_PROFILE = """
@@ -99,7 +99,7 @@ class PredictionE2ETest {
 
     /**
      * High-fat / high-protein pizza (Double Wave / Dual Wave).
-     * {@code suggestedDurationHours=8.0} → prediction path extends to 8 h.
+     * {@code suggestedDurationHours=8.0} -> prediction path extends to 8 h.
      */
     private static final String PIZZA_PROFILE = """
             {"absorptionMode":"GI_GL_ENHANCED","estimatedGi":60,"glycemicLoad":48.0,
@@ -109,7 +109,7 @@ class PredictionE2ETest {
             """;
 
     /**
-     * High-fibre lentil / legume meal — blunted, slow absorption.
+     * High-fibre lentil / legume meal - blunted, slow absorption.
      * Majority of carbs still on board 45 min after eating.
      */
     private static final String FIBER_PROFILE = """
@@ -119,12 +119,12 @@ class PredictionE2ETest {
              "suggestedDurationHours":4.0,"totalCarbs":50.0}
             """;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Scenario 1: Baseline — no notes, stable glucose
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Scenario 1: Baseline - no notes, stable glucose
+    // ---
 
     @Test
-    @DisplayName("1 · Baseline — no notes → COB=0, IOB=0, prediction ≈ current, trend=stable")
+    @DisplayName("1 * Baseline - no notes -> COB=0, IOB=0, prediction ≈ current, trend=stable")
     void baseline_noNotes_stableGlucose() throws Exception {
         double current = 7.2;
         JsonNode data = calculate(current);
@@ -135,13 +135,13 @@ class PredictionE2ETest {
         String trend = data.path("predictionTrend").asText();
 
         assertEquals(0.0, cob, 0.01,
-                "COB must be 0 with no active notes — got: " + cob);
+                "COB must be 0 with no active notes - got: " + cob);
         assertEquals(0.0, iob, 0.01,
-                "IOB must be 0 with no insulin notes — got: " + iob);
+                "IOB must be 0 with no insulin notes - got: " + iob);
         assertEquals("stable", trend,
-                "Trend must be stable when COB=IOB=0 — got: " + trend);
+                "Trend must be stable when COB=IOB=0 - got: " + trend);
         assertEquals(current, pred, 0.5,
-                "Prediction should stay near current glucose with no active factors — got: " + pred);
+                "Prediction should stay near current glucose with no active factors - got: " + pred);
 
         // Path must exist and start near current glucose
         JsonNode path = data.path("predictionPath");
@@ -149,15 +149,15 @@ class PredictionE2ETest {
                 "predictionPath must be non-empty");
         double firstPoint = path.get(0).path("predictedGlucose").asDouble();
         assertEquals(current, firstPoint, 1.0,
-                "First path point should be close to currentGlucose — got: " + firstPoint);
+                "First path point should be close to currentGlucose - got: " + firstPoint);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Scenario 2: Fast spike — high-GI carbs + matching bolus, 30 min ago
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Scenario 2: Fast spike - high-GI carbs + matching bolus, 30 min ago
+    // ---
 
     @Test
-    @DisplayName("2 · Fast spike — 60g high-GI + 6u bolus 30 min ago → COB>0, IOB>0, carb effect positive")
+    @DisplayName("2 * Fast spike - 60g high-GI + 6u bolus 30 min ago -> COB>0, IOB>0, carb effect positive")
     void fastSpike_highGiMeal_30minsAgo() throws Exception {
         postNote(60.0, 6.0, "Lunch", HIGH_GI_PROFILE, 30);
 
@@ -170,23 +170,23 @@ class PredictionE2ETest {
         String trend   = data.path("predictionTrend").asText();
 
         assertTrue(cob > 0,
-                "COB should be positive 30 min after 60g carbs — got: " + cob);
+                "COB should be positive 30 min after 60g carbs - got: " + cob);
         assertTrue(iob > 0,
-                "IOB should be positive 30 min after 6u bolus — got: " + iob);
+                "IOB should be positive 30 min after 6u bolus - got: " + iob);
         assertTrue(carbEff > 0,
-                "carbContribution should be positive when carbs still absorbing — got: " + carbEff);
+                "carbContribution should be positive when carbs still absorbing - got: " + carbEff);
         assertTrue(iobEff < 0,
-                "insulinContribution should be negative when insulin still active — got: " + iobEff);
+                "insulinContribution should be negative when insulin still active - got: " + iobEff);
         assertTrue("rising".equals(trend) || "stable".equals(trend),
-                "Trend should be rising or stable 30 min after a high-GI meal — got: " + trend);
+                "Trend should be rising or stable 30 min after a high-GI meal - got: " + trend);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Scenario 3: IOB only — correction bolus, no carbs, glucose falling
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Scenario 3: IOB only - correction bolus, no carbs, glucose falling
+    // ---
 
     @Test
-    @DisplayName("3 · IOB only — 4u correction 45 min ago, no carbs → falling trend, COB=0, IOB>0")
+    @DisplayName("3 * IOB only - 4u correction 45 min ago, no carbs -> falling trend, COB=0, IOB>0")
     void iobOnly_correctionBolus_glucoseFalling() throws Exception {
         postNote(0.0, 4.0, "Correction", null, 45);
 
@@ -201,27 +201,27 @@ class PredictionE2ETest {
         double iobEff  = data.path("factors").path("insulinContribution").asDouble();
 
         assertEquals(0.0, cob, 0.01,
-                "COB must be 0 when no carbs were eaten — got: " + cob);
+                "COB must be 0 when no carbs were eaten - got: " + cob);
         assertTrue(iob > 0,
-                "IOB should be positive 45 min after 4u correction — got: " + iob);
+                "IOB should be positive 45 min after 4u correction - got: " + iob);
         assertTrue(pred < current,
-                "Prediction should be below current glucose with active IOB and no COB — got pred="
+                "Prediction should be below current glucose with active IOB and no COB - got pred="
                         + pred + " vs current=" + current);
         assertEquals("falling", trend,
-                "Trend should be falling with IOB and no COB — got: " + trend);
+                "Trend should be falling with IOB and no COB - got: " + trend);
         assertEquals(0.0, carbEff, 0.01,
-                "carbContribution must be 0 with no active carbs — got: " + carbEff);
+                "carbContribution must be 0 with no active carbs - got: " + carbEff);
         assertTrue(iobEff < 0,
-                "insulinContribution must be negative — got: " + iobEff);
+                "insulinContribution must be negative - got: " + iobEff);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Scenario 4: Double Wave — HFHP pizza, 60 min ago
+    // ---
+    // Scenario 4: Double Wave - HFHP pizza, 60 min ago
     // Also regression guard for BE-P0-1: 8h path = 48 dense + 24 sparse = 72 points
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("4 · Double Wave — HFHP pizza 60 min ago → path extends to 8h, Dual Wave strategy")
+    @DisplayName("4 * Double Wave - HFHP pizza 60 min ago -> path extends to 8h, Dual Wave strategy")
     void doubleWave_pizzaMeal_8hPath() throws Exception {
         postNote(80.0, 7.0, "Dinner", PIZZA_PROFILE, 60);
 
@@ -236,26 +236,26 @@ class PredictionE2ETest {
         assertTrue(path.isArray() && path.size() > 0,
                 "predictionPath must be present for HFHP meal");
         // BE-P0-1 regression: 8h HFHP path = 48 dense (5-min) + 24 sparse (10-min) = 72 points.
-        // Before the fix this was 240 + 24 = 264. The new size must be ≤100.
+        // Before the fix this was 240 + 24 = 264. The new size must be <=100.
         assertTrue(path.size() <= 100,
                 "BE-P0-1 regression: path size " + path.size()
-                        + " is too large — step size has reverted to 1 min (expected ≤100 for 8h path)");
+                        + " is too large - step size has reverted to 1 min (expected <=100 for 8h path)");
         // Path must extend beyond a plain 4h run (48 points) due to HFHP suggestedDurationHours=8
         assertTrue(path.size() > 48,
-                "HFHP 8h path should have more than 48 points — got: " + path.size());
+                "HFHP 8h path should have more than 48 points - got: " + path.size());
 
         assertTrue(pattern.contains("Wave") || "Dual Wave".equals(strategy),
-                "HFHP pizza must match Double Wave pattern or Dual Wave strategy — pattern='"
+                "HFHP pizza must match Double Wave pattern or Dual Wave strategy - pattern='"
                         + pattern + "', strategy='" + strategy + "'");
         assertNotNull(fourHour, "fourHourPrediction must be present for an 8h path");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Scenario 5: Blunted Curve — high-fibre meal, 45 min ago
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Scenario 5: Blunted Curve - high-fibre meal, 45 min ago
+    // ---
 
     @Test
-    @DisplayName("5 · Blunted Curve — 50g high-fibre meal 45 min ago → COB > 20g still on board")
+    @DisplayName("5 * Blunted Curve - 50g high-fibre meal 45 min ago -> COB > 20g still on board")
     void bluntedCurve_highFibreMeal_mostCarbsStillOnBoard() throws Exception {
         postNote(50.0, 4.0, "Lunch", FIBER_PROFILE, 45);
 
@@ -263,44 +263,44 @@ class PredictionE2ETest {
         double cob = data.path("activeCarbsOnBoard").asDouble();
 
         assertTrue(cob > 20.0,
-                "Slow-absorbing high-fibre meal: most carbs should still be on board 45 min later — got COB: " + cob);
+                "Slow-absorbing high-fibre meal: most carbs should still be on board 45 min later - got COB: " + cob);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Scenario 6: Pre-bolus timing — optimal (20 min early) vs. late (same time)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Scenario 6: Pre-bolus timing - optimal (20 min early) vs. late (same time)
+    // ---
 
     @Test
-    @DisplayName("6 · Pre-bolus timing — late bolus produces higher preBolusTimingContribution than optimal")
+    @DisplayName("6 * Pre-bolus timing - late bolus produces higher preBolusTimingContribution than optimal")
     void preBolusTiming_lateVsOptimal() throws Exception {
-        // ── User A: optimal bolus 20 min before carbs ──
+        // -- User A: optimal bolus 20 min before carbs --
         HttpHeaders headersA = registerAndLogin();
-        // Bolus at -50 min, meal at -30 min → bolus led by 20 min
+        // Bolus at -50 min, meal at -30 min -> bolus led by 20 min
         postNoteWithHeaders(0.0, 5.0, "Correction", null, 50, headersA);
         postNoteWithHeaders(60.0, 0.0, "Lunch", HIGH_GI_PROFILE, 30, headersA);
         JsonNode dataA = calculateWithHeaders(8.0, headersA);
         double optimalContrib = dataA.path("factors").path("preBolusTimingContribution").asDouble();
 
-        // ── User B (same auth session, different note set): bolus at same time as carbs ──
+        // -- User B (same auth session, different note set): bolus at same time as carbs --
         HttpHeaders headersB = registerAndLogin();
-        // Bolus and meal both at -30 min → 0 min lead
+        // Bolus and meal both at -30 min -> 0 min lead
         postNoteWithHeaders(60.0, 5.0, "Lunch", HIGH_GI_PROFILE, 30, headersB);
         JsonNode dataB = calculateWithHeaders(8.0, headersB);
         double lateContrib = dataB.path("factors").path("preBolusTimingContribution").asDouble();
 
-        // Late bolus → higher positive timing contribution (more post-meal rise expected)
+        // Late bolus -> higher positive timing contribution (more post-meal rise expected)
         assertTrue(optimalContrib <= lateContrib,
                 "Late bolus should produce a higher timing contribution than a 20-min pre-bolus."
                         + " optimal=" + optimalContrib + ", late=" + lateContrib);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Scenario 7: Prediction path shape invariants
     // Also regression guard for BE-P0-1: 4h path must have exactly 48 points (5-min steps)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("7 · Path shape — timestamps ascending, glucose in [1,25], 4h=48 points (BE-P0-1 regression)")
+    @DisplayName("7 * Path shape - timestamps ascending, glucose in [1,25], 4h=48 points (BE-P0-1 regression)")
     void predictionPath_shapeInvariants() throws Exception {
         // A standard meal gives us a non-trivial path to validate
         postNote(45.0, 4.0, "Breakfast", HIGH_GI_PROFILE, 60);
@@ -312,12 +312,12 @@ class PredictionE2ETest {
                 "predictionPath must be non-empty");
 
         // BE-P0-1 regression: 4h path at 5-min steps = 48 points (was 240 at 1-min steps).
-        // Accept ≤52 to allow for rounding edge cases, but never anywhere near 240.
+        // Accept <=52 to allow for rounding edge cases, but never anywhere near 240.
         assertTrue(path.size() <= 52,
                 "BE-P0-1 regression: predictionPath has " + path.size()
-                        + " points — step size must have reverted to 1 min (expected ≈48 for 4h path)");
+                        + " points - step size must have reverted to 1 min (expected ≈48 for 4h path)");
         assertTrue(path.size() >= 44,
-                "predictionPath should have ≈48 points for a standard 4h path — got: " + path.size());
+                "predictionPath should have ≈48 points for a standard 4h path - got: " + path.size());
 
         // Timestamps strictly ascending; glucose in physiological range [1.0, 25.0]
         for (int i = 1; i < path.size(); i++) {
@@ -325,7 +325,7 @@ class PredictionE2ETest {
             LocalDateTime curr = LocalDateTime.parse(path.get(i).path("timestamp").asText());
             assertTrue(curr.isAfter(prev),
                     "Timestamps must be strictly ascending at index " + i
-                            + " — prev=" + prev + ", curr=" + curr);
+                            + " - prev=" + prev + ", curr=" + curr);
 
             double g = path.get(i).path("predictedGlucose").asDouble();
             assertTrue(g >= 1.0 && g <= 25.0,
@@ -336,21 +336,21 @@ class PredictionE2ETest {
         double lastPointGlucose = path.get(path.size() - 1).path("predictedGlucose").asDouble();
         double fourHour = data.path("fourHourPrediction").asDouble();
         assertEquals(lastPointGlucose, fourHour, 0.11,
-                "fourHourPrediction should equal the last path point for a standard 4h run — "
+                "fourHourPrediction should equal the last path point for a standard 4h run - "
                         + "lastPoint=" + lastPointGlucose + ", fourHour=" + fourHour);
 
         // First point close to current glucose
         double firstPoint = path.get(0).path("predictedGlucose").asDouble();
         assertEquals(7.5, firstPoint, 2.0,
-                "First path point should start near currentGlucose — got: " + firstPoint);
+                "First path point should start near currentGlucose - got: " + firstPoint);
     }
 
     // Scenario 8 (feature flag off): PredictionE2EFeatureFlagOffTest (separate Spring context).
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Scenario 9: COB taper — no sudden step near meal-window expiry
+    // ---
+    // Scenario 9: COB taper - no sudden step near meal-window expiry
     // Regression guard for the hard-cutoff-causes-step bug fixed in CarbsOnBoardService.
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     /**
      * A 50g FAST-class meal eaten 90 min ago has its COB window expire at
@@ -364,9 +364,9 @@ class PredictionE2ETest {
      * 0.8 mmol/L (pre-fix value was ~1.6 mmol/L for this scenario).
      */
     @Test
-    @DisplayName("9 · COB taper — no sudden step in path when FAST meal expires (regression: hard-cutoff step)")
+    @DisplayName("9 * COB taper - no sudden step in path when FAST meal expires (regression: hard-cutoff step)")
     void predictionPath_noSuddenStep_cobExpiryFastMeal() throws Exception {
-        // 50g FAST (window=120 min), bolus at same time — meal exactly at taper entry now
+        // 50g FAST (window=120 min), bolus at same time - meal exactly at taper entry now
         String fastProfile = """
                 {"absorptionMode":"GI_GL_ENHANCED","estimatedGi":75,"glycemicLoad":37.5,
                  "fiber":1.0,"protein":3.0,"fat":2.0,"absorptionSpeedClass":"FAST",
@@ -390,7 +390,7 @@ class PredictionE2ETest {
         // Post-fix the taper must keep every consecutive step below 0.8 mmol/L.
         assertTrue(maxDelta < 0.8,
                 "COB-taper regression: max consecutive prediction-path step = " + maxDelta
-                + " mmol/L. A value ≥ 0.8 indicates the hard-cutoff step is back "
+                + " mmol/L. A value >= 0.8 indicates the hard-cutoff step is back "
                 + "(pre-fix value for this scenario was ~1.6 mmol/L).");
     }
 
@@ -399,12 +399,12 @@ class PredictionE2ETest {
      * meal = 92 min into the prediction path.  This is the exact scenario observed
      * in the original bug report (Lunch 35g + Pre-bolus 5u).
      *
-     * <p>Pre-fix: COB snapped from ~0.9g → 0 at minute 92, causing a ~0.18 mmol/L step.
+     * <p>Pre-fix: COB snapped from ~0.9g -> 0 at minute 92, causing a ~0.18 mmol/L step.
      * Post-fix: the taper zone (210-240 min from meal = 62-92 min from now) smooths
-     * this transition; the step near minute 92 must be ≤ 0.1 mmol/L.
+     * this transition; the step near minute 92 must be <= 0.1 mmol/L.
      */
     @Test
-    @DisplayName("9b · COB taper — original bug scenario: 35g meal 148 min ago, step near minute 92 < 0.1")
+    @DisplayName("9b * COB taper - original bug scenario: 35g meal 148 min ago, step near minute 92 < 0.1")
     void predictionPath_originalBugScenario_tinyStepAtExpiry() throws Exception {
         postNote(35.0, 5.0, "Lunch", null, 148);
 
@@ -438,12 +438,12 @@ class PredictionE2ETest {
     }
 
     // Additional regression: 4h baseline path = exactly 48 points (BE-P0-1)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("BE-P0-1 regression — 4h path with no HFHP notes has 48 points (5-min steps, not 240)")
+    @DisplayName("BE-P0-1 regression - 4h path with no HFHP notes has 48 points (5-min steps, not 240)")
     void beP0_1_regression_4hPathHas48Points() throws Exception {
-        // No notes → pure 4h default path at PREDICTION_PATH_STEP_MINUTES=5
+        // No notes -> pure 4h default path at PREDICTION_PATH_STEP_MINUTES=5
         JsonNode data = calculate(6.0);
         JsonNode path = data.path("predictionPath");
 
@@ -452,13 +452,13 @@ class PredictionE2ETest {
         int size = path.size();
         // 240 min / 5 min per step = 48. Allow ±2 for boundary rounding.
         assertTrue(size >= 46 && size <= 50,
-                "BE-P0-1: 4h path should have ≈48 points with step=5 min — got " + size
+                "BE-P0-1: 4h path should have ≈48 points with step=5 min - got " + size
                         + ". If this is 240 the step size has reverted to 1 min.");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     private HttpHeaders registerAndLogin() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
@@ -520,10 +520,10 @@ class PredictionE2ETest {
                 String.class);
 
         assertEquals(HttpStatus.OK, resp.getStatusCode(),
-                "Expected 200 from /api/glucose-calculations/ — got: " + resp.getStatusCode());
+                "Expected 200 from /api/glucose-calculations/ - got: " + resp.getStatusCode());
         JsonNode root = mapper.readTree(resp.getBody());
         assertTrue(root.path("backendMode").asBoolean(),
-                "backendMode must be true — check @TestPropertySource / application.yml features. "
+                "backendMode must be true - check @TestPropertySource / application.yml features. "
                         + "Response: " + resp.getBody());
         return root.path("data");
     }

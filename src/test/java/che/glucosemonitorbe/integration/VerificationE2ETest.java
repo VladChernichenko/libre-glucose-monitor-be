@@ -70,10 +70,10 @@ class VerificationE2ETest {
         authHeaders = registerAndLogin();
     }
 
-    // ── T1: POST note → verification_event created ────────────────────────────
+    // -- T1: POST note -> verification_event created ----------------------------
 
     @Test
-    @DisplayName("T1 — Creating a qualifying meal note creates a PENDING verification event")
+    @DisplayName("T1 - Creating a qualifying meal note creates a PENDING verification event")
     void createNote_createsVerificationEvent() {
         postNote(45.0, 4.0, "Lunch");
 
@@ -81,15 +81,15 @@ class VerificationE2ETest {
         assertFalse(events.isEmpty(), "A verification event should have been created");
 
         // The event may be PENDING or SKIPPED depending on eligibility
-        // (no IOB stacking in this test, carbs in range, insulin present → should be PENDING)
+        // (no IOB stacking in this test, carbs in range, insulin present -> should be PENDING)
         VerificationEvent event = events.get(0);
         assertNotNull(event.getNoteId(), "Event must reference the note");
     }
 
-    // ── T2: GET /summary returns initial empty state ──────────────────────────
+    // -- T2: GET /summary returns initial empty state --------------------------
 
     @Test
-    @DisplayName("T2 — GET /verification/summary returns 200 with zero events for a new user")
+    @DisplayName("T2 - GET /verification/summary returns 200 with zero events for a new user")
     void getSummary_returnsEmpty_forNewUser() throws Exception {
         ResponseEntity<String> resp = rest.exchange(
                 "/api/experiments/verification/summary", HttpMethod.GET,
@@ -102,10 +102,10 @@ class VerificationE2ETest {
                 "No suggestion should be ready for a new user");
     }
 
-    // ── T3: HFHP note is skipped ──────────────────────────────────────────────
+    // -- T3: HFHP note is skipped ----------------------------------------------
 
     @Test
-    @DisplayName("T3 — Note with HFHP nutrition profile is marked SKIPPED")
+    @DisplayName("T3 - Note with HFHP nutrition profile is marked SKIPPED")
     void hfhpNote_isSkipped() {
         postNoteWithProfile(80.0, 7.0, "Dinner",
                 "{\"absorptionMode\":\"GI_GL_ENHANCED\",\"estimatedGi\":60,\"fat\":28.0,\"protein\":22.0," +
@@ -123,10 +123,10 @@ class VerificationE2ETest {
                         "Skipped event must have a skip reason"));
     }
 
-    // ── T4: Note with no insulin is skipped ───────────────────────────────────
+    // -- T4: Note with no insulin is skipped -----------------------------------
 
     @Test
-    @DisplayName("T4 — Note with zero insulin is skipped")
+    @DisplayName("T4 - Note with zero insulin is skipped")
     void noteWithNoInsulin_isSkipped() {
         postNote(45.0, 0.0, "Snack");
 
@@ -137,10 +137,10 @@ class VerificationE2ETest {
                 "Note with no insulin should produce a SKIPPED event with reason 'no_insulin'");
     }
 
-    // ── T5: GET /events returns event list ────────────────────────────────────
+    // -- T5: GET /events returns event list ------------------------------------
 
     @Test
-    @DisplayName("T5 — GET /verification/events returns all events for the user")
+    @DisplayName("T5 - GET /verification/events returns all events for the user")
     void getEvents_returnsUserEvents() throws Exception {
         postNote(45.0, 4.0, "Lunch");
         postNote(60.0, 5.0, "Dinner");
@@ -152,29 +152,29 @@ class VerificationE2ETest {
         assertEquals(HttpStatus.OK, resp.getStatusCode());
         JsonNode body = mapper.readTree(resp.getBody());
         assertTrue(body.isArray(), "Response should be an array");
-        assertTrue(body.size() >= 1, "Should return at least 1 event — got: " + body.size());
+        assertTrue(body.size() >= 1, "Should return at least 1 event - got: " + body.size());
     }
 
-    // ── T7: POST accept-suggestion → 200 ─────────────────────────────────────
+    // -- T7: POST accept-suggestion -> 200 -------------------------------------
 
     @Test
-    @DisplayName("T7 — POST /verification/accept-suggestion returns 200")
+    @DisplayName("T7 - POST /verification/accept-suggestion returns 200")
     void acceptSuggestion_returns200() {
         // There is no suggestion ready, but the endpoint should still succeed
         // (it only updates if there is something to update)
         ResponseEntity<Void> resp = rest.exchange(
                 "/api/experiments/verification/accept-suggestion", HttpMethod.POST,
                 new HttpEntity<>(authHeaders), Void.class);
-        // 200 = endpoint reachable even without summary → graceful no-op or throws
+        // 200 = endpoint reachable even without summary -> graceful no-op or throws
         // Accept either 200 or 500 (no summary yet = expected error in some configurations)
         assertTrue(resp.getStatusCode().is2xxSuccessful() || resp.getStatusCode().is5xxServerError(),
-                "accept-suggestion should be reachable — got: " + resp.getStatusCode());
+                "accept-suggestion should be reachable - got: " + resp.getStatusCode());
     }
 
-    // ── T8: large-history regression for the CGM lookup ───────────────────────
+    // -- T8: large-history regression for the CGM lookup -----------------------
 
     @Test
-    @DisplayName("T8 — evaluatePending matches the near-target CGM reading even with >2000 readings "
+    @DisplayName("T8 - evaluatePending matches the near-target CGM reading even with >2000 readings "
             + "(regression: lookup used to page the OLDEST 2000 and miss recent targets)")
     void evaluatePending_findsRecentCgm_withLargeHistory() {
         UUID userId = userRepository.findAll().get(0).getId();
@@ -193,13 +193,13 @@ class VerificationE2ETest {
             batch.add(reading(userId, t, 120, "old-" + i));   // 120 mg/dL, far in time from targets
         }
         // The two readings evaluateEvent actually needs: baseline at the note time and +2h.
-        batch.add(reading(userId, noteMs, 108, "baseline"));   // 108 mg/dL → 6.0 mmol/L
-        batch.add(reading(userId, twoHMs, 180, "twohour"));    // 180 mg/dL → 10.0 mmol/L
+        batch.add(reading(userId, noteMs, 108, "baseline"));   // 108 mg/dL -> 6.0 mmol/L
+        batch.add(reading(userId, twoHMs, 180, "twohour"));    // 180 mg/dL -> 10.0 mmol/L
         cgmReadingRepository.saveAll(batch);
         assertTrue(cgmReadingRepository.countByUserId(userId) > 2000,
                 "test must seed more than one page of readings to exercise the bug");
 
-        // A qualifying meal note in the past → enqueues a PENDING verification event.
+        // A qualifying meal note in the past -> enqueues a PENDING verification event.
         postNoteAt(noteTime, 45.0, 4.0, "Lunch");
         // createdAt is @CreationTimestamp = now, so backdate it past the 2h "ready to evaluate" gate.
         int updated = jdbc.update(
@@ -219,7 +219,7 @@ class VerificationE2ETest {
         assertEquals(10.0, ev.getActualGlucose2h(), 0.2);
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private CgmReading reading(UUID userId, long epochMs, int sgv, String externalId) {
         return CgmReading.builder()

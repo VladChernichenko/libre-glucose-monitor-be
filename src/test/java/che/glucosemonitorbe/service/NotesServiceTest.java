@@ -175,7 +175,7 @@ class NotesServiceTest {
         request.setCarbs(20.0);
         request.setInsulin(1.5);
         request.setMeal("Snack");
-        // absorptionMode intentionally null — older clients / web that don't send this field
+        // absorptionMode intentionally null - older clients / web that don't send this field
 
         when(nutritionEnrichmentService.enrichFromText(any(), any(), any()))
                 .thenThrow(new RuntimeException("API unavailable"));
@@ -196,7 +196,7 @@ class NotesServiceTest {
         NoteDto result = notesService.createNote(userId, request);
 
         assertNotNull(result);
-        // No client hint → fall back to DEFAULT_DECAY as before
+        // No client hint -> fall back to DEFAULT_DECAY as before
         assertEquals("DEFAULT_DECAY", saved.getAbsorptionMode());
     }
 
@@ -248,12 +248,12 @@ class NotesServiceTest {
         assertEquals("medium", request.getAbsorptionMode());
     }
 
-    // ── BE-9: getNoteById must throw ResourceNotFoundException, not NPE ────────
+    // -- BE-9: getNoteById must throw ResourceNotFoundException, not NPE --------
 
     /**
-     * BUG: BE-9 — Before the fix, getNoteById passed a null Note to NoteMapper.toDto,
-     * which produced a NullPointerException → HTTP 500.  After the fix the service
-     * throws ResourceNotFoundException → HTTP 404.
+     * BUG: BE-9 - Before the fix, getNoteById passed a null Note to NoteMapper.toDto,
+     * which produced a NullPointerException -> HTTP 500.  After the fix the service
+     * throws ResourceNotFoundException -> HTTP 404.
      *
      * This test documents the fixed contract; it PASSES once the fix is in place and
      * FAILS against the buggy code (NPE is not ResourceNotFoundException).
@@ -263,7 +263,7 @@ class NotesServiceTest {
         UUID userId = UUID.randomUUID();
         UUID noteId = UUID.randomUUID();
 
-        // Repository returns empty Optional — note not found for this user
+        // Repository returns empty Optional - note not found for this user
         when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.empty());
 
         // After fix: service must throw ResourceNotFoundException
@@ -271,10 +271,10 @@ class NotesServiceTest {
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
-    // ── D1: deleteNote must return false when no row is deleted ───────────────
+    // -- D1: deleteNote must return false when no row is deleted ---------------
 
     /**
-     * BUG: D1 — NotesService.deleteNote calls noteRepository.deleteByIdAndUserId and
+     * BUG: D1 - NotesService.deleteNote calls noteRepository.deleteByIdAndUserId and
      * always returns true, even when the note does not exist for the user.
      * deleteByIdAndUserId is a void method; the service does not check whether a row
      * was actually removed.
@@ -291,20 +291,20 @@ class NotesServiceTest {
         UUID userId = UUID.randomUUID();
         UUID noteId = UUID.randomUUID();
 
-        // Note does not exist for this user — repository returns empty Optional
+        // Note does not exist for this user - repository returns empty Optional
         when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.empty());
 
         // BUG: current code calls deleteByIdAndUserId unconditionally and returns true
         boolean result = notesService.deleteNote(userId, noteId);
 
-        // FAILS against buggy code — the service returns true even though nothing was deleted
+        // FAILS against buggy code - the service returns true even though nothing was deleted
         assertFalse(result, "deleteNote must return false when the note does not exist for the user");
     }
 
-    // ── D2: UpdateNoteRequest must have an absorptionMode field ──────────────
+    // -- D2: UpdateNoteRequest must have an absorptionMode field --------------
 
     /**
-     * BUG: D2 — UpdateNoteRequest does not have an absorptionMode field.
+     * BUG: D2 - UpdateNoteRequest does not have an absorptionMode field.
      * The iOS client sends absorptionMode on updates so that the user's meal picker
      * choice is preserved.  Without this field, updates silently discard it.
      *
@@ -314,7 +314,7 @@ class NotesServiceTest {
     @Test
     void d2_updateNoteRequest_mustHaveAbsorptionModeField() throws Exception {
         // Use reflection so the test compiles against buggy code and fails at runtime.
-        // BUG: UpdateNoteRequest has no absorptionMode field — NoSuchMethodException until fixed.
+        // BUG: UpdateNoteRequest has no absorptionMode field - NoSuchMethodException until fixed.
         java.lang.reflect.Method setter = UpdateNoteRequest.class.getMethod("setAbsorptionMode", String.class);
         java.lang.reflect.Method getter = UpdateNoteRequest.class.getMethod("getAbsorptionMode");
         UpdateNoteRequest request = new UpdateNoteRequest();
@@ -322,10 +322,10 @@ class NotesServiceTest {
         assertEquals("slow", getter.invoke(request));
     }
 
-    // ── D3: CreateNoteRequest must validate timestamp and carbs with @NotNull ─
+    // -- D3: CreateNoteRequest must validate timestamp and carbs with @NotNull -
 
     /**
-     * BUG: D3 — CreateNoteRequest.timestamp and CreateNoteRequest.carbs lack @NotNull
+     * BUG: D3 - CreateNoteRequest.timestamp and CreateNoteRequest.carbs lack @NotNull
      * validation annotations.  Without them, a POST with null timestamp reaches the
      * service layer and causes unexpected failures rather than a clean HTTP 400.
      *
@@ -340,13 +340,13 @@ class NotesServiceTest {
         boolean hasNotNull = java.util.Arrays.stream(timestampField.getDeclaredAnnotations())
                 .anyMatch(a -> a.annotationType().getSimpleName().equals("NotNull"));
 
-        // BUG: @NotNull is absent on timestamp — this FAILS until the annotation is added
+        // BUG: @NotNull is absent on timestamp - this FAILS until the annotation is added
         assertTrue(hasNotNull,
                 "CreateNoteRequest.timestamp must be annotated with @NotNull to trigger HTTP 400 validation");
     }
 
     /**
-     * BUG: D3 companion — CreateNoteRequest.carbs must also have @NotNull.
+     * BUG: D3 companion - CreateNoteRequest.carbs must also have @NotNull.
      */
     @Test
     void d3_createNoteRequest_carbsField_mustHaveNotNullAnnotation() throws Exception {
@@ -356,12 +356,12 @@ class NotesServiceTest {
         boolean hasNotNull = java.util.Arrays.stream(carbsField.getDeclaredAnnotations())
                 .anyMatch(a -> a.annotationType().getSimpleName().equals("NotNull"));
 
-        // BUG: @NotNull is absent on carbs — this FAILS until the annotation is added
+        // BUG: @NotNull is absent on carbs - this FAILS until the annotation is added
         assertTrue(hasNotNull,
                 "CreateNoteRequest.carbs must be annotated with @NotNull to trigger HTTP 400 validation");
     }
 
-    // ── Note photo upload (MinIO/S3) ───────────────────────────────────────────
+    // -- Note photo upload (MinIO/S3) -------------------------------------------
 
     @Test
     void uploadPhoto_success_storesKeyAndReturnsPhotoUrl() {

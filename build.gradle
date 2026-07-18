@@ -51,7 +51,7 @@ dependencies {
     // https://mvnrepository.com/artifact/org.springframework.boot/spring-boot-testcontainers
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    // Levenberg–Marquardt nonlinear least-squares for digital-twin parameter estimation
+    // Levenberg-Marquardt nonlinear least-squares for digital-twin parameter estimation
     implementation 'org.apache.commons:commons-math3:3.6.1'
     // https://mvnrepository.com/artifact/org.mapstruct/mapstruct
     implementation 'org.mapstruct:mapstruct:1.6.3'
@@ -107,5 +107,4 @@ jacocoTestCoverageVerification {
         }
     }
 }
-
 

@@ -29,9 +29,9 @@ public class VerificationService {
     private static final int WINDOW_SIZE = 7;
     // Thresholds for triggering a suggestion
     private static final double MEAN_ERROR_THRESHOLD_CR  = 0.5;   // mmol/L
-    private static final double CONSISTENCY_THRESHOLD    = 0.60;  // 0–1
+    private static final double CONSISTENCY_THRESHOLD    = 0.60;  // 0-1
     // Below this mean predicted rise the error can't be attributed to the rise coefficient reliably,
-    // so the relative scale would explode — suppress the suggestion instead.
+    // so the relative scale would explode - suppress the suggestion instead.
     private static final double MIN_PREDICTED_RISE       = 0.5;   // mmol/L
 
     // Qualifying meal range
@@ -47,7 +47,7 @@ public class VerificationService {
     private final UserSettingsRepository userSettingsRepository;
     private final CgmReadingRepository cgmReadingRepository;
 
-    // ── Enqueue a note for verification ──────────────────────────────────────
+    // -- Enqueue a note for verification --------------------------------------
 
     public void enqueueNote(UUID noteId, UUID userId) {
         // Skip if already enqueued
@@ -72,7 +72,7 @@ public class VerificationService {
         verificationEventRepository.save(event);
     }
 
-    // ── Evaluate pending events (called by scheduler) ─────────────────────────
+    // -- Evaluate pending events (called by scheduler) -------------------------
 
     public void evaluatePending() {
         LocalDateTime cutoff = LocalDateTime.now().minusHours(2);
@@ -129,7 +129,7 @@ public class VerificationService {
         double carbs   = note.getCarbs()   != null ? note.getCarbs()   : 0.0;
         double insulin = note.getInsulin() != null ? note.getInsulin() : 0.0;
 
-        // carbRatio in DB = mmol/L rise per 10g carbs → convert to per gram
+        // carbRatio in DB = mmol/L rise per 10g carbs -> convert to per gram
         double carbRatioPerGram = carbRatio / 10.0;
         double predictedDelta = (carbs * carbRatioPerGram) - (insulin * isf);
         double actualDelta    = twoHour - baseline;
@@ -151,7 +151,7 @@ public class VerificationService {
         refreshSummary(event.getUserId(), cob);
     }
 
-    // ── Rolling summary ───────────────────────────────────────────────────────
+    // -- Rolling summary -------------------------------------------------------
 
     private void refreshSummary(UUID userId, UserSettings cob) {
         List<VerificationEvent> completed = verificationEventRepository.findCompletedByUserId(userId);
@@ -185,8 +185,8 @@ public class VerificationService {
         summary.setSuggestedIsf(null);
 
         // Attribute a *consistent* systematic error to a single knob. Every qualifying event is a
-        // meal with a bolus (carbs 20–80 g, insulin > 0), so the 2 h net error cannot be split
-        // between the carb-rise coefficient and the model ISF — adjusting both would double-count
+        // meal with a bolus (carbs 20-80 g, insulin > 0), so the 2 h net error cannot be split
+        // between the carb-rise coefficient and the model ISF - adjusting both would double-count
         // the same miss. We therefore correct only the carb ratio (the dominant driver of the
         // post-meal excursion), scaled *relative* to the mean predicted rise rather than by the
         // absolute mmol error (a fixed absolute step over/under-corrects small/large meals alike).
@@ -200,8 +200,8 @@ public class VerificationService {
                 && meanAbsPredicted >= MIN_PREDICTED_RISE
                 && cob != null) {
             double curCR = cob.getCarbRatio() != null ? cob.getCarbRatio() : 2.0;
-            // meanError > 0 → actual exceeded prediction → predicted rise too low → raise CR;
-            // meanError < 0 → predicted too high → lower CR. relError carries both signs.
+            // meanError > 0 -> actual exceeded prediction -> predicted rise too low -> raise CR;
+            // meanError < 0 -> predicted too high -> lower CR. relError carries both signs.
             double relError = meanError / meanAbsPredicted;
             double scale = Math.max(0.5, Math.min(2.0, 1.0 + relError));
             summary.setSuggestedCarbRatio(round2(curCR * scale));
@@ -211,7 +211,7 @@ public class VerificationService {
         verificationSummaryRepository.save(summary);
     }
 
-    // ── Public queries ────────────────────────────────────────────────────────
+    // -- Public queries --------------------------------------------------------
 
     @Transactional(readOnly = true)
     public VerificationSummaryDTO getSummary(UUID userId) {
@@ -251,7 +251,7 @@ public class VerificationService {
                 .stream().map(this::toEventDTO).toList();
     }
 
-    // ── Eligibility ───────────────────────────────────────────────────────────
+    // -- Eligibility -----------------------------------------------------------
 
     private String preCheckEligibility(Note note) {
         double carbs   = note.getCarbs()   != null ? note.getCarbs()   : 0.0;
@@ -291,7 +291,7 @@ public class VerificationService {
         } catch (Exception e) { return 0; }
     }
 
-    // ── CGM helper ────────────────────────────────────────────────────────────
+    // -- CGM helper ------------------------------------------------------------
 
     private Double findClosestCgm(UUID userId, Long targetMs) {
         // Fetch only the small window around the target instead of scanning history: an
@@ -312,7 +312,7 @@ public class VerificationService {
             }
         }
         if (closest == null || closest.getSgv() == null) return null;
-        // sgv is mg/dL — convert to mmol/L
+        // sgv is mg/dL - convert to mmol/L
         return round2(closest.getSgv() / 18.0);
     }
 
@@ -320,7 +320,7 @@ public class VerificationService {
         return ldt.toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
     }
 
-    // ── DTOs ──────────────────────────────────────────────────────────────────
+    // -- DTOs ------------------------------------------------------------------
 
     private VerificationSummaryDTO toSummaryDTO(VerificationSummary s) {
         String confidence = computeConfidence(s);
@@ -361,7 +361,7 @@ public class VerificationService {
                 .build();
     }
 
-    // ── Math helpers ──────────────────────────────────────────────────────────
+    // -- Math helpers ----------------------------------------------------------
 
     private double stddev(List<Double> values, double mean) {
         if (values.size() < 2) return 0;

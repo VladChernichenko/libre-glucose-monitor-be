@@ -96,11 +96,11 @@ public class CircuitBreaker {
                 }
                 // Fall through to HALF_OPEN check: first probe call must be allowed
             } else {
-                return true; // Timeout not yet elapsed — circuit still blocked
+                return true; // Timeout not yet elapsed - circuit still blocked
             }
         }
 
-        // HALF_OPEN state (or just transitioned from OPEN → HALF_OPEN above)
+        // HALF_OPEN state (or just transitioned from OPEN -> HALF_OPEN above)
         return halfOpenCalls.get() >= halfOpenMaxCalls;
     }
     
@@ -141,13 +141,13 @@ public class CircuitBreaker {
         log.debug("Circuit breaker {} failure count: {}/{}", name, failures, failureThreshold);
         
         if (failures >= failureThreshold) {
-            // BE-6 fix: also handle HALF_OPEN → OPEN so a failed test-call re-opens the circuit
+            // BE-6 fix: also handle HALF_OPEN -> OPEN so a failed test-call re-opens the circuit
             if (state.compareAndSet(State.CLOSED, State.OPEN)) {
-                log.warn("Circuit breaker {} CLOSED → OPEN after {} failures", name, failures);
+                log.warn("Circuit breaker {} CLOSED -> OPEN after {} failures", name, failures);
             } else if (state.compareAndSet(State.HALF_OPEN, State.OPEN)) {
                 halfOpenCalls.set(0);
                 successCount.set(0);
-                log.warn("Circuit breaker {} HALF_OPEN → OPEN after test-call failure", name);
+                log.warn("Circuit breaker {} HALF_OPEN -> OPEN after test-call failure", name);
             }
         }
     }

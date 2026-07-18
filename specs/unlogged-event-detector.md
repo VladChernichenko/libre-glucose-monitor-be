@@ -1,4 +1,4 @@
-# Unlogged-event detector — Specification
+# Unlogged-event detector - Specification
 
 **Status:** Draft
 **Date:** 2026-07-05
@@ -10,11 +10,11 @@ Self-logged input to the glucose model is systematically unreliable: users forge
 insulin, and automated food detection mis-estimates macros. These gaps corrupt the digital-twin
 calibration (a forgotten meal looks like the model under-predicting; a forgotten bolus looks like the
 user being more insulin-sensitive than they are) and degrade live predictions, with no mechanism today
-to notice them — the calibrator only downweights them as generic statistical outliers.
+to notice them - the calibrator only downweights them as generic statistical outliers.
 
 This feature adds a backend **unlogged-event detector**: a scheduled job that runs the physiological
 prediction from each user's logged inputs (COB/IOB) over their recent CGM window and flags **sustained,
-unexplained residuals** — glucose moving in a way the logged events do not account for. Each flag is
+unexplained residuals** - glucose moving in a way the logged events do not account for. Each flag is
 persisted and serves two consumers: (1) it is surfaced via a REST API so the app can ask the user to
 confirm/backfill the missing data, and (2) the digital-twin calibration down-weights the flagged window
 so an unlogged/mis-logged event can't bias the fit. Success = the calibrator stops learning from
@@ -33,19 +33,19 @@ prompt UI (iOS/FE) is a separate follow-up.
    Because logged events are already accounted for, a large residual is "unexplained."
 3. (Must) A window is flagged only when the windowed mean residual exceeds **~2× the user's own robust
    residual σ** (MAD-based, consistent with the calibrator) **and** the exceedance persists for
-   **≥ ~45 min (≥ ~9 consecutive 5-min readings)**. Both thresholds are configurable.
+   **>= ~45 min (>= ~9 consecutive 5-min readings)**. Both thresholds are configurable.
 4. (Must) Each flag is classified into one of four categories from the residual sign and whether a
    matching-type event is logged in the window:
-   - `UNLOGGED_FOOD` — sustained positive residual (actual > predicted), **no** carbs logged in window.
-   - `UNDER_ESTIMATED_FOOD` — sustained positive residual, carbs **are** logged but insufficient.
-   - `UNLOGGED_INSULIN` — sustained negative residual (actual < predicted), **no** bolus logged.
-   - `UNDER_ESTIMATED_INSULIN` — sustained negative residual, bolus **is** logged but insufficient.
+   - `UNLOGGED_FOOD` - sustained positive residual (actual > predicted), **no** carbs logged in window.
+   - `UNDER_ESTIMATED_FOOD` - sustained positive residual, carbs **are** logged but insufficient.
+   - `UNLOGGED_INSULIN` - sustained negative residual (actual < predicted), **no** bolus logged.
+   - `UNDER_ESTIMATED_INSULIN` - sustained negative residual, bolus **is** logged but insufficient.
 5. (Must) Each flag is persisted with: user, category, direction, window start/end, magnitude
    (mean residual and/or robust-σ multiple), detected-at, and state.
 6. (Must) Flag state is one of `OPEN`, `CONFIRMED`, `DISMISSED`. New flags are `OPEN`.
 7. (Must) A REST API exposes:
    - list a user's flags (filterable by state);
-   - **confirm** a flag — optionally carrying a corrected carbs and/or insulin amount;
+   - **confirm** a flag - optionally carrying a corrected carbs and/or insulin amount;
    - **dismiss** a flag.
 8. (Must) On **confirm with an amount**, the system backfills the log: create/adjust a `Note` at the
    window (carbs and/or insulin), so the model uses real data rather than merely down-weighting. On
@@ -66,10 +66,10 @@ prompt UI (iOS/FE) is a separate follow-up.
 ## Inputs & Outputs
 
 **Inputs**
-- CGM readings (`cgm_readings`, mg/dL → mmol/L) for the scan window.
+- CGM readings (`cgm_readings`, mg/dL -> mmol/L) for the scan window.
 - Logged events (`notes`: carbs, insulin, macros, timestamp) for COB/IOB.
 - The user's Hovorka base parameters and rapid-insulin/IOB settings (existing services).
-- The user's robust residual σ — derived from recent predicted-vs-actual residuals (same MAD-based
+- The user's robust residual σ - derived from recent predicted-vs-actual residuals (same MAD-based
   estimate the calibrator uses).
 - Config: scan cadence, window length, σ-multiple threshold, persistence minimum, feature flag.
 
@@ -83,13 +83,13 @@ prompt UI (iOS/FE) is a separate follow-up.
 - Java 21 / Spring Boot backend (`glucose-monitor-be`); PostgreSQL via Flyway; existing scheduling
   infra (`@EnableScheduling` + `taskScheduler`), reused rather than a new mechanism.
 - Reuse the existing prediction stack (`HovorkaGlucosePredictionService`, `PredictionReplayEngine`
-  or equivalent) — do not re-implement the physiological model.
+  or equivalent) - do not re-implement the physiological model.
 - Residual σ and Huber conventions must match the calibrator (`DigitalTwinCalibrator`) so the flag
   threshold and the fit's down-weighting are consistent.
 - New DB table for flags introduced via a new Flyway migration (a brand-new table justifies a new
   `V{n+1}__` file per the schema rules); do not `ALTER` existing tables in a new migration.
 - Server assumed UTC (matches existing hour-of-day / epoch conventions).
-- Backend only — no iOS/FE code in this round.
+- Backend only - no iOS/FE code in this round.
 - Backfilled notes must pass the same validation as user-entered notes (non-negative, plausible caps).
 
 ## Edge Cases to Handle
@@ -115,11 +115,11 @@ prompt UI (iOS/FE) is a separate follow-up.
 ## Out of Scope
 
 - iOS / FE prompt UI and push notifications (separate follow-up round).
-- Any therapeutic/dosing action — this never adjusts insulin or dosing settings.
+- Any therapeutic/dosing action - this never adjusts insulin or dosing settings.
 - Sensor-artifact taxonomy/classification beyond the persistence gate (no compression-low/dropout
   detectors as such).
 - Per-data-source noise models, changepoint/regime-shift detection, DDE modelling.
-- Online/per-reading learning — detection is a periodic scan, calibration remains the nightly batch.
+- Online/per-reading learning - detection is a periodic scan, calibration remains the nightly batch.
 
 ## Definition of Done
 
@@ -135,7 +135,7 @@ prompt UI (iOS/FE) is a separate follow-up.
 - [ ] `GET` returns a user's flags; `confirm` (with and without amount) and `dismiss` transition state
       correctly; confirm-with-amount creates/adjusts a `Note`.
 - [ ] The digital-twin calibration excludes/down-weights anchors inside `OPEN`/`CONFIRMED` windows and
-      keeps `DISMISSED` windows at full weight — verified on a constructed case where excluding a
+      keeps `DISMISSED` windows at full weight - verified on a constructed case where excluding a
       corrupted window improves the out-of-sample fit.
 - [ ] Confirm/dismiss are authorized (a user cannot act on another user's flag) and idempotent.
 - [ ] The feature flag disables scanning and calibration consumption cleanly.

@@ -13,7 +13,7 @@ import java.util.UUID;
  * Persistent per-user "digital twin": machine-learned corrections to the Hovorka prediction model,
  * fitted nightly from the user's own predicted-vs-actual CGM history.
  *
- * <p>Applied to <b>predictions only</b> — never to the user's insulin-dosing settings. See
+ * <p>Applied to <b>predictions only</b> - never to the user's insulin-dosing settings. See
  * {@code V8__user_digital_twin.sql} for column semantics.</p>
  */
 @Getter
@@ -34,7 +34,7 @@ public class UserDigitalTwin {
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
-    // ── Learned physiological scales (1.0 = neutral) ──────────────────────────
+    // -- Learned physiological scales (1.0 = neutral) --------------------------
     @Builder.Default @Column(name = "isf_scale", nullable = false)    private Double isfScale   = 1.0;
     @Builder.Default @Column(name = "ag_scale", nullable = false)     private Double agScale    = 1.0;
     @Builder.Default @Column(name = "tmax_g_scale", nullable = false) private Double tMaxGScale = 1.0;
@@ -52,7 +52,7 @@ public class UserDigitalTwin {
     @Builder.Default @Column(name = "applied", nullable = false)
     private Boolean applied = false;
 
-    // ── Fit diagnostics (out-of-sample) ───────────────────────────────────────
+    // -- Fit diagnostics (out-of-sample) ---------------------------------------
     @Column(name = "mae_baseline")    private Double maeBaseline;
     @Column(name = "mae_calibrated")  private Double maeCalibrated;
     @Column(name = "improvement_pct") private Double improvementPct;

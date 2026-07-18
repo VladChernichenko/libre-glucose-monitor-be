@@ -51,10 +51,10 @@ class UserGlucoseSyncStateServiceTest {
         assertEquals(UserGlucoseSyncStateService.STATUS_NO_CHANGE, saved.getLastStatus());
     }
 
-    // ── C3: markError must set nextPollAt for backoff ─────────────────────────
+    // -- C3: markError must set nextPollAt for backoff -------------------------
 
     /**
-     * BUG: C3 — UserGlucoseSyncStateService.markError does not set nextPollAt.
+     * BUG: C3 - UserGlucoseSyncStateService.markError does not set nextPollAt.
      * Without nextPollAt the scheduler sees a null/past time and immediately re-polls,
      * causing a tight error loop that hammers the Nightscout endpoint.
      *
@@ -83,21 +83,21 @@ class UserGlucoseSyncStateServiceTest {
         verify(repository, atLeastOnce()).save(captor.capture());
         UserGlucoseSyncState saved = captor.getValue();
 
-        // BUG: nextPollAt is null in current implementation — this FAILS
+        // BUG: nextPollAt is null in current implementation - this FAILS
         assertThat(saved.getNextPollAt())
                 .as("markError must set nextPollAt to a future time for error backoff")
                 .isNotNull()
                 .isAfter(now);
     }
 
-    // ── C2: getOrCreate has a TOCTOU race condition ───────────────────────────
+    // -- C2: getOrCreate has a TOCTOU race condition ---------------------------
 
     /**
-     * BUG: C2 — UserGlucoseSyncStateService.getOrCreate uses findByUserId → if empty,
+     * BUG: C2 - UserGlucoseSyncStateService.getOrCreate uses findByUserId -> if empty,
      * save(newState). Two concurrent threads can both see empty and both call save,
      * causing a DataIntegrityViolationException on the unique constraint.
      *
-     * Expected: the service must handle this case gracefully — on a unique constraint
+     * Expected: the service must handle this case gracefully - on a unique constraint
      * violation it should retry the find and return the existing record rather than
      * propagating DataIntegrityViolationException to the caller.
      *
@@ -128,8 +128,8 @@ class UserGlucoseSyncStateServiceTest {
         // BUG: second call to getOrCreate propagates DataIntegrityViolationException
         // Expected: service catches it and returns the existing record gracefully
         org.assertj.core.api.Assertions.assertThatCode(() -> {
-            service.getOrCreate(userId); // first call — succeeds
-            service.getOrCreate(userId); // simulates concurrent second call — throws on save
+            service.getOrCreate(userId); // first call - succeeds
+            service.getOrCreate(userId); // simulates concurrent second call - throws on save
         }).doesNotThrowAnyException();
     }
 }

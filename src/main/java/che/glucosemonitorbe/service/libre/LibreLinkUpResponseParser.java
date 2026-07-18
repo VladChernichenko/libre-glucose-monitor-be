@@ -88,7 +88,7 @@ public class LibreLinkUpResponseParser {
         return "Body: " + s;
     }
 
-    /** Hex-encoded SHA-256. Never throws — SHA-256 is always available on the JVM. */
+    /** Hex-encoded SHA-256. Never throws - SHA-256 is always available on the JVM. */
     public static String sha256Hex(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -115,7 +115,7 @@ public class LibreLinkUpResponseParser {
             try { return new Date(Instant.parse(timestamp).toEpochMilli()); } catch (Exception ignored) {}
         }
         try { return new Date(Long.parseLong(timestamp.trim())); } catch (Exception ignored) {}
-        // Regional formats — FactoryTimestamp is always UTC, so parse as UTC explicitly.
+        // Regional formats - FactoryTimestamp is always UTC, so parse as UTC explicitly.
         for (String pattern : new String[]{"M/d/yyyy h:mm:ss a", "M/d/yyyy H:mm:ss", "dd/MM/yyyy HH:mm:ss", "dd/MM/yyyy HH:mm"}) {
             try {
                 return Date.from(LocalDateTime.parse(
@@ -145,7 +145,7 @@ public class LibreLinkUpResponseParser {
         return new LibreSensorInfo(null, "FreeStyle Libre", null, null, null, 14, "unknown", null);
     }
 
-    // ── wire → domain mapping (BE-M5 decomposition) ───────────────────────────
+    // -- wire -> domain mapping (BE-M5 decomposition) ---------------------------
 
     /**
      * Map the {@code /llu/connections} success response to domain connections, unwrapping the
@@ -171,7 +171,7 @@ public class LibreLinkUpResponseParser {
 
     /**
      * Map a {@code /llu/connections/{id}/graph} success response to domain glucose data. Reads
-     * graphData (ValueInMgPerDl → mmol/L at the LLU 18.0 divisor, FactoryTimestamp preferred over
+     * graphData (ValueInMgPerDl -> mmol/L at the LLU 18.0 divisor, FactoryTimestamp preferred over
      * Timestamp) and appends the live {@code connection.glucoseMeasurement} when it is newer than
      * the last graph point.
      */
@@ -223,7 +223,7 @@ public class LibreLinkUpResponseParser {
         }
 
         // connection.glucoseMeasurement is the live reading and can be newer than the last graphData entry.
-        // Graph data points do not include TrendArrow — the live measurement is the only reliable trend source.
+        // Graph data points do not include TrendArrow - the live measurement is the only reliable trend source.
         if (dataEnvelope != null) {
             JsonNode conn = dataEnvelope.get("connection");
             JsonNode gm = conn != null ? conn.get("glucoseMeasurement") : null;

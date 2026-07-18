@@ -26,7 +26,7 @@ class LibreLinkUpRegionResolverTest {
         assertThat(LibreLinkUpRegionResolver.normalizeBaseUrl("")).isEqualTo("https://api-eu.libreview.io");
     }
 
-    @ParameterizedTest(name = "locale {0} → {1}")
+    @ParameterizedTest(name = "locale {0} -> {1}")
     @CsvSource({
         "fr-FR, https://api-fr.libreview.io",
         "ja-JP, https://api-jp.libreview.io",
@@ -44,7 +44,7 @@ class LibreLinkUpRegionResolverTest {
         assertThat(resolver.localeToBaseUrl("")).isNull();
     }
 
-    @ParameterizedTest(name = "region {0} → {1}")
+    @ParameterizedTest(name = "region {0} -> {1}")
     @CsvSource({
         "us, https://api-us.libreview.io",
         "USA, https://api-us.libreview.io",

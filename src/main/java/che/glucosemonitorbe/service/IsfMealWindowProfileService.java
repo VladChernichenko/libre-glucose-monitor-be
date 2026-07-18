@@ -55,17 +55,17 @@ public class IsfMealWindowProfileService {
     /** Weight applied to a correction bolus (no significant carbs nearby). */
     public static final double WEIGHT_CORRECTION = 1.0;
 
-    /** Weight applied to a meal-attached bolus (lower trust — depends on user's CR). */
+    /** Weight applied to a meal-attached bolus (lower trust - depends on user's CR). */
     public static final double WEIGHT_MEAL = 0.4;
 
     /** A bolus is treated as "correction" when nearby carbs (±2 h around t_B) sum below this. */
     public static final double CARB_THRESHOLD_GRAMS = 10.0;
 
-    /** Plausibility band — per-event ISF estimates outside this range are dropped as noise. */
+    /** Plausibility band - per-event ISF estimates outside this range are dropped as noise. */
     public static final double MIN_PLAUSIBLE_ISF = 0.3;
     public static final double MAX_PLAUSIBLE_ISF = 10.0;
 
-    /** CGM lookup tolerance (minutes) — pick the nearest CGM reading within this window. */
+    /** CGM lookup tolerance (minutes) - pick the nearest CGM reading within this window. */
     private static final int CGM_LOOKUP_WINDOW_MIN = 15;
 
     /** Default carb ratio fallback when user has none configured (mmol/L per 10 g). */
@@ -78,9 +78,9 @@ public class IsfMealWindowProfileService {
     private final CarbsOnBoardService carbsOnBoardService;
     private final IsfMealWindowSnapshotRepository snapshotRepository;
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Public API
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     /**
      * Returns the cached profile for the user. Always returns 4 entries
@@ -164,9 +164,9 @@ public class IsfMealWindowProfileService {
         return getProfile(userId);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Internals
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     private List<CgmReading> loadCgmReadings(UUID userId, LocalDateTime since) {
         long sinceEpochMs = since.toInstant(ZoneOffset.UTC).toEpochMilli();
@@ -195,7 +195,7 @@ public class IsfMealWindowProfileService {
             return null;
         }
 
-        // Reject if another bolus stacks within the window — confounds attribution.
+        // Reject if another bolus stacks within the window - confounds attribution.
         for (Note other : allNotes) {
             if (other == bolus) continue;
             if (other.isLongActing()) continue;
@@ -243,7 +243,7 @@ public class IsfMealWindowProfileService {
     /**
      * Finds the CGM reading closest to {@code target} within {@link #CGM_LOOKUP_WINDOW_MIN}
      * minutes. Returns {@code null} if none found in range. mmol/L conversion: backend stores
-     * {@code sgv} as mg/dL × 1 (or as mmol/L × 10 depending on source) — this helper assumes
+     * {@code sgv} as mg/dL × 1 (or as mmol/L × 10 depending on source) - this helper assumes
      * mg/dL, the dominant Nightscout convention. LibreLinkUp readings already arrive normalised.
      */
     Double nearestCgmMmol(List<CgmReading> readings, LocalDateTime target) {
@@ -264,7 +264,7 @@ public class IsfMealWindowProfileService {
         return sgvToMmol(best.getSgv());
     }
 
-    /** Nightscout stores sgv as mg/dL — divide by 18.0182 for mmol/L. */
+    /** Nightscout stores sgv as mg/dL - divide by 18.0182 for mmol/L. */
     static double sgvToMmol(int sgv) {
         return sgv / 18.0182;
     }

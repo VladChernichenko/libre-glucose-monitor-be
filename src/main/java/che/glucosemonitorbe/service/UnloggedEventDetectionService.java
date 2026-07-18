@@ -84,7 +84,7 @@ public class UnloggedEventDetectionService {
     /** Robust-σ multiple the sustained mean residual must exceed to flag. */
     @Value("${app.unlogged-events.sigma-multiple:2.0}")
     private double sigmaMultiple;
-    /** Minimum duration of the sustained run [min] — rejects transient sensor artifacts. */
+    /** Minimum duration of the sustained run [min] - rejects transient sensor artifacts. */
     @Value("${app.unlogged-events.persistence-minutes:45}")
     private int persistenceMinutes;
     /** Tolerance when aligning a predicted point to an actual CGM reading [ms]. */
@@ -99,7 +99,7 @@ public class UnloggedEventDetectionService {
     @Value("${app.unlogged-events.backfill-max-insulin:50}")
     private double maxBackfillInsulin;
 
-    /** Raw predictor (no twin overlay, no residual correction) — the calibration-consistent baseline. */
+    /** Raw predictor (no twin overlay, no residual correction) - the calibration-consistent baseline. */
     private HovorkaGlucosePredictionService rawPredictor;
 
     @PostConstruct
@@ -112,7 +112,7 @@ public class UnloggedEventDetectionService {
     /** Aggregate outcome of a scan pass. */
     public record ScanSummary(int scanned, int flagged, int skipped, int failed) {}
 
-    // ── Scan ─────────────────────────────────────────────────────────────────
+    // -- Scan -----------------------------------------------------------------
 
     /** Scan every real (non-seed) user. No-op unless the feature is enabled. */
     public ScanSummary scanAllRealUsers() {
@@ -187,7 +187,7 @@ public class UnloggedEventDetectionService {
                 baseParams, rapidIob, settings, g0, anchorTime, carbs, insulin, longActing,
                 userId, windowMinutes, activity);
 
-        // Align predicted → actual; residual = actual − predicted [mmol/L].
+        // Align predicted -> actual; residual = actual − predicted [mmol/L].
         TreeMap<Long, Double> predByMs = new TreeMap<>();
         for (PredictionPointDTO pt : predicted) {
             if (pt.getPredictedGlucose() != null) predByMs.put(toEpochMs(pt.getTimestamp()), pt.getPredictedGlucose());
@@ -213,11 +213,11 @@ public class UnloggedEventDetectionService {
         return Optional.of(persistFlag(userId, best, sigma, notes));
     }
 
-    // ── Detection helpers ──────────────────────────────────────────────────────
+    // -- Detection helpers ------------------------------------------------------
 
     record Run(long startMs, long endMs, double mean) {}
 
-    /** Strongest sustained same-sign run whose mean |residual| ≥ threshold and duration ≥ persistence. */
+    /** Strongest sustained same-sign run whose mean |residual| >= threshold and duration >= persistence. */
     static Run strongestRun(List<long[]> tMs, List<Double> resid, double threshold, int persistenceMinutes) {
         int n = resid.size();
         Run best = null;
@@ -280,7 +280,7 @@ public class UnloggedEventDetectionService {
         return !f.getWindowStart().isAfter(end) && !start.isAfter(f.getWindowEnd());
     }
 
-    // ── List / confirm / dismiss ───────────────────────────────────────────────
+    // -- List / confirm / dismiss -----------------------------------------------
 
     @Transactional(readOnly = true)
     public List<UnloggedEventFlagDTO> list(UUID userId, State stateFilter) {
@@ -348,9 +348,9 @@ public class UnloggedEventDetectionService {
         return x;
     }
 
-    // ── Math / time helpers ─────────────────────────────────────────────────────
+    // -- Math / time helpers -----------------------------------------------------
 
-    /** Robust spread: 1.4826·MAD, floored at 0.3 mmol/L (CGM sensor noise) — matches the calibrator. */
+    /** Robust spread: 1.4826*MAD, floored at 0.3 mmol/L (CGM sensor noise) - matches the calibrator. */
     static double robustScale(List<Double> values) {
         if (values.isEmpty()) return 0.3;
         double[] a = values.stream().mapToDouble(Double::doubleValue).toArray();
@@ -367,7 +367,7 @@ public class UnloggedEventDetectionService {
         return (n % 2 == 1) ? a[n / 2] : 0.5 * (a[n / 2 - 1] + a[n / 2]);
     }
 
-    /** Nearest value in a time→value map within tolerance, or null. */
+    /** Nearest value in a time->value map within tolerance, or null. */
     private static Double nearest(TreeMap<Long, Double> map, long target, long tolMs) {
         Map.Entry<Long, Double> floor = map.floorEntry(target);
         Map.Entry<Long, Double> ceil = map.ceilingEntry(target);

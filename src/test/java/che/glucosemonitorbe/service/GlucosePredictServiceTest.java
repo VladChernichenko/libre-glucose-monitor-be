@@ -28,7 +28,7 @@ import static org.mockito.Mockito.*;
 /**
  * London-School unit tests for {@link GlucosePredictService}.
  *
- * <p>All collaborators are mocked — the ODE engine, parameter service, user
+ * <p>All collaborators are mocked - the ODE engine, parameter service, user
  * service, and note repository. We verify:
  * <ul>
  *   <li>Macro modulation: when macros are supplied, tMaxG in the
@@ -37,7 +37,7 @@ import static org.mockito.Mockito.*;
  *   <li>No macros: base tMaxG is passed through unchanged.</li>
  *   <li>No insulin dose: pre-bolus pause = 0, optimizer is never called.</li>
  *   <li>Insulin dose present: optimizer calls are made and preBolusMinutes is
- *       one of the candidate values [0, 5, …, 30].</li>
+ *       one of the candidate values [0, 5, ..., 30].</li>
  *   <li>Bolus strategy: SQUARE_WAVE for high-fat/high-protein meals, NORMAL otherwise.</li>
  *   <li>Response structure: curve, preBolusMinutes, bolusStrategy, tMaxGUsed, betaWeighted
  *       are all populated.</li>
@@ -48,7 +48,7 @@ class GlucosePredictServiceTest {
     private static final UUID   USER_ID  = UUID.randomUUID();
     private static final String USERNAME = "test-user";
 
-    // ── Mocks ────────────────────────────────────────────────────────────────
+    // -- Mocks ----------------------------------------------------------------
     private HovorkaGlucosePredictionService hovorkaService;
     private HovorkaParameterService         paramService;
     private UserService                     userService;
@@ -56,7 +56,7 @@ class GlucosePredictServiceTest {
 
     private GlucosePredictService sut;
 
-    // ── Base params (simulating user's calibrated settings) ─────────────────
+    // -- Base params (simulating user's calibrated settings) -----------------
     private static final HovorkaParameters BASE_PARAMS = new HovorkaParameters(
             0.16 * 70,   // vG
             0.0097 * 70, // f01
@@ -108,9 +108,9 @@ class GlucosePredictServiceTest {
                 .thenReturn(fixedCurve);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Response structure
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("response always contains curve, preBolusMinutes, bolusStrategy, tMaxGUsed, betaWeighted")
@@ -124,14 +124,14 @@ class GlucosePredictServiceTest {
         assertThat(resp.getBetaWeighted()).isNotNull();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: tMaxG modulation
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("when macros provided, ODE engine receives a modulated tMaxG (> base)")
     void macrosProvided_odeReceivesModulatedTMaxG() {
-        // Buffalo-wings-style meal: high fat + high protein → longer gastric emptying
+        // Buffalo-wings-style meal: high fat + high protein -> longer gastric emptying
         PredictRequest req = simpleRequest(7.0, 0, 40, 30, 25, 5); // carbs/protein/fat/fiber
 
         sut.predict(req, USERNAME);
@@ -161,16 +161,16 @@ class GlucosePredictServiceTest {
 
         double capturedTMaxG = paramsCaptor.getValue().tMaxG();
         assertThat(capturedTMaxG)
-                .as("No macros → tMaxG must equal the user's base value")
+                .as("No macros -> tMaxG must equal the user's base value")
                 .isEqualTo(BASE_PARAMS.tMaxG());
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Pre-bolus optimisation
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("no insulin dose → preBolusMinutes=0, ODE engine called exactly once (final curve only)")
+    @DisplayName("no insulin dose -> preBolusMinutes=0, ODE engine called exactly once (final curve only)")
     void noInsulinDose_noPrebolusCalls() {
         PredictRequest req = simpleRequest(6.0, 0, 50, 0, 0, 0); // insulinDose=0
 
@@ -184,7 +184,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("with insulin dose → optimizer runs 7 candidates + 1 final = 8 ODE calls")
+    @DisplayName("with insulin dose -> optimizer runs 7 candidates + 1 final = 8 ODE calls")
     void withInsulinDose_optimizerRunsSevenPlusFinalCall() {
         PredictRequest req = simpleRequest(8.5, 4.0, 60, 0, 0, 0); // insulinDose=4u
 
@@ -208,12 +208,12 @@ class GlucosePredictServiceTest {
                 .isIn(0, 5, 10, 15, 20, 25, 30);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Bolus strategy
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("high-fat + high-protein meal → SQUARE_WAVE strategy")
+    @DisplayName("high-fat + high-protein meal -> SQUARE_WAVE strategy")
     void highFatHighProtein_squareWaveStrategy() {
         PredictRequest req = simpleRequest(7.0, 4.0, 30, 25, 30, 3); // fat=30g, protein=25g
 
@@ -223,7 +223,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("simple carb meal → NORMAL strategy")
+    @DisplayName("simple carb meal -> NORMAL strategy")
     void simpleCarbMeal_normalStrategy() {
         PredictRequest req = simpleRequest(7.0, 4.0, 60, 5, 3, 2); // carb-heavy, low fat/protein
 
@@ -233,7 +233,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("very high protein alone (>40g) → SQUARE_WAVE strategy")
+    @DisplayName("very high protein alone (>40g) -> SQUARE_WAVE strategy")
     void veryHighProteinAlone_squareWaveStrategy() {
         PredictRequest req = simpleRequest(7.0, 4.0, 10, 45, 5, 1); // protein=45g, low fat
 
@@ -242,12 +242,12 @@ class GlucosePredictServiceTest {
         assertThat(resp.getBolusStrategy()).isEqualTo("SQUARE_WAVE");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: betaWeighted
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("pure carb meal → betaWeighted ≈ 1.05 (Elashoff carb constant)")
+    @DisplayName("pure carb meal -> betaWeighted ≈ 1.05 (Elashoff carb constant)")
     void pureCarbMeal_betaWeightedIsCarb() {
         PredictRequest req = simpleRequest(7.0, 0, 60, 0, 0, 0);
 
@@ -258,7 +258,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("pure fat meal → betaWeighted ≈ 2.20 (Elashoff fat constant)")
+    @DisplayName("pure fat meal -> betaWeighted ≈ 2.20 (Elashoff fat constant)")
     void pureFatMeal_betaWeightedIsFat() {
         PredictRequest req = simpleRequest(7.0, 0, 0, 0, 60, 0);
 
@@ -268,9 +268,9 @@ class GlucosePredictServiceTest {
                 .isCloseTo(MacroNutrientGastricModel.BETA_FAT, org.assertj.core.api.Assertions.within(0.02));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: History integration
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("recent carb notes are loaded and passed to the ODE engine")
@@ -297,7 +297,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("horizon clamped to [60, 480] — value 999 becomes 480")
+    @DisplayName("horizon clamped to [60, 480] - value 999 becomes 480")
     void horizon_clampedToMaximum() {
         PredictRequest req = PredictRequest.builder()
                 .currentGlucose(7.0)
@@ -316,9 +316,9 @@ class GlucosePredictServiceTest {
         assertThat(horizonCaptor.getValue()).isEqualTo(480);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Prospective meal lifecycle (regression for "flat curve" bug)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("when carbs > 0 a prospective meal entry is added to carbsWithMeal")
@@ -357,12 +357,12 @@ class GlucosePredictServiceTest {
                 anyDouble(), any(),
                 carbsCaptor.capture(), anyList(), anyList(), any(), anyInt());
 
-        // No DB notes in setUp, no carbsG → list must be empty
+        // No DB notes in setUp, no carbsG -> list must be empty
         assertThat(carbsCaptor.getValue()).isEmpty();
     }
 
     @Test
-    @DisplayName("prospective meal entry has a non-null timestamp (never null → never skipped in ODE)")
+    @DisplayName("prospective meal entry has a non-null timestamp (never null -> never skipped in ODE)")
     void prospectiveMealEntry_hasNonNullTimestamp() {
         PredictRequest req = simpleRequest(5.8, 0, 35, 0, 0, 0);
 
@@ -377,20 +377,20 @@ class GlucosePredictServiceTest {
 
         carbsCaptor.getValue().forEach(e ->
                 assertThat(e.getTimestamp())
-                        .as("carb entry timestamp must not be null — a null timestamp is silently skipped by the ODE warm-up")
+                        .as("carb entry timestamp must not be null - a null timestamp is silently skipped by the ODE warm-up")
                         .isNotNull());
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Null-safe macro inputs
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("null macro fields are treated as zero — no NullPointerException")
+    @DisplayName("null macro fields are treated as zero - no NullPointerException")
     void nullMacroFields_treatedAsZeroNoException() {
         PredictRequest req = PredictRequest.builder()
                 .currentGlucose(7.0)
-                .insulinDose(null)   // null → safe() → 0
+                .insulinDose(null)   // null -> safe() -> 0
                 .carbs(null)
                 .protein(null)
                 .fat(null)
@@ -420,7 +420,7 @@ class GlucosePredictServiceTest {
         PredictResponse resp = sut.predict(req, USERNAME);
 
         assertThat(resp.getPreBolusMinutes()).isEqualTo(0); // negative insulin treated as 0
-        // No prospective meal entry (carbsG ≤ 0)
+        // No prospective meal entry (carbsG <= 0)
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
         verify(hovorkaService, atLeastOnce()).buildPredictionPath(
@@ -430,12 +430,12 @@ class GlucosePredictServiceTest {
         assertThat(carbsCaptor.getValue()).isEmpty();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Horizon clamping
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("null horizon → uses default 300 min")
+    @DisplayName("null horizon -> uses default 300 min")
     void nullHorizon_usesDefault300() {
         PredictRequest req = PredictRequest.builder()
                 .currentGlucose(7.0)
@@ -455,7 +455,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("horizon 30 (below minimum) → clamped to 60")
+    @DisplayName("horizon 30 (below minimum) -> clamped to 60")
     void horizon_belowMinimum_clampedTo60() {
         PredictRequest req = PredictRequest.builder()
                 .currentGlucose(7.0)
@@ -474,9 +474,9 @@ class GlucosePredictServiceTest {
         assertThat(horizonCaptor.getValue()).isEqualTo(60);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // MARK: History → ODE plumbing
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // MARK: History -> ODE plumbing
+    // ---
 
     @Test
     @DisplayName("past insulin note becomes an InsulinDose passed to the ODE engine")
@@ -575,31 +575,31 @@ class GlucosePredictServiceTest {
                 .isEmpty();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Exception resilience
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("repository throws → gracefully falls back to empty history, prediction still runs")
+    @DisplayName("repository throws -> gracefully falls back to empty history, prediction still runs")
     void repositoryThrows_gracefulFallback_predictionStillReturns() {
         when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
                 .thenThrow(new RuntimeException("DB connection lost"));
 
-        // Must not propagate — service swallows it and returns an empty history
+        // Must not propagate - service swallows it and returns an empty history
         PredictResponse resp = sut.predict(simpleRequest(7.2, 0, 35, 0, 0, 0), USERNAME);
 
         assertThat(resp).isNotNull();
         assertThat(resp.getCurve()).isNotEmpty();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // MARK: Gap 2 — FPU virtual slow-carb entry (Warsaw Protocol)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // MARK: Gap 2 - FPU virtual slow-carb entry (Warsaw Protocol)
+    // ---
 
     @Test
-    @DisplayName("fat+protein above threshold → fpu-equiv entry added at t+90 min")
+    @DisplayName("fat+protein above threshold -> fpu-equiv entry added at t+90 min")
     void highFatProtein_fpuEntryAddedAt90min() {
-        // 25g protein × 4 = 100 kcal, 30g fat × 9 = 270 kcal → 370 kcal / 100 × 10 = 37 g equiv
+        // 25g protein × 4 = 100 kcal, 30g fat × 9 = 270 kcal -> 370 kcal / 100 × 10 = 37 g equiv
         PredictRequest req = simpleRequest(7.0, 0, 40, 25, 30, 0);
 
         sut.predict(req, USERNAME);
@@ -652,7 +652,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("carbs only (no fat/protein) → no fpu-equiv entry added")
+    @DisplayName("carbs only (no fat/protein) -> no fpu-equiv entry added")
     void carbsOnlyNoPF_noFpuEntry() {
         PredictRequest req = simpleRequest(7.0, 0, 60, 0, 0, 0);
 
@@ -671,9 +671,9 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("trace fat+protein below threshold (< 2 g equiv) → no fpu-equiv entry")
+    @DisplayName("trace fat+protein below threshold (< 2 g equiv) -> no fpu-equiv entry")
     void traceFatProtein_belowThreshold_noFpuEntry() {
-        // 3g protein × 4 = 12 kcal → fpuEquivCarbs = 12/100×10 = 1.2 g < 2.0 threshold
+        // 3g protein × 4 = 12 kcal -> fpuEquivCarbs = 12/100×10 = 1.2 g < 2.0 threshold
         PredictRequest req = simpleRequest(7.0, 0, 60, 3, 0, 0);
 
         sut.predict(req, USERNAME);
@@ -693,7 +693,7 @@ class GlucosePredictServiceTest {
     @Test
     @DisplayName("pure protein meal (no carbs) still generates an fpu-equiv entry")
     void pureProteinMeal_noCarbs_fpuEntryStillAdded() {
-        // 50g protein × 4 = 200 kcal → 20 g equiv > 2 g threshold; carbsG=0
+        // 50g protein × 4 = 200 kcal -> 20 g equiv > 2 g threshold; carbsG=0
         PredictRequest req = simpleRequest(7.0, 0, 0, 50, 0, 0);
 
         sut.predict(req, USERNAME);
@@ -710,15 +710,15 @@ class GlucosePredictServiceTest {
                 .isTrue();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Prospective insulin bolus timing
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("with insulin dose > 0, a prospective dose is added at now + bestPause")
     void withInsulinDose_prospectiveDoseAddedAtCorrectOffset() {
         // Make optimizer always return pause=0 by returning a flat high-cost curve
-        // regardless of timing (it picks the first candidate with equal cost → pause=0)
+        // regardless of timing (it picks the first candidate with equal cost -> pause=0)
         PredictRequest req = simpleRequest(7.0, 3.0, 50, 0, 0, 0);
 
         sut.predict(req, USERNAME);
@@ -740,7 +740,7 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("insulin dose = 0 → no prospective bolus entry in finalDoses")
+    @DisplayName("insulin dose = 0 -> no prospective bolus entry in finalDoses")
     void zeroDose_noProspectiveBolus() {
         PredictRequest req = simpleRequest(7.0, 0.0, 50, 0, 0, 0);
 
@@ -759,19 +759,19 @@ class GlucosePredictServiceTest {
                 .isEmpty();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // MARK: Pre-bolus optimiser is hypo-aware (safety)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("optimiser rejects a pre-bolus that predicts hypoglycaemia even when its ∫(G−5.5)² is smaller")
     void preBolusOptimiser_avoidsHypo_despiteLowerSymmetricCost() {
         // Curve depends on the prospective bolus pause:
-        //   pause < 15 min → glucose bottoms at 3.5 mmol/L (HYPO, below 3.9)
-        //   pause ≥ 15 min → glucose sits at 8.0 mmol/L (mild high, but SAFE)
-        // Symmetric ∫(G−5.5)²: hypo curve = (2.0)²·2 = 8.0  <  safe curve = (2.5)²·2 = 12.5,
+        //   pause < 15 min -> glucose bottoms at 3.5 mmol/L (HYPO, below 3.9)
+        //   pause >= 15 min -> glucose sits at 8.0 mmol/L (mild high, but SAFE)
+        // Symmetric ∫(G−5.5)²: hypo curve = (2.0)²*2 = 8.0  <  safe curve = (2.5)²*2 = 12.5,
         // so an unweighted optimiser would pick the HYPO pause (0). The hypo-weighted cost
-        // must instead pick a safe pause (≥ 15).
+        // must instead pick a safe pause (>= 15).
         when(hovorkaService.buildPredictionPath(
                 any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
                 anyList(), anyList(), anyList(), eq(USER_ID), anyInt()))
@@ -796,9 +796,9 @@ class GlucosePredictServiceTest {
                 .isGreaterThanOrEqualTo(15);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     private static PredictRequest simpleRequest(
             double glucose, double insulin,

@@ -9,7 +9,7 @@ import java.util.List;
  * least-squares fit lets a handful of such anchors (which produce huge prediction errors) dominate
  * the objective and drag the fitted parameters to absurd values. The <b>Huber</b> loss is quadratic
  * for small residuals (efficient, like least-squares) but only <b>linear</b> for large residuals, so
- * a mis-logged anchor contributes roughly its magnitude instead of its square — the optimiser fits
+ * a mis-logged anchor contributes roughly its magnitude instead of its square - the optimiser fits
  * the bulk of well-behaved data and shrugs off outliers.</p>
  */
 public final class RobustLoss {
@@ -28,7 +28,7 @@ public final class RobustLoss {
      *
      * @param residual error [mmol/L]
      * @param delta    transition point [mmol/L]
-     * @return {@code 0.5·r²} for {@code |r| ≤ delta}, else {@code delta·(|r| − 0.5·delta)}
+     * @return {@code 0.5*r²} for {@code |r| <= delta}, else {@code delta*(|r| − 0.5*delta)}
      */
     public static double huber(double residual, double delta) {
         double a = Math.abs(residual);
@@ -61,7 +61,7 @@ public final class RobustLoss {
      *
      * <p>With sparse or noisy data some dimensions are weakly identifiable; without a prior the
      * optimiser can push them to the clamp bounds on noise alone. This L2 prior keeps a scale at 1.0
-     * unless the data pays for moving it — the Bayesian-MAP counterpart to "don't personalise a
+     * unless the data pays for moving it - the Bayesian-MAP counterpart to "don't personalise a
      * parameter you can't actually see."</p>
      *
      * @param lambda regularisation strength [mmol/L² per unit²]; 0 disables the prior
@@ -77,7 +77,7 @@ public final class RobustLoss {
         return lambda * sum;
     }
 
-    /** Plain mean absolute error [mmol/L] — the headline accuracy metric (not the fit objective). */
+    /** Plain mean absolute error [mmol/L] - the headline accuracy metric (not the fit objective). */
     public static double mae(List<AnchorSample> samples) {
         if (samples == null || samples.isEmpty()) return Double.NaN;
         double sum = 0.0;

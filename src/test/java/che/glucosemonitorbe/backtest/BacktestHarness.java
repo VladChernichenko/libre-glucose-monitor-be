@@ -34,7 +34,7 @@ import static org.mockito.Mockito.when;
  * model-development tool, not a marketing number.</p>
  *
  * <p>Inputs are CSV exports of the {@code cgm_readings} and {@code notes} tables. No database
- * or Spring context is required — only the pure ODE engine plus mocked DB-bound collaborators.</p>
+ * or Spring context is required - only the pure ODE engine plus mocked DB-bound collaborators.</p>
  */
 public final class BacktestHarness {
 
@@ -45,7 +45,7 @@ public final class BacktestHarness {
 
     private BacktestHarness() {}
 
-    // ── Configuration ─────────────────────────────────────────────────────────
+    // -- Configuration ---------------------------------------------------------
 
     public static final class Config {
         public double isf            = 2.2;    // mmol/L per unit
@@ -63,7 +63,7 @@ public final class BacktestHarness {
         /** Add FPU-equivalent slow-carb entries from protein/fat (mirrors GlucosePredictService). */
         public boolean fpuEquiv      = true;
         /**
-         * EGP scale ≥ 1.0: target egpNet = egpScale × f01 at fasting. Realized via a synthetic
+         * EGP scale >= 1.0: target egpNet = egpScale × f01 at fasting. Realized via a synthetic
          * long-acting note positioned on the basal-suppression curve (only when no REAL basal is
          * active in the 36 h window). 1.0 = the model's pinned fasting steady state.
          */
@@ -73,13 +73,13 @@ public final class BacktestHarness {
         public int[]  reportHorizons = {30, 60, 120, 180, 240};
     }
 
-    // ── FPU constants (mirror GlucosePredictService) ───────────────────────────
+    // -- FPU constants (mirror GlucosePredictService) ---------------------------
     private static final int    FPU_ONSET_MIN    = 90;
     private static final double FPU_CARB_EQUIV_G = 10.0;
     private static final double FPU_MIN_EQUIV_G  = 2.0;
     private static final double FPU_GLUC_FRACTION = 0.50;
 
-    // ── Data records ──────────────────────────────────────────────────────────
+    // -- Data records ----------------------------------------------------------
 
     public record CgmPoint(long epochMs, double mmol) {}
     public record NoteRow(long epochMs, double carbs, double insulin, boolean longActing,
@@ -88,7 +88,7 @@ public final class BacktestHarness {
     /** Physiological context of an anchor, used to attribute error to a regime. */
     public enum Bucket { FASTING, MEAL, CORRECTION }
 
-    // ── Public entry point ─────────────────────────────────────────────────────
+    // -- Public entry point -----------------------------------------------------
 
     public static Report runAndReport(Path cgmCsv, Path notesCsv, Config cfg) throws IOException {
         return runAndReport(List.of(cgmCsv), List.of(notesCsv), cfg);
@@ -113,7 +113,7 @@ public final class BacktestHarness {
         return backtest(cgmList, noteList, cfg);
     }
 
-    // ── CSV loading (quote-aware) ───────────────────────────────────────────────
+    // -- CSV loading (quote-aware) -----------------------------------------------
 
     static List<CgmPoint> loadCgm(Path csv) throws IOException {
         List<String> lines = Files.readAllLines(csv);
@@ -202,7 +202,7 @@ public final class BacktestHarness {
         return out;
     }
 
-    // ── Core backtest ──────────────────────────────────────────────────────────
+    // -- Core backtest ----------------------------------------------------------
 
     static Report backtest(List<CgmPoint> cgm, List<NoteRow> notes, Config cfg) {
         HovorkaGlucosePredictionService svc = buildPredictor(cfg);
@@ -278,7 +278,7 @@ public final class BacktestHarness {
             Bucket bucket = carbActive ? Bucket.MEAL : (insulinActive ? Bucket.CORRECTION : Bucket.FASTING);
 
             // EGP sweep: when no REAL basal is active, inject a synthetic long-acting note placed
-            // on the suppression curve so egpNet = egpScale × f01 (egpScale=1.0 → no injection).
+            // on the suppression curve so egpNet = egpScale × f01 (egpScale=1.0 -> no injection).
             if (cfg.egpScale != 1.0 && longActing.isEmpty()) {
                 longActing.add(syntheticBasal(t0, cfg.egpScale));
             }
@@ -310,7 +310,7 @@ public final class BacktestHarness {
         return report;
     }
 
-    // ── Predictor wiring (no DB / Spring) ──────────────────────────────────────
+    // -- Predictor wiring (no DB / Spring) --------------------------------------
 
     private static HovorkaGlucosePredictionService buildPredictor(Config cfg) {
         DallaManGutModel gut = new DallaManGutModel();
@@ -337,7 +337,7 @@ public final class BacktestHarness {
 
     /**
      * Synthetic long-acting note placed so {@link BasalInsulinResolver} returns a suppression
-     * fraction x3 with egpNet = egpScale × f01. x3 = 1 − (f01/EGP0)·egpScale; mapped to an age on
+     * fraction x3 with egpNet = egpScale × f01. x3 = 1 − (f01/EGP0)*egpScale; mapped to an age on
      * the wane arm of the suppression curve (plateau when egpScale≈1).
      */
     private static Note syntheticBasal(long t0, double egpScale) {
@@ -378,7 +378,7 @@ public final class BacktestHarness {
         return Math.abs(t[best] - target) <= tolMs ? g[best] : null;
     }
 
-    // ── Clarke Error Grid (inputs in mg/dL) ────────────────────────────────────
+    // -- Clarke Error Grid (inputs in mg/dL) ------------------------------------
 
     public enum ClarkeZone { A, B, C, D, E }
 
@@ -387,21 +387,21 @@ public final class BacktestHarness {
      * y = reference (actual CGM), yp = predicted. Standard zone boundaries.
      */
     public static ClarkeZone clarkeZone(double y, double yp) {
-        // Zone A — clinically accurate (within 20% or both hypo)
+        // Zone A - clinically accurate (within 20% or both hypo)
         if ((yp <= 70 && y <= 70) || (yp <= 1.2 * y && yp >= 0.8 * y)) return ClarkeZone.A;
-        // Zone E — opposite treatment (hyper vs hypo confusion)
+        // Zone E - opposite treatment (hyper vs hypo confusion)
         if ((y >= 180 && yp <= 70) || (y <= 70 && yp >= 180)) return ClarkeZone.E;
-        // Zone C — overcorrection risk
+        // Zone C - overcorrection risk
         if (((y >= 70 && y <= 290) && yp >= y + 110)
                 || ((y >= 130 && y <= 180) && yp <= (7.0 / 5.0) * y - 182)) return ClarkeZone.C;
-        // Zone D — failure to detect (dangerous miss)
+        // Zone D - failure to detect (dangerous miss)
         if ((y >= 240 && yp >= 70 && yp <= 180)
                 || (y <= 70 && yp >= 70 && yp <= 180)) return ClarkeZone.D;
-        // Zone B — benign error
+        // Zone B - benign error
         return ClarkeZone.B;
     }
 
-    // ── Report ─────────────────────────────────────────────────────────────────
+    // -- Report -----------------------------------------------------------------
 
     public static final class Report {
         private final Config cfg;
@@ -478,7 +478,7 @@ public final class BacktestHarness {
                     "OVERALL", all.n, all.mae, all.rmse, all.mard, all.bias,
                     all.inBandPct, all.baselineInBandPct, all.clarkeAB));
 
-            sb.append("\n── ERROR BY CONTEXT @ 240 min ────────────────────────────────────\n");
+            sb.append("\n-- ERROR BY CONTEXT @ 240 min ------------------------------------\n");
             sb.append(String.format("%-11s %5s %7s %7s %7s %8s %10s %10s%n",
                     "bucket", "n", "MAE", "RMSE", "MARD%", "bias", "in±band%", "base in%"));
             for (Bucket b : Bucket.values()) {
@@ -489,11 +489,11 @@ public final class BacktestHarness {
             }
 
             Metrics m4h = metricsAt(240);
-            sb.append("\n── 4-HOUR HEADLINE ───────────────────────────────────────────────\n");
+            sb.append("\n-- 4-HOUR HEADLINE -----------------------------------------------\n");
             if (m4h.n > 0) {
                 sb.append(String.format("4h predictions within ±%.1f mmol/L: %.1f%%  (persistence baseline: %.1f%%)%n",
                         cfg.inBandMmol, m4h.inBandPct, m4h.baselineInBandPct));
-                sb.append(String.format("4h Clarke A+B: %.1f%%   |   gate ≥80%%: %s%n",
+                sb.append(String.format("4h Clarke A+B: %.1f%%   |   gate >=80%%: %s%n",
                         m4h.clarkeAB, m4h.inBandPct >= 80.0 ? "PASS ✅" : "FAIL ❌"));
             } else {
                 sb.append("No 4h samples (insufficient CGM coverage at +240 min).\n");

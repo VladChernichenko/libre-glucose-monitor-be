@@ -9,14 +9,14 @@ import static org.assertj.core.api.Assertions.within;
 /**
  * Unit tests for the Hovorka ODE solver with Dalla Man 3-compartment gut model.
  *
- * 1. Steady state — glucose stays stable with no inputs and EGP = F01.
+ * 1. Steady state - glucose stays stable with no inputs and EGP = F01.
  * 2. Glucose drop from correction bolus matches ISF (± tolerance).
  * 3. Glucose rise from meal (no insulin) is within physiological range.
- * 4. Gut absorption — no instantaneous spike (Qsto1/Qsto2 build up correctly).
- * 5. Non-negativity — state variables never go below zero.
- * 6. Hypoglycaemia buffer — F01_c is clamped below 4.5 mmol/L.
- * 7. BasalInsulinResolver — suppression curve boundaries.
- * 8. ODE derivatives — glucose SS gives zero rate of change.
+ * 4. Gut absorption - no instantaneous spike (Qsto1/Qsto2 build up correctly).
+ * 5. Non-negativity - state variables never go below zero.
+ * 6. Hypoglycaemia buffer - F01_c is clamped below 4.5 mmol/L.
+ * 7. BasalInsulinResolver - suppression curve boundaries.
+ * 8. ODE derivatives - glucose SS gives zero rate of change.
  */
 class HovorkaOdeSolverTest {
 
@@ -41,9 +41,9 @@ class HovorkaOdeSolverTest {
         );
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 1: Steady state — glucose stays stable
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 1: Steady state - glucose stays stable
+    // ---
 
     @Test
     void steadyState_noInputs_glucoseIsStable() {
@@ -57,9 +57,9 @@ class HovorkaOdeSolverTest {
         assertThat(state.glucoseMmolL(params)).isCloseTo(g0, within(0.10));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 2: 1-unit correction bolus → glucose drops by ≈ ISF over 4.5 h DIA
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 2: 1-unit correction bolus -> glucose drops by ≈ ISF over 4.5 h DIA
+    // ---
 
     @Test
     void correctionBolus_1Unit_glucoseDropMatchesIsf() {
@@ -84,9 +84,9 @@ class HovorkaOdeSolverTest {
         assertThat(actualDrop).isBetween(isf * 0.75, isf * 1.25);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 3: 20 g meal (no insulin) → glucose rises within physiological range
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 3: 20 g meal (no insulin) -> glucose rises within physiological range
+    // ---
 
     @Test
     void meal20g_noInsulin_glucoseRisesWithinPhysiologicalRange() {
@@ -108,9 +108,9 @@ class HovorkaOdeSolverTest {
         assertThat(actualRise).isBetween(1.5, 6.0);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 4: Gut absorption — no instantaneous spike on meal delivery
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 4: Gut absorption - no instantaneous spike on meal delivery
+    // ---
 
     @Test
     void gutAbsorption_raIsZeroAtMealTime_noInstantaneousSpike() {
@@ -120,7 +120,7 @@ class HovorkaOdeSolverTest {
         double carbMmol = 50.0 * params.aG() / 0.18;
         HovorkaState after1Min = solver.step(before, params, carbMmol, 0.0);
 
-        // Dalla Man: Ra starts from 0 → no immediate glucose spike
+        // Dalla Man: Ra starts from 0 -> no immediate glucose spike
         assertThat(after1Min.glucoseMmolL(params) - gBefore).isLessThan(0.20);
 
         // Qsto1 has the meal; Qsto2 starts accumulating via K_GRI
@@ -129,9 +129,9 @@ class HovorkaOdeSolverTest {
         assertThat(after1Min.qsto2()).isLessThan(after1Min.qsto1());
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 5: Non-negativity — state variables never go below zero
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 5: Non-negativity - state variables never go below zero
+    // ---
 
     @Test
     void integration_stateVariablesAlwaysNonNegative() {
@@ -150,9 +150,9 @@ class HovorkaOdeSolverTest {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 6: Hypoglycaemia buffer — glucose stabilises below 4.5 mmol/L
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 6: Hypoglycaemia buffer - glucose stabilises below 4.5 mmol/L
+    // ---
 
     @Test
     void hypoglycaemia_f01cClamp_preventsFurtherGlucoseDrop() {
@@ -168,9 +168,9 @@ class HovorkaOdeSolverTest {
         assertThat(minGlucose).isGreaterThanOrEqualTo(1.0);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 7: BasalInsulinResolver — suppression curve boundaries
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 7: BasalInsulinResolver - suppression curve boundaries
+    // ---
 
     @Test
     void basalResolver_suppressionCurve_followsExpectedProfile() {
@@ -188,9 +188,9 @@ class HovorkaOdeSolverTest {
         assertThat(resolver.suppressionCurve(35.0)).isZero();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 8: ODE derivatives — glucose SS gives zero rate of change
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 8: ODE derivatives - glucose SS gives zero rate of change
+    // ---
 
     @Test
     void derivatives_atSteadyState_allZero() {
@@ -207,9 +207,9 @@ class HovorkaOdeSolverTest {
         assertThat(dy[5]).isCloseTo(0.0, within(1e-6)); // dInc/dt   = 0
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 9: Physics documentation — uncompensated EGP causes glucose rise
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 9: Physics documentation - uncompensated EGP causes glucose rise
+    // ---
 
     @Test
     void noCobNoIob_uncompensatedEgp_glucoseRisesOver4h() {
@@ -229,13 +229,13 @@ class HovorkaOdeSolverTest {
         }
 
         double rise = state.glucoseMmolL(unstable) - g0;
-        // EGP0 - f01 = (0.0161 - 0.0097) * 70 = 0.448 mmol/min → ~7 mmol rise in 4h (clamped)
+        // EGP0 - f01 = (0.0161 - 0.0097) * 70 = 0.448 mmol/min -> ~7 mmol rise in 4h (clamped)
         assertThat(rise).isGreaterThan(3.0);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 10: Steady-state EGP — glucose is stable at any euglycaemic level
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 10: Steady-state EGP - glucose is stable at any euglycaemic level
+    // ---
 
     @Test
     void noCobNoIob_steadyStateEgpEqualsF01_glucoseRemainsFlat() {
@@ -250,9 +250,9 @@ class HovorkaOdeSolverTest {
         assertThat(state.glucoseMmolL(params)).isCloseTo(g0, within(0.15));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 11: Renal clearance — inactive below 9 mmol/L, active above
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 11: Renal clearance - inactive below 9 mmol/L, active above
+    // ---
 
     @Test
     void renalClearance_activatesAboveThreshold_inactiveBelow() {
@@ -261,13 +261,13 @@ class HovorkaOdeSolverTest {
         // So at G=5.5: dq1 ≈ 0 (FR inactive); at G=12: dq1 = -FR < 0.
         double q2Ratio = HovorkaParameters.K12_POP / HovorkaParameters.K21_POP; // = 1.0
 
-        // Euglycemia (G=5.5 < KE2=9.0) — FR must not fire
+        // Euglycemia (G=5.5 < KE2=9.0) - FR must not fire
         double q1Low = 5.5 * params.vG();
         double[] yLow = {q1Low, q2Ratio * q1Low, 0, 0, 0, 0};
         double[] dyLow = solver.derivatives(yLow, params, 0.0, 0.0);
         assertThat(dyLow[0]).isCloseTo(0.0, within(1e-4));
 
-        // Hyperglycemia (G=12 > KE2=9.0) — FR fires, pulling Q1 down
+        // Hyperglycemia (G=12 > KE2=9.0) - FR fires, pulling Q1 down
         double q1High = 12.0 * params.vG();
         double[] yHigh = {q1High, q2Ratio * q1High, 0, 0, 0, 0};
         double[] dyHigh = solver.derivatives(yHigh, params, 0.0, 0.0);
@@ -278,17 +278,17 @@ class HovorkaOdeSolverTest {
         assertThat(dyHigh[0]).isCloseTo(-expectedFR, within(1e-4));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Test 12: Ileal brake — elevated Inc reduces gastric emptying to the floor
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // Test 12: Ileal brake - elevated Inc reduces gastric emptying to the floor
+    // ---
 
     @Test
     void ilealBrake_elevatedInc_slowsGastricEmptyingToFloor() {
         // dqsto2 = K_GRI*qsto1 − kemptEff*qsto2
         // With qsto1=0: dqsto2 = −kemptEff*qsto2.
         // kemptEff = kempt × max(MIN_KEMPT_FRACTION, 1 − PHI_GLP1*Inc)
-        // Inc=0   → kemptEff = kempt      → drain = kempt*qsto2
-        // Inc=100 → 1−0.5×100=−49 → floor → kemptEff = kempt×0.20 → drain = kempt×0.20×qsto2
+        // Inc=0   -> kemptEff = kempt      -> drain = kempt*qsto2
+        // Inc=100 -> 1−0.5×100=−49 -> floor -> kemptEff = kempt×0.20 -> drain = kempt×0.20×qsto2
         // Ratio: dyHigh[3] / dyBase[3] ≈ 0.20 (the floor fraction)
         HovorkaState ss = HovorkaState.steadyState(5.5, params);
         double q1 = ss.q1(), q2 = ss.q2();
@@ -301,7 +301,7 @@ class HovorkaOdeSolverTest {
         double[] dyBase = solver.derivatives(yBaseInc, params, mealMmol, 0.0);
         double[] dyHigh = solver.derivatives(yHighInc, params, mealMmol, 0.0);
 
-        // High Inc → less drainage from Qsto2 → dqsto2 is less negative
+        // High Inc -> less drainage from Qsto2 -> dqsto2 is less negative
         assertThat(dyHigh[3]).isGreaterThan(dyBase[3]);
 
         // At floor: ratio of drain rates equals MIN_KEMPT_FRACTION
@@ -309,9 +309,9 @@ class HovorkaOdeSolverTest {
         assertThat(ratio).isCloseTo(HovorkaOdeSolver.MIN_KEMPT_FRACTION, within(0.01));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Test 13: GLP-1 incretin accumulates during meal absorption
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void incGlp1_risesDuringMealAbsorption_peaksAboveBaseline() {
@@ -330,7 +330,7 @@ class HovorkaOdeSolverTest {
         assertThat(maxInc).isGreaterThan(0.005);
     }
 
-    // ── Helper: OpenAPS IOB (same formula as InsulinCalculatorService) ────────
+    // -- Helper: OpenAPS IOB (same formula as InsulinCalculatorService) --------
 
     private static double iobExponential(double units, double minsAgo, double diaMin, double peak) {
         if (minsAgo < 0 || minsAgo >= diaMin || units <= 0) return 0.0;

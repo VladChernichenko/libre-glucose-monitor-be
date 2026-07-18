@@ -52,7 +52,7 @@ spring:
 security:
   jwt:
     # Dev-only fallback (>=64 bytes for HS512). SecretsStartupValidator refuses to boot under the
-    # 'prod' profile with this default — set a strong JWT_SECRET (e.g. `openssl rand -base64 64`).
+    # 'prod' profile with this default - set a strong JWT_SECRET (e.g. `openssl rand -base64 64`).
     secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-CHANGE-ME-do-not-use-in-production-0123456789}
     access-expiration-ms: 3600000      # 1 hour
     # Long-lived refresh so mobile clients stay signed in across weeks without re-login.
@@ -134,7 +134,7 @@ app:
       glucose-calculations: "1.0.0"
       insulin-calculator: "1.0.0"
       carbs-on-board: "1.0.0"
-  # Glucose observer — anomaly detection & alert scheduling
+  # Glucose observer - anomaly detection & alert scheduling
   observer:
     # How often the anomaly detector scans all users (matches CGM sync cadence).
     # Override via env var OBSERVER_INTERVAL_MS. Set to a large value in tests.
@@ -148,7 +148,7 @@ app:
     glucose-calculations-enabled: true
     user-configuration-enabled: false
     nutrition-aware-prediction-enabled: ${APP_FEATURES_NUTRITION_AWARE_PREDICTION_ENABLED:true}
-    # Hovorka 2-compartment ODE model — off by default, enable per-env for validation
+    # Hovorka 2-compartment ODE model - off by default, enable per-env for validation
     hovorka-model-enabled: ${APP_FEATURES_HOVORKA_MODEL_ENABLED:true}
     # Per-user digital twin: nightly ML calibration of predictions from predicted-vs-actual error.
     # Applied to predictions only; each user's twin activates only after beating baseline out-of-sample.
@@ -168,7 +168,7 @@ app:
     glucose-data-migration-percent: 100
     glucose-calculations-migration-percent: 100
 
-  # Background Nightscout в†’ DB sync (stored chart data), every 5 minutes per user with active config
+  # Background Nightscout -> DB sync (stored chart data), every 5 minutes per user with active config
   glucose-sync:
     enabled: true
     fixed-delay-ms: 300000
@@ -203,6 +203,5 @@ cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
 
 kind: Application
-
 
 

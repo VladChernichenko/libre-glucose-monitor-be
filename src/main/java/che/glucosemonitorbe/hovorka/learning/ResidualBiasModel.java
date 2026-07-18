@@ -7,12 +7,12 @@ import java.util.List;
  * from the residuals the physiological model leaves behind.
  *
  * <p>After the {@link che.glucosemonitorbe.hovorka.HovorkaParameters} are calibrated, systematic
- * misses remain that the ODE cannot express from the logged inputs — dawn phenomenon, an
+ * misses remain that the ODE cannot express from the logged inputs - dawn phenomenon, an
  * afternoon activity dip, chronically unlogged snacks at a particular hour. Averaged over many days
  * these show up as a stable bias at a given clock hour. This model captures {@code actual − predicted}
  * per hour-of-day and adds it back to future predictions.</p>
  *
- * <h3>Noise robustness — empirical-Bayes shrinkage</h3>
+ * <h3>Noise robustness - empirical-Bayes shrinkage</h3>
  * <p>A raw per-hour mean over a sparse, noisy window would itself overfit. Each hour's correction is
  * therefore shrunk toward the user's global mean residual (and the global mean toward zero) with a
  * pseudo-count {@code k}: an hour with few samples barely moves off the pooled estimate, while an
@@ -27,7 +27,7 @@ public final class ResidualBiasModel {
     private static final double SHRINK_K = 12.0;
     /** Pseudo-count pulling the global mean residual toward zero. */
     private static final double GLOBAL_SHRINK_K = 30.0;
-    /** Hard clamp on any single correction [mmol/L] — a safety rail against runaway bias. */
+    /** Hard clamp on any single correction [mmol/L] - a safety rail against runaway bias. */
     public static final double MAX_CORRECTION = 2.5;
 
     private final double[] bias; // length BUCKETS, in mmol/L, already shrunk + clamped
@@ -107,10 +107,10 @@ public final class ResidualBiasModel {
         double w; // weight applied to the neighbour bucket
         if (offsetFromCentre >= 0.0) {
             neighbour = (h + 1) % BUCKETS;
-            w = offsetFromCentre;             // 0 at :30 → 0.5 approaching :90 (next centre)
+            w = offsetFromCentre;             // 0 at :30 -> 0.5 approaching :90 (next centre)
         } else {
             neighbour = ((h - 1) % BUCKETS + BUCKETS) % BUCKETS;
-            w = -offsetFromCentre;            // 0 at :30 → 0.5 approaching :-30 (prev centre)
+            w = -offsetFromCentre;            // 0 at :30 -> 0.5 approaching :-30 (prev centre)
         }
         return bias[h] * (1.0 - w) + bias[neighbour] * w;
     }
@@ -126,7 +126,7 @@ public final class ResidualBiasModel {
         return Math.max(-MAX_CORRECTION, Math.min(MAX_CORRECTION, v));
     }
 
-    // ── Serialisation (compact CSV for the JSON/text column) ────────────────────
+    // -- Serialisation (compact CSV for the JSON/text column) --------------------
 
     /** Serialise the 24 corrections as a comma-separated string. */
     public String toCsv() {

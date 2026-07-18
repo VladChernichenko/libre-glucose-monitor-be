@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
- * Unit tests for LibreLinkUpController — covers all 9 endpoints (happy-path + error path).
+ * Unit tests for LibreLinkUpController - covers all 9 endpoints (happy-path + error path).
  * Uses MockMvc standalone setup with mocked services; no Spring context overhead.
  */
 @ExtendWith(MockitoExtension.class)
@@ -57,10 +57,10 @@ class LibreLinkUpControllerTest {
                 "testuser", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
     }
 
-    // ── POST /api/libre/auth/login ────────────────────────────────────────────
+    // -- POST /api/libre/auth/login --------------------------------------------
 
     @Test
-    @DisplayName("POST /auth/login — success returns 200 with token")
+    @DisplayName("POST /auth/login - success returns 200 with token")
     void authenticate_success_returns200() throws Exception {
         LibreAuthRequest req = new LibreAuthRequest("test@example.com", "secret");
         LibreAuthResponse resp = new LibreAuthResponse("tok-123", System.currentTimeMillis() + 86400_000L);
@@ -75,7 +75,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("POST /auth/login — service error returns 400")
+    @DisplayName("POST /auth/login - service error returns 400")
     void authenticate_serviceThrows_returns400() throws Exception {
         LibreAuthRequest req = new LibreAuthRequest("bad@example.com", "wrong");
         when(libreLinkUpService.authenticate(any(), any())).thenThrow(new RuntimeException("Auth failed"));
@@ -89,7 +89,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("POST /auth/login — persists LLU config; DataSource exception is swallowed")
+    @DisplayName("POST /auth/login - persists LLU config; DataSource exception is swallowed")
     void authenticate_dataSourceConfigFails_stillReturns200() throws Exception {
         LibreAuthRequest req = new LibreAuthRequest("test@example.com", "secret");
         LibreAuthResponse resp = new LibreAuthResponse("tok-ok", System.currentTimeMillis() + 86400_000L);
@@ -105,10 +105,10 @@ class LibreLinkUpControllerTest {
                 .andExpect(jsonPath("$.token").value("tok-ok"));
     }
 
-    // ── GET /api/libre/connections ────────────────────────────────────────────
+    // -- GET /api/libre/connections --------------------------------------------
 
     @Test
-    @DisplayName("GET /connections — returns list and persists patientId")
+    @DisplayName("GET /connections - returns list and persists patientId")
     void getConnections_success_returns200AndPersistsPatientId() throws Exception {
         LibreConnection conn = new LibreConnection("John Doe", "patient-1", "active", "2025-01-01T00:00:00Z");
         when(libreLinkUpService.getConnections(userId)).thenReturn(List.of(conn));
@@ -121,7 +121,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections — empty list skips patientId persist")
+    @DisplayName("GET /connections - empty list skips patientId persist")
     void getConnections_empty_skipsPatientIdPersist() throws Exception {
         when(libreLinkUpService.getConnections(userId)).thenReturn(List.of());
 
@@ -133,7 +133,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections — connection with null patientId skips persist")
+    @DisplayName("GET /connections - connection with null patientId skips persist")
     void getConnections_nullPatientId_skipsPatientIdPersist() throws Exception {
         LibreConnection conn = new LibreConnection("Jane", null, "active", "now");
         when(libreLinkUpService.getConnections(userId)).thenReturn(List.of(conn));
@@ -145,7 +145,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections — patientId persist failure is swallowed")
+    @DisplayName("GET /connections - patientId persist failure is swallowed")
     void getConnections_dataSourceConfigFails_stillReturns200() throws Exception {
         LibreConnection conn = new LibreConnection("John", "patient-2", "active", "now");
         when(libreLinkUpService.getConnections(userId)).thenReturn(List.of(conn));
@@ -157,7 +157,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections — service error returns 400")
+    @DisplayName("GET /connections - service error returns 400")
     void getConnections_serviceThrows_returns400() throws Exception {
         when(libreLinkUpService.getConnections(any())).thenThrow(new RuntimeException("Not authenticated"));
 
@@ -166,10 +166,10 @@ class LibreLinkUpControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch connections")));
     }
 
-    // ── GET /api/libre/connections/{patientId}/graph ──────────────────────────
+    // -- GET /api/libre/connections/{patientId}/graph --------------------------
 
     @Test
-    @DisplayName("GET /connections/{id}/graph — returns 200 with glucose data")
+    @DisplayName("GET /connections/{id}/graph - returns 200 with glucose data")
     void getGlucoseData_success_returns200() throws Exception {
         LibreGlucoseData data = new LibreGlucoseData("p1", List.of(), "start", "end", "mmol/L");
         when(libreLinkUpService.getGlucoseData(eq("p1"), eq(1), eq(userId))).thenReturn(data);
@@ -180,7 +180,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections/{id}/graph — service error returns 400")
+    @DisplayName("GET /connections/{id}/graph - service error returns 400")
     void getGlucoseData_serviceThrows_returns400() throws Exception {
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), any()))
                 .thenThrow(new RuntimeException("Network error"));
@@ -190,13 +190,13 @@ class LibreLinkUpControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch glucose data")));
     }
 
-    // ── GET /api/libre/connections/{patientId}/current ────────────────────────
+    // -- GET /api/libre/connections/{patientId}/current ------------------------
 
     @Test
-    @DisplayName("GET /connections/{id}/current — returns 200 with reading")
+    @DisplayName("GET /connections/{id}/current - returns 200 with reading")
     void getCurrentGlucose_success_returns200() throws Exception {
         LibreGlucoseReading reading = new LibreGlucoseReading(
-                new Date(), 7.5, 4, "→", "normal", "mmol/L", new Date());
+                new Date(), 7.5, 4, "->", "normal", "mmol/L", new Date());
         when(libreLinkUpService.getCurrentGlucose(eq("p1"), eq(userId))).thenReturn(reading);
 
         mockMvc.perform(get("/api/libre/connections/p1/current").principal(auth))
@@ -205,7 +205,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections/{id}/current — service error returns 400")
+    @DisplayName("GET /connections/{id}/current - service error returns 400")
     void getCurrentGlucose_serviceThrows_returns400() throws Exception {
         when(libreLinkUpService.getCurrentGlucose(any(), any()))
                 .thenThrow(new RuntimeException("No data"));
@@ -215,10 +215,10 @@ class LibreLinkUpControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch current glucose")));
     }
 
-    // ── GET /api/libre/connections/{patientId}/history ────────────────────────
+    // -- GET /api/libre/connections/{patientId}/history ------------------------
 
     @Test
-    @DisplayName("GET /connections/{id}/history — returns 200 with default days")
+    @DisplayName("GET /connections/{id}/history - returns 200 with default days")
     void getGlucoseHistory_success_returns200() throws Exception {
         LibreGlucoseData data = new LibreGlucoseData("p1", List.of(), null, null, "mmol/L");
         when(libreLinkUpService.getGlucoseHistory(eq("p1"), eq(7), isNull(), isNull(), eq(userId)))
@@ -230,7 +230,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections/{id}/history — custom days and date range forwarded")
+    @DisplayName("GET /connections/{id}/history - custom days and date range forwarded")
     void getGlucoseHistory_customParams_forwardedToService() throws Exception {
         LibreGlucoseData data = new LibreGlucoseData("p1", List.of(), "2025-01-01", "2025-01-14", "mmol/L");
         when(libreLinkUpService.getGlucoseHistory(eq("p1"), eq(14), eq("2025-01-01"), eq("2025-01-14"), eq(userId)))
@@ -245,7 +245,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections/{id}/history — service error returns 400")
+    @DisplayName("GET /connections/{id}/history - service error returns 400")
     void getGlucoseHistory_serviceThrows_returns400() throws Exception {
         when(libreLinkUpService.getGlucoseHistory(any(), anyInt(), any(), any(), any()))
                 .thenThrow(new RuntimeException("History error"));
@@ -255,10 +255,10 @@ class LibreLinkUpControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Failed to fetch glucose history")));
     }
 
-    // ── GET /api/libre/connections/{patientId}/sensor ─────────────────────────
+    // -- GET /api/libre/connections/{patientId}/sensor -------------------------
 
     @Test
-    @DisplayName("GET /connections/{id}/sensor — returns 200 with sensor info")
+    @DisplayName("GET /connections/{id}/sensor - returns 200 with sensor info")
     void getSensorInfo_success_returns200() throws Exception {
         LibreSensorInfo info = new LibreSensorInfo(
                 "FA-12345", "FreeStyle Libre 3", new Date(), new Date(), 5, 14, "active", 9);
@@ -273,7 +273,7 @@ class LibreLinkUpControllerTest {
     }
 
     @Test
-    @DisplayName("GET /connections/{id}/sensor — service error returns 400")
+    @DisplayName("GET /connections/{id}/sensor - service error returns 400")
     void getSensorInfo_serviceThrows_returns400() throws Exception {
         when(libreLinkUpService.getSensorInfo(any(), any()))
                 .thenThrow(new RuntimeException("Sensor error"));

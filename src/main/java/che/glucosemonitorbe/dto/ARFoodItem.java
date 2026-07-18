@@ -14,6 +14,6 @@ public class ARFoodItem {
 
     private double volumeCm3;
 
-    /** segmentedPointRatio from ARKit — fraction of scene points assigned to this food [0,1] */
+    /** segmentedPointRatio from ARKit - fraction of scene points assigned to this food [0,1] */
     private double segmentationConfidence;
 }

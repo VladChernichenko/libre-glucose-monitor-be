@@ -94,7 +94,7 @@ public class LibreLinkUpGlucoseSyncScheduler {
 
     /**
      * Waits for {@code futures} up to {@code syncTimeoutMs}, then tallies only the ones that
-     * completed normally — futures still running at the deadline are excluded from the tally and
+     * completed normally - futures still running at the deadline are excluded from the tally and
      * cancelled (best-effort: this does not interrupt the underlying sync, which is bounded by
      * RestTemplate's own connect/read timeouts, but it stops them from racing the result computed
      * here).

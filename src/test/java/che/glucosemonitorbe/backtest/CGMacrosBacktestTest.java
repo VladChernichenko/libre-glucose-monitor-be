@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Because these subjects have no exogenous insulin, {@code insulinEffect=0}
  * throughout. The test isolates the gut absorption / glucose distribution model.
- * Endogenous insulin response means we systematically over-predict at ≥90 min;
+ * Endogenous insulin response means we systematically over-predict at >=90 min;
  * the +30/+60 min windows are the most informative.</p>
  *
  * <p>Skipped automatically when the CGMacros directory does not exist,
@@ -39,13 +39,13 @@ class CGMacrosBacktestTest {
 
     private static final int[] HORIZONS_MIN = {30, 60, 90, 120};
 
-    // ── Main test ─────────────────────────────────────────────────────────────
+    // -- Main test -------------------------------------------------------------
 
     @Test
     @DisplayName("CGMacros postprandial accuracy: gut-model vs real CGM, no-insulin subjects")
     void cgMacrosPostprandialAccuracy() throws IOException {
         Assumptions.assumeTrue(Files.isDirectory(DATA_DIR),
-                "CGMacros dataset not found at " + DATA_DIR + " — skipping");
+                "CGMacros dataset not found at " + DATA_DIR + " - skipping");
 
         Map<Integer, Double> weightKgBySubject = loadBioWeights();
         HovorkaOdeSolver solver = new HovorkaOdeSolver(new DallaManGutModel());
@@ -136,7 +136,7 @@ class CGMacrosBacktestTest {
         assertThat(clarkeAB30).as("Clarke A+B% at +30 min").isGreaterThan(50.0);
     }
 
-    // ── Synthetic T1D IOB test ─────────────────────────────────────────────────
+    // -- Synthetic T1D IOB test -------------------------------------------------
 
     /**
      * Synthetic type-1 diabetes scenario: 60 g carb meal + meal bolus via the OpenAPS
@@ -154,7 +154,7 @@ class CGMacrosBacktestTest {
     @DisplayName("Synthetic T1D: meal bolus via OpenAPS IOB curve suppresses postprandial rise")
     void syntheticT1d_mealBolus_suppressesPostprandialRise() {
         double weightKg   = 70.0;
-        double isf        = 2.5;   // mmol/L per unit — typical T1D
+        double isf        = 2.5;   // mmol/L per unit - typical T1D
         double cr         = 10.0;  // g carbs per unit
         double diaMin     = 270.0; // 4.5 h duration
         double peakMin    = 75.0;  // Fiasp-like peak
@@ -208,20 +208,20 @@ class CGMacrosBacktestTest {
                 peakIns,   gIns120, minIns);
 
         // T1D with no insulin: gut absorption alone drives glucose into hyperglycaemia
-        assertThat(peakNoIns).as("peak glucose — no insulin").isGreaterThan(9.0);
+        assertThat(peakNoIns).as("peak glucose - no insulin").isGreaterThan(9.0);
 
         // Bolus must suppress the peak
-        assertThat(peakIns).as("peak glucose — with bolus").isLessThan(peakNoIns);
+        assertThat(peakIns).as("peak glucose - with bolus").isLessThan(peakNoIns);
 
         // Without counterregulatory hormones the model correctly shows late-phase hypo risk
         // from a CR=10 bolus (slightly aggressive). Guard > 2.0 catches sign errors / runaway.
-        assertThat(minIns).as("minimum glucose — with bolus").isGreaterThan(2.0);
+        assertThat(minIns).as("minimum glucose - with bolus").isGreaterThan(2.0);
 
         // At +2 h the insulin-treated trajectory must be clearly lower
-        assertThat(gIns120).as("glucose at +120 min — with bolus").isLessThan(gNoIns120);
+        assertThat(gIns120).as("glucose at +120 min - with bolus").isLessThan(gNoIns120);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // -- Helpers ---------------------------------------------------------------
 
     private static HovorkaParameters buildParams(double weightKg, double tMaxG) {
         double vG  = HovorkaParameters.VG_PER_KG * weightKg;
@@ -360,7 +360,7 @@ class CGMacrosBacktestTest {
                 "═══════════════════════════════════════════════════%n");
     }
 
-    // ── IOB helpers (OpenAPS exponential model) ──────────────────────────────
+    // -- IOB helpers (OpenAPS exponential model) ------------------------------
 
     private static double iobEffect(double units, int minsElapsed,
                                     double diaMin, double peakMin,
@@ -383,7 +383,7 @@ class CGMacrosBacktestTest {
         return Math.max(0.0, Math.min(units, units * (1.0 - s * (1.0 - a) * bracket)));
     }
 
-    // ── Data row ─────────────────────────────────────────────────────────────
+    // -- Data row -------------------------------------------------------------
 
     private static final class Row {
         LocalDateTime timestamp;

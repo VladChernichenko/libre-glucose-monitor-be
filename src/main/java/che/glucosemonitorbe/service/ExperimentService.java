@@ -40,9 +40,9 @@ public class ExperimentService {
      */
     static int minElapsedMinutes(Type type) {
         return switch (type) {
-            case BASAL_CHECK   -> 180;  // 3 h floor; protocol target 4–6 h
+            case BASAL_CHECK   -> 180;  // 3 h floor; protocol target 4-6 h
             case CARB_FACTOR   -> 60;
-            case ISF_ONE_UNIT  -> 180;  // 3 h floor; protocol target 4–5 h
+            case ISF_ONE_UNIT  -> 180;  // 3 h floor; protocol target 4-5 h
         };
     }
 
@@ -54,7 +54,7 @@ public class ExperimentService {
     /** Owns the single shared COB/IOB calculation used by the dashboard, so both surfaces agree. */
     private final GlucoseCalculationsService calculationsService;
 
-    // ── Background check ─────────────────────────────────────────────────────
+    // -- Background check -----------------------------------------------------
 
     public BackgroundStatusDTO checkBackground(UUID userId, String clientTimestamp) {
         LocalDateTime now = resolveNow(clientTimestamp);
@@ -94,7 +94,7 @@ public class ExperimentService {
      * Resolves "now" for comparing against note timestamps, which the client stores as
      * naive local time matching the user's device clock/timezone. The server's own
      * {@code LocalDateTime.now()} runs in the deployment's timezone (e.g. UTC), which can
-     * be hours away from the user's — using it here would make recent notes appear to be
+     * be hours away from the user's - using it here would make recent notes appear to be
      * "in the future" and silently drop out of the COB/IOB window. Falls back to server
      * time only if the client didn't send one or it fails to parse.
      */
@@ -124,7 +124,7 @@ public class ExperimentService {
         return 600;
     }
 
-    // ── Available experiments ─────────────────────────────────────────────────
+    // -- Available experiments -------------------------------------------------
 
     @Transactional(readOnly = true)
     public List<AvailableExperimentDTO> getAvailableExperiments(UUID userId) {
@@ -132,21 +132,21 @@ public class ExperimentService {
 
         List<AvailableExperimentDTO> result = new ArrayList<>();
 
-        // Basal Check — always available
+        // Basal Check - always available
         result.add(buildAvailable(userId, Type.BASAL_CHECK,
                 "Basal Rate Check",
                 "Verify your background insulin keeps glucose stable without food or bolus. Required before ISF and Carb tests.",
                 360, true, null));
 
-        // Carb Factor — requires stable basal check
+        // Carb Factor - requires stable basal check
         result.add(buildAvailable(userId, Type.CARB_FACTOR,
                 "Carb Factor Test",
                 "Eat 15g of fast-acting carbs (no insulin) and measure how much your glucose rises. Determines your personal carb ratio.",
                 90, basalOk, basalOk ? null : "Complete a successful Basal Rate Check first"));
 
-        // ISF 1-Unit — requires stable basal check
+        // ISF 1-Unit - requires stable basal check
         result.add(buildAvailable(userId, Type.ISF_ONE_UNIT,
-                "ISF — 1-Unit Test",
+                "ISF - 1-Unit Test",
                 "Inject 1 unit of rapid insulin during stable hyperglycaemia and measure the drop. Determines your Insulin Sensitivity Factor.",
                 300, basalOk, basalOk ? null : "Complete a successful Basal Rate Check first"));
 
@@ -171,7 +171,7 @@ public class ExperimentService {
                 .build();
     }
 
-    // ── Start ─────────────────────────────────────────────────────────────────
+    // -- Start -----------------------------------------------------------------
 
     public ExperimentDTO startExperiment(UUID userId, StartExperimentRequest req, String clientTimestamp) {
         // Gate 1: background must be clean
@@ -207,7 +207,7 @@ public class ExperimentService {
         return toDTO(exp);
     }
 
-    // ── Record reading ────────────────────────────────────────────────────────
+    // -- Record reading --------------------------------------------------------
 
     public ExperimentDTO recordReading(UUID experimentId, UUID userId, RecordReadingRequest req) {
         Experiment exp = getExperimentForUser(experimentId, userId);
@@ -227,7 +227,7 @@ public class ExperimentService {
         return toDTO(exp);
     }
 
-    // ── Complete ──────────────────────────────────────────────────────────────
+    // -- Complete --------------------------------------------------------------
 
     public ExperimentResultDTO completeExperiment(UUID experimentId, UUID userId, String clientTimestamp) {
         Experiment exp = getExperimentForUser(experimentId, userId);
@@ -247,7 +247,7 @@ public class ExperimentService {
         if (elapsed < minMinutes) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.format(
                     "%s requires a minimum of %d minutes elapsed before completion (current: %d min). "
-                    + "Premature results are not clinically meaningful — keep the experiment running.",
+                    + "Premature results are not clinically meaningful - keep the experiment running.",
                     exp.getType(), minMinutes, elapsed));
         }
 
@@ -269,7 +269,7 @@ public class ExperimentService {
 
     /**
      * Rejects completion if rapid-acting insulin or carbs were logged after the experiment
-     * started — such notes invalidate the result (active bolus/food on board confounds the
+     * started - such notes invalidate the result (active bolus/food on board confounds the
      * glucose response being measured). Mirrors the iOS client's auto-abandon check, but as a
      * server-side gate so a stale/killed app can't bypass it and complete on bad data.
      */
@@ -283,13 +283,13 @@ public class ExperimentService {
             if (note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.format(
                         "%.1fu of rapid-acting insulin was recorded during the experiment. "
-                        + "This invalidates the result — abandon and start a new experiment.",
+                        + "This invalidates the result - abandon and start a new experiment.",
                         note.getInsulin()));
             }
             if (note.getCarbs() != null && note.getCarbs() > 0) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.format(
                         "%.0fg of carbs were recorded during the experiment. "
-                        + "This invalidates the result — abandon and start a new experiment.",
+                        + "This invalidates the result - abandon and start a new experiment.",
                         note.getCarbs()));
             }
         }
@@ -447,7 +447,7 @@ public class ExperimentService {
                 .build();
     }
 
-    // ── Get / List ────────────────────────────────────────────────────────────
+    // -- Get / List ------------------------------------------------------------
 
     @Transactional(readOnly = true)
     public ExperimentDTO getExperiment(UUID experimentId, UUID userId) {
@@ -460,7 +460,7 @@ public class ExperimentService {
                 .stream().map(this::toDTO).toList();
     }
 
-    // ── Abandon ───────────────────────────────────────────────────────────────
+    // -- Abandon ---------------------------------------------------------------
 
     public ExperimentDTO abandonExperiment(UUID experimentId, UUID userId) {
         Experiment exp = getExperimentForUser(experimentId, userId);
@@ -472,7 +472,7 @@ public class ExperimentService {
         return toDTO(experimentRepository.save(exp));
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // -- Helpers ---------------------------------------------------------------
 
     private Experiment getExperimentForUser(UUID experimentId, UUID userId) {
         return experimentRepository.findByIdAndUserId(experimentId, userId)

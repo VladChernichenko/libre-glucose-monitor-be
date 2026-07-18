@@ -62,7 +62,7 @@ public class NightscoutController {
         }
 
         try {
-            // The cache in NightScoutIntegration returns a shared list — copy before mutating so
+            // The cache in NightScoutIntegration returns a shared list - copy before mutating so
             // per-request timezone offsets don't corrupt the cached value for the next caller.
             List<NightscoutEntryDto> cached = nightScoutIntegration.getGlucoseEntries(userId, count);
             List<NightscoutEntryDto> entries = copyEntries(cached);

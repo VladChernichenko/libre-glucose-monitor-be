@@ -51,7 +51,7 @@ public class NightscoutGlucoseSyncScheduler {
     @Value("${app.glucose-sync.slow-interval-minutes:60}")
     private long slowIntervalMinutes;
 
-    /** BE-P1-1 fix: bounded parallel executor — same pattern as LibreLinkUpGlucoseSyncScheduler. */
+    /** BE-P1-1 fix: bounded parallel executor - same pattern as LibreLinkUpGlucoseSyncScheduler. */
     private static final int MAX_CONCURRENT_SYNCS = 8;
     private final ExecutorService syncExecutor = Executors.newFixedThreadPool(
             MAX_CONCURRENT_SYNCS,

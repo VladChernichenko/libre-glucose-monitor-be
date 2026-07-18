@@ -57,10 +57,10 @@ class AuthControllerBugTest {
         SecurityContextHolder.clearContext();
     }
 
-    // ── A2: register must return 201 Created ─────────────────────────────────
+    // -- A2: register must return 201 Created ---------------------------------
 
     /**
-     * BUG: A2 — AuthController.register calls ResponseEntity.ok() which returns
+     * BUG: A2 - AuthController.register calls ResponseEntity.ok() which returns
      * HTTP 200.  REST conventions require HTTP 201 Created for resource creation.
      * This test FAILS until the controller is changed to use
      * ResponseEntity.status(HttpStatus.CREATED).body(response).
@@ -81,17 +81,17 @@ class AuthControllerBugTest {
         registerRequest.setFullName("Test User");
         registerRequest.setPassword("password123");
 
-        // BUG: current code returns 200; this assertion expects 201 → FAILS
+        // BUG: current code returns 200; this assertion expects 201 -> FAILS
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(registerRequest)))
                 .andExpect(status().isCreated());
     }
 
-    // ── A3: logout must return error status when service returns failure ──────
+    // -- A3: logout must return error status when service returns failure ------
 
     /**
-     * BUG: A3 — AuthController.logout wraps the service response in
+     * BUG: A3 - AuthController.logout wraps the service response in
      * ResponseEntity.ok() unconditionally.  When the service returns
      * LogoutResponse.error(...) (success=false), the HTTP status must reflect
      * that failure (e.g. 400 or 401), not 200 OK.
@@ -106,7 +106,7 @@ class AuthControllerBugTest {
         LogoutRequest logoutRequest = new LogoutRequest();
         logoutRequest.setAccessToken("invalid-access-token");
 
-        // BUG: current code returns 200 regardless of success flag → this FAILS
+        // BUG: current code returns 200 regardless of success flag -> this FAILS
         mockMvc.perform(post("/api/auth/logout")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(logoutRequest)))
@@ -114,7 +114,7 @@ class AuthControllerBugTest {
     }
 
     /**
-     * A3 companion — on a successful logout, HTTP 200 is correct.
+     * A3 companion - on a successful logout, HTTP 200 is correct.
      * This regression test ensures the success path is not broken when A3 is fixed.
      */
     @Test

@@ -20,11 +20,11 @@ public class FeatureToggleConfig {
     // Global toggle to switch between frontend and backend
     private boolean backendModeEnabled = false;
 
-    // Experiments — ISF / Carb Ratio determination (on by default)
+    // Experiments - ISF / Carb Ratio determination (on by default)
     private boolean experimentsEnabled = true;
 
     // Hovorka 2-compartment ODE model (replaces OpenAPS exponential path when enabled)
-    // Off by default — toggle on per-environment after validation
+    // Off by default - toggle on per-environment after validation
     private boolean hovorkaModelEnabled = false;
 
     // Per-user "digital twin": nightly ML calibration of the prediction model from
@@ -43,7 +43,7 @@ public class FeatureToggleConfig {
     // prediction/detector/calibration. Enabled per-environment in application.yml.
     private boolean activityLoggingEnabled = false;
 
-    // Phase 2–4 integration gates (all off by default — toggle on per feature-flag)
+    // Phase 2-4 integration gates (all off by default - toggle on per feature-flag)
     private boolean foodPhotoAnalysisEnabled = false;
     private boolean arSpatialEnabled = false;
     private boolean cgmServiceExternal = false;

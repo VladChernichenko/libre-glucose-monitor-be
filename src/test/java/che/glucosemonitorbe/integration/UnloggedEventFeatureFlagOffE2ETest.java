@@ -88,7 +88,7 @@ class UnloggedEventFeatureFlagOffE2ETest {
         assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode());
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private HttpHeaders registerAndLogin() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);

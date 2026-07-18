@@ -85,7 +85,7 @@ public class UserInsulinPreferencesService {
         entity.setUserId(userId);
         entity.setRapidInsulin(rapid);
         entity.setLongActingInsulin(basal);
-        // null → leave unchanged; "" → clear; "HH:mm" → set. Lets older clients omit the field safely.
+        // null -> leave unchanged; "" -> clear; "HH:mm" -> set. Lets older clients omit the field safely.
         if (request.getLongActingInjectionTime() != null) {
             entity.setLongActingInjectionTime(parseInjectionTime(request.getLongActingInjectionTime()));
         }

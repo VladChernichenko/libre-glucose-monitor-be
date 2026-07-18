@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-@Tag(name = "Insulin Catalog", description = "Insulin product catalog — rapid, long-acting, mixed types")
+@Tag(name = "Insulin Catalog", description = "Insulin product catalog - rapid, long-acting, mixed types")
 @RestController
 @RequestMapping("/api/insulin-catalog")
 @RequiredArgsConstructor

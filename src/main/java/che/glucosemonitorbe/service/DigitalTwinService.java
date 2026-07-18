@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class DigitalTwinService {
 
-    /** Cache lifetime — long enough to spare the hot path, short enough that a recalibration
+    /** Cache lifetime - long enough to spare the hot path, short enough that a recalibration
      *  (which also calls {@link #invalidate}) shows up promptly. */
     private static final long CACHE_TTL_MS = 60_000;
 
@@ -58,7 +58,7 @@ public class DigitalTwinService {
 
     /**
      * The per-horizon σ curve for this user's prediction band. Uses the personally-fitted spread when
-     * an applied twin exists, otherwise the population prior — so predictions always carry a sensible
+     * an applied twin exists, otherwise the population prior - so predictions always carry a sensible
      * band, even before the user has been calibrated.
      */
     public PredictionUncertaintyModel activeUncertainty(UUID userId) {
@@ -67,12 +67,12 @@ public class DigitalTwinService {
         return c.applied() ? c.uncertainty() : PredictionUncertaintyModel.populationDefault();
     }
 
-    /** Drop the cached twin for a user — call right after persisting a fresh calibration. */
+    /** Drop the cached twin for a user - call right after persisting a fresh calibration. */
     public void invalidate(UUID userId) {
         cache.remove(userId);
     }
 
-    // ── internals ───────────────────────────────────────────────────────────────
+    // -- internals ---------------------------------------------------------------
 
     private Cached resolve(UUID userId) {
         Cached cached = cache.get(userId);

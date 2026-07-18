@@ -27,12 +27,12 @@ import java.util.UUID;
  *
  * <h3>Scenarios detected</h3>
  * <ul>
- *   <li>Predicted hypo — path point &lt; 3.9 within 60 min</li>
- *   <li>Rapid drop — ROC &lt; −0.07 for ≥ 2 consecutive readings</li>
- *   <li>Unlogged meal — ROC &gt; +0.10 &amp; COB=0 &amp; no note 45 min</li>
- *   <li>Predicted hyper — path &gt; 12 within 2h &amp; IOB &lt; 0.5u</li>
+ *   <li>Predicted hypo - path point &lt; 3.9 within 60 min</li>
+ *   <li>Rapid drop - ROC &lt; −0.07 for >= 2 consecutive readings</li>
+ *   <li>Unlogged meal - ROC &gt; +0.10 &amp; COB=0 &amp; no note 45 min</li>
+ *   <li>Predicted hyper - path &gt; 12 within 2h &amp; IOB &lt; 0.5u</li>
  * </ul>
- * Over-injection is NOT re-checked here — it fires immediately at note-save
+ * Over-injection is NOT re-checked here - it fires immediately at note-save
  * via {@link GlucoseAlertService#checkOverInjection}.
  */
 @Component
@@ -75,7 +75,7 @@ public class GlucoseAnomalyDetector {
         }
     }
 
-    // ── Per-user evaluation ───────────────────────────────────────────────────
+    // -- Per-user evaluation ---------------------------------------------------
 
     private void evaluateUser(UUID userId, String username) {
         LocalDateTime now = LocalDateTime.now();
@@ -91,7 +91,7 @@ public class GlucoseAnomalyDetector {
                 .toList();
 
         if (recentReadings.size() < MIN_READINGS_FOR_ROC) {
-            // Not enough data to compute a meaningful ROC — skip this cycle.
+            // Not enough data to compute a meaningful ROC - skip this cycle.
             return;
         }
 
@@ -111,7 +111,7 @@ public class GlucoseAnomalyDetector {
         alertService.evaluateAll(userId, username, currentGlucose, roc, minutesSinceLastMeal);
     }
 
-    // ── Rate-of-change computation ────────────────────────────────────────────
+    // -- Rate-of-change computation --------------------------------------------
 
     /**
      * Ordinary least-squares slope over the provided readings.

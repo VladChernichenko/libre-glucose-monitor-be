@@ -14,8 +14,8 @@ import java.util.function.Predicate;
  *
  * <pre>{@code   J(θ) = Σ_i ( G_model(t_i; θ) − G_real(t_i) )²  }</pre>
  *
- * <h3>Optimiser — robust Levenberg–Marquardt</h3>
- * <p>The fit uses {@link LmParameterFitter Levenberg–Marquardt} (Apache Commons Math) — the standard
+ * <h3>Optimiser - robust Levenberg-Marquardt</h3>
+ * <p>The fit uses {@link LmParameterFitter Levenberg-Marquardt} (Apache Commons Math) - the standard
  * choice for nonlinear least-squares over a physiological ODE. Because self-logged data is unreliable
  * (forgotten / mis-timed meals and boluses), a plain squared loss would chase those outliers, so the
  * fit is wrapped in <b>IRLS</b> (iteratively reweighted least squares) with <b>Huber</b> weights: large
@@ -26,20 +26,20 @@ import java.util.function.Predicate;
  *
  * <h3>Two-stage fit</h3>
  * <ol>
- *   <li><b>BASAL_CHECK</b> — EGP₀ (endogenous glucose production, {@code egpScale}) is identifiable
+ *   <li><b>BASAL_CHECK</b> - EGP₀ (endogenous glucose production, {@code egpScale}) is identifiable
  *       only away from meals, so it is fitted first on the <b>fasting</b> anchors alone, with insulin
  *       sensitivity and meal magnitude held neutral. Skipped (egpScale = 1.0) when there are too few
  *       fasting anchors to trust.</li>
- *   <li><b>Sensitivity / meal fit</b> — {@code isfScale} and {@code agScale} are then fitted over all
+ *   <li><b>Sensitivity / meal fit</b> - {@code isfScale} and {@code agScale} are then fitted over all
  *       anchors with EGP₀ fixed at the stage-1 value.</li>
  * </ol>
  *
  * <p>Finally a {@link ResidualBiasModel} and {@link PredictionUncertaintyModel} are fitted on what the
  * calibrated physiology leaves behind, and baseline vs. calibrated MAE are scored on the held-out
- * validation window — the twin only reports {@code improved} when it genuinely beats the un-calibrated
+ * validation window - the twin only reports {@code improved} when it genuinely beats the un-calibrated
  * model out-of-sample.</p>
  *
- * <p>No Spring/DB dependencies — it operates entirely on {@link AnchorSampleSource}s, which makes the
+ * <p>No Spring/DB dependencies - it operates entirely on {@link AnchorSampleSource}s, which makes the
  * learning logic unit-testable against synthetic data.</p>
  */
 public final class DigitalTwinCalibrator {
@@ -75,7 +75,7 @@ public final class DigitalTwinCalibrator {
             String confidence,      // HIGH | MEDIUM | LOW
             String status) {        // human-readable outcome / skip reason
 
-        /** Fractional out-of-sample improvement (0–1); 0 when baseline is unusable. */
+        /** Fractional out-of-sample improvement (0-1); 0 when baseline is unusable. */
         public double improvementFraction() {
             if (Double.isNaN(maeBaseline) || maeBaseline <= 0) return 0.0;
             return Math.max(0.0, (maeBaseline - maeCalibrated) / maeBaseline);
@@ -107,7 +107,7 @@ public final class DigitalTwinCalibrator {
             return notEnough(train.anchorCount());
         }
 
-        // 1) BASAL_CHECK — fit EGP₀ on fasting anchors only (identifiable without meal confounders).
+        // 1) BASAL_CHECK - fit EGP₀ on fasting anchors only (identifiable without meal confounders).
         double egpScale = fitEgpFromFasting(train);
 
         // 2) Fit ISF + meal-magnitude scales over all anchors, EGP₀ fixed at the BASAL_CHECK value.
@@ -145,16 +145,16 @@ public final class DigitalTwinCalibrator {
 
         String confidence = confidence(valSamples, improvement);
         String status = improved
-                ? String.format("calibrated: val MAE %.2f→%.2f mmol/L (%.0f%% better)",
+                ? String.format("calibrated: val MAE %.2f->%.2f mmol/L (%.0f%% better)",
                         maeBaseline, maeCalibrated, improvement * 100.0)
-                : String.format("no improvement out-of-sample (val MAE %.2f→%.2f, n=%d)",
+                : String.format("no improvement out-of-sample (val MAE %.2f->%.2f, n=%d)",
                         maeBaseline, maeCalibrated, valSamples);
 
         return new Result(scales, residual, uncertainty, maeBaseline, maeCalibrated,
                 trainCalibrated.size(), valSamples, improved, confidence, status);
     }
 
-    // ── BASAL_CHECK ──────────────────────────────────────────────────────────────
+    // -- BASAL_CHECK --------------------------------------------------------------
 
     /**
      * Fit {@code egpScale} on the fasting anchors alone. Returns 1.0 (neutral) when the window lacks
@@ -176,7 +176,7 @@ public final class DigitalTwinCalibrator {
         return TwinScales.clamp(egp[0]);
     }
 
-    // ── Robust Levenberg–Marquardt (IRLS + Huber) ────────────────────────────────
+    // -- Robust Levenberg-Marquardt (IRLS + Huber) --------------------------------
 
     /**
      * Robustly fit the parameter vector that {@code toScales} maps into a {@link TwinScales}, over the
@@ -230,7 +230,7 @@ public final class DigitalTwinCalibrator {
         return w;
     }
 
-    /** Robust spread estimate: 1.4826·MAD, floored so it never collapses to zero. */
+    /** Robust spread estimate: 1.4826*MAD, floored so it never collapses to zero. */
     private static double robustScale(double[] values) {
         if (values.length == 0) return 1.0;
         double median = median(values.clone());
@@ -260,7 +260,7 @@ public final class DigitalTwinCalibrator {
         return max;
     }
 
-    // ── Scoring helpers ──────────────────────────────────────────────────────────
+    // -- Scoring helpers ----------------------------------------------------------
 
     /** MAE with the residual correction applied to each predicted point. */
     private static double maeWithResidual(List<AnchorSample> samples, ResidualBiasModel residual) {

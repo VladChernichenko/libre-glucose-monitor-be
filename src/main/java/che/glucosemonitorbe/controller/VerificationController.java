@@ -52,7 +52,7 @@ public class VerificationController {
         return ResponseEntity.ok(verificationService.getEvents(userId(auth)));
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void requireFeature() {
         if (!featureToggleService.isEnabled("experiments-enabled")) {

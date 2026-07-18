@@ -13,8 +13,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByEmail(String email);
     boolean existsByUsername(String username);
 
-    /** Users whose email does not match {@code emailPattern} (SQL LIKE) — e.g. to exclude seed fixtures. */
+    /** Users whose email does not match {@code emailPattern} (SQL LIKE) - e.g. to exclude seed fixtures. */
     List<User> findByEmailNotLike(String emailPattern);
 }
-
 

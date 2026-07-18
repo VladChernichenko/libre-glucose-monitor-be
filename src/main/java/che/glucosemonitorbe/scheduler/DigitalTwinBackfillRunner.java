@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * One-shot backfill job: recalibrates every real (non-seed) user's digital twin with the current
- * calibrator (Levenberg–Marquardt + EGP₀) immediately, then exits. This is the on-demand trigger for
+ * calibrator (Levenberg-Marquardt + EGP₀) immediately, then exits. This is the on-demand trigger for
  * applying the twin to all users without waiting for the nightly {@link DigitalTwinCalibrationScheduler}.
  *
  * <p>Activated only under the {@code recalibrate-cli} Spring profile, so a normal application boot
@@ -35,7 +35,7 @@ public class DigitalTwinBackfillRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        log.info("Digital-twin backfill starting — recalibrating all real users (LM + EGP0)…");
+        log.info("Digital-twin backfill starting - recalibrating all real users (LM + EGP0)...");
         DigitalTwinCalibrationService.BatchSummary summary = calibrationService.calibrateAllRealUsers();
         log.info("Digital-twin backfill complete: {}", summary);
         int exitCode = SpringApplication.exit(context, () -> summary.failed() == 0 ? 0 : 1);

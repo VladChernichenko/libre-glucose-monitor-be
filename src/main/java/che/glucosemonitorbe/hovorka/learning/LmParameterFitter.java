@@ -13,7 +13,7 @@ import org.apache.commons.math3.linear.RealVector;
 import org.apache.commons.math3.util.Pair;
 
 /**
- * Levenberg–Marquardt (LM) nonlinear least-squares fitter for the digital-twin's inverse-dynamics
+ * Levenberg-Marquardt (LM) nonlinear least-squares fitter for the digital-twin's inverse-dynamics
  * parameter estimation. Wraps Apache Commons Math's {@link LevenbergMarquardtOptimizer} so the rest
  * of the calibration code can fit an arbitrary physiological parameter vector by minimising
  *
@@ -21,19 +21,19 @@ import org.apache.commons.math3.util.Pair;
  *
  * i.e. the squared error between the RK4-integrated Hovorka prediction and the real CGM trace at a
  * set of sample points. LM is the recommended optimiser for this class of problem: it interpolates
- * between Gauss–Newton (fast near the optimum) and gradient descent (robust far from it), which suits
+ * between Gauss-Newton (fast near the optimum) and gradient descent (robust far from it), which suits
  * the mild parameter coupling of a physiological ODE (insulin sensitivity, EGP₀, absorption time all
  * reshape the same post-meal curve).
  *
  * <h3>Derivatives</h3>
  * <p>The forward model is an ODE integration with no closed-form Jacobian, so ∂residual/∂θ is
  * approximated by forward finite differences. The number of residuals must be constant across
- * evaluations (it is — the sample set is fixed by the CGM/anchor grid, independent of θ).</p>
+ * evaluations (it is - the sample set is fixed by the CGM/anchor grid, independent of θ).</p>
  *
  * <h3>Hard clamping</h3>
  * <p>LM is unconstrained by construction. Physiological bounds (e.g. sensitivity or EGP₀ can never be
  * negative) are enforced as a {@link LeastSquaresBuilder#parameterValidator parameter validator} that
- * projects every trial θ back into {@code [lower, upper]} before the model is evaluated — the
+ * projects every trial θ back into {@code [lower, upper]} before the model is evaluated - the
  * "software clamping" the estimation must never violate.</p>
  *
  * <p>Pure math, no Spring/DB dependencies, so it is unit-testable against synthetic models.</p>
@@ -71,8 +71,8 @@ public final class LmParameterFitter {
      * Fit {@code model} starting from {@code start}, keeping every parameter within
      * {@code [lower[i], upper[i]]}.
      *
-     * @param model  residual function (θ → residual vector)
-     * @param start  initial parameter guess (e.g. all scales = 1.0 — the "warm start" toward physiology)
+     * @param model  residual function (θ -> residual vector)
+     * @param start  initial parameter guess (e.g. all scales = 1.0 - the "warm start" toward physiology)
      * @param lower  per-parameter lower bounds (hard clamp)
      * @param upper  per-parameter upper bounds (hard clamp)
      * @return the fitted parameters (already clamped) plus fit diagnostics
@@ -107,7 +107,7 @@ public final class LmParameterFitter {
         LeastSquaresProblem problem = new LeastSquaresBuilder()
                 .start(start0)
                 .model(jacobianModel)
-                .target(new double[residualCount])          // drive residuals → 0
+                .target(new double[residualCount])          // drive residuals -> 0
                 .lazyEvaluation(false)
                 .maxIterations(maxIterations)
                 .maxEvaluations(maxEvaluations)
@@ -120,7 +120,7 @@ public final class LmParameterFitter {
 
             double[] fitted = clampToBounds(opt.getPoint().toArray(), lower, upper);
             double rmse = opt.getRMS();
-            double cost = opt.getCost();                      // ½·Σ residual² in Commons Math
+            double cost = opt.getCost();                      // ½*Σ residual² in Commons Math
             return new Result(fitted, rmse, cost, opt.getIterations(), opt.getEvaluations());
         } catch (MaxCountExceededException e) {
             // LM could not converge within the iteration/evaluation budget (flat or ill-conditioned

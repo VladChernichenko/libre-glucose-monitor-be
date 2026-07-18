@@ -123,7 +123,7 @@ public class GlucoseCalculationsController {
                 "message", "Glucose calculations completed using backend service"
             ));
         } catch (RuntimeException e) {
-            // BUG A1 fix: RuntimeExceptions are server faults — let GlobalExceptionHandler
+            // BUG A1 fix: RuntimeExceptions are server faults - let GlobalExceptionHandler
             // map them to HTTP 500. Only catch checked / user-input exceptions as 400.
             throw e;
         } catch (Exception e) {

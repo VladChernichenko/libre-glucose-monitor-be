@@ -36,7 +36,7 @@ public class UserSettings {
     @Column(name = "max_cob_duration", nullable = false)
     private Integer maxCOBDuration = 240;
 
-    /** Body weight in kg — used for Hovorka model volume-of-distribution scaling (VG, VI).
+    /** Body weight in kg - used for Hovorka model volume-of-distribution scaling (VG, VI).
      *  NULL = population default 70 kg is applied automatically. */
     @Column(name = "body_weight_kg")
     private Double bodyWeightKg;

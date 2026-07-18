@@ -31,39 +31,39 @@ import java.util.*;
  *   <li>Pre-compute IOB activity rate for each future minute using the OpenAPS curve.</li>
  *   <li>Add future (prospective) meal and insulin events to timelines.</li>
  *   <li>Integrate the 4-variable ODE system with RK4 at 1-min resolution.</li>
- *   <li>Emit {@link PredictionPointDTO} every 5 min (0–4 h) or 10 min (4–8 h).</li>
+ *   <li>Emit {@link PredictionPointDTO} every 5 min (0-4 h) or 10 min (4-8 h).</li>
  * </ol>
  *
  * <h3>Insulin effect modelling</h3>
- * <p>Rather than tracking plasma insulin concentration through S1→S2→I_plasma compartments,
+ * <p>Rather than tracking plasma insulin concentration through S1->S2->I_plasma compartments,
  * we compute the bolus IOB activity rate directly from the proven OpenAPS exponential curve:</p>
  * <pre>
  *   iobActivityRate(t) = max(0, IOB(t) - IOB(t+1))    [units/min]
  *   insulinEffect(t)   = ISF × VG × iobActivityRate(t) [mmol/min]
  * </pre>
  * <p>This preserves exact IOB pharmacokinetics while avoiding unit-conversion errors in
- * the full Hovorka subcutaneous absorption chain (S1→S2→I_plasma).</p>
+ * the full Hovorka subcutaneous absorption chain (S1->S2->I_plasma).</p>
  *
  * <h3>EGP modelling</h3>
  * <p>Net EGP is calibrated by {@link BasalInsulinResolver} from the user's long-acting notes.
  * At steady state with therapeutic basal, egpNet = F01 (hepatic output = brain/RBC uptake).
- * If basal wanes, egpNet rises above F01 → fasting hyperglycaemia in the prediction.</p>
+ * If basal wanes, egpNet rises above F01 -> fasting hyperglycaemia in the prediction.</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class HovorkaGlucosePredictionService {
 
-    // ── Emission schedule (matches existing OpenAPS path) ─────────────────────
+    // -- Emission schedule (matches existing OpenAPS path) ---------------------
     private static final int DENSE_STEP_MIN   = 5;
     private static final int SPARSE_STEP_MIN  = 10;
     private static final int DENSE_LIMIT_MIN  = 240;
 
-    // ── Confidence band ───────────────────────────────────────────────────────
+    // -- Confidence band -------------------------------------------------------
     /** Confidence covered by [lower, upper]. Prediction is probabilistic, so each point ships a band
-     *  rather than a bare line; the half-width is z·σ(horizon) from the digital-twin uncertainty model. */
+     *  rather than a bare line; the half-width is z*σ(horizon) from the digital-twin uncertainty model. */
     private static final double BAND_CONFIDENCE = 0.90;
-    /** Normal quantile for {@link #BAND_CONFIDENCE} (two-sided): 90% → 1.6449. */
+    /** Normal quantile for {@link #BAND_CONFIDENCE} (two-sided): 90% -> 1.6449. */
     private static final double BAND_Z          = 1.6449;
     private static final double G_MIN           = 1.0;
     private static final double G_MAX           = 25.0;
@@ -88,7 +88,7 @@ public class HovorkaGlucosePredictionService {
      * @param pastInsulinDoses       bolus doses from the last 8 h (for IOB curve)
      * @param longActingNotes        long-acting notes from the last 36 h (for EGP)
      * @param userId                 user UUID
-     * @param pathMinutes            total prediction horizon [min] — 240 or 480
+     * @param pathMinutes            total prediction horizon [min] - 240 or 480
      * @return                       list of prediction points, emitted every 5/10 min
      */
     public List<PredictionPointDTO> buildPredictionPath(
@@ -230,7 +230,7 @@ public class HovorkaGlucosePredictionService {
     }
 
     /**
-     * Core ODE integration — shared by both public overloads.
+     * Core ODE integration - shared by both public overloads.
      */
     private List<PredictionPointDTO> buildWithParams(
             HovorkaParameters p,
@@ -245,14 +245,14 @@ public class HovorkaGlucosePredictionService {
             int pathMinutes,
             ActivityProvider activityProvider) {
 
-        // ── State warm-up ─────────────────────────────────────────────────────
+        // -- State warm-up -----------------------------------------------------
         HovorkaState state = buildWarmState(currentGlucose, pastCarbsEntries, currentTime, p);
 
-        // ── EGP net from long-acting insulin ──────────────────────────────────
+        // -- EGP net from long-acting insulin ----------------------------------
         double x3Basal  = basalResolver.resolveEgpSuppression(longActingNotes, currentTime);
         double egp0Abs  = HovorkaParameters.EGP0_PER_KG * p.weightKg();
         double egpNow   = basalResolver.netEgp(p.f01(), egp0Abs, x3Basal);
-        // No basal logged → assume fasting steady state (T1D on continuous unlogged background basal).
+        // No basal logged -> assume fasting steady state (T1D on continuous unlogged background basal).
         // Without this guard, egpNow = EGP0 >> f01 and glucose rises ~9 mmol/L in 4 h with no COB/IOB.
         if (longActingNotes == null || longActingNotes.isEmpty()) {
             egpNow = p.f01();
@@ -262,25 +262,25 @@ public class HovorkaGlucosePredictionService {
                 p.vG(), p.f01(), egpNow, p.k12(), p.k21(),
                 p.tMaxG(), p.aG(), p.isf(), p.weightKg());
 
-        // ── Pre-compute per-dose IOB timelines, each tagged with the ISF that ──
-        //    was in effect when that dose was administered ────────────────────
+        // -- Pre-compute per-dose IOB timelines, each tagged with the ISF that --
+        //    was in effect when that dose was administered --------------------
         List<DoseActivity> doseActivities = buildDoseActivities(pastInsulinDoses, currentTime,
                 pathMinutes, rapidIob, settings, pAdj.isf());
 
-        // ── Future carb timeline (prospective notes already in pastCarbsEntries
-        //    with future timestamps — carbs at t ≤ now were in the warm-up) ───
+        // -- Future carb timeline (prospective notes already in pastCarbsEntries
+        //    with future timestamps - carbs at t <= now were in the warm-up) ---
         Map<Integer, Double> futureCarbs = buildFutureCarbTimeline(
                 pastCarbsEntries, currentTime, pAdj);
 
-        // ── Integration loop (1-min steps) ───────────────────────────────────
-        // Pre-compute effective K_ABS once — same tMaxG for the whole prediction.
+        // -- Integration loop (1-min steps) -----------------------------------
+        // Pre-compute effective K_ABS once - same tMaxG for the whole prediction.
         double kAbsEff = DallaManGutModel.effectiveKAbs(pAdj.tMaxG());
 
         List<PredictionPointDTO> points = new ArrayList<>();
         int nextEmit = DENSE_STEP_MIN;
 
-        // ── Activity modulation (a(t) → insulin-sensitivity amplification + insulin-independent
-        //    uptake). Inert with the NONE provider — that path is bit-identical to the base model. ──
+        // -- Activity modulation (a(t) -> insulin-sensitivity amplification + insulin-independent
+        //    uptake). Inert with the NONE provider - that path is bit-identical to the base model. --
         boolean hasActivity = activityProvider != ActivityProvider.NONE;
         ActivityModulation activity = new ActivityModulation();
         if (hasActivity) {
@@ -295,7 +295,7 @@ public class HovorkaGlucosePredictionService {
             // active doses. effectiveInsulinVolume = 2×VG corrects for the 2-compartment
             // distribution factor (see HovorkaParameters.effectiveInsulinVolume() for
             // derivation). Each dose's ISF was resolved once, from the time the dose was
-            // administered — a manual isfBreakfast/isfLunch/isfDinner override applies to a
+            // administered - a manual isfBreakfast/isfLunch/isfDinner override applies to a
             // dose's entire activity curve if the dose was given in that window, even once
             // most of its activity plays out after the window ends (e.g. a dinner-time
             // correction bolus peaking after 22:00 still uses isfDinner).
@@ -303,7 +303,7 @@ public class HovorkaGlucosePredictionService {
             for (DoseActivity dose : doseActivities) {
                 // IOB activity rate: how many units/min this dose is "working" during the
                 // step that advances state from t=now+(min-1) to t=now+min, i.e. the IOB
-                // decay during [min-1, min] — NOT [min, min+1].
+                // decay during [min-1, min] - NOT [min, min+1].
                 double iobActivityRate = iobActivityRate(dose.iobTimeline(), min - 1);
                 insulinEffect += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
             }
@@ -331,8 +331,8 @@ public class HovorkaGlucosePredictionService {
                 double carbEffect  = gutModel.ra(state.qgut(), kAbsEff) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
-                // Probabilistic band: predicted ± z·σ(horizon), σ from the digital-twin uncertainty
-                // model (personal when calibrated, else population prior; 0 → no band during replay).
+                // Probabilistic band: predicted ± z*σ(horizon), σ from the digital-twin uncertainty
+                // model (personal when calibrated, else population prior; 0 -> no band during replay).
                 double sd = residualProvider.uncertaintySdMmol(userId, min);
                 double half = BAND_Z * sd;
 
@@ -357,14 +357,14 @@ public class HovorkaGlucosePredictionService {
         return points;
     }
 
-    // ── State warm-up ─────────────────────────────────────────────────────────
+    // -- State warm-up ---------------------------------------------------------
 
     /**
      * Initialises the extended state reflecting the current physiological state.
      *
      * <ul>
-     *   <li>Q1, Q2 — from current CGM glucose (steady-state approximation).</li>
-     *   <li>Qsto1, Qsto2, Qgut — by replaying each past meal through the
+     *   <li>Q1, Q2 - from current CGM glucose (steady-state approximation).</li>
+     *   <li>Qsto1, Qsto2, Qgut - by replaying each past meal through the
      *       Dalla Man gut ODE up to "now". This gives accurate nonlinear
      *       absorption state without shortcuts.</li>
      * </ul>
@@ -381,9 +381,9 @@ public class HovorkaGlucosePredictionService {
         // so a meal's Qgut carries over consistently across the warm-up/forward boundary.
         double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
 
-        // Collect past meals (delivered before "now") as age-in-minutes → carb mmol.
-        // We replay ALL of them through ONE shared gut chain in chronological order — not
-        // isolated per-meal chains — so the k_empt D reference is refreshed to the stomach
+        // Collect past meals (delivered before "now") as age-in-minutes -> carb mmol.
+        // We replay ALL of them through ONE shared gut chain in chronological order - not
+        // isolated per-meal chains - so the k_empt D reference is refreshed to the stomach
         // load at each ingestion exactly like HovorkaOdeSolver.step. This makes stacked
         // history meals (e.g. snack then dinner) carry the same emptying dynamics into the
         // forward integration as the forward path itself, and keeps a single fresh meal
@@ -432,7 +432,7 @@ public class HovorkaGlucosePredictionService {
         return warm;
     }
 
-    // ── Per-dose IOB timelines ───────────────────────────────────────────────
+    // -- Per-dose IOB timelines -----------------------------------------------
 
     /**
      * A single insulin dose's IOB [units] timeline (index 0 = current time, index m =
@@ -464,7 +464,7 @@ public class HovorkaGlucosePredictionService {
             for (int m = 0; m < size; m++) {
                 // Elapsed time since this dose at prediction step m. For past doses
                 // (minsAgoDose > 0), more time has passed by step m, so IOB must keep
-                // decaying — NOT fold back toward the full dose. For prospective doses
+                // decaying - NOT fold back toward the full dose. For prospective doses
                 // (minsAgoDose < 0), this is negative until m reaches the delivery
                 // minute; iobOpenApsExponential returns 0 for negative input.
                 double minsAgoAtStep = minsAgoDose + m;
@@ -503,7 +503,7 @@ public class HovorkaGlucosePredictionService {
     }
 
     /**
-     * IOB activity rate at minute m [units/min] — the rate at which IOB is being consumed.
+     * IOB activity rate at minute m [units/min] - the rate at which IOB is being consumed.
      * Computed as a forward difference: max(0, IOB[m] - IOB[m+1]).
      */
     private double iobActivityRate(double[] iobTimeline, int m) {
@@ -511,10 +511,10 @@ public class HovorkaGlucosePredictionService {
         return Math.max(0.0, iobTimeline[m] - iobTimeline[m + 1]);
     }
 
-    // ── Future carb timeline ──────────────────────────────────────────────────
+    // -- Future carb timeline --------------------------------------------------
 
     /**
-     * Builds a map of minute → carb mmol for future events only.
+     * Builds a map of minute -> carb mmol for future events only.
      * Past events (minsAgo > 0) are already captured in the warm-up.
      */
     private Map<Integer, Double> buildFutureCarbTimeline(
@@ -526,11 +526,11 @@ public class HovorkaGlucosePredictionService {
         for (CarbsEntry entry : carbsEntries) {
             if (entry.getTimestamp() == null) continue;
             long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
-            if (minsAgo > 0) continue; // past — captured in warm-up
+            if (minsAgo > 0) continue; // past - captured in warm-up
 
             // Future or current event: minute = |minsAgo|.
             // Clamp to 1: minsAgo=0 (meal logged at exactly "now") must still enter the ODE loop,
-            // which starts at min=1 — storing at key=0 would cause the meal to be silently dropped.
+            // which starts at min=1 - storing at key=0 would cause the meal to be silently dropped.
             int futureMin = Math.max(1, (int) Math.abs(minsAgo));
             double carbMmol = toCarbMmol(entry, p);
             if (carbMmol > 0) {
@@ -559,7 +559,7 @@ public class HovorkaGlucosePredictionService {
         return entry.getCarbs() * p.aG() / 0.18;
     }
 
-    /** Round to 1 decimal place [mmol/L] — matches the predictedGlucose precision. */
+    /** Round to 1 decimal place [mmol/L] - matches the predictedGlucose precision. */
     private static double round1(double v) {
         return Math.round(v * 10.0) / 10.0;
     }

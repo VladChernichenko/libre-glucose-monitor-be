@@ -86,7 +86,7 @@ public class LlmGatewayService {
             } catch (Exception e) {
                 log.warn("[Ollama] sync/json call failed, falling back. reason={}{}", e.getMessage(),
                         e.getMessage() != null && e.getMessage().contains("401")
-                                ? " — hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
+                                ? " - hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
             }
         }
 
@@ -133,7 +133,7 @@ public class LlmGatewayService {
             } catch (Exception e) {
                 log.warn("[Ollama] stream/json call failed, falling back. reason={}{}", e.getMessage(),
                         e.getMessage() != null && e.getMessage().contains("401")
-                                ? " — hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
+                                ? " - hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
             }
         }
 
@@ -232,7 +232,7 @@ public class LlmGatewayService {
             } catch (Exception e) {
                 log.warn("[Ollama] stream/markdown call failed, falling back. reason={}{}", e.getMessage(),
                         e.getMessage() != null && e.getMessage().contains("401")
-                                ? " — hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
+                                ? " - hint: OLLAMA_API_KEY is set but local Ollama does not require auth; unset it or leave it blank" : "");
             }
         }
 

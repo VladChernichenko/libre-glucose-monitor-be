@@ -7,14 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests for the Levenberg–Marquardt fitter against synthetic models — no ODE/DB needed.
+ * Unit tests for the Levenberg-Marquardt fitter against synthetic models - no ODE/DB needed.
  */
 class LmParameterFitterTest {
 
     private final LmParameterFitter fitter = new LmParameterFitter();
 
     @Test
-    @DisplayName("recovers the parameters of a nonlinear model y = a·exp(b·x) from clean data")
+    @DisplayName("recovers the parameters of a nonlinear model y = a*exp(b*x) from clean data")
     void recoversNonlinearParameters() {
         double trueA = 2.5, trueB = -0.35;
         double[] xs = {0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0};
@@ -72,8 +72,8 @@ class LmParameterFitterTest {
                 new double[]{Double.NaN, 3.0, -7.0},
                 new double[]{0.5, 0.5, 0.5},
                 new double[]{2.0, 2.0, 2.0});
-        assertEquals(1.25, out[0], 1e-9, "NaN → mid-bound");
-        assertEquals(2.0, out[1], 1e-9, "over-upper → upper");
-        assertEquals(0.5, out[2], 1e-9, "under-lower → lower");
+        assertEquals(1.25, out[0], 1e-9, "NaN -> mid-bound");
+        assertEquals(2.0, out[1], 1e-9, "over-upper -> upper");
+        assertEquals(0.5, out[2], 1e-9, "under-lower -> lower");
     }
 }

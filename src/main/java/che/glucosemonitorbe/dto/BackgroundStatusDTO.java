@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class BackgroundStatusDTO {
-    /** True if COB < 5g and IOB < 0.3u — safe to start an experiment.
+    /** True if COB < 5g and IOB < 0.3u - safe to start an experiment.
      *  @JsonProperty forces the key to "is_clean" so the iOS convertFromSnakeCase
      *  decoder finds it as "isClean" instead of the Lombok-generated "clean". */
     @JsonProperty("is_clean")

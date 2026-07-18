@@ -43,4 +43,3 @@ public class GlucoseCalculationsRequest {
      */
     private Double currentTrendMmolPerMin;
 }
-

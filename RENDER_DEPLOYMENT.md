@@ -10,7 +10,7 @@ This guide will help you deploy your Spring Boot application to Render with a Po
 ## Step 1: Create a PostgreSQL Database
 
 1. Go to your Render dashboard
-2. Click "New +" → "PostgreSQL"
+2. Click "New +" -> "PostgreSQL"
 3. Configure your database:
    - **Name**: `glucose-monitor-db`
    - **Database**: `glucose_monitor` (must be lowercase with underscores only)
@@ -30,7 +30,7 @@ Render PostgreSQL databases must follow these naming rules:
 
 ## Step 2: Deploy Your Web Service
 
-1. In your Render dashboard, click "New +" → "Web Service"
+1. In your Render dashboard, click "New +" -> "Web Service"
 2. Connect your Git repository
 3. Configure your service:
    - **Name**: `glucose-monitor-be`

@@ -36,9 +36,9 @@ class GutModelMealTypeTest {
                 45.0 / 1.68, 0.80, 2.2, weight);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Bug 1: stacked-meal D reference
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("adding carbs refreshes the k_empt D reference to the stomach load, not a cumulative sum")
@@ -47,14 +47,14 @@ class GutModelMealTypeTest {
         HovorkaState state = HovorkaState.steadyState(6.0, p);
 
         // First meal: 200 mmol onto an empty stomach. D = post-ingestion stomach load ≈ 200
-        // (D is fixed at ingestion; the state has since drained ~1 min, so D ≥ current stomach).
+        // (D is fixed at ingestion; the state has since drained ~1 min, so D >= current stomach).
         state = solver.step(state, p, 200.0, 0.0);
         assertThat(state.mealMmol())
                 .as("D after first meal = ingested load (≈200), not a cumulative sum")
                 .isCloseTo(200.0, within(1.0))
                 .isGreaterThanOrEqualTo(state.qsto1() + state.qsto2());
 
-        // Digest for 90 min with no new carbs — D stays fixed for this emptying episode.
+        // Digest for 90 min with no new carbs - D stays fixed for this emptying episode.
         for (int m = 0; m < 90; m++) state = solver.step(state, p, 0.0, 0.0);
         double residualStomach = state.qsto1() + state.qsto2();
 
@@ -80,8 +80,8 @@ class GutModelMealTypeTest {
         state = solver.step(state, p, 200.0, 0.0);
         double kemptAfterStack = gutModel.kEmpt(state.qsto1() + state.qsto2(), state.mealMmol());
 
-        // With the fix, D ≈ current stomach load → "full stomach" branch → near K_MAX.
-        // With the old cumulative D ≈ 400 and stomach ≈ 210, this was the mid-fill dip → near K_MIN.
+        // With the fix, D ≈ current stomach load -> "full stomach" branch -> near K_MAX.
+        // With the old cumulative D ≈ 400 and stomach ≈ 210, this was the mid-fill dip -> near K_MIN.
         assertThat(kemptAfterStack)
                 .as("stacked meal must empty near K_MAX=%.4f, not be throttled to K_MIN=%.4f",
                         DallaManGutModel.K_MAX, DallaManGutModel.K_MIN)
@@ -116,12 +116,12 @@ class GutModelMealTypeTest {
                 .isGreaterThan(gAt90 + 1.0);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Bug 2: fast-carb absorption (effectiveKAbs)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
-    @DisplayName("fast carbs (low tMaxG) absorb FASTER than baseline — was previously capped at 1×")
+    @DisplayName("fast carbs (low tMaxG) absorb FASTER than baseline - was previously capped at 1×")
     void effectiveKAbs_fastCarbs_exceedsBaseline() {
         double base = DallaManGutModel.BASE_T_MAX_G_MIN;   // ≈ 26.8 min
         double fast = base / 2.0;                          // juice / glucose tabs

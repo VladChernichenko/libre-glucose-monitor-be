@@ -153,4 +153,3 @@ The LibreLinkUp API appears to:
 - LibreLinkUp unofficial API: https://github.com/DRFR0ST/libre-link-unofficial-api
 - Working headers discovered through testing and community feedback
 - API version 4.12.0 confirmed working as of October 2025
-

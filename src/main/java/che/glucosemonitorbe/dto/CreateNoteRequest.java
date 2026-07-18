@@ -29,7 +29,7 @@ public class CreateNoteRequest {
     /**
      * Pre-computed nutrition profile JSON from the iOS Nutrition analyser.
      * When present, {@code NotesService} stores it directly and skips server-side
-     * re-enrichment — the analyser result includes GI/GL, fiber, fat, protein,
+     * re-enrichment - the analyser result includes GI/GL, fiber, fat, protein,
      * pattern, bolus strategy and {@code suggestedDurationHours} which drive the
      * 8 h HFHP prediction path.
      */

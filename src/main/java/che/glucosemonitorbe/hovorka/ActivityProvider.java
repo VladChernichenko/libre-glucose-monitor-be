@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  * {@link che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider}.
  *
  * <p>The {@link #NONE} implementation returns 0 everywhere, which makes the activity term fully inert
- * — the production default while no live activity feed exists.</p>
+ * - the production default while no live activity feed exists.</p>
  */
 @FunctionalInterface
 public interface ActivityProvider {

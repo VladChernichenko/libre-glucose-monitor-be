@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
  * <p>Bound from {@code app.storage.s3.*}, sourced from the {@code ENDPOINT}, {@code REGION},
  * {@code BUCKET}, {@code ACCESS_KEY_ID} and {@code SECRET_ACCESS_KEY} environment variables
  * (the names Railway injects for a referenced MinIO bucket). Photo storage is considered
- * {@link #isEnabled() enabled} only when endpoint, bucket and credentials are all present —
+ * {@link #isEnabled() enabled} only when endpoint, bucket and credentials are all present -
  * otherwise upload is refused and notes simply have no {@code photoUrl}.
  */
 @Component

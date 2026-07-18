@@ -26,13 +26,13 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * User glucose notes — CRUD, date range, summary.
+ * User glucose notes - CRUD, date range, summary.
  *
  * <p>Exceptions propagate to {@link che.glucosemonitorbe.exception.GlobalExceptionHandler}, which maps
  * them to the correct status and logs server faults. Controllers no longer swallow everything into a
  * bare 500 (BE-M2).
  */
-@Tag(name = "Notes", description = "User glucose notes — CRUD, date range, summary")
+@Tag(name = "Notes", description = "User glucose notes - CRUD, date range, summary")
 @RestController
 @RequestMapping("/api/notes")
 @RequiredArgsConstructor

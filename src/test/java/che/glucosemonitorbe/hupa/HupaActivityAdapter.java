@@ -20,7 +20,7 @@ public final class HupaActivityAdapter implements ActivityProvider {
     public static final double DEFAULT_MAX_HR     = 190.0;
     public static final double STEPS_CAP_PER_5MIN = 600.0;
     /**
-     * Reserve fraction below which a(t) is treated as 0 — a fixed deadband that keeps ordinary daily
+     * Reserve fraction below which a(t) is treated as 0 - a fixed deadband that keeps ordinary daily
      * heart rate (which sits well above resting) from registering as constant low-grade exercise.
      * With rest 60 / max 190 this means HR must exceed ~99 bpm before activity registers.
      */

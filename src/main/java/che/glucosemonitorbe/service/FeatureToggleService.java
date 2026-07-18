@@ -66,7 +66,7 @@ public class FeatureToggleService {
     }
 
     /**
-     * Check if a named Phase 2–4 integration toggle is on.
+     * Check if a named Phase 2-4 integration toggle is on.
      * Falls back to shouldUseBackend() for legacy feature names.
      */
     public boolean isEnabled(String featureName) {

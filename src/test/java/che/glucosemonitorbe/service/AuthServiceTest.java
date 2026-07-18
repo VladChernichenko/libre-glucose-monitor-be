@@ -54,7 +54,7 @@ class AuthServiceTest {
         when(tokenProvider.generateRefreshToken(anyString())).thenReturn("refresh-token");
     }
 
-    // ── BE-8: duplicate username ───────────────────────────────────────────────
+    // -- BE-8: duplicate username -----------------------------------------------
 
     /**
      * BE-8 regression: before the fix, register threw RuntimeException for duplicate
@@ -78,12 +78,12 @@ class AuthServiceTest {
 
         RegisterRequest request = registerRequest("taken", "new@example.com");
 
-        // Must NOT be a plain RuntimeException — that would result in HTTP 400
+        // Must NOT be a plain RuntimeException - that would result in HTTP 400
         assertThatThrownBy(() -> authService.register(request))
                 .isNotExactlyInstanceOf(RuntimeException.class);
     }
 
-    // ── BE-8: duplicate email ──────────────────────────────────────────────────
+    // -- BE-8: duplicate email --------------------------------------------------
 
     @Test
     void register_duplicateEmail_throwsUsernameAlreadyExistsException() {
@@ -106,7 +106,7 @@ class AuthServiceTest {
                 .isNotExactlyInstanceOf(RuntimeException.class);
     }
 
-    // ── happy-path registration ────────────────────────────────────────────────
+    // -- happy-path registration ------------------------------------------------
 
     @Test
     void register_newUser_returnsTokens() {
@@ -121,7 +121,7 @@ class AuthServiceTest {
         verify(userRepository).save(any(User.class));
     }
 
-    // ── login ──────────────────────────────────────────────────────────────────
+    // -- login ------------------------------------------------------------------
 
     @Test
     void login_validCredentials_returnsTokens() {
@@ -157,7 +157,7 @@ class AuthServiceTest {
         verify(tokenProvider, never()).generateTokenFromUsername(anyString());
     }
 
-    // ── logout ─────────────────────────────────────────────────────────────────
+    // -- logout -----------------------------------------------------------------
 
     @Test
     void logout_validAccessToken_blacklistsToken() {
@@ -200,7 +200,7 @@ class AuthServiceTest {
         verify(tokenBlacklistService).blacklistToken("refresh-token");
     }
 
-    // ── logoutAllDevices ───────────────────────────────────────────────────────
+    // -- logoutAllDevices -------------------------------------------------------
 
     @Test
     void logoutAllDevices_returnsSuccess() {
@@ -208,7 +208,7 @@ class AuthServiceTest {
         assertThat(resp.isSuccess()).isTrue();
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private RegisterRequest registerRequest(String username, String email) {
         RegisterRequest req = new RegisterRequest();

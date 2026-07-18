@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * {@code POST /api/predict} — macronutrient-aware glucose prediction.
+ * {@code POST /api/predict} - macronutrient-aware glucose prediction.
  *
  * <p>Accepts the current CGM reading, a prospective insulin bolus, and the
  * full macronutrient breakdown of the upcoming meal (carbs, protein, fat,

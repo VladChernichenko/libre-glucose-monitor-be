@@ -12,32 +12,32 @@ import org.springframework.stereotype.Component;
  *   G      = Q1 / VG
  *   F01_c  = f01 × min(1, G / 4.5)
  *   Qsto   = Qsto1 + Qsto2
- *   kempt  = K_MIN + (K_MAX-K_MIN)/2 × {tanh[α(Qsto−b·D)] − tanh[c(Qsto−d·D)] + 2}
+ *   kempt  = K_MIN + (K_MAX-K_MIN)/2 × {tanh[α(Qsto−b*D)] − tanh[c(Qsto−d*D)] + 2}
  *   Ra     = F × K_ABS × Qgut
  *
- *   dQ1/dt    = −F01_c − k12·Q1 + k21·Q2 + Ra + egpNet − insulinEffect − α_inc·Inc·Q1
- *   dQ2/dt    = k12·Q1 − k21·Q2
- *   dQsto1/dt = −K_GRI·Qsto1               (meal u(t) added before RK4 step)
- *   dQsto2/dt = K_GRI·Qsto1 − kempt·Qsto2
- *   dQgut/dt  = kempt·Qsto2 − K_ABS·Qgut
- *   dInc/dt   = K_INC·Ra − K_DEL·Inc
+ *   dQ1/dt    = −F01_c − k12*Q1 + k21*Q2 + Ra + egpNet − insulinEffect − α_inc*Inc*Q1
+ *   dQ2/dt    = k12*Q1 − k21*Q2
+ *   dQsto1/dt = −K_GRI*Qsto1               (meal u(t) added before RK4 step)
+ *   dQsto2/dt = K_GRI*Qsto1 − kempt*Qsto2
+ *   dQgut/dt  = kempt*Qsto2 − K_ABS*Qgut
+ *   dInc/dt   = K_INC*Ra − K_DEL*Inc
  * </pre>
  */
 @Component
 public class HovorkaOdeSolver {
 
-    // ── Incretin GLP-1 parameters ─────────────────────────────────────────────
+    // -- Incretin GLP-1 parameters ---------------------------------------------
     static final double K_INC    = 0.005;   // secretion [min/mmol] per unit Ra
     static final double K_DEL    = 0.020;   // clearance rate [/min]  (t½ ≈ 35 min)
     static final double ALPHA_INC = 0.001;  // incretin effect on glucose uptake [/min]
 
-    // ── Renal glucose clearance (Hovorka 2004, eq. 7) ─────────────────────────
+    // -- Renal glucose clearance (Hovorka 2004, eq. 7) -------------------------
     // FR = ke1 × (Q1 − ke2×VG)  if G > ke2, else 0
     static final double KE1 = 0.003;   // renal clearance rate [/min]
     static final double KE2 = 9.0;     // renal glucose threshold [mmol/L]
 
-    // ── Ileal brake: GLP-1 inhibition of gastric emptying ────────────────────
-    // Protein/fat → GLP-1 rises → k_empt × (1 − Φ_GLP1 × Inc) decreases
+    // -- Ileal brake: GLP-1 inhibition of gastric emptying --------------------
+    // Protein/fat -> GLP-1 rises -> k_empt × (1 − Φ_GLP1 × Inc) decreases
     static final double PHI_GLP1           = 0.50;  // inhibition coefficient [per Inc unit]
     static final double MIN_KEMPT_FRACTION = 0.20;  // floor: k_empt never below 20% of base
 
@@ -52,7 +52,7 @@ public class HovorkaOdeSolver {
      *
      * @param state         current 6-variable state + meal reference
      * @param p             Hovorka parameters
-     * @param carbMmolNow   carbs delivered at this minute [mmol] — impulse input to Qsto1
+     * @param carbMmolNow   carbs delivered at this minute [mmol] - impulse input to Qsto1
      * @param insulinEffect ISF × VG × iobActivityRate [mmol/min]
      * @return next state after 1-minute integration
      */
@@ -78,14 +78,14 @@ public class HovorkaOdeSolver {
 
         // Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
         //
-        // D (mealMmol) is the saturation reference for k_empt — it must be the stomach
+        // D (mealMmol) is the saturation reference for k_empt - it must be the stomach
         // content of the *current* emptying episode, NOT the cumulative sum of every meal
         // ever eaten. Using a cumulative sum made a fresh meal that lands on top of a
         // partly-digested earlier meal be treated as a half-full large meal, throttling
         // k_empt toward K_MIN and badly delaying absorption. This is hit by virtually every
         // mixed meal because GlucosePredictService injects a second (FPU-equivalent) carb
         // entry. Refresh D to the post-ingestion stomach load so a new meal empties from the
-        // "full stomach → near K_MAX" branch as the physiology requires.
+        // "full stomach -> near K_MAX" branch as the physiology requires.
         HovorkaState s0;
         if (carbMmolNow > 0) {
             double newQsto1   = state.qsto1() + carbMmolNow;
@@ -154,12 +154,12 @@ public class HovorkaOdeSolver {
 
         // Ileal brake: elevated GLP-1 (Inc) inhibits gastric emptying.
         // After protein/fat intake Inc rises via K_INC×Ra, which delays subsequent
-        // carb absorption — the "food sequencing" effect (Palumbo modification).
+        // carb absorption - the "food sequencing" effect (Palumbo modification).
         double kemptEff = kempt * Math.max(MIN_KEMPT_FRACTION, 1.0 - PHI_GLP1 * inc);
 
         // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix).
-        // A high-fat/protein meal has a longer tMaxG → slower intestinal drain
-        // → Ra peak shifts right without changing total absorbed glucose.
+        // A high-fat/protein meal has a longer tMaxG -> slower intestinal drain
+        // -> Ra peak shifts right without changing total absorbed glucose.
         double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
         double ra    = gutModel.ra(qgut, kAbsEff);
 
@@ -181,7 +181,7 @@ public class HovorkaOdeSolver {
         return new double[]{dq1, dq2, dqsto1, dqsto2, dqgut, dinc};
     }
 
-    // ── Array helpers ─────────────────────────────────────────────────────────
+    // -- Array helpers ---------------------------------------------------------
 
     private double[] toArray(HovorkaState s) {
         return new double[]{s.q1(), s.q2(), s.qsto1(), s.qsto2(), s.qgut(), s.inc()};

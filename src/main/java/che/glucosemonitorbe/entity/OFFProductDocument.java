@@ -18,7 +18,7 @@ public class OFFProductDocument {
     @Id
     private String id;
 
-    /** EAN / UPC barcode — the primary lookup key. */
+    /** EAN / UPC barcode - the primary lookup key. */
     @Indexed
     @Field("code")
     private String code;

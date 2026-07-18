@@ -51,7 +51,7 @@ public class AuthService {
         }
 
         if (userRepository.existsByEmail(request.getEmail())) {
-            // BE-8 fix: same — email conflict also maps to HTTP 409
+            // BE-8 fix: same - email conflict also maps to HTTP 409
             throw new UsernameAlreadyExistsException("Email already in use: " + request.getEmail());
         }
 
@@ -158,4 +158,3 @@ public class AuthService {
         }
     }
 }
-

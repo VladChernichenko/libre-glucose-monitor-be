@@ -18,7 +18,7 @@ public class CarbsOnBoardService {
 
     /**
      * Calculate remaining carbs on board for a given time.
-     * Loads COB settings from DB — use {@link #calculateTotalCarbsOnBoard} for batch
+     * Loads COB settings from DB - use {@link #calculateTotalCarbsOnBoard} for batch
      * processing to avoid per-entry DB queries.
      */
     public double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime, UUID userId) {
@@ -30,7 +30,7 @@ public class CarbsOnBoardService {
     }
 
     /**
-     * Inner calculation using pre-loaded settings — avoids a DB round-trip per entry.
+     * Inner calculation using pre-loaded settings - avoids a DB round-trip per entry.
      */
     private double calculateRemainingCarbs(CarbsEntry entry, LocalDateTime currentTime, UserSettingsDTO userSettings) {
         long minutesSinceEntry = ChronoUnit.MINUTES.between(entry.getTimestamp(), currentTime);
@@ -42,7 +42,7 @@ public class CarbsOnBoardService {
         int patternDuration = entry.getSuggestedDurationHours() != null
                 ? (int) (entry.getSuggestedDurationHours() * 60) : 0;
         // Base default from user settings; fall back to speed-class baseline when not configured.
-        // Evidence: simple carbs absorb 90% within 1–2 h (Hovorka model, 40–80 min time constant).
+        // Evidence: simple carbs absorb 90% within 1-2 h (Hovorka model, 40-80 min time constant).
         int userDefault = userSettings.getMaxCOBDuration() != null ? userSettings.getMaxCOBDuration() : 0;
         int speedDefault = speedClassDurationMinutes(entry.getAbsorptionSpeedClass());
         int defaultDuration = userDefault > 0 ? userDefault : speedDefault;
@@ -105,9 +105,9 @@ public class CarbsOnBoardService {
 
     /**
      * Default COB window by absorption speed class, aligned with clinical evidence:
-     *   FAST  — simple/high-GI carbs: 90% absorbed within 1–2 h → 120 min
-     *   MEDIUM — mixed meals peak 1.5–2 h, tail to 3 h → 180 min
-     *   SLOW / DEFAULT — high-fiber or protein-heavy meals → 240 min
+     *   FAST  - simple/high-GI carbs: 90% absorbed within 1-2 h -> 120 min
+     *   MEDIUM - mixed meals peak 1.5-2 h, tail to 3 h -> 180 min
+     *   SLOW / DEFAULT - high-fiber or protein-heavy meals -> 240 min
      * Pattern-matched suggestedDurationHours always overrides this value.
      */
     private int speedClassDurationMinutes(String speedClass) {
@@ -125,7 +125,7 @@ public class CarbsOnBoardService {
     
     /**
      * Calculate total carbs on board from multiple entries.
-     * Settings are loaded once for the batch — O(1) DB queries regardless of list size.
+     * Settings are loaded once for the batch - O(1) DB queries regardless of list size.
      */
     public double calculateTotalCarbsOnBoard(List<CarbsEntry> entries, LocalDateTime currentTime, UUID userId) {
         if (entries == null || entries.isEmpty()) {

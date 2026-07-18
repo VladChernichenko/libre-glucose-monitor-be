@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * A window in which glucose moved in a way the user's logged inputs (COB/IOB) do not explain —
+ * A window in which glucose moved in a way the user's logged inputs (COB/IOB) do not explain -
  * a probable unlogged or under-estimated food/insulin event. Serves both the user-confirmation API
  * and the digital-twin calibration (which down-weights {@code OPEN}/{@code CONFIRMED} windows).
  */
@@ -30,7 +30,7 @@ public class UnloggedEventFlag {
     /** Direction of the unexplained move. */
     public enum Direction { RISE, FALL }
 
-    /** Lifecycle: OPEN (detected) → CONFIRMED or DISMISSED (by the user). */
+    /** Lifecycle: OPEN (detected) -> CONFIRMED or DISMISSED (by the user). */
     public enum State { OPEN, CONFIRMED, DISMISSED }
 
     @Id
@@ -60,7 +60,7 @@ public class UnloggedEventFlag {
     @Column(name = "mean_residual_mmol", nullable = false)
     private Double meanResidualMmol;
 
-    /** How many robust-σ the mean residual is — the adaptive detection strength. */
+    /** How many robust-σ the mean residual is - the adaptive detection strength. */
     @Column(name = "sigma_multiple")
     private Double sigmaMultiple;
 

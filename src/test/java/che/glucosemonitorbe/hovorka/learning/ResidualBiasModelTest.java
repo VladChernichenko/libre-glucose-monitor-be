@@ -82,7 +82,7 @@ class ResidualBiasModelTest {
         assertThat(model.correctionAt(6, 0)).isLessThan(model.correctionAt(6, 15));
         assertThat(model.correctionAt(6, 15)).isLessThan(model.correctionAt(6, 30));
 
-        // Midnight wrap: hour 0 blends with hour 23, hour 23 blends with hour 0 — no exception.
+        // Midnight wrap: hour 0 blends with hour 23, hour 23 blends with hour 0 - no exception.
         assertThat(model.correctionAt(0, 0)).isFinite();
         assertThat(model.correctionAt(23, 59)).isFinite();
     }

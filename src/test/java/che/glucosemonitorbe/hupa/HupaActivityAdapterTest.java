@@ -27,12 +27,12 @@ class HupaActivityAdapterTest {
     }
 
     @Test
-    @DisplayName("ordinary daily heart rate is below the deadband → a(t) = 0 (not treated as exercise)")
+    @DisplayName("ordinary daily heart rate is below the deadband -> a(t) = 0 (not treated as exercise)")
     void ordinaryDailyHrIsZero() {
-        // 85 bpm → reserve 0.19 < deadband 0.30 → 0.
+        // 85 bpm -> reserve 0.19 < deadband 0.30 -> 0.
         assertThat(HupaActivityAdapter.intensity(85, 0, 60, 190, 600)).isEqualTo(0.0);
         assertThat(HupaActivityAdapter.intensity(95, 0, 60, 190, 600)).isEqualTo(0.0);
-        // 160 bpm → clearly above the deadband → positive.
+        // 160 bpm -> clearly above the deadband -> positive.
         assertThat(HupaActivityAdapter.intensity(160, 0, 60, 190, 600)).isGreaterThan(0.3);
     }
 
@@ -54,7 +54,7 @@ class HupaActivityAdapterTest {
 
         assertThat(adapter.intensityAt(LocalDateTime.of(2025, 1, 1, 12, 0))).isGreaterThan(0.3);
         assertThat(adapter.intensityAt(LocalDateTime.of(2025, 1, 1, 12, 5))).isEqualTo(0.0);
-        // 30 min away from any sample → out of tolerance → 0.
+        // 30 min away from any sample -> out of tolerance -> 0.
         assertThat(adapter.intensityAt(LocalDateTime.of(2025, 1, 1, 12, 30))).isEqualTo(0.0);
     }
 }

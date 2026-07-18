@@ -24,7 +24,7 @@ import java.util.UUID;
  * Stores meal-photo uploads in an S3-compatible object store (MinIO) and generates
  * time-limited GET URLs for displaying them.
  *
- * <p>Object keys are always generated server-side as {@code notes/{userId}/{noteId}/{uuid}.{ext}} —
+ * <p>Object keys are always generated server-side as {@code notes/{userId}/{noteId}/{uuid}.{ext}} -
  * user-supplied filenames are never used in the key, preventing path traversal.
  */
 @Slf4j
@@ -121,7 +121,7 @@ public class NotePhotoStorageService {
     }
 
     /**
-     * Deletes the photo stored at {@code key}, if any. Failures are logged and swallowed —
+     * Deletes the photo stored at {@code key}, if any. Failures are logged and swallowed -
      * photo cleanup must never prevent a note from being deleted.
      */
     public void delete(String key) {

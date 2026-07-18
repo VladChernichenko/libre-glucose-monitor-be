@@ -48,12 +48,12 @@ class GlucoseAlertServiceTest {
         when(featureToggleConfig.isGlucoseCalculationsEnabled()).thenReturn(true);
     }
 
-    // ── L1: timezone hardcoded to UTC ─────────────────────────────────────────
+    // -- L1: timezone hardcoded to UTC -----------------------------------------
 
     /**
-     * // BUG: L1 — GlucoseAlertService.runCalculations hardcodes timezone="UTC" when
+     * // BUG: L1 - GlucoseAlertService.runCalculations hardcodes timezone="UTC" when
      * building the GlucoseCalculationsRequest. This causes wrong calculation times for
-     * users in non-UTC timezones — especially for meal/IOB timing.
+     * users in non-UTC timezones - especially for meal/IOB timing.
      *
      * This test verifies that when the system (or user) timezone is NOT UTC, the
      * calculations request does NOT send "UTC".
@@ -89,7 +89,7 @@ class GlucoseAlertServiceTest {
 
             if (!requestCaptor.getAllValues().isEmpty()) {
                 ClientTimeInfo clientTimeInfo = requestCaptor.getValue().getClientTimeInfo();
-                // BUG: currently always "UTC" — this FAILS when system TZ is non-UTC
+                // BUG: currently always "UTC" - this FAILS when system TZ is non-UTC
                 assertThat(clientTimeInfo.getTimezone())
                         .as("Alert calculations request timezone must NOT be hardcoded to 'UTC'; "
                                 + "should use system/user timezone (BUG: L1)")
@@ -100,10 +100,10 @@ class GlucoseAlertServiceTest {
         }
     }
 
-    // ── C4: cooldownMap TOCTOU race — duplicate alerts under concurrency ──────
+    // -- C4: cooldownMap TOCTOU race - duplicate alerts under concurrency ------
 
     /**
-     * // BUG: C4 — GlucoseAlertService.maybeDispatch performs a non-atomic
+     * // BUG: C4 - GlucoseAlertService.maybeDispatch performs a non-atomic
      * get-check-then-put on the cooldownMap. Under concurrent invocations, two threads
      * can both see no cooldown entry and both deliver the same alert, causing duplicate
      * notifications to the user.
@@ -162,13 +162,13 @@ class GlucoseAlertServiceTest {
         executor.awaitTermination(3, TimeUnit.SECONDS);
 
         // After both threads complete, the alert should have been dispatched exactly once.
-        // BUG: C4 — both threads pass the get-check-then-put race and may both deliver,
+        // BUG: C4 - both threads pass the get-check-then-put race and may both deliver,
         // so `deliverAlert` is called twice. This test documents the required behavior.
         // (In practice we observe this via log output count; here we verify the design.)
         // The assertion below is a best-effort: it passes after the fix uses an atomic op.
         // NOTE: this is a probabilistic test; it may pass occasionally on buggy code.
         assertThat(callCount.get())
                 .as("Alert must be dispatched at most once despite concurrent calls (BUG: C4)")
-                .isLessThanOrEqualTo(2); // permissive — real enforcement is via log audit
+                .isLessThanOrEqualTo(2); // permissive - real enforcement is via log audit
     }
 }

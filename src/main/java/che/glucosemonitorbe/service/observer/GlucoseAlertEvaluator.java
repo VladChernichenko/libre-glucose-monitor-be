@@ -12,7 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Pure evaluation logic — no I/O, no Spring state.
+ * Pure evaluation logic - no I/O, no Spring state.
  * Given a freshly-computed {@link GlucoseCalculationsResponse} plus contextual
  * signals, returns zero or more {@link GlucoseAlert}s that should be dispatched.
  *
@@ -22,39 +22,39 @@ import java.util.UUID;
 @Component
 public class GlucoseAlertEvaluator {
 
-    // ── Thresholds ────────────────────────────────────────────────────────────
+    // -- Thresholds ------------------------------------------------------------
 
-    /** mmol/L — glucose below this triggers hypo alerts. */
+    /** mmol/L - glucose below this triggers hypo alerts. */
     private static final double HYPO_THRESHOLD       = 3.9;
 
-    /** mmol/L — early warning before hard hypo floor. */
+    /** mmol/L - early warning before hard hypo floor. */
     private static final double HYPO_WARN_THRESHOLD  = 4.5;
 
-    /** mmol/L — nadir below this after over-injection. */
+    /** mmol/L - nadir below this after over-injection. */
     private static final double OVER_INJ_THRESHOLD   = 4.0;
 
-    /** mmol/L — hyper alert ceiling. */
+    /** mmol/L - hyper alert ceiling. */
     private static final double HYPER_THRESHOLD      = 12.0;
 
-    /** Units — IOB considered "negligible" (no hyper risk). */
+    /** Units - IOB considered "negligible" (no hyper risk). */
     private static final double IOB_LOW              = 0.5;
 
-    /** mmol/L/min — ROC threshold for "rising fast". */
+    /** mmol/L/min - ROC threshold for "rising fast". */
     private static final double ROC_RISE             = 0.10;
 
-    /** mmol/L/min — ROC threshold for "falling fast". */
+    /** mmol/L/min - ROC threshold for "falling fast". */
     private static final double ROC_DROP             = -0.07;
 
     /**
      * Net glucose effect (carbEffect − insulinEffect) below this means
-     * more insulin than carbs can cover → over-injection risk.
+     * more insulin than carbs can cover -> over-injection risk.
      */
     private static final double OVER_INJ_NET_EFFECT  = -2.0;
 
-    /** mmol/L — stability band; swings within ±2 are considered normal. */
+    /** mmol/L - stability band; swings within ±2 are considered normal. */
     public static final double STABILITY_BAND        = 2.0;
 
-    // ── Public API ────────────────────────────────────────────────────────────
+    // -- Public API ------------------------------------------------------------
 
     /**
      * Evaluate a full calculation response for all alert types.
@@ -77,7 +77,7 @@ public class GlucoseAlertEvaluator {
         double current = calc.getCurrentGlucose() != null ? calc.getCurrentGlucose() : 0;
         List<PredictionPointDTO> path = calc.getPredictionPath();
 
-        // P1 — Predicted hypo: any path point < 3.9 within 60 min
+        // P1 - Predicted hypo: any path point < 3.9 within 60 min
         findNadir(path, now, 60).ifPresent(nadir -> {
             if (nadir.glucose() < HYPO_THRESHOLD) {
                 alerts.add(new GlucoseAlert(
@@ -91,7 +91,7 @@ public class GlucoseAlertEvaluator {
             }
         });
 
-        // P2 — Rapid drop: ROC below threshold (evaluated by caller across readings)
+        // P2 - Rapid drop: ROC below threshold (evaluated by caller across readings)
         if (roc < ROC_DROP) {
             int eta = estimateMinutesToThreshold(path, HYPO_WARN_THRESHOLD, now);
             double predictedAt30 = glucoseAtMinutes(path, 30, current);
@@ -99,15 +99,15 @@ public class GlucoseAlertEvaluator {
                     userId, GlucoseAlert.Type.RAPID_DROP,
                     current, predictedAt30,
                     now.plusMinutes(30), 30,
-                    String.format("Falling fast (%.2f mmol/min) — now %.1f mmol/L",
+                    String.format("Falling fast (%.2f mmol/min) - now %.1f mmol/L",
                             roc, current),
                     eta > 0
-                            ? String.format("Could reach %.1f in ~%d min — consider a small snack", HYPO_WARN_THRESHOLD, eta)
+                            ? String.format("Could reach %.1f in ~%d min - consider a small snack", HYPO_WARN_THRESHOLD, eta)
                             : "Consider a small snack if trend continues"
             ));
         }
 
-        // P3 — Unlogged meal: rising fast + COB=0 + no note in 45 min
+        // P3 - Unlogged meal: rising fast + COB=0 + no note in 45 min
         double cob = calc.getActiveCarbsOnBoard() != null ? calc.getActiveCarbsOnBoard() : 0;
         if (roc > ROC_RISE
                 && cob < 1.0
@@ -121,7 +121,7 @@ public class GlucoseAlertEvaluator {
             ));
         }
 
-        // P4 — Predicted hyper: path > 12 within 2h + low IOB
+        // P4 - Predicted hyper: path > 12 within 2h + low IOB
         double iob = calc.getActiveInsulinOnBoard() != null ? calc.getActiveInsulinOnBoard() : 0;
         if (iob < IOB_LOW && cob > 0) {
             findPeakAbove(path, HYPER_THRESHOLD, now, 120).ifPresent(peak -> {
@@ -140,7 +140,7 @@ public class GlucoseAlertEvaluator {
     }
 
     /**
-     * Over-injection check — call this immediately after an insulin note is saved,
+     * Over-injection check - call this immediately after an insulin note is saved,
      * before the CGM cycle fires. Compares IOB glucose-lowering power against
      * available COB carb buffer. If the net effect puts the nadir below 4.0,
      * returns an alert.
@@ -184,12 +184,12 @@ public class GlucoseAlertEvaluator {
         int rescueCarbs     = (int) Math.ceil(Math.max(0, glucoseGap / 0.2)); // ~0.2 mmol/L per gram fast carbs
 
         String message = String.format(
-                "Insulin dose (%.1fu) may exceed carb coverage — glucose could drop to %.1f mmol/L in ~%d min",
+                "Insulin dose (%.1fu) may exceed carb coverage - glucose could drop to %.1f mmol/L in ~%d min",
                 insulinUnits, projectedNadir, minutesToNadir);
 
         String action = rescueCarbs > 0
                 ? String.format("Consider eating %dg of fast carbs to prevent a low", rescueCarbs)
-                : "Monitor closely — low expected";
+                : "Monitor closely - low expected";
 
         return Optional.of(new GlucoseAlert(
                 userId, GlucoseAlert.Type.OVER_INJECTION,
@@ -199,7 +199,7 @@ public class GlucoseAlertEvaluator {
         ));
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // -- Private helpers -------------------------------------------------------
 
     /**
      * Find the minimum predicted glucose within {@code horizonMinutes},

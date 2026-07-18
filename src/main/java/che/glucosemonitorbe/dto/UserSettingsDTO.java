@@ -20,7 +20,7 @@ public class UserSettingsDTO {
     private Double isf;
     private Integer carbHalfLife;
     private Integer maxCOBDuration;
-    /** Body weight in kg — used for Hovorka model VG/VI scaling. NULL = 70 kg population default. */
+    /** Body weight in kg - used for Hovorka model VG/VI scaling. NULL = 70 kg population default. */
     private Double bodyWeightKg;
     /** Manual ISF override for 05:00-11:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
     private Double isfBreakfast;
@@ -34,7 +34,7 @@ public class UserSettingsDTO {
     // Constructors
     public UserSettingsDTO() {}
 
-    /** Legacy 6-arg constructor — bodyWeightKg defaults to null (population 70 kg). */
+    /** Legacy 6-arg constructor - bodyWeightKg defaults to null (population 70 kg). */
     public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
         this.id = id;
         this.userId = userId;

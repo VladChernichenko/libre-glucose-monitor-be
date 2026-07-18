@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@Tag(name = "Nutrition", description = "Nutrition analysis — ingredient GL/GI enrichment via Spoonacular and Edamam")
+@Tag(name = "Nutrition", description = "Nutrition analysis - ingredient GL/GI enrichment via Spoonacular and Edamam")
 @ConditionalOnProperty(name = "mongodb.enabled", havingValue = "true", matchIfMissing = true)
 @Slf4j
 @RestController
@@ -90,9 +90,9 @@ public class NutritionController {
         return ResponseEntity.ok(snapshot);
     }
 
-    // -------------------------------------------------------------------------
+    // ---
     // OpenFoodFacts endpoints
-    // -------------------------------------------------------------------------
+    // ---
 
     @Operation(summary = "Look up a food product by barcode and return a NutritionSnapshot",
                description = "Queries the OpenFoodFacts database. Results are cached for 7 days. " +
@@ -128,7 +128,7 @@ public class NutritionController {
     @GetMapping("/search")
     public ResponseEntity<List<OFFProductDto>> searchProducts(
             @Parameter(description = "Free-text product name query") @RequestParam String q,
-            @Parameter(description = "Maximum results to return (1–50, default 10)")
+            @Parameter(description = "Maximum results to return (1-50, default 10)")
             @RequestParam(defaultValue = "10") int pageSize,
             Authentication authentication
     ) {

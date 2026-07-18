@@ -14,7 +14,7 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class OFFProductDto {
 
-    /** EAN barcode — injected after lookup, not part of the nested product object. */
+    /** EAN barcode - injected after lookup, not part of the nested product object. */
     private String barcode;
 
     @JsonProperty("product_name")
@@ -38,7 +38,7 @@ public class OFFProductDto {
 
     private String brands;
 
-    // -------------------------------------------------------------------------
+    // ---
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)

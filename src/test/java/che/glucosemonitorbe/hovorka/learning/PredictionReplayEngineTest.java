@@ -18,7 +18,7 @@ import static org.mockito.Mockito.mock;
 /**
  * Plumbing test: the replay engine drives the real Hovorka ODE over a synthetic CGM trace and
  * produces finite, in-range comparison samples. Validates the engine ↔ predictor wiring end-to-end
- * (not numerical accuracy — that is the calibrator's concern).
+ * (not numerical accuracy - that is the calibrator's concern).
  */
 class PredictionReplayEngineTest {
 

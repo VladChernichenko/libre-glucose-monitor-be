@@ -23,4 +23,3 @@ public class PredictionFactors {
     private String matchedPattern;    // e.g. "Double Wave"
     private String bolusStrategy;     // Normal | Extended | Dual Wave
 }
-

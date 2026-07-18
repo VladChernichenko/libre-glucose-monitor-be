@@ -25,7 +25,7 @@ class NutritionVisionServiceTest {
 
     private static final String OLLAMA_URL = "http://localhost:11434/api/generate";
 
-    // 1×1 white pixel JPEG — smallest valid JPEG for image-in-request tests
+    // 1×1 white pixel JPEG - smallest valid JPEG for image-in-request tests
     private static final byte[] TINY_JPEG = Base64.getDecoder().decode(
             "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8U"
             + "HRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgN"
@@ -55,7 +55,7 @@ class NutritionVisionServiceTest {
         ReflectionTestUtils.setField(service, "ollamaApiKey", "");
     }
 
-    // ── happy path ────────────────────────────────────────────────────────────
+    // -- happy path ------------------------------------------------------------
 
     @Test
     void fullJsonResponse_mapsAllFields() throws Exception {
@@ -105,7 +105,7 @@ class NutritionVisionServiceTest {
         assertEquals(List.of("apple"), result.getNormalizedFoods());
     }
 
-    // ── llava output quirks ───────────────────────────────────────────────────
+    // -- llava output quirks ---------------------------------------------------
 
     @Test
     void llavaWrapsJsonInMarkdown_extractedCorrectly() throws Exception {
@@ -137,7 +137,7 @@ class NutritionVisionServiceTest {
 
     @Test
     void llavaReturnsNoGi_absorptionModeIsDefaultDecay() throws Exception {
-        // carbs > 0 so no enrichment fallback; estimatedGi = 0 → DEFAULT_DECAY
+        // carbs > 0 so no enrichment fallback; estimatedGi = 0 -> DEFAULT_DECAY
         stubOllama("{\"foods\":[\"lettuce\"],\"totalCarbs\":2,\"fiber\":1,\"protein\":0,\"fat\":0,\"estimatedGi\":0,\"glycemicLoad\":0,\"absorptionSpeedClass\":\"DEFAULT\"}");
 
         NutritionSnapshot result = service.analyzeImage(jpegFile());
@@ -150,7 +150,7 @@ class NutritionVisionServiceTest {
 
     @Test
     void llavaReturnsMissingFields_defaultsToZero() throws Exception {
-        // include totalCarbs > 0 so no enrichment fallback; other fields absent → 0.0
+        // include totalCarbs > 0 so no enrichment fallback; other fields absent -> 0.0
         stubOllama("{\"foods\":[\"unknown food\"],\"totalCarbs\":10}");
 
         NutritionSnapshot result = service.analyzeImage(jpegFile());
@@ -180,12 +180,12 @@ class NutritionVisionServiceTest {
 
         NutritionSnapshot result = service.analyzeImage(jpegFile());
 
-        // extractJson returns "{}" on garbage, so foods=empty, carbs=0 → DEFAULT_DECAY VISION_LLM
+        // extractJson returns "{}" on garbage, so foods=empty, carbs=0 -> DEFAULT_DECAY VISION_LLM
         assertEquals("VISION_LLM", result.getSource());
         assertTrue(result.getNormalizedFoods().isEmpty());
     }
 
-    // ── failure / fallback ────────────────────────────────────────────────────
+    // -- failure / fallback ----------------------------------------------------
 
     @Test
     void ollamaReturns500_returnsFallbackSnapshot() {
@@ -222,7 +222,7 @@ class NutritionVisionServiceTest {
         mockServer.verify();
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void stubOllama(String llavaResponseContent) throws Exception {
         mockServer.expect(requestTo(OLLAMA_URL))

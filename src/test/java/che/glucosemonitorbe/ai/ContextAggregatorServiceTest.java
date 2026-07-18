@@ -68,7 +68,7 @@ class ContextAggregatorServiceTest {
     @Test
     @DisplayName("buildContext converts sgv to mmol/L (÷18) and populates statistics")
     void buildContext_convertsSgvToMmolL() {
-        // sgv 108 → 6.0 mmol/L, sgv 162 → 9.0 mmol/L
+        // sgv 108 -> 6.0 mmol/L, sgv 162 -> 9.0 mmol/L
         long now = System.currentTimeMillis();
         CgmReading r1 = chartRow(108, now - 3_600_000L);
         CgmReading r2 = chartRow(162, now - 60_000L);

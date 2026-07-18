@@ -10,6 +10,6 @@ public class ARNutritionRequest {
     @NotEmpty
     private List<ARFoodItem> foods;
 
-    /** 15%-of-mass estimate from iOS — used only if every food label misses OFF */
+    /** 15%-of-mass estimate from iOS - used only if every food label misses OFF */
     private Double fallbackCarbs;
 }

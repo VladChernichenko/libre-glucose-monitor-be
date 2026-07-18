@@ -25,8 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 /**
- * Data-gated validation of the digital-twin learning (Levenberg–Marquardt + EGP₀) against the
- * real-world HUPA-UCM diabetes dataset — a second, independent cohort to the AZT1D validation.
+ * Data-gated validation of the digital-twin learning (Levenberg-Marquardt + EGP₀) against the
+ * real-world HUPA-UCM diabetes dataset - a second, independent cohort to the AZT1D validation.
  *
  * <p>For each subject it fits the twin on the earlier 80% of the record and scores it on the held-out
  * later 20%, then prints per-subject and aggregate baseline vs. calibrated prediction MAE.</p>
@@ -54,7 +54,7 @@ class HupaUcmCalibrationValidationTest {
     void calibratesAndImprovesAcrossRealSubjects() throws Exception {
         Path root = datasetRoot();
         Assumptions.assumeTrue(!root.toString().isBlank() && Files.isDirectory(root.resolve("Preprocessed")),
-                "HUPA-UCM dataset not present — set -Dhupa.dir=\"/path/to/HUPA-UCM Diabetes Dataset\" to run");
+                "HUPA-UCM dataset not present - set -Dhupa.dir=\"/path/to/HUPA-UCM Diabetes Dataset\" to run");
 
         List<HupaUcmDataset.Subject> subjects = HupaUcmDataset.loadAll(root);
         assertThat(subjects).isNotEmpty();
@@ -101,7 +101,7 @@ class HupaUcmCalibrationValidationTest {
         assertThat(rows).isNotEmpty();
     }
 
-    // ── Report rendering ─────────────────────────────────────────────────────
+    // -- Report rendering -----------------------------------------------------
 
     private static String render(List<Row> rows) {
         StringBuilder sb = new StringBuilder();
@@ -127,7 +127,7 @@ class HupaUcmCalibrationValidationTest {
             counted++;
             if (r.applied()) { applied++; sumImprApplied += impr; }
         }
-        sb.append("─────────────────────────────────────────────────────────────────────────────────────────\n");
+        sb.append("-----------------------------------------------------------------------------------------\n");
         if (counted > 0) {
             sb.append(String.format("Subjects scored: %d   |   twin applied (beat baseline O.O.S.): %d%n", counted, applied));
             sb.append(String.format("Mean baseline MAE:   %.2f mmol/L%n", sumBase / counted));
@@ -147,7 +147,7 @@ class HupaUcmCalibrationValidationTest {
             bandN++;
         }
         if (bandN > 0) {
-            sb.append("\n── PROBABILISTIC BAND (mean learned σ and 90% half-width by horizon) ──────\n");
+            sb.append("\n-- PROBABILISTIC BAND (mean learned σ and 90% half-width by horizon) ------\n");
             sb.append(String.format("%-14s %8s %8s %8s %8s%n", "horizon", "30min", "60min", "90min", "120min"));
             sb.append(String.format("%-14s %7.2f  %7.2f  %7.2f  %7.2f %n", "σ (mmol/L)",
                     sumSd[0] / bandN, sumSd[1] / bandN, sumSd[2] / bandN, sumSd[3] / bandN));
@@ -159,7 +159,7 @@ class HupaUcmCalibrationValidationTest {
         return sb.toString();
     }
 
-    // ── Predictor wiring (raw model, no DB) ─────────────────────────────────────
+    // -- Predictor wiring (raw model, no DB) -------------------------------------
 
     private static HovorkaGlucosePredictionService rawPredictor() {
         DallaManGutModel gut = new DallaManGutModel();

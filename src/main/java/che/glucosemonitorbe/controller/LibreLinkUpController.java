@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
-@Tag(name = "LibreLinkUp CGM", description = "FreeStyle Libre CGM integration — authentication, connections, and glucose readings")
+@Tag(name = "LibreLinkUp CGM", description = "FreeStyle Libre CGM integration - authentication, connections, and glucose readings")
 @RestController
 @RequestMapping("/api/libre")
 // Wildcard CORS removed (BE-M6): defer to the restricted global CorsConfig like every other controller.
@@ -234,4 +234,3 @@ public class LibreLinkUpController {
     }
 
 }
-

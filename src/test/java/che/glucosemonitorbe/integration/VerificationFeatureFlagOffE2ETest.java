@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * T6 — verification feature flag disabled.
+ * T6 - verification feature flag disabled.
  *
  * Kept in a separate top-level class because {@code @TestPropertySource} on a {@code @Nested}
  * inner class does not override the parent {@link SpringBootTest} context.
@@ -58,13 +58,13 @@ class VerificationFeatureFlagOffE2ETest {
     }
 
     @Test
-    @DisplayName("T6 — GET /verification/summary returns 404 when experiments disabled")
+    @DisplayName("T6 - GET /verification/summary returns 404 when experiments disabled")
     void verificationDisabled_returns404() {
         ResponseEntity<String> resp = rest.exchange(
                 "/api/experiments/verification/summary", HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class);
         assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode(),
-                "Disabled experiments feature should return 404 — got: " + resp.getBody());
+                "Disabled experiments feature should return 404 - got: " + resp.getBody());
     }
 
     private HttpHeaders registerAndLogin() {

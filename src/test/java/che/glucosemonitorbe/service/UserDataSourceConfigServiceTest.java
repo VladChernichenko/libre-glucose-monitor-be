@@ -119,10 +119,10 @@ class UserDataSourceConfigServiceTest {
         assertFalse(result);
     }
 
-    // ── A4: convertToDto must not expose plaintext credentials ───────────────
+    // -- A4: convertToDto must not expose plaintext credentials ---------------
 
     /**
-     * BUG: A4 — UserDataSourceConfigService.convertToDto maps nightscoutApiSecret
+     * BUG: A4 - UserDataSourceConfigService.convertToDto maps nightscoutApiSecret
      * and librePassword directly from the entity to the DTO in plaintext.
      * These fields are sensitive and must be masked or omitted from API responses.
      *
@@ -154,13 +154,13 @@ class UserDataSourceConfigServiceTest {
 
         UserDataSourceConfigDto result = service.saveConfig(userId, request);
 
-        // BUG: result.getNightscoutApiSecret() returns "super-secret" — FAILS
+        // BUG: result.getNightscoutApiSecret() returns "super-secret" - FAILS
         assertNull(result.getNightscoutApiSecret(),
                 "nightscoutApiSecret must be null or masked in DTO response; found: " + result.getNightscoutApiSecret());
     }
 
     /**
-     * BUG: A4 companion — getAllConfigs must also mask librePassword in DTOs.
+     * BUG: A4 companion - getAllConfigs must also mask librePassword in DTOs.
      */
     @Test
     void a4_getAllConfigs_returnedDto_mustNotContainPlaintextLibrePassword() {
@@ -175,7 +175,7 @@ class UserDataSourceConfigServiceTest {
         java.util.List<UserDataSourceConfigDto> results = service.getAllConfigs(userId);
         assertEquals(1, results.size());
 
-        // BUG: librePassword is exposed as plaintext — FAILS
+        // BUG: librePassword is exposed as plaintext - FAILS
         assertNull(results.get(0).getLibrePassword(),
                 "librePassword must be null or masked in DTO response; found: " + results.get(0).getLibrePassword());
     }

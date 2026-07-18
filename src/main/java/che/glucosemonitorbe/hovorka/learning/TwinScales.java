@@ -6,13 +6,13 @@ package che.glucosemonitorbe.hovorka.learning;
  *
  * <p>Scales are centred on <b>1.0</b> (= no correction). Learning a scale rather than an absolute
  * value keeps the calibration regularised toward physiology and means the base value can still come
- * from the user's measured ISF / settings — the twin only nudges it to fit the CGM record.</p>
+ * from the user's measured ISF / settings - the twin only nudges it to fit the CGM record.</p>
  *
  * <h3>Active dimensions (v1)</h3>
  * <ul>
- *   <li>{@code isfScale} — corrects systematic under/over-response to insulin. Flows to every
+ *   <li>{@code isfScale} - corrects systematic under/over-response to insulin. Flows to every
  *       prediction path through {@code HovorkaParameters.isf()}.</li>
- *   <li>{@code agScale} — corrects systematic meal-magnitude bias (carbs hitting harder/softer than
+ *   <li>{@code agScale} - corrects systematic meal-magnitude bias (carbs hitting harder/softer than
  *       logged). Flows through {@code HovorkaParameters.aG()}.</li>
  * </ul>
  *
@@ -23,8 +23,8 @@ package che.glucosemonitorbe.hovorka.learning;
  * {@link che.glucosemonitorbe.hovorka.MacroNutrientGastricModel}, and fasting drift is currently
  * absorbed more robustly by the {@link ResidualBiasModel}. They default to 1.0 (neutral).</p>
  *
- * @param isfScale    multiplier on ISF               [dimensionless, ~0.5–2.0]
- * @param agScale     multiplier on meal magnitude A_G [dimensionless, ~0.5–2.0]
+ * @param isfScale    multiplier on ISF               [dimensionless, ~0.5-2.0]
+ * @param agScale     multiplier on meal magnitude A_G [dimensionless, ~0.5-2.0]
  * @param tMaxGScale  multiplier on gut absorption time (reserved)
  * @param egpScale    multiplier on endogenous glucose production (reserved)
  */
@@ -34,7 +34,7 @@ public record TwinScales(
         double tMaxGScale,
         double egpScale
 ) {
-    /** Lower bound for any scale — prevents the optimiser wandering to unphysical extremes. */
+    /** Lower bound for any scale - prevents the optimiser wandering to unphysical extremes. */
     public static final double MIN_SCALE = 0.5;
     /** Upper bound for any scale. */
     public static final double MAX_SCALE = 2.0;

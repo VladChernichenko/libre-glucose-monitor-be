@@ -16,6 +16,6 @@ public interface UnloggedEventFlagRepository extends JpaRepository<UnloggedEvent
 
     List<UnloggedEventFlag> findByUserIdAndStateOrderByDetectedAtDesc(UUID userId, State state);
 
-    /** Flags in any of the given states — used by calibration (OPEN/CONFIRMED) and dedupe (OPEN). */
+    /** Flags in any of the given states - used by calibration (OPEN/CONFIRMED) and dedupe (OPEN). */
     List<UnloggedEventFlag> findByUserIdAndStateIn(UUID userId, Collection<State> states);
 }

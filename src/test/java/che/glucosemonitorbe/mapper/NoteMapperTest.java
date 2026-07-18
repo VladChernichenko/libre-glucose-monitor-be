@@ -22,7 +22,7 @@ class NoteMapperTest {
     @BeforeEach
     void setUp() { mapper = new NoteMapper(); }
 
-    // ── toDto ─────────────────────────────────────────────────────────────────
+    // -- toDto -----------------------------------------------------------------
 
     @Test
     void toDto_null_returnsNull() {
@@ -79,7 +79,7 @@ class NoteMapperTest {
         assertThat(dto.isMockData()).isFalse();
     }
 
-    // ── toEntity ──────────────────────────────────────────────────────────────
+    // -- toEntity --------------------------------------------------------------
 
     @Test
     void toEntity_null_returnsNull() {
@@ -136,7 +136,7 @@ class NoteMapperTest {
         assertThat(entity.isMockData()).isTrue();
     }
 
-    // ── updateEntity ──────────────────────────────────────────────────────────
+    // -- updateEntity ----------------------------------------------------------
 
     @Test
     void updateEntity_bothNull_doesNotThrow() {

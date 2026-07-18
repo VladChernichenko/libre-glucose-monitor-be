@@ -19,8 +19,8 @@ import java.util.List;
 
 /**
  * LogMeal food recognition API.
- * Step 1: POST image → /v2/image/segmentation/complete  → imageId + food names
- * Step 2: POST imageId → /v2/nutrition/recipe/nutritionalInfo → macro/micro nutrients
+ * Step 1: POST image -> /v2/image/segmentation/complete  -> imageId + food names
+ * Step 2: POST imageId -> /v2/nutrition/recipe/nutritionalInfo -> macro/micro nutrients
  */
 @Slf4j
 @Service
@@ -119,10 +119,10 @@ public class LogMealService {
         double calories = (info != null && info.has("calories") && info.get("calories").isNumber())
                 ? info.get("calories").asDouble() : nutrientQuantity(tn, "ENERC_KCAL");
 
-        log.info("[LogMeal] parsed — foods={} carbs={} fiber={} protein={} fat={} kcal={}",
+        log.info("[LogMeal] parsed - foods={} carbs={} fiber={} protein={} fat={} kcal={}",
                 foods, carbs, fiber, protein, fat, calories);
 
-        // Use Spoonacular only for GI/GL — always keep LogMeal's own macro values
+        // Use Spoonacular only for GI/GL - always keep LogMeal's own macro values
         NutritionSnapshot snapshot;
         if (!foods.isEmpty()) {
             NutritionSnapshot enriched = nutritionEnrichmentService.enrichFromText(

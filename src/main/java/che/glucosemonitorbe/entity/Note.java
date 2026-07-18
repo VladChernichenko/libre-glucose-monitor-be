@@ -15,7 +15,7 @@ public class Note {
 
     /** {@link #type} value for ordinary meal/correction/bolus notes (the default). */
     public static final String TYPE_NORMAL = "normal";
-    /** {@link #type} value for long-acting (basal) insulin notes — excluded from bolus IOB/predictions. */
+    /** {@link #type} value for long-acting (basal) insulin notes - excluded from bolus IOB/predictions. */
     public static final String TYPE_LONG_ACTING = "long_acting";
     /** {@link #type} value for a logged physical-activity note (drives the model's activity signal). */
     public static final String TYPE_ACTIVITY = "activity";
@@ -227,7 +227,7 @@ public class Note {
         this.photoKey = photoKey;
     }
 
-    /** True when this note is a long-acting (basal) injection — excluded from bolus IOB/predictions. */
+    /** True when this note is a long-acting (basal) injection - excluded from bolus IOB/predictions. */
     public boolean isLongActing() {
         return TYPE_LONG_ACTING.equals(type);
     }

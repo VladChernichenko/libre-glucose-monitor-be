@@ -112,7 +112,7 @@ public class QwenGatewayService {
         }
 
         String preview = fullContent.length() > 200
-                ? fullContent.substring(0, 200) + "…" : fullContent.toString();
+                ? fullContent.substring(0, 200) + "..." : fullContent.toString();
         log.info("[Qwen] DONE model={} promptTokens={} completionTokens={} latencyMs={} responsePreview={}",
                 model, promptTokens, completionTokens, System.currentTimeMillis() - start, preview);
         log.debug("[Qwen] FULL RESPONSE:\n{}", fullContent);
@@ -163,7 +163,7 @@ public class QwenGatewayService {
             throw new RuntimeException("Qwen vision returned no choices");
         }
         String content = choices.get(0).path("message").path("content").asText("{}");
-        String contentPreview = content.length() > 300 ? content.substring(0, 300) + "…" : content;
+        String contentPreview = content.length() > 300 ? content.substring(0, 300) + "..." : content;
         log.info("[QwenVision] CONTENT preview={}", contentPreview);
         return content;
     }

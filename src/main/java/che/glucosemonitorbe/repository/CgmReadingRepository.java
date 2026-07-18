@@ -15,7 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Persistence access for {@link CgmReading} — the shared CGM cache for all supported
+ * Persistence access for {@link CgmReading} - the shared CGM cache for all supported
  * data sources (Nightscout, LibreLinkUp). Replaces the legacy
  * {@code NightscoutChartDataRepository}.
  */

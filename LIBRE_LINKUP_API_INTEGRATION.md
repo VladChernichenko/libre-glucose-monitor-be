@@ -55,7 +55,7 @@ const glucoseData = await libreApiService.getGlucoseData(patientId, days);
 ### Trend Arrows
 - **1**: ↗ (Rising)
 - **2**: ↘ (Falling)  
-- **3**: → (Stable)
+- **3**: -> (Stable)
 - **4**: ? (No data)
 
 ### Glucose Status

@@ -45,7 +45,7 @@ public class NutritionEnrichmentService {
 
         // Gap #5: fat+protein dampen the glycemic response in mixed meals.
         // Literature (Moghaddam et al.; Venn & Green): simple GI averages overestimate
-        // peak glucose by 22–50% when fat/protein delay gastric emptying.
+        // peak glucose by 22-50% when fat/protein delay gastric emptying.
         // Formula caps total dampening at 20 GI units; floor at 15 (minimum physiological GI).
         double estimatedGi = applyFatProteinDampening(rawGi, fat, protein);
 
@@ -98,14 +98,14 @@ public class NutritionEnrichmentService {
         if (food.contains("potato") && !food.contains("sweet")) return 78.0;
         if (food.contains("watermelon")) return 76.0;
 
-        // Medium-high GI (56–69)
+        // Medium-high GI (56-69)
         if (food.contains("bread") && !food.contains("whole") && !food.contains("rye")
                 && !food.contains("sourdough")) return 65.0;
         if (food.contains("rice") && !food.contains("brown")) return 64.0;
         if (food.contains("banana") || food.contains("pineapple")) return 60.0;
         if (food.contains("pasta") || food.contains("noodle")) return 58.0;
 
-        // Low-medium GI (40–55)
+        // Low-medium GI (40-55)
         if (food.contains("whole grain") || food.contains("whole wheat") || food.contains("wholegrain")) return 50.0;
         if (food.contains("brown rice")) return 50.0;
         if (food.contains("rye") || food.contains("sourdough")) return 48.0;
@@ -127,11 +127,11 @@ public class NutritionEnrichmentService {
     /**
      * Reduces effective GI for mixed meals containing fat and/or protein.
      * Fat delays gastric emptying; protein stimulates insulin and blunts the glucose peak.
-     * Evidence: Moghaddam et al. 2006 (AJCN), Venn & Green 2007 — fat+protein can reduce
-     * observed glycemic response by 22–50% relative to the carb-only GI prediction.
+     * Evidence: Moghaddam et al. 2006 (AJCN), Venn & Green 2007 - fat+protein can reduce
+     * observed glycemic response by 22-50% relative to the carb-only GI prediction.
      *
      * Dampening: 0.30 per fat gram + 0.20 per protein gram, capped at 20 GI units.
-     * Floor: 15 — the minimum physiologically plausible GI for any food.
+     * Floor: 15 - the minimum physiologically plausible GI for any food.
      */
     private double applyFatProteinDampening(double rawGi, double fat, double protein) {
         double dampening = Math.min(fat * 0.30 + protein * 0.20, 20.0);

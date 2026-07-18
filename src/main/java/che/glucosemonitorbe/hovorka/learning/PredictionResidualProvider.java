@@ -21,9 +21,9 @@ public interface PredictionResidualProvider {
     double residualMmol(UUID userId, LocalDateTime pointTime);
 
     /**
-     * Predictive standard deviation [mmol/L] at {@code horizonMin} minutes ahead — the half-width
+     * Predictive standard deviation [mmol/L] at {@code horizonMin} minutes ahead - the half-width
      * driver of the confidence band around the point. Defaults to a population prior so any provider
-     * yields a sensible band; {@link #NONE} returns 0 (raw model, no band — used in calibration replay).
+     * yields a sensible band; {@link #NONE} returns 0 (raw model, no band - used in calibration replay).
      *
      * @param userId     the user whose twin to consult
      * @param horizonMin minutes from "now" to the predicted point

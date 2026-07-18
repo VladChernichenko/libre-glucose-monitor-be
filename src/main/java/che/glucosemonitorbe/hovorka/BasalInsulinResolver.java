@@ -11,7 +11,7 @@ import java.util.List;
  * Computes EGP (endogenous glucose production) suppression fraction from long-acting insulin.
  *
  * <h3>Physiology</h3>
- * Long-acting insulin (Lantus/Tresiba) reaches steady-state plasma levels 3–6 h after
+ * Long-acting insulin (Lantus/Tresiba) reaches steady-state plasma levels 3-6 h after
  * injection and maintains hepatic glucose production suppression throughout the day.
  * At therapeutic dosing, basal insulin suppresses roughly 40% of EGP, exactly balanced
  * by non-insulin-dependent glucose utilisation (F01) at fasting glucose.
@@ -20,24 +20,24 @@ import java.util.List;
  *
  * <h3>EGP suppression curve</h3>
  * <ul>
- *   <li>0–20 h after injection: full suppression maintained (plateau)</li>
- *   <li>20–28 h: waning (linear taper)</li>
+ *   <li>0-20 h after injection: full suppression maintained (plateau)</li>
+ *   <li>20-28 h: waning (linear taper)</li>
  * </ul>
  * <p>There is deliberately no ramp-up phase: a freshly logged dose is assumed to
  * continue the steady-state coverage already established by the user's regular
- * dosing routine — the same assumption used when no long-acting note is logged
+ * dosing routine - the same assumption used when no long-acting note is logged
  * at all (see {@code egpNow = f01} fallback in
  * {@link HovorkaGlucosePredictionService}). Without this, logging today's dose
  * a few minutes ago would make the model <em>more</em> pessimistic about EGP
  * suppression than logging nothing at all, producing a spurious rising forecast
  * right after a routine injection.</p>
  * The peak suppression fraction {@link #PEAK_X3_BASAL} (0.40) is derived from the
- * steady-state identity EGP0 × (1 - x3) = F01 → x3 = 1 - F01/EGP0 = 1 - 0.0097/0.0161 ≈ 0.40.
+ * steady-state identity EGP0 × (1 - x3) = F01 -> x3 = 1 - F01/EGP0 = 1 - 0.0097/0.0161 ≈ 0.40.
  */
 @Component
 public class BasalInsulinResolver {
 
-    /** EGP suppression fraction at steady-state basal insulin (dimensionless, 0–1). */
+    /** EGP suppression fraction at steady-state basal insulin (dimensionless, 0-1). */
     public static final double PEAK_X3_BASAL   = 0.40;
 
     /** Duration after which long-acting insulin has fully cleared [hours]. */
@@ -51,7 +51,7 @@ public class BasalInsulinResolver {
      *
      * <p>Scans long-acting notes from the last {@link #BASAL_DIA_HOURS} hours.
      * If multiple overlapping doses are present, the maximum fraction is taken
-     * (conservative — avoid double-counting). Returns 0 if no basal insulin is active.</p>
+     * (conservative - avoid double-counting). Returns 0 if no basal insulin is active.</p>
      *
      * @param longActingNotes  notes with {@code isLongActing()==true} from recent history
      * @param now              current time
@@ -79,8 +79,8 @@ public class BasalInsulinResolver {
      * EGP suppression profile as a function of hours since injection.
      *
      * <pre>
-     *   0 → wane_start : plateau at PEAK_X3_BASAL
-     *   wane_start → DIA : linear PEAK_X3_BASAL → 0
+     *   0 -> wane_start : plateau at PEAK_X3_BASAL
+     *   wane_start -> DIA : linear PEAK_X3_BASAL -> 0
      *   > DIA : 0
      * </pre>
      */
@@ -98,7 +98,7 @@ public class BasalInsulinResolver {
      * Net EGP [mmol/min] accounting for basal insulin suppression.
      *
      * <p>At full basal coverage, egpNet = f01 (hepatic output = non-insulin-dependent
-     * utilisation → glucose is stable). When basal wanes, egpNet rises above f01,
+     * utilisation -> glucose is stable). When basal wanes, egpNet rises above f01,
      * causing fasting hyperglycaemia (dawn phenomenon).</p>
      *
      * @param f01Abs         F01 * weightKg [mmol/min]
@@ -108,7 +108,7 @@ public class BasalInsulinResolver {
     public double netEgp(double f01Abs, double egp0Abs, double x3Basal) {
         // When x3 = PEAK_X3_BASAL ≈ 0.40: EGP_net ≈ EGP0 * 0.60 ≈ 0.0097*W = f01
         // The net contribution to Q1 is: egpNet - f01  (= 0 at steady state)
-        // At x3=0 (no basal): egpNet = EGP0 → net positive → glucose rises
+        // At x3=0 (no basal): egpNet = EGP0 -> net positive -> glucose rises
         return egp0Abs * (1.0 - x3Basal);
     }
 }

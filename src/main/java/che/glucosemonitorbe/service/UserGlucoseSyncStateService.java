@@ -36,7 +36,7 @@ public class UserGlucoseSyncStateService {
                                 .build()
                 );
             } catch (DataIntegrityViolationException e) {
-                // Another thread won the insert race — re-query to return their committed row.
+                // Another thread won the insert race - re-query to return their committed row.
                 // If the re-query also returns empty (test environment / rollback), fall back
                 // to an unsaved default so the caller always receives a non-null state.
                 return repository.findByUserId(userId)

@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Read + resolve API for unlogged-event flags — windows where glucose moved in a way the user's logged
+ * Read + resolve API for unlogged-event flags - windows where glucose moved in a way the user's logged
  * inputs don't explain. Flags are produced by the periodic scanner; this endpoint lets the app show
  * them and let the user confirm (optionally backfilling the real amount) or dismiss.
  */
@@ -59,7 +59,7 @@ public class UnloggedEventController {
         return ResponseEntity.ok(detectionService.dismiss(userId(auth), id));
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void requireFeature() {
         if (!featureToggleService.isEnabled("unlogged-event-detection-enabled")) {

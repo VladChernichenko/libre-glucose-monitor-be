@@ -1,4 +1,4 @@
-# Physical-activity integration — Specification
+# Physical-activity integration - Specification
 
 **Status:** Draft
 **Date:** 2026-07-05
@@ -7,8 +7,8 @@
 ## Objective
 
 Physical activity is the largest driver of insulin-sensitivity change that the glucose model does not
-represent today. Exercise increases glucose uptake — both directly (contraction-mediated, insulin-
-independent) and by amplifying insulin action — and that elevated sensitivity persists for hours after
+represent today. Exercise increases glucose uptake - both directly (contraction-mediated, insulin-
+independent) and by amplifying insulin action - and that elevated sensitivity persists for hours after
 the activity ends, which is a leading cause of delayed post-exercise hypoglycemia. Because the model
 ignores activity, exercise-driven drops appear as unexplained residuals: they degrade predictions and
 would surface as false "unlogged insulin" flags in the unlogged-event detector.
@@ -16,7 +16,7 @@ would surface as false "unlogged insulin" flags in the unlogged-event detector.
 This round adds an **activity term to the Hovorka ODE** driven by a normalized activity intensity
 `a(t) ∈ [0,1]`, plus a clean `ActivityProvider` input interface and a HUPA-dataset adapter to validate
 it offline. It does **not** wire live activity ingestion, persistence, an API, digital-twin gain
-calibration, or the detector — those only pay off once a live activity feed exists and are explicit
+calibration, or the detector - those only pay off once a live activity feed exists and are explicit
 follow-ups. Success = the model can consume an activity signal and reproduce the exercise-driven extra
 glucose drop and its post-exercise tail, with zero change to predictions when no activity data is
 present.
@@ -25,22 +25,22 @@ present.
 
 1. (Must) The Hovorka ODE integration accepts a per-minute activity intensity `a(t) ∈ [0,1]` and, when
    `a(t) > 0`, modulates glucose dynamics in two coupled ways from a single intensity:
-   - **Insulin-sensitivity amplification** — scales the insulin effect up by `(1 + gainInsulin·a)`.
-   - **Insulin-independent uptake** — adds a glucose-removal flux proportional to `gainIndep·a` (acts
+   - **Insulin-sensitivity amplification** - scales the insulin effect up by `(1 + gainInsulin*a)`.
+   - **Insulin-independent uptake** - adds a glucose-removal flux proportional to `gainIndep*a` (acts
      even when IOB ≈ 0).
 2. (Must) A single population-default gain configuration drives both effects (one calibratable knob
    conceptually; not per-user calibrated this round). Gains are configurable constants.
-3. (Must) **Post-exercise tail** — the sensitivity amplification does not drop to zero the instant
+3. (Must) **Post-exercise tail** - the sensitivity amplification does not drop to zero the instant
    activity stops; `a(t)` fed to the sensitivity term includes an exponentially-decaying tail after
    activity ends, with a configurable half-life (default ~2 h).
 4. (Must) Activity reaches the predictor through an `ActivityProvider` abstraction that returns
    `a(t)` for a given time. A `NONE` provider returns `0` everywhere.
-5. (Must) With the `NONE` provider (the production default — no live activity data), predictions are
+5. (Must) With the `NONE` provider (the production default - no live activity data), predictions are
    **identical** to the current model (the activity term is fully inert).
 6. (Must) A HUPA adapter builds an `ActivityProvider` from a subject's data: `a(t)` = heart-rate
    reserve `(HR − rest)/(max − rest)`, clamped to `[0,1]`, using default resting/max HR when unknown;
    falls back to a normalized steps rate when HR is missing; `a = 0` when both are absent. A **fixed
-   deadband** (a constant reserve threshold, ~0.30 — i.e. ≈ >99 bpm at rest 60 / max 190 — not a
+   deadband** (a constant reserve threshold, ~0.30 - i.e. ≈ >99 bpm at rest 60 / max 190 - not a
    per-user calibration) is applied so ordinary daily heart rate does not register as low-grade
    exercise; the reserve above the deadband is rescaled to `[0,1]`.
 7. (Must) `a(t)` is clamped to `[0,1]`, and the added terms are bounded so the ODE stays stable
@@ -67,7 +67,7 @@ present.
 ## Constraints
 
 - Java 21 / Spring Boot backend (`glucose-monitor-be`); reuse `HovorkaOdeSolver`,
-  `HovorkaGlucosePredictionService`, and the existing prediction/replay path — do not re-implement the
+  `HovorkaGlucosePredictionService`, and the existing prediction/replay path - do not re-implement the
   model or the gut/insulin sub-models.
 - The `ActivityProvider` interface mirrors the existing `PredictionResidualProvider.NONE` pattern
   (a `NONE` default that makes the feature inert).
@@ -115,7 +115,7 @@ present.
 - [ ] The HUPA adapter derives `a(t)` from HR reserve with a steps fallback and `a=0` when both absent
       (unit-tested on constructed rows).
 - [ ] A data-gated HUPA harness runs and reports overall MAE with vs. without the activity term;
-      activity-aware overall MAE is **not worse within a small tolerance (≤ 0.05 mmol/L)** than without.
+      activity-aware overall MAE is **not worse within a small tolerance (<= 0.05 mmol/L)** than without.
       (On HUPA the term is expected to be roughly neutral, not beneficial: the cohort has little genuine
       exercise and gains are population defaults, not per-user tuned. Real-world benefit needs the
       deferred per-user gain calibration and cleaner activity data.)

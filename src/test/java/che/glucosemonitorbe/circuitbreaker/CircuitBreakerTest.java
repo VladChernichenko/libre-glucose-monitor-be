@@ -8,7 +8,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Unit tests for the Circuit Breaker pattern implementation.
- * Covers BE-6 regression: HALF_OPEN → OPEN transition on test-call failure.
+ * Covers BE-6 regression: HALF_OPEN -> OPEN transition on test-call failure.
  */
 class CircuitBreakerTest {
 
@@ -23,7 +23,7 @@ class CircuitBreakerTest {
         cb = new CircuitBreaker("test-cb", FAILURE_THRESHOLD, TIMEOUT_MS, HALF_OPEN_MAX_CALLS);
     }
 
-    // ── initial state ──────────────────────────────────────────────────────────
+    // -- initial state ----------------------------------------------------------
 
     @Test
     void initialState_isClosed() {
@@ -36,7 +36,7 @@ class CircuitBreakerTest {
         assertThat(result).isEqualTo("ok");
     }
 
-    // ── CLOSED → OPEN transition ───────────────────────────────────────────────
+    // -- CLOSED -> OPEN transition -----------------------------------------------
 
     @Test
     void afterThresholdFailures_circuitOpens() {
@@ -65,7 +65,7 @@ class CircuitBreakerTest {
         assertThat(cb.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
     }
 
-    // ── OPEN → HALF_OPEN transition ────────────────────────────────────────────
+    // -- OPEN -> HALF_OPEN transition --------------------------------------------
 
     @Test
     void afterTimeout_circuitTransitionsToHalfOpen() throws InterruptedException {
@@ -74,13 +74,13 @@ class CircuitBreakerTest {
 
         Thread.sleep(TIMEOUT_MS + 10);
 
-        // isCircuitOpen() drives the OPEN→HALF_OPEN transition
+        // isCircuitOpen() drives the OPEN->HALF_OPEN transition
         boolean open = cb.isCircuitOpen();
         assertThat(cb.getState()).isEqualTo(CircuitBreaker.State.HALF_OPEN);
         assertThat(open).isFalse(); // first call into HALF_OPEN is allowed
     }
 
-    // ── HALF_OPEN → CLOSED transition ─────────────────────────────────────────
+    // -- HALF_OPEN -> CLOSED transition -----------------------------------------
 
     @Test
     void halfOpen_enoughSuccesses_closesCircuit() throws InterruptedException {
@@ -108,12 +108,12 @@ class CircuitBreakerTest {
         assertThat(cb.getFailureCount()).isEqualTo(0);
     }
 
-    // ── BE-6 regression: HALF_OPEN → OPEN on test-call failure ───────────────
+    // -- BE-6 regression: HALF_OPEN -> OPEN on test-call failure ---------------
 
     /**
-     * Before BE-6: a failed test-call in HALF_OPEN only attempted CAS(CLOSED→OPEN)
+     * Before BE-6: a failed test-call in HALF_OPEN only attempted CAS(CLOSED->OPEN)
      * which always fails, so the circuit silently remained HALF_OPEN.
-     * After fix: CAS(HALF_OPEN→OPEN) is also tried → circuit re-opens.
+     * After fix: CAS(HALF_OPEN->OPEN) is also tried -> circuit re-opens.
      */
     @Test
     void halfOpen_failedTestCall_reOpensCircuit() throws InterruptedException {
@@ -148,7 +148,7 @@ class CircuitBreakerTest {
         triggerFailures(FAILURE_THRESHOLD);
         Thread.sleep(TIMEOUT_MS + 10);
 
-        // First HALF_OPEN attempt fails → re-opens
+        // First HALF_OPEN attempt fails -> re-opens
         assertThatThrownBy(() -> cb.execute(() -> { throw new RuntimeException("still down"); }))
                 .isInstanceOf(RuntimeException.class);
 
@@ -160,7 +160,7 @@ class CircuitBreakerTest {
         assertThat(cb.getState()).isEqualTo(CircuitBreaker.State.HALF_OPEN);
     }
 
-    // ── fallback behaviour ─────────────────────────────────────────────────────
+    // -- fallback behaviour -----------------------------------------------------
 
     @Test
     void openCircuit_executeWithFallback_returnsFallbackValue() {
@@ -177,7 +177,7 @@ class CircuitBreakerTest {
         assertThat(result).isEqualTo("safe-fallback");
     }
 
-    // ── reset ──────────────────────────────────────────────────────────────────
+    // -- reset ------------------------------------------------------------------
 
     @Test
     void reset_restoresClosedStateAndZeroCounters() {
@@ -191,7 +191,7 @@ class CircuitBreakerTest {
         assertThat(cb.getSuccessCount()).isEqualTo(0);
     }
 
-    // ── stats ──────────────────────────────────────────────────────────────────
+    // -- stats ------------------------------------------------------------------
 
     @Test
     void getStats_reflectsCurrentState() {
@@ -201,7 +201,7 @@ class CircuitBreakerTest {
         assertThat(stats.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void triggerFailures(int count) {
         for (int i = 0; i < count; i++) {

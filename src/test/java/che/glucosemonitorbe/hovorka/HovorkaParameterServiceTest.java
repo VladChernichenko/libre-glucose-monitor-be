@@ -44,11 +44,11 @@ class HovorkaParameterServiceTest {
         service = new HovorkaParameterService(userSettingsService, experimentRepository, digitalTwinService);
         when(experimentRepository.findCompletedByUserIdAndType(any(), any()))
                 .thenReturn(List.of()); // default: no experiments
-        // No active twin by default → buildForUser returns the base parameters unchanged.
+        // No active twin by default -> buildForUser returns the base parameters unchanged.
         lenient().when(digitalTwinService.activeScales(any())).thenReturn(Optional.empty());
     }
 
-    // ── Weight fallback ────────────────────────────────────────────────────────
+    // -- Weight fallback --------------------------------------------------------
 
     @Test
     void buildForUser_nullWeight_usesDefaultWeight() {
@@ -74,7 +74,7 @@ class HovorkaParameterServiceTest {
         assertThat(p.vG()).isCloseTo(HovorkaParameters.VG_PER_KG * 80.0, within(0.001));
     }
 
-    // ── CarbHalfLife fallback ──────────────────────────────────────────────────
+    // -- CarbHalfLife fallback --------------------------------------------------
 
     @Test
     void buildForUser_nullCarbHalfLife_usesDefault45() {
@@ -97,15 +97,15 @@ class HovorkaParameterServiceTest {
         assertThat(p.tMaxG()).isCloseTo(60.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, within(0.001));
     }
 
-    // ── A_G meal-magnitude calibration ─────────────────────────────────────────
+    // -- A_G meal-magnitude calibration -----------------------------------------
     //
     // RECALIBRATION (carb-bioavailability double-discount fix):
     //   Previously A_G = clamp(0.8 × carbRatio/CR_DEFAULT, 0.5, 0.95). That had two defects:
     //     (1) It was a SECOND bioavailability discount on top of DallaManGutModel.F = 0.90,
-    //         so net carbs reaching blood were A_G × F ≈ 0.8 × 0.9 = 0.72 — ~28% vanished,
+    //         so net carbs reaching blood were A_G × F ≈ 0.8 × 0.9 = 0.72 - ~28% vanished,
     //         systematically under-predicting the post-meal rise.
     //     (2) It was derived from the carb RATIO (an insulin-dosing quantity), which has no
-    //         physiological relation to the absorbed carb fraction — corrupting meal magnitude
+    //         physiological relation to the absorbed carb fraction - corrupting meal magnitude
     //         per user with no basis.
     //   Fix: bioavailability is applied ONCE downstream (F = 0.90). A_G is now a pure per-user
     //   meal-magnitude trim centred on 1.0, INDEPENDENT of carb ratio. These tests guard that
@@ -129,7 +129,7 @@ class HovorkaParameterServiceTest {
     void buildForUser_largeCarbRatio_agUnchanged_decoupledFromCarbRatio() {
         when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(10.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
-        // A_G no longer scales with carb ratio — a large CR must NOT inflate meal magnitude.
+        // A_G no longer scales with carb ratio - a large CR must NOT inflate meal magnitude.
         assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
@@ -137,11 +137,11 @@ class HovorkaParameterServiceTest {
     void buildForUser_smallCarbRatio_agUnchanged_decoupledFromCarbRatio() {
         when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.1));
         HovorkaParameters p = service.buildForUser(USER_ID);
-        // A_G no longer scales with carb ratio — a small CR must NOT shrink meal magnitude.
+        // A_G no longer scales with carb ratio - a small CR must NOT shrink meal magnitude.
         assertThat(p.aG()).isCloseTo(1.00, within(0.001));
     }
 
-    // ── ISF fallback ──────────────────────────────────────────────────────────
+    // -- ISF fallback ----------------------------------------------------------
 
     @Test
     void buildForUser_nullIsf_usesDefault22() {
@@ -164,7 +164,7 @@ class HovorkaParameterServiceTest {
         assertThat(p.isf()).isCloseTo(3.5, within(0.001));
     }
 
-    // ── EGP estimation ────────────────────────────────────────────────────────
+    // -- EGP estimation --------------------------------------------------------
 
     @Test
     void buildForUser_noBasalCheck_egpNetEqualsF01() {
@@ -184,7 +184,7 @@ class HovorkaParameterServiceTest {
                 .thenReturn(List.of(exp));
 
         HovorkaParameters p = service.buildForUser(USER_ID);
-        // G=5.5 > G_THRESHOLD=4.5 → clamp(5.5/4.5)=1 → egpNet = f01 × 1
+        // G=5.5 > G_THRESHOLD=4.5 -> clamp(5.5/4.5)=1 -> egpNet = f01 × 1
         assertThat(p.egpNet()).isCloseTo(p.f01(), within(1e-5));
     }
 
@@ -198,7 +198,7 @@ class HovorkaParameterServiceTest {
                 .thenReturn(List.of(exp));
 
         HovorkaParameters p = service.buildForUser(USER_ID);
-        // G=3.0 < 4.5 → egpNet = f01 × (3.0/4.5) < f01
+        // G=3.0 < 4.5 -> egpNet = f01 × (3.0/4.5) < f01
         assertThat(p.egpNet()).isLessThan(p.f01());
     }
 
@@ -211,7 +211,7 @@ class HovorkaParameterServiceTest {
         when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
                 .thenReturn(List.of(exp));
 
-        // No stable experiment → uses first in list
+        // No stable experiment -> uses first in list
         HovorkaParameters p = service.buildForUser(USER_ID);
         assertThat(p.egpNet()).isGreaterThan(0.0); // has readings, should calculate
     }
@@ -246,7 +246,7 @@ class HovorkaParameterServiceTest {
         assertThat(p.k21()).isEqualTo(HovorkaParameters.K21_POP);
     }
 
-    // ── helpers ────────────────────────────────────────────────────────────────
+    // -- helpers ----------------------------------------------------------------
 
     private static UserSettingsDTO defaultSettings() {
         UserSettingsDTO dto = new UserSettingsDTO();

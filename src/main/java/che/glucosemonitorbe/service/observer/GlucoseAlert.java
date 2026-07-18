@@ -8,12 +8,12 @@ import java.util.UUID;
  *
  * <p>Priority order (highest first):
  * <ol>
- *   <li>{@link Type#PREDICTED_HYPO}    – path point &lt;3.9 within 60 min</li>
- *   <li>{@link Type#OVER_INJECTION}     – IOB exceeds COB buffer; nadir projected &lt;4.0</li>
- *   <li>{@link Type#RAPID_DROP}         – ROC &lt;−0.07 mmol/L/min for ≥2 readings</li>
- *   <li>{@link Type#UNLOGGED_MEAL}      – ROC &gt;+0.10 sustained &amp; COB=0 &amp; no note 45 min</li>
- *   <li>{@link Type#PREDICTED_HYPER}    – path &gt;12 in 2h &amp; IOB&lt;0.5u</li>
- *   <li>{@link Type#POST_MEAL_SWING}    – ±2 mmol/L beyond expected peak/nadir</li>
+ *   <li>{@link Type#PREDICTED_HYPO}    - path point &lt;3.9 within 60 min</li>
+ *   <li>{@link Type#OVER_INJECTION}     - IOB exceeds COB buffer; nadir projected &lt;4.0</li>
+ *   <li>{@link Type#RAPID_DROP}         - ROC &lt;−0.07 mmol/L/min for >=2 readings</li>
+ *   <li>{@link Type#UNLOGGED_MEAL}      - ROC &gt;+0.10 sustained &amp; COB=0 &amp; no note 45 min</li>
+ *   <li>{@link Type#PREDICTED_HYPER}    - path &gt;12 in 2h &amp; IOB&lt;0.5u</li>
+ *   <li>{@link Type#POST_MEAL_SWING}    - ±2 mmol/L beyond expected peak/nadir</li>
  * </ol>
  */
 public record GlucoseAlert(
@@ -27,7 +27,7 @@ public record GlucoseAlert(
         String actionSuggestion
 ) {
     public enum Type {
-        /** Path point < 3.9 mmol/L within 60 min — APNs critical. */
+        /** Path point < 3.9 mmol/L within 60 min - APNs critical. */
         PREDICTED_HYPO,
 
         /**
@@ -36,12 +36,12 @@ public record GlucoseAlert(
          */
         OVER_INJECTION,
 
-        /** ROC < −0.07 mmol/L/min for ≥ 2 consecutive CGM readings. */
+        /** ROC < −0.07 mmol/L/min for >= 2 consecutive CGM readings. */
         RAPID_DROP,
 
         /**
          * Glucose rising fast (ROC > +0.10) with zero active COB and no
-         * meal note in the last 45 minutes — user likely forgot to log.
+         * meal note in the last 45 minutes - user likely forgot to log.
          */
         UNLOGGED_MEAL,
 

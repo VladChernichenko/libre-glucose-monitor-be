@@ -73,10 +73,10 @@ class UserSettingsServiceTest {
         assertFalse(exists);
     }
 
-    // ── L3: getUserSettings must not perform DB saves (side-effect in @Cacheable) ────
+    // -- L3: getUserSettings must not perform DB saves (side-effect in @Cacheable) ----
 
     /**
-     * BUG: L3 — UserSettingsService.getUserSettings is annotated @Cacheable but when no
+     * BUG: L3 - UserSettingsService.getUserSettings is annotated @Cacheable but when no
      * settings exist it calls createDefaultSettings, which does a DB INSERT (save).
      * A read method annotated @Cacheable must not have side-effects because:
      *   1. The cache may serve subsequent calls, bypassing the save.
@@ -87,17 +87,17 @@ class UserSettingsServiceTest {
      * access (the save IS called).
      *
      * Note: Spring's @Cacheable proxy is bypassed when calling the method directly on
-     * the service (same-bean invocation), so the save IS reached in tests — which is
+     * the service (same-bean invocation), so the save IS reached in tests - which is
      * exactly what we want to document as the bug.
      */
-    // ── C1: TOCTOU race in getUserSettings creates duplicate default settings ──
+    // -- C1: TOCTOU race in getUserSettings creates duplicate default settings --
 
     /**
-     * // BUG: C1 — UserSettingsService.getUserSettings is non-atomic: it first calls
+     * // BUG: C1 - UserSettingsService.getUserSettings is non-atomic: it first calls
      * findByUserId, then (if absent) calls save. Under concurrent requests, two threads
      * can both see "no settings" and both attempt to insert, causing a
      * DataIntegrityViolationException from the unique constraint on userId.
-     * The service must handle this race gracefully — either by using an atomic upsert
+     * The service must handle this race gracefully - either by using an atomic upsert
      * or by catching the constraint violation and retrying the read.
      *
      * This test simulates the race: findByUserId returns empty, but save throws
@@ -113,10 +113,10 @@ class UserSettingsServiceTest {
 
         // First call: no settings found (concurrent thread hasn't inserted yet)
         when(repository.findByUserId(userId))
-                .thenReturn(Optional.empty())  // first call — race window
+                .thenReturn(Optional.empty())  // first call - race window
                 .thenReturn(Optional.of(existingSettings)); // retry read after conflict
 
-        // BUG: currently propagates DataIntegrityViolationException — this FAILS
+        // BUG: currently propagates DataIntegrityViolationException - this FAILS
         assertThatNoException()
                 .as("getUserSettings must not propagate DataIntegrityViolationException "
                         + "caused by concurrent default-settings insert (BUG: C1)")
@@ -130,7 +130,7 @@ class UserSettingsServiceTest {
 
         service.getUserSettings(userId);
 
-        // BUG: repository.save IS called (createDefaultSettings) — this FAILS
+        // BUG: repository.save IS called (createDefaultSettings) - this FAILS
         verify(repository, never()).save(any(UserSettings.class));
     }
 }

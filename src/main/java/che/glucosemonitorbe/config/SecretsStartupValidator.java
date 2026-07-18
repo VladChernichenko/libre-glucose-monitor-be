@@ -14,7 +14,7 @@ import java.util.Arrays;
  * Fail-fast guard for insecure secrets (BE-P0 / H1).
  *
  * <p>Under the {@code prod} profile the application refuses to start if the JWT signing secret is
- * missing, too short for HS512, or a known development default — or if the credential-encryption
+ * missing, too short for HS512, or a known development default - or if the credential-encryption
  * key is still the development fallback. In non-prod profiles these conditions only log warnings so
  * local development keeps working.
  */

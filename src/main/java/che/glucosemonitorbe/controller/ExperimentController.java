@@ -90,7 +90,7 @@ public class ExperimentController {
         return ResponseEntity.ok(experimentService.getHistory(userId(auth)));
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void requireFeature() {
         if (!featureToggleService.isEnabled("experiments-enabled")) {

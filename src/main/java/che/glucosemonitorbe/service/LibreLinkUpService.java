@@ -28,8 +28,8 @@ import java.util.UUID;
  *
  * <p>BE-M5 decomposition: transport (HTTP, headers, byte parsing) lives in {@link LibreLinkUpClient};
  * per-user session state in {@link LibreLinkUpSessionStore}; regional host routing in
- * {@link LibreLinkUpRegionResolver}; wire→domain mapping helpers in {@link LibreLinkUpResponseParser}.
- * This class coordinates those collaborators and owns the auth flow and JSON→DTO mapping.
+ * {@link LibreLinkUpRegionResolver}; wire->domain mapping helpers in {@link LibreLinkUpResponseParser}.
+ * This class coordinates those collaborators and owns the auth flow and JSON->DTO mapping.
  */
 @Service
 public class LibreLinkUpService {
@@ -66,7 +66,7 @@ public class LibreLinkUpService {
 
     /**
      * Authenticate with LibreLinkUp and store the resulting token per-user.
-     * BE-1: credentials are keyed by userId — no shared singleton state.
+     * BE-1: credentials are keyed by userId - no shared singleton state.
      */
     public LibreAuthResponse authenticate(LibreAuthRequest authRequest, UUID userId) throws Exception {
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-auth:" + userId);

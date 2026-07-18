@@ -84,10 +84,10 @@ class UnloggedEventE2ETest {
         authHeaders = registerAndLogin();
     }
 
-    // ── T1: unexplained rise, nothing logged → UNLOGGED_FOOD ──────────────────
+    // -- T1: unexplained rise, nothing logged -> UNLOGGED_FOOD ------------------
 
     @Test
-    @DisplayName("T1 — a sustained rise with no logged carbs opens an UNLOGGED_FOOD flag")
+    @DisplayName("T1 - a sustained rise with no logged carbs opens an UNLOGGED_FOOD flag")
     void unexplainedRise_flagsUnloggedFood() {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -101,14 +101,14 @@ class UnloggedEventE2ETest {
         assertTrue(flag.get().getMeanResidualMmol() > 0, "residual is a rise");
     }
 
-    // ── T2: same rise WITH a too-small carb note → UNDER_ESTIMATED_FOOD ────────
+    // -- T2: same rise WITH a too-small carb note -> UNDER_ESTIMATED_FOOD --------
 
     @Test
-    @DisplayName("T2 — a rise with a too-small logged carb note opens UNDER_ESTIMATED_FOOD")
+    @DisplayName("T2 - a rise with a too-small logged carb note opens UNDER_ESTIMATED_FOOD")
     void underEstimatedFood_whenCarbsLoggedButInsufficient() {
         UUID userId = userId();
         long elevatedStart = seedRiseWindow(userId);
-        // A small carb log inside the window — present but nowhere near enough to explain the rise.
+        // A small carb log inside the window - present but nowhere near enough to explain the rise.
         Note n = new Note();
         n.setUserId(userId);
         n.setTimestamp(toLdt(elevatedStart));
@@ -126,10 +126,10 @@ class UnloggedEventE2ETest {
         assertEquals(Category.UNDER_ESTIMATED_FOOD, flag.get().getCategory());
     }
 
-    // ── T3: re-scan updates the same flag, no duplicate ───────────────────────
+    // -- T3: re-scan updates the same flag, no duplicate -----------------------
 
     @Test
-    @DisplayName("T3 — re-scanning the same window updates the OPEN flag rather than duplicating")
+    @DisplayName("T3 - re-scanning the same window updates the OPEN flag rather than duplicating")
     void rescan_dedupesOpenFlag() {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -140,10 +140,10 @@ class UnloggedEventE2ETest {
         assertEquals(1, flagRepository.findByUserIdOrderByDetectedAtDesc(userId).size());
     }
 
-    // ── T4: a transient spike shorter than the persistence minimum → no flag ──
+    // -- T4: a transient spike shorter than the persistence minimum -> no flag --
 
     @Test
-    @DisplayName("T4 — a transient spike (< persistence minimum) produces no flag")
+    @DisplayName("T4 - a transient spike (< persistence minimum) produces no flag")
     void transientSpike_notFlagged() {
         UUID userId = userId();
         long now = Instant.now().toEpochMilli();
@@ -158,10 +158,10 @@ class UnloggedEventE2ETest {
         assertTrue(detectionService.scanUser(userId).isEmpty());
     }
 
-    // ── T5: confirm with backfill via API → CONFIRMED + a note is created ─────
+    // -- T5: confirm with backfill via API -> CONFIRMED + a note is created -----
 
     @Test
-    @DisplayName("T5 — confirming with a backfill amount marks CONFIRMED and creates a note")
+    @DisplayName("T5 - confirming with a backfill amount marks CONFIRMED and creates a note")
     void confirmWithBackfill_createsNote() throws Exception {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -179,10 +179,10 @@ class UnloggedEventE2ETest {
                 "a backfilled note with the confirmed carbs should exist");
     }
 
-    // ── T6: dismiss via API → DISMISSED ───────────────────────────────────────
+    // -- T6: dismiss via API -> DISMISSED ---------------------------------------
 
     @Test
-    @DisplayName("T6 — dismissing a flag marks it DISMISSED")
+    @DisplayName("T6 - dismissing a flag marks it DISMISSED")
     void dismiss_marksDismissed() throws Exception {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -197,10 +197,10 @@ class UnloggedEventE2ETest {
                 flagRepository.findById(flagId).orElseThrow().getState());
     }
 
-    // ── T7/T8: sustained fall → insulin categories ────────────────────────────
+    // -- T7/T8: sustained fall -> insulin categories ----------------------------
 
     @Test
-    @DisplayName("T7 — a sustained fall with no logged bolus opens UNLOGGED_INSULIN")
+    @DisplayName("T7 - a sustained fall with no logged bolus opens UNLOGGED_INSULIN")
     void unexplainedFall_flagsUnloggedInsulin() {
         UUID userId = userId();
         seedFallWindow(userId);
@@ -214,7 +214,7 @@ class UnloggedEventE2ETest {
     }
 
     @Test
-    @DisplayName("T8 — a fall with a too-small logged bolus opens UNDER_ESTIMATED_INSULIN")
+    @DisplayName("T8 - a fall with a too-small logged bolus opens UNDER_ESTIMATED_INSULIN")
     void underEstimatedInsulin_whenBolusLoggedButInsufficient() {
         UUID userId = userId();
         long dropStart = seedFallWindow(userId);
@@ -235,10 +235,10 @@ class UnloggedEventE2ETest {
         assertEquals(Category.UNDER_ESTIMATED_INSULIN, flag.get().getCategory());
     }
 
-    // ── T9: authorization + idempotency of confirm/dismiss ────────────────────
+    // -- T9: authorization + idempotency of confirm/dismiss --------------------
 
     @Test
-    @DisplayName("T9a — a user cannot resolve another user's flag (404)")
+    @DisplayName("T9a - a user cannot resolve another user's flag (404)")
     void cannotResolveOtherUsersFlag() {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -253,7 +253,7 @@ class UnloggedEventE2ETest {
     }
 
     @Test
-    @DisplayName("T9b — resolving an already-resolved flag is rejected (409)")
+    @DisplayName("T9b - resolving an already-resolved flag is rejected (409)")
     void cannotResolveAlreadyResolvedFlag() {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -268,10 +268,10 @@ class UnloggedEventE2ETest {
         assertEquals(HttpStatus.CONFLICT, second.getStatusCode());
     }
 
-    // ── T10/T11: list endpoint + confirm without a backfill amount ────────────
+    // -- T10/T11: list endpoint + confirm without a backfill amount ------------
 
     @Test
-    @DisplayName("T10 — GET lists the user's flags and honors the state filter")
+    @DisplayName("T10 - GET lists the user's flags and honors the state filter")
     void listFlags_filtersByState() throws Exception {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -288,7 +288,7 @@ class UnloggedEventE2ETest {
     }
 
     @Test
-    @DisplayName("T11 — confirming without an amount marks CONFIRMED and creates no note")
+    @DisplayName("T11 - confirming without an amount marks CONFIRMED and creates no note")
     void confirmWithoutAmount_noNote() throws Exception {
         UUID userId = userId();
         seedRiseWindow(userId);
@@ -303,10 +303,10 @@ class UnloggedEventE2ETest {
         assertEquals(0, noteRepository.count(), "no backfill note when no amount is supplied");
     }
 
-    // ── T12: calibration down-weights CONFIRMED windows, keeps DISMISSED ──────
+    // -- T12: calibration down-weights CONFIRMED windows, keeps DISMISSED ------
 
     @Test
-    @DisplayName("T12 — calibration excludes CONFIRMED-window readings and keeps DISMISSED ones")
+    @DisplayName("T12 - calibration excludes CONFIRMED-window readings and keeps DISMISSED ones")
     void calibrationExcludesConfirmedKeepsDismissed() {
         UUID userId = userId();
         seedCalibrationData(userId);
@@ -316,7 +316,7 @@ class UnloggedEventE2ETest {
         int base = r0.trainSamples();
         assertTrue(base > 0);
 
-        // A CONFIRMED flag over a 4-hour window inside the record → those readings are excluded.
+        // A CONFIRMED flag over a 4-hour window inside the record -> those readings are excluded.
         long now = Instant.now().toEpochMilli();
         LocalDateTime wEnd = toLdt(now - 6 * 3600_000L);
         LocalDateTime wStart = wEnd.minusHours(4);
@@ -338,15 +338,15 @@ class UnloggedEventE2ETest {
         assertEquals(base, dismissed, "DISMISSED window must keep full weight");
     }
 
-    // ── T13: a logged activity explains an exercise-driven drop → no false flag ───
+    // -- T13: a logged activity explains an exercise-driven drop -> no false flag ---
 
     @Test
-    @DisplayName("T13 — logging an activity over a drop shrinks the flagged residual (detector is activity-aware)")
+    @DisplayName("T13 - logging an activity over a drop shrinks the flagged residual (detector is activity-aware)")
     void loggedActivity_reducesFlaggedResidual() {
         UUID userId = userId();
         long dropStart = seedFallWindow(userId);   // sustained fall, no bolus
 
-        // Without any activity, the drop is unexplained → flagged with a large negative residual.
+        // Without any activity, the drop is unexplained -> flagged with a large negative residual.
         UnloggedEventFlag before = detectionService.scanUser(userId).orElseThrow();
         assertEquals(Category.UNLOGGED_INSULIN, before.getCategory());
         double residualBefore = Math.abs(before.getMeanResidualMmol());
@@ -375,7 +375,7 @@ class UnloggedEventE2ETest {
                         + ", after=" + residualAfter + ")");
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     /** Seed a flat baseline then a sustained elevated tail with no logged inputs. Returns elevated-start ms. */
     private long seedRiseWindow(UUID userId) {
@@ -383,7 +383,7 @@ class UnloggedEventE2ETest {
         long start = now - (N - 1) * STEP;
         List<CgmReading> batch = new ArrayList<>();
         for (int i = 0; i < N; i++) {
-            int sgv = i < ELEVATED_FROM ? 110 : 200;    // 6.1 → 11.1 mmol/L
+            int sgv = i < ELEVATED_FROM ? 110 : 200;    // 6.1 -> 11.1 mmol/L
             batch.add(reading(userId, start + i * STEP, sgv, "u" + i));
         }
         cgmReadingRepository.saveAll(batch);
@@ -396,7 +396,7 @@ class UnloggedEventE2ETest {
         long start = now - (N - 1) * STEP;
         List<CgmReading> batch = new ArrayList<>();
         for (int i = 0; i < N; i++) {
-            int sgv = i < ELEVATED_FROM ? 200 : 110;    // 11.1 → 6.1 mmol/L
+            int sgv = i < ELEVATED_FROM ? 200 : 110;    // 11.1 -> 6.1 mmol/L
             batch.add(reading(userId, start + i * STEP, sgv, "u" + i));
         }
         cgmReadingRepository.saveAll(batch);

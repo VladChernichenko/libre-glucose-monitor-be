@@ -18,10 +18,10 @@ public class PredictionPointDTO {
     private Double insulinActivityEffect;
     private String absorptionMode;
 
-    // ── Probabilistic band (digital-twin uncertainty) ─────────────────────────
-    /** Lower bound of the confidence band [mmol/L] — predictedGlucose − z·σ(horizon). */
+    // -- Probabilistic band (digital-twin uncertainty) -------------------------
+    /** Lower bound of the confidence band [mmol/L] - predictedGlucose − z*σ(horizon). */
     private Double predictedGlucoseLower;
-    /** Upper bound of the confidence band [mmol/L] — predictedGlucose + z·σ(horizon). */
+    /** Upper bound of the confidence band [mmol/L] - predictedGlucose + z*σ(horizon). */
     private Double predictedGlucoseUpper;
     /** Predictive standard deviation at this horizon [mmol/L]. */
     private Double uncertaintySd;

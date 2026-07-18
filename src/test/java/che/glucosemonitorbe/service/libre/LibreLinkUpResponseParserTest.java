@@ -40,7 +40,7 @@ class LibreLinkUpResponseParserTest {
         }
     }
 
-    // ── trendToArrow ──────────────────────────────────────────────────────────
+    // -- trendToArrow ----------------------------------------------------------
 
     @ParameterizedTest(name = "trend {0} -> {1}")
     @CsvSource({
@@ -62,9 +62,9 @@ class LibreLinkUpResponseParserTest {
         assertThat(parser.trendToArrow(trend)).isEqualTo("\u2192");
     }
 
-    // ── glucoseStatus ─────────────────────────────────────────────────────────
+    // -- glucoseStatus ---------------------------------------------------------
 
-    @ParameterizedTest(name = "{0} mmol/L → {1}")
+    @ParameterizedTest(name = "{0} mmol/L -> {1}")
     @CsvSource({
         "2.0, low",
         "3.89, low",
@@ -77,15 +77,15 @@ class LibreLinkUpResponseParserTest {
         "14.0, critical",
         "20.0, critical"
     })
-    @DisplayName("glucoseStatus — correct status for boundary values")
+    @DisplayName("glucoseStatus - correct status for boundary values")
     void glucoseStatus_allRanges(double mmol, String expected) {
         assertThat(parser.glucoseStatus(mmol)).isEqualTo(expected);
     }
 
-    // ── parseTimestamp ────────────────────────────────────────────────────────
+    // -- parseTimestamp --------------------------------------------------------
 
     @Test
-    @DisplayName("parseTimestamp — ISO-8601 with Z suffix")
+    @DisplayName("parseTimestamp - ISO-8601 with Z suffix")
     void parseTimestamp_iso8601WithZ() {
         Date d = parser.parseTimestamp("2025-01-14T22:22:33Z");
         assertThat(d).isNotNull();
@@ -93,7 +93,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("parseTimestamp — epoch milliseconds string")
+    @DisplayName("parseTimestamp - epoch milliseconds string")
     void parseTimestamp_epochMilliseconds() {
         long epochMs = 1_716_471_000_000L;
         Date d = parser.parseTimestamp(String.valueOf(epochMs));
@@ -102,21 +102,21 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("parseTimestamp — US format M/d/yyyy h:mm:ss a")
+    @DisplayName("parseTimestamp - US format M/d/yyyy h:mm:ss a")
     void parseTimestamp_usRegionalFormat() {
         Date d = parser.parseTimestamp("1/14/2026 10:22:33 PM");
         assertThat(d).isNotNull();
     }
 
     @Test
-    @DisplayName("parseTimestamp — EU format dd/MM/yyyy HH:mm:ss")
+    @DisplayName("parseTimestamp - EU format dd/MM/yyyy HH:mm:ss")
     void parseTimestamp_euRegionalFormat() {
         Date d = parser.parseTimestamp("14/01/2026 22:22:33");
         assertThat(d).isNotNull();
     }
 
     @Test
-    @DisplayName("parseTimestamp — null returns current time (not null)")
+    @DisplayName("parseTimestamp - null returns current time (not null)")
     void parseTimestamp_null_returnsFallback() {
         long before = System.currentTimeMillis();
         Date d = parser.parseTimestamp(null);
@@ -126,7 +126,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("parseTimestamp — blank returns current time (not null)")
+    @DisplayName("parseTimestamp - blank returns current time (not null)")
     void parseTimestamp_blank_returnsFallback() {
         long before = System.currentTimeMillis();
         Date d = parser.parseTimestamp("   ");
@@ -136,7 +136,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("parseTimestamp — unparseable string returns current time (not null)")
+    @DisplayName("parseTimestamp - unparseable string returns current time (not null)")
     void parseTimestamp_unparseable_returnsFallback() {
         long before = System.currentTimeMillis();
         Date d = parser.parseTimestamp("not-a-date-at-all");
@@ -145,10 +145,10 @@ class LibreLinkUpResponseParserTest {
         assertThat(d.getTime()).isBetween(before - 1000, after + 1000);
     }
 
-    // ── toConnections (BE-2 envelope unwrap) ──────────────────────────────────
+    // -- toConnections (BE-2 envelope unwrap) ----------------------------------
 
     @Test
-    @DisplayName("toConnections — unwraps {\"data\":[...]} envelope, name stored in id field")
+    @DisplayName("toConnections - unwraps {\"data\":[...]} envelope, name stored in id field")
     void toConnections_unwrapsEnvelopeAndConcatenatesName() {
         List<LibreConnection> conns = parser.toConnections(json(
                 "{\"data\":[{\"patientId\":\"p1\",\"firstName\":\"John\",\"lastName\":\"Doe\","
@@ -162,16 +162,16 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toConnections — missing/non-array data yields empty list (no NPE)")
+    @DisplayName("toConnections - missing/non-array data yields empty list (no NPE)")
     void toConnections_missingOrNonArrayData_returnsEmptyList() {
         assertThat(parser.toConnections(json("{}"))).isEmpty();
         assertThat(parser.toConnections(json("{\"data\":{}}"))).isEmpty();
     }
 
-    // ── toGlucoseData (graph mapping + live-measurement merge) ─────────────────
+    // -- toGlucoseData (graph mapping + live-measurement merge) -----------------
 
     @Test
-    @DisplayName("toGlucoseData — mg/dL → mmol/L (÷18), correct arrow and status")
+    @DisplayName("toGlucoseData - mg/dL -> mmol/L (÷18), correct arrow and status")
     void toGlucoseData_mapsMgDlToMmolWithArrowAndStatus() {
         LibreGlucoseData data = parser.toGlucoseData(json(
                 "{\"data\":{\"graphData\":[{\"ValueInMgPerDl\":180,"
@@ -202,7 +202,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toGlucoseData — appends live glucoseMeasurement when newer than last graph point")
+    @DisplayName("toGlucoseData - appends live glucoseMeasurement when newer than last graph point")
     void toGlucoseData_appendsLiveMeasurementWhenNewer() {
         LibreGlucoseData data = parser.toGlucoseData(json(
                 "{\"data\":{"
@@ -217,7 +217,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toGlucoseData — patches trend from live measurement when timestamps are equal (graph points lack TrendArrow)")
+    @DisplayName("toGlucoseData - patches trend from live measurement when timestamps are equal (graph points lack TrendArrow)")
     void toGlucoseData_patchesTrendWhenSameTimestamp() {
         // Graph data point has no TrendArrow (trend=0); glucoseMeasurement has same timestamp but valid trend.
         LibreGlucoseData data = parser.toGlucoseData(json(
@@ -233,7 +233,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toGlucoseData — patches trend from live measurement even when older than last graph point")
+    @DisplayName("toGlucoseData - patches trend from live measurement even when older than last graph point")
     void toGlucoseData_patchesTrendWhenLiveMeasurementOlder() {
         // glucoseMeasurement (22:15) is older than the last graph point (22:30).
         // Graph points never have TrendArrow so we always take the live trend.
@@ -249,7 +249,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toGlucoseData — skips zero-valued / timestampless points")
+    @DisplayName("toGlucoseData - skips zero-valued / timestampless points")
     void toGlucoseData_skipsZeroValuedPoints() {
         LibreGlucoseData data = parser.toGlucoseData(json(
                 "{\"data\":{\"graphData\":["
@@ -260,10 +260,10 @@ class LibreLinkUpResponseParserTest {
         assertThat(data.getData().get(0).getValue()).isEqualTo(6.0); // 108 / 18.0
     }
 
-    // ── toSensorInfo (activeSensors mapping) ──────────────────────────────────
+    // -- toSensorInfo (activeSensors mapping) ----------------------------------
 
     @Test
-    @DisplayName("toSensorInfo — no active sensor returns unknown placeholder")
+    @DisplayName("toSensorInfo - no active sensor returns unknown placeholder")
     void toSensorInfo_noActiveSensors_returnsUnknown() {
         assertThat(parser.toSensorInfo(json("{\"data\":{}}"), "p1").getStatus()).isEqualTo("unknown");
         LibreSensorInfo empty = parser.toSensorInfo(json("{\"data\":{\"activeSensors\":[]}}"), "p1");
@@ -272,7 +272,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toSensorInfo — maps Libre 3 (dtid 40), serial, age/remaining from 14-day life")
+    @DisplayName("toSensorInfo - maps Libre 3 (dtid 40), serial, age/remaining from 14-day life")
     void toSensorInfo_mapsLibre3ModelSerialAndAge() {
         long activationEpochSec = System.currentTimeMillis() / 1000L - 3L * 86400L; // activated 3 days ago
         LibreSensorInfo info = parser.toSensorInfo(json(
@@ -289,7 +289,7 @@ class LibreLinkUpResponseParserTest {
     }
 
     @Test
-    @DisplayName("toSensorInfo — maps Libre 2 (dtid 30); no activation epoch → unknown status")
+    @DisplayName("toSensorInfo - maps Libre 2 (dtid 30); no activation epoch -> unknown status")
     void toSensorInfo_mapsLibre2Model_unknownStatusWithoutActivation() {
         LibreSensorInfo info = parser.toSensorInfo(json(
                 "{\"data\":{\"activeSensors\":[{\"sensor\":{\"sn\":\"S2\"},\"device\":{\"dtid\":30}}]}}"), "p1");

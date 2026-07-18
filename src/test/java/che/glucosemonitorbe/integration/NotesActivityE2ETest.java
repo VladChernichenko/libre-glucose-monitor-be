@@ -80,7 +80,7 @@ class NotesActivityE2ETest {
         assertEquals(HttpStatus.BAD_REQUEST, postNote(activity("TELEPORTING", "MODERATE", 30)).getStatusCode());
     }
 
-    // ── helpers ────────────────────────────────────────────────────────────────
+    // -- helpers ----------------------------------------------------------------
 
     private CreateNoteRequest activity(String type, String intensity, int durationMin) {
         CreateNoteRequest n = new CreateNoteRequest();

@@ -38,11 +38,11 @@ class CarbsOnBoardServiceTest {
         settingsService = mock(UserSettingsService.class);
         service = new CarbsOnBoardService(settingsService);
         now = LocalDateTime.now();
-        // Default: no user-configured maxCOBDuration (0 → use speed class), halfLife=45 min
+        // Default: no user-configured maxCOBDuration (0 -> use speed class), halfLife=45 min
         stubSettings(0, 45);
     }
 
-    // ── null / zero guards ────────────────────────────────────────────────────
+    // -- null / zero guards ----------------------------------------------------
 
     @Test
     void nullEntry_returnsZero() {
@@ -68,7 +68,7 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── speed class COB windows ───────────────────────────────────────────────
+    // -- speed class COB windows -----------------------------------------------
 
     @Test
     void fastClass_windowIs120Min_carbsGoneAfterWindow() {
@@ -122,7 +122,7 @@ class CarbsOnBoardServiceTest {
     }
 
     /** At exactly the window boundary the carbs must be 0. */
-    @ParameterizedTest(name = "speedClass={0} → zero at {1}+1 min")
+    @ParameterizedTest(name = "speedClass={0} -> zero at {1}+1 min")
     @CsvSource({
             "FAST,   120",
             "MEDIUM, 180",
@@ -133,11 +133,11 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── Warsaw Method pattern duration override ───────────────────────────────
+    // -- Warsaw Method pattern duration override -------------------------------
 
     @Test
     void doubleWave8h_carbsActiveAt6h() {
-        // Double Wave (≥4 FPU): 8h = 480 min → carbs still present at 360 min
+        // Double Wave (>=4 FPU): 8h = 480 min -> carbs still present at 360 min
         CarbsEntry e = carbEntry(now.minusMinutes(360), 60.0, "SLOW", 8.0);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
     }
@@ -150,7 +150,7 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void flatPlateau5h_carbsActiveAt4h() {
-        // Flat Plateau (≥3 FPU): 5h = 300 min → active at 240 min
+        // Flat Plateau (>=3 FPU): 5h = 300 min -> active at 240 min
         CarbsEntry e = carbEntry(now.minusMinutes(240), 50.0, "MEDIUM", 5.0);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
     }
@@ -163,7 +163,7 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void moderateFpu4h_carbsActiveAt3h() {
-        // Moderate FPU (2 FPU): 4h = 240 min → active at 180 min
+        // Moderate FPU (2 FPU): 4h = 240 min -> active at 180 min
         CarbsEntry e = carbEntry(now.minusMinutes(180), 50.0, "MEDIUM", 4.0);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
     }
@@ -171,7 +171,7 @@ class CarbsOnBoardServiceTest {
     @Test
     void lightFpu3h_extendsWindowBeyondFastClass() {
         // FAST class = 120 min; Light FPU pattern = 3h = 180 min
-        // At 150 min: FAST alone → expired; with pattern 3h → still active
+        // At 150 min: FAST alone -> expired; with pattern 3h -> still active
         CarbsEntry withoutPattern = carbEntry(now.minusMinutes(150), 50.0, "FAST", null);
         CarbsEntry withPattern    = carbEntry(now.minusMinutes(150), 50.0, "FAST", 3.0);
 
@@ -181,17 +181,17 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void patternShorterThanDefault_defaultWindowWins() {
-        // Pattern=1h (60 min) but SLOW default=240 min → max(60,240)=240 → still active at 90 min
+        // Pattern=1h (60 min) but SLOW default=240 min -> max(60,240)=240 -> still active at 90 min
         CarbsEntry e = carbEntry(now.minusMinutes(90), 50.0, "SLOW", 1.0);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
     }
 
-    // ── user-configured maxCOBDuration ────────────────────────────────────────
+    // -- user-configured maxCOBDuration ----------------------------------------
 
     @Test
     void userMaxCobDuration_overridesSpeedClassDefault() {
         stubSettings(120, 45); // user configured 120 min max
-        // At 150 min: speed class SLOW=240, but user cap=120 → 0
+        // At 150 min: speed class SLOW=240, but user cap=120 -> 0
         CarbsEntry e = carbEntry(now.minusMinutes(150), 50.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
@@ -203,10 +203,10 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── exponential decay behaviour (BE-3 regression guards) ─────────────────
+    // -- exponential decay behaviour (BE-3 regression guards) -----------------
 
     /**
-     * // BUG: BE-3 — CarbsOnBoardService used linear decay instead of exponential
+     * // BUG: BE-3 - CarbsOnBoardService used linear decay instead of exponential
      * half-life decay.  Fixed: now uses 2^(-t/halfLife) exponential model.
      * This regression test PASSES on the fixed code and documents the correct behaviour.
      */
@@ -221,7 +221,7 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void atOneHalfLife_remainingIsApproxHalf() {
-        // halfLife=45 min → at t=45 min: remaining ≈ 50% of carbs
+        // halfLife=45 min -> at t=45 min: remaining ≈ 50% of carbs
         CarbsEntry e = carbEntry(now.minusMinutes(45), 50.0, "SLOW", null);
         double remaining = service.calculateRemainingCarbs(e, now, USER_ID);
         assertThat(remaining).isCloseTo(25.0, within(3.0));
@@ -239,7 +239,7 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThanOrEqualTo(0.0);
     }
 
-    // ── GI_GL_ENHANCED absorption mode ───────────────────────────────────────
+    // -- GI_GL_ENHANCED absorption mode ---------------------------------------
 
     @Test
     void enhancedMode_returnsBoundedCob() {
@@ -251,7 +251,7 @@ class CarbsOnBoardServiceTest {
     @Test
     void enhancedMode_highFiberAndFatProtein_moreCobRemainingThanPureHighGI() {
         // High-GI fast meal: peaks and clears quickly
-        // Low-GI with fiber/protein/fat: delayed absorption → more COB at 90 min
+        // Low-GI with fiber/protein/fat: delayed absorption -> more COB at 90 min
         CarbsEntry highGi = giEnhancedEntry(now.minusMinutes(90), 50.0, 80.0, 1.0,  2.0, 1.0);
         CarbsEntry lowGi  = giEnhancedEntry(now.minusMinutes(90), 50.0, 30.0, 8.0, 20.0, 15.0);
 
@@ -269,7 +269,7 @@ class CarbsOnBoardServiceTest {
                 .isGreaterThan(service.calculateRemainingCarbs(lean, now, USER_ID));
     }
 
-    // ── total COB aggregation ─────────────────────────────────────────────────
+    // -- total COB aggregation -------------------------------------------------
 
     @Test
     void totalCob_equalsSum_ofIndividualEntries() {
@@ -293,7 +293,7 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateTotalCarbsOnBoard(null, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── N+1 fix: getUserSettings invocation counts ─────────────────────────────
+    // -- N+1 fix: getUserSettings invocation counts -----------------------------
 
     /**
      * Core regression for the N+1 fix:
@@ -332,11 +332,11 @@ class CarbsOnBoardServiceTest {
 
         service.calculateTotalCarbsOnBoard(entries, now, USER_ID);
 
-        // Must be 1 regardless of list size — the N+1 guarantee
+        // Must be 1 regardless of list size - the N+1 guarantee
         verify(settingsService, times(1)).getUserSettings(USER_ID);
     }
 
-    /** Empty list returns early — DB should never be hit. */
+    /** Empty list returns early - DB should never be hit. */
     @Test
     void totalCob_emptyList_neverLoadsSettings() {
         service.calculateTotalCarbsOnBoard(List.of(), now, USER_ID);
@@ -344,7 +344,7 @@ class CarbsOnBoardServiceTest {
         verify(settingsService, never()).getUserSettings(any());
     }
 
-    /** Null list returns early — DB should never be hit. */
+    /** Null list returns early - DB should never be hit. */
     @Test
     void totalCob_nullList_neverLoadsSettings() {
         service.calculateTotalCarbsOnBoard(null, now, USER_ID);
@@ -381,7 +381,7 @@ class CarbsOnBoardServiceTest {
     }
 
     /**
-     * Batch with null/zero entries mixed in — the filter skips them.
+     * Batch with null/zero entries mixed in - the filter skips them.
      * Settings must still be loaded exactly once (not once per valid entry,
      * not once per total entry count).
      */
@@ -396,7 +396,7 @@ class CarbsOnBoardServiceTest {
         verify(settingsService, times(1)).getUserSettings(USER_ID);
     }
 
-    // ── NotebookLM scenario 1: fiber >5g net-carb threshold ──────────────────
+    // -- NotebookLM scenario 1: fiber >5g net-carb threshold ------------------
 
     /**
      * Clinical rule: when fiber > 5g, subtract it from total carbs before calculating COB.
@@ -405,9 +405,9 @@ class CarbsOnBoardServiceTest {
      */
     @Test
     void enhancedMode_fiberOver5g_reducesEffectiveCarbs() {
-        // 25g carbs, 7g fiber (>5g threshold) — net 18g available
+        // 25g carbs, 7g fiber (>5g threshold) - net 18g available
         CarbsEntry highFiber = giEnhancedEntry(now.minusMinutes(30), 25.0, 50.0, 7.0, 5.0, 3.0);
-        // 25g carbs, 0g fiber — all 25g available
+        // 25g carbs, 0g fiber - all 25g available
         CarbsEntry noFiber   = giEnhancedEntry(now.minusMinutes(30), 25.0, 50.0, 0.0, 5.0, 3.0);
 
         double cobHighFiber = service.calculateRemainingCarbs(highFiber, now, USER_ID);
@@ -418,16 +418,16 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void enhancedMode_fiberExceedsCarbs_cobIsZero() {
-        // fiber=30g > carbs=25g → availableCarbs clamped to 0
+        // fiber=30g > carbs=25g -> availableCarbs clamped to 0
         CarbsEntry e = giEnhancedEntry(now.minusMinutes(20), 25.0, 55.0, 30.0, 5.0, 3.0);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── NotebookLM scenario 2: double-wave FPU >= 2 extends path to 8h ───────
+    // -- NotebookLM scenario 2: double-wave FPU >= 2 extends path to 8h -------
 
     @Test
     void doubleWave_exactBoundary_carbsGoneAt480min() {
-        // 8h = 480 min → at exactly 481 min → 0
+        // 8h = 480 min -> at exactly 481 min -> 0
         CarbsEntry e = carbEntry(now.minusMinutes(481), 60.0, "SLOW", 8.0);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
@@ -438,7 +438,7 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
     }
 
-    // ── NotebookLM scenario 3: IOB edge — zero halfLife returns 0 ─────────────
+    // -- NotebookLM scenario 3: IOB edge - zero halfLife returns 0 -------------
 
     @Test
     void zeroHalfLife_returnsZeroImmediately() {
@@ -447,16 +447,16 @@ class CarbsOnBoardServiceTest {
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isEqualTo(0.0);
     }
 
-    // ── COB taper: smooth approach to zero (regression for the step-in-prediction bug) ──
+    // -- COB taper: smooth approach to zero (regression for the step-in-prediction bug) --
 
     /**
-     * In the 30-minute taper zone (maxDuration-30 … maxDuration) COB must be
-     * strictly decreasing — no plateau or uptick that would create a step in the
+     * In the 30-minute taper zone (maxDuration-30 ... maxDuration) COB must be
+     * strictly decreasing - no plateau or uptick that would create a step in the
      * prediction path.
      */
     @Test
     void cobTaper_inTaperZone_isStrictlyDecreasing() {
-        // SLOW class → maxDuration=240, taperStart=210
+        // SLOW class -> maxDuration=240, taperStart=210
         double prev = Double.MAX_VALUE;
         for (int t = 210; t <= 240; t += 5) {
             CarbsEntry e = carbEntry(now.minusMinutes(t), 60.0, "SLOW", null);
@@ -468,12 +468,12 @@ class CarbsOnBoardServiceTest {
 
     /**
      * COB must be exactly 0 at maxDuration via the taper (taperProgress=1.0),
-     * and also at maxDuration+1 via the hard cutoff — no residual value leaks
+     * and also at maxDuration+1 via the hard cutoff - no residual value leaks
      * past the window end.
      */
     @Test
     void cobTaper_atMaxDuration_isZero() {
-        // Taper at exactly 240 min (taperProgress = (240-210)/30 = 1.0 → raw *= 0)
+        // Taper at exactly 240 min (taperProgress = (240-210)/30 = 1.0 -> raw *= 0)
         CarbsEntry atMax = carbEntry(now.minusMinutes(240), 60.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(atMax, now, USER_ID)).isEqualTo(0.0);
 
@@ -486,12 +486,12 @@ class CarbsOnBoardServiceTest {
      * The taper must significantly reduce the COB value at the last step before
      * maxDuration compared with the natural exponential decay.
      * Pre-fix, a 60g SLOW meal at t=235 min had ~1.5g COB which then snapped
-     * to 0 at t=240 — visible as a step in the prediction path.
-     * Post-fix, the taper must have reduced that 1.5g to ≤25% of the natural value.
+     * to 0 at t=240 - visible as a step in the prediction path.
+     * Post-fix, the taper must have reduced that 1.5g to <=25% of the natural value.
      */
     @Test
     void cobTaper_nearEnd_isSignificantlyLessThanNaturalDecay() {
-        // t=235 min → taperProgress = (235-210)/30 = 0.833 → raw *= 0.167
+        // t=235 min -> taperProgress = (235-210)/30 = 0.833 -> raw *= 0.167
         CarbsEntry e = carbEntry(now.minusMinutes(235), 60.0, "SLOW", null);
         double tapered = service.calculateRemainingCarbs(e, now, USER_ID);
 
@@ -503,17 +503,17 @@ class CarbsOnBoardServiceTest {
 
     /**
      * The key bug: the hard cutoff caused a single 5-min path step of
-     * ~15.7g → 0g at maxDuration.  The taper reduces this boundary step
-     * (minute 115 → 120) to ≤ 20% of the pre-fix natural decay value.
+     * ~15.7g -> 0g at maxDuration.  The taper reduces this boundary step
+     * (minute 115 -> 120) to <= 20% of the pre-fix natural decay value.
      *
-     * The taper zone entry (minute 90 → 95) has a larger delta due to
-     * taper progress beginning there — that's expected.  The regression
+     * The taper zone entry (minute 90 -> 95) has a larger delta due to
+     * taper progress beginning there - that's expected.  The regression
      * guard is specifically about the BOUNDARY step that the original bug
      * reported (a sudden spike in the prediction chart at meal expiry time).
      */
     @Test
     void cobTaper_boundaryStep_reducedToLessThan20PercentOfPreFix() {
-        // Pre-fix: hard cutoff snapped from naturalAt120 → 0 in one step
+        // Pre-fix: hard cutoff snapped from naturalAt120 -> 0 in one step
         double naturalAt120 = 100.0 * Math.pow(0.5, 120.0 / 45.0); // ~15.7g
 
         // Post-fix: step from last point inside window (115 min) to maxDuration (120 min)
@@ -545,7 +545,7 @@ class CarbsOnBoardServiceTest {
     }
 
     /**
-     * The taper applies for the GI_GL_ENHANCED path too — verifies that the
+     * The taper applies for the GI_GL_ENHANCED path too - verifies that the
      * enhanced mode also approaches 0 smoothly instead of snapping at maxDuration.
      */
     @Test
@@ -583,13 +583,13 @@ class CarbsOnBoardServiceTest {
         assertThat(totalTapered).isLessThan((natural1 + natural2) * 0.25);
     }
 
-    // ── null user-settings fields fall back to defaults ──────────────────────
+    // -- null user-settings fields fall back to defaults ----------------------
 
     @Test
     void nullMaxCobDuration_fallsBackToSpeedClassDefault() {
         when(settingsService.getUserSettings(USER_ID))
                 .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, null));
-        // maxCOBDuration null → SLOW speed-class default = 240 → still active at 200 min
+        // maxCOBDuration null -> SLOW speed-class default = 240 -> still active at 200 min
         CarbsEntry e = carbEntry(now.minusMinutes(200), 60.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
     }
@@ -598,12 +598,12 @@ class CarbsOnBoardServiceTest {
     void nullCarbHalfLife_fallsBackToDefault45Minutes() {
         when(settingsService.getUserSettings(USER_ID))
                 .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, null, 240));
-        // carbHalfLife null → default 45 min → at t=45 min remaining ≈ 50%
+        // carbHalfLife null -> default 45 min -> at t=45 min remaining ≈ 50%
         CarbsEntry e = carbEntry(now.minusMinutes(45), 50.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isCloseTo(25.0, within(3.0));
     }
 
-    // ── GI_GL_ENHANCED with unset macros falls back to defaults ───────────────
+    // -- GI_GL_ENHANCED with unset macros falls back to defaults ---------------
 
     @Test
     void enhancedMode_nullMacros_usesDefaultsAndStaysBounded() {
@@ -613,12 +613,12 @@ class CarbsOnBoardServiceTest {
                 .build();
         e.setAbsorptionMode("GI_GL_ENHANCED");
         e.setAbsorptionSpeedClass("MEDIUM");
-        // estimatedGi/fiber/protein/fat all left null → defaults (gi=55, others=0)
+        // estimatedGi/fiber/protein/fat all left null -> defaults (gi=55, others=0)
         double remaining = service.calculateRemainingCarbs(e, now, USER_ID);
         assertThat(remaining).isBetween(0.0, 60.0);
     }
 
-    // ── batch overload with pre-loaded settings (no DB lookup) ────────────────
+    // -- batch overload with pre-loaded settings (no DB lookup) ----------------
 
     @Test
     void totalCob_preloadedSettings_nullList_returnsZeroWithoutLookup() {
@@ -650,11 +650,11 @@ class CarbsOnBoardServiceTest {
         double total = service.calculateTotalCarbsOnBoard(entries, now, settings);
 
         assertThat(total).isGreaterThan(0.0);
-        // Pre-loaded settings → no DB round-trip
+        // Pre-loaded settings -> no DB round-trip
         verifyNoInteractions(settingsService);
     }
 
-    // ── getCOBTimeline ─────────────────────────────────────────────────────────
+    // -- getCOBTimeline ---------------------------------------------------------
 
     @Test
     void getCOBTimeline_returnsStartAndEndPoints() {
@@ -670,7 +670,7 @@ class CarbsOnBoardServiceTest {
         assertThat(timeline.get(1).getCarbsOnBoard()).isEqualTo(0.0);
     }
 
-    // ── calculateCOB ────────────────────────────────────────────────────────────
+    // -- calculateCOB ------------------------------------------------------------
 
     @Test
     void calculateCOB_nullRequest_returnsNoCarbsToCalculate() {
@@ -713,7 +713,7 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void calculateCOB_nullTimestamp_defaultsToNow() {
-        // Real-life: 25g Snack entry, no timestamp provided → defaults to "now" → near-full COB
+        // Real-life: 25g Snack entry, no timestamp provided -> defaults to "now" -> near-full COB
         CarbsOnBoardService.COBCalculationRequest request = new CarbsOnBoardService.COBCalculationRequest();
         request.setCarbs(25.0);
         request.setTimestamp(null);
@@ -724,7 +724,7 @@ class CarbsOnBoardServiceTest {
         assertThat(response.getCarbsOnBoard()).isCloseTo(25.0, within(2.0));
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void stubSettings(int maxCobMinutes, int halfLife) {
         when(settingsService.getUserSettings(USER_ID))

@@ -28,7 +28,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Verifies that {@link LibreLinkUpSyncService#syncUser(UUID, boolean)} writes its readings
- * into the shared CGM cache tagged with {@link CgmReading.DataSource#LIBRE_LINK_UP} —
+ * into the shared CGM cache tagged with {@link CgmReading.DataSource#LIBRE_LINK_UP} -
  * the core invariant of the data-source rename.
  */
 @ExtendWith(MockitoExtension.class)
@@ -100,11 +100,11 @@ class LibreLinkUpSyncServiceCgmTagTest {
                 .storeChartData(eq(userId), anyList(), eq(CgmReading.DataSource.NIGHTSCOUT));
     }
 
-    // ── fixtures ─────────────────────────────────────────────────────────────────
+    // -- fixtures -----------------------------------------------------------------
 
     private UserDataSourceConfig libreConfig() {
         // UserDataSourceConfig stores its owner as a @ManyToOne User association,
-        // but the doSync flow only reads the libre_* fields — no need to wire a User here.
+        // but the doSync flow only reads the libre_* fields - no need to wire a User here.
         UserDataSourceConfig c = new UserDataSourceConfig();
         c.setDataSource(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP);
         c.setLibreEmail("user@example.com");

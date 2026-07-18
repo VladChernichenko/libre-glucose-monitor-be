@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Tests for JWT clock-skew tolerance in {@link JwtTokenProvider#parseClaims(String)}.
  *
- * <p>Without explicit skew configured, jjwt uses a default of 0 seconds — a token whose
+ * <p>Without explicit skew configured, jjwt uses a default of 0 seconds - a token whose
  * {@code exp} is even one millisecond in the past is rejected. In practice device clocks
  * routinely drift a handful of seconds ahead of the server, so a token freshly issued
  * by the server can be perceived as already-expired by the time the client first uses it
@@ -26,9 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>Fix: parser should tolerate up to {@link JwtTokenProvider#CLOCK_SKEW_SECONDS} of
  * skew (planned 30 s). These tests pin the contract:</p>
  * <ul>
- *   <li>Token expired by 5 s → still accepted (within skew)</li>
- *   <li>Token expired by 60 s → rejected (outside skew)</li>
- *   <li>Token still valid → accepted</li>
+ *   <li>Token expired by 5 s -> still accepted (within skew)</li>
+ *   <li>Token expired by 60 s -> rejected (outside skew)</li>
+ *   <li>Token still valid -> accepted</li>
  * </ul>
  *
  * <p><b>RED before fix, GREEN after.</b> Until {@code .clockSkewSeconds(30)} is added
@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class JwtTokenProviderClockSkewTest {
 
-    /** Must be ≥64 bytes for HS512 (matches the dev default secret in application.yml). */
+    /** Must be >=64 bytes for HS512 (matches the dev default secret in application.yml). */
     private static final String SECRET = "dev-only-insecure-jwt-secret-CHANGE-ME-do-not-use-in-production-0123456789";
 
     private JwtTokenProvider tokenProvider;
@@ -83,16 +83,16 @@ class JwtTokenProviderClockSkewTest {
         Optional<Claims> claims = tokenProvider.parseClaims(token);
 
         assertThat(claims)
-                .as("Skew tolerance must not become a free expiration extension — 60 s outside it is rejected")
+                .as("Skew tolerance must not become a free expiration extension - 60 s outside it is rejected")
                 .isEmpty();
     }
 
     // Note: a "tampered token is rejected" test was considered here, but it surfaces a
-    // separate pre-existing bug — JwtTokenProvider.parseClaims catches java.lang.SecurityException
+    // separate pre-existing bug - JwtTokenProvider.parseClaims catches java.lang.SecurityException
     // while jjwt actually throws io.jsonwebtoken.security.SignatureException (different package
     // root). That's orthogonal to the clock-skew topic and is tracked as a follow-up.
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     /**
      * Build a signed JWT with explicit issuedAt + expiration offsets relative to now.

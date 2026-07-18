@@ -60,10 +60,10 @@ class ExperimentE2ETest {
         authHeaders = registerAndLogin();
     }
 
-    // ── T1: Start experiment → 201, status IN_PROGRESS ───────────────────────
+    // -- T1: Start experiment -> 201, status IN_PROGRESS -----------------------
 
     @Test
-    @DisplayName("T1 — POST /api/experiments starts BASAL_CHECK and returns 201")
+    @DisplayName("T1 - POST /api/experiments starts BASAL_CHECK and returns 201")
     void startBasalCheck_returns201_andStatusInProgress() {
         StartExperimentRequest req = new StartExperimentRequest(Experiment.Type.BASAL_CHECK, null, null);
         ResponseEntity<ExperimentDTO> resp = rest.exchange(
@@ -81,10 +81,10 @@ class ExperimentE2ETest {
         assertNotNull(resp.getBody().getStartedAt(), "startedAt must be set");
     }
 
-    // ── T2: Available experiments list ────────────────────────────────────────
+    // -- T2: Available experiments list ----------------------------------------
 
     @Test
-    @DisplayName("T2 — GET /api/experiments/available returns all 3 experiment types")
+    @DisplayName("T2 - GET /api/experiments/available returns all 3 experiment types")
     void getAvailable_returnsAllThreeTypes() {
         ResponseEntity<List<AvailableExperimentDTO>> resp = rest.exchange(
                 "/api/experiments/available", HttpMethod.GET,
@@ -112,10 +112,10 @@ class ExperimentE2ETest {
         assertNotNull(carb.getLockReason(), "CARB_FACTOR must have a lock reason");
     }
 
-    // ── T3: Record readings → timestamps ascending ────────────────────────────
+    // -- T3: Record readings -> timestamps ascending ----------------------------
 
     @Test
-    @DisplayName("T3 — POST /{id}/reading records glucose; readings timestamps ascending")
+    @DisplayName("T3 - POST /{id}/reading records glucose; readings timestamps ascending")
     void recordReadings_appendsInOrder() throws Exception {
         UUID expId = startBasalCheckAndGetId();
 
@@ -139,10 +139,10 @@ class ExperimentE2ETest {
         }
     }
 
-    // ── T4: Complete experiment saves result ──────────────────────────────────
+    // -- T4: Complete experiment saves result ----------------------------------
 
     @Test
-    @DisplayName("T4 — POST /{id}/complete returns result with explanation and marks COMPLETED")
+    @DisplayName("T4 - POST /{id}/complete returns result with explanation and marks COMPLETED")
     void completeBasalCheck_returnsResult_andSetsCompleted() {
         UUID expId = startBasalCheckAndGetId();
         postReading(expId, 6.2, 0,   "Baseline");
@@ -162,10 +162,10 @@ class ExperimentE2ETest {
         assertEquals(Experiment.Status.COMPLETED, result.getBody().getExperiment().getStatus());
     }
 
-    // ── T5: Carb Factor computation ───────────────────────────────────────────
+    // -- T5: Carb Factor computation -------------------------------------------
 
     @Test
-    @DisplayName("T5 — CARB_FACTOR completion computes carbRatio = rise / grams")
+    @DisplayName("T5 - CARB_FACTOR completion computes carbRatio = rise / grams")
     void completeCarbFactor_computesCorrectCarbRatio() {
         // First complete a stable basal check to unlock CARB_FACTOR
         completeStableBasalCheck();
@@ -178,7 +178,7 @@ class ExperimentE2ETest {
         assertEquals(HttpStatus.CREATED, start.getStatusCode());
         UUID expId = start.getBody().getId();
 
-        // Baseline 7.0, peak 10.0 → rise = 3.0 → carbRatio = 3.0 / 15 = 0.2 mmol/L per gram
+        // Baseline 7.0, peak 10.0 -> rise = 3.0 -> carbRatio = 3.0 / 15 = 0.2 mmol/L per gram
         postReading(expId, 7.0, 0,  "Baseline");
         postReading(expId, 10.0, 35, "Peak");
         postReading(expId, 9.5, 60,  "T+60min");
@@ -197,10 +197,10 @@ class ExperimentE2ETest {
                 "Result should be automatically saved to UserSettings");
     }
 
-    // ── T6: ISF computation ───────────────────────────────────────────────────
+    // -- T6: ISF computation ---------------------------------------------------
 
     @Test
-    @DisplayName("T6 — ISF_ONE_UNIT completion computes isf = drop / units")
+    @DisplayName("T6 - ISF_ONE_UNIT completion computes isf = drop / units")
     void completeIsfOneUnit_computesCorrectIsf() {
         completeStableBasalCheck();
 
@@ -211,7 +211,7 @@ class ExperimentE2ETest {
         assertEquals(HttpStatus.CREATED, start.getStatusCode());
         UUID expId = start.getBody().getId();
 
-        // Baseline 13.0, nadir 10.5 → drop = 2.5 → isf = 2.5 / 1 = 2.5 mmol/L per unit
+        // Baseline 13.0, nadir 10.5 -> drop = 2.5 -> isf = 2.5 / 1 = 2.5 mmol/L per unit
         postReading(expId, 13.0, 0,   "Baseline");
         postReading(expId, 11.5, 60,  "T+60min");
         postReading(expId, 10.5, 120, "Nadir");
@@ -230,10 +230,10 @@ class ExperimentE2ETest {
                 "ISF result should be saved to UserSettings");
     }
 
-    // ── T7: Dirty background → 409 ───────────────────────────────────────────
+    // -- T7: Dirty background -> 409 -------------------------------------------
 
     @Test
-    @DisplayName("T7 — Starting experiment with active COB returns 409 Conflict")
+    @DisplayName("T7 - Starting experiment with active COB returns 409 Conflict")
     void startWithDirtyBackground_returns409() {
         // Post a recent note with lots of carbs to dirty the background
         postCarbNote(80.0);
@@ -244,13 +244,13 @@ class ExperimentE2ETest {
                 new HttpEntity<>(req, authHeaders), String.class);
 
         assertEquals(HttpStatus.CONFLICT, resp.getStatusCode(),
-                "Starting with active COB should return 409 Conflict — got: " + resp.getBody());
+                "Starting with active COB should return 409 Conflict - got: " + resp.getBody());
     }
 
-    // ── T8: Parallel experiment → 409 ────────────────────────────────────────
+    // -- T8: Parallel experiment -> 409 ----------------------------------------
 
     @Test
-    @DisplayName("T8 — Starting a second experiment while one is active returns 409")
+    @DisplayName("T8 - Starting a second experiment while one is active returns 409")
     void startSecondExperiment_returns409() {
         // First experiment starts fine (clean background)
         StartExperimentRequest req = new StartExperimentRequest(Experiment.Type.BASAL_CHECK, null, null);
@@ -264,13 +264,13 @@ class ExperimentE2ETest {
                 "/api/experiments", HttpMethod.POST,
                 new HttpEntity<>(req, authHeaders), String.class);
         assertEquals(HttpStatus.CONFLICT, second.getStatusCode(),
-                "Second experiment start should return 409 — got: " + second.getBody());
+                "Second experiment start should return 409 - got: " + second.getBody());
     }
 
-    // ── T9: check-background returns correct COB/IOB ─────────────────────────
+    // -- T9: check-background returns correct COB/IOB -------------------------
 
     @Test
-    @DisplayName("T9 — GET /check-background returns isClean:true when no active notes")
+    @DisplayName("T9 - GET /check-background returns isClean:true when no active notes")
     void checkBackground_noNotes_isClean() {
         ResponseEntity<BackgroundStatusDTO> resp = rest.exchange(
                 "/api/experiments/check-background", HttpMethod.GET,
@@ -286,11 +286,11 @@ class ExperimentE2ETest {
     }
 
     @Test
-    @DisplayName("T10 — REGRESSION: stale notes from >5 h ago show as clean (old code misapplied carbHalfLife to insulin)")
+    @DisplayName("T10 - REGRESSION: stale notes from >5 h ago show as clean (old code misapplied carbHalfLife to insulin)")
     void checkBackground_staleBolusFromPreviousEvening_isClean() {
         // Exact bug scenario: 7 u bolus + 15 g carbs logged ~5.5 h ago.
-        // Old code applied carbHalfLife (180 min) to insulin → 2.0 u IOB (dirty).
-        // New code uses InsulinCalculatorService with DIA 5 h → 0.0 u (clean).
+        // Old code applied carbHalfLife (180 min) to insulin -> 2.0 u IOB (dirty).
+        // New code uses InsulinCalculatorService with DIA 5 h -> 0.0 u (clean).
         LocalDateTime fiveAndHalfHoursAgo = LocalDateTime.now().minusMinutes(330);
 
         CreateNoteRequest bolusNote = new CreateNoteRequest();
@@ -316,7 +316,7 @@ class ExperimentE2ETest {
         assertEquals(HttpStatus.OK, resp.getStatusCode());
         assertNotNull(resp.getBody());
         assertTrue(resp.getBody().isClean(),
-                "Notes from 5.5 h ago must be fully absorbed — IOB and COB should be near 0. " +
+                "Notes from 5.5 h ago must be fully absorbed - IOB and COB should be near 0. " +
                 "Got: COB=" + resp.getBody().getCobGrams() + "g, IOB=" + resp.getBody().getIobUnits() + "u");
         assertThat(resp.getBody().getIobUnits())
                 .as("IOB must be negligible after 5.5 h (well beyond DIA=5h)")
@@ -327,7 +327,7 @@ class ExperimentE2ETest {
     }
 
     @Test
-    @DisplayName("T11 — Long-acting insulin note does NOT contribute to IOB background check")
+    @DisplayName("T11 - Long-acting insulin note does NOT contribute to IOB background check")
     void checkBackground_longActingInsulin_excluded() {
         // A large long-acting basal dose must not pollute the background IOB reading
         CreateNoteRequest basalNote = new CreateNoteRequest();
@@ -350,7 +350,7 @@ class ExperimentE2ETest {
                 .isLessThan(0.3);
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private HttpHeaders registerAndLogin() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
@@ -403,13 +403,13 @@ class ExperimentE2ETest {
                 "/api/experiments/" + expId + "/reading", HttpMethod.POST,
                 new HttpEntity<>(req, authHeaders), ExperimentDTO.class);
         assertEquals(HttpStatus.OK, resp.getStatusCode(),
-                "Recording reading should return 200 — got: " + resp.getStatusCode());
+                "Recording reading should return 200 - got: " + resp.getStatusCode());
     }
 
     /** Complete a stable basal check to unlock CARB_FACTOR and ISF_ONE_UNIT. */
     private void completeStableBasalCheck() {
         UUID expId = startBasalCheckAndGetId();
-        // Tight readings: delta = 0.3 mmol/L → stable
+        // Tight readings: delta = 0.3 mmol/L -> stable
         postReading(expId, 6.5, 0,   "Baseline");
         postReading(expId, 6.7, 60,  "T+60min");
         postReading(expId, 6.6, 120, "T+120min");

@@ -56,7 +56,7 @@ class HupaUcmActivityValidationTest {
     void activityTermDoesNotWorsenMae() throws Exception {
         Path root = datasetRoot();
         Assumptions.assumeTrue(!root.toString().isBlank() && Files.isDirectory(root.resolve("Preprocessed")),
-                "HUPA-UCM dataset not present — set -Dhupa.dir=\"/path/to/HUPA-UCM Diabetes Dataset\" to run");
+                "HUPA-UCM dataset not present - set -Dhupa.dir=\"/path/to/HUPA-UCM Diabetes Dataset\" to run");
 
         List<HupaUcmDataset.Subject> subjects = HupaUcmDataset.loadAll(root);
         HovorkaGlucosePredictionService predictor = rawPredictor();
@@ -114,7 +114,7 @@ class HupaUcmActivityValidationTest {
         assertThat(maeAct).isLessThanOrEqualTo(maeNone + 0.05);
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private static void collectEvents(List<PredictionReplayEngine.Event> events, long t0,
                                       List<CarbsEntry> carbs, List<InsulinDose> insulin, List<Note> longActing) {

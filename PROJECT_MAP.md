@@ -43,28 +43,28 @@ ls -la  # Look for build.gradle (BE) or package.json (FE)
 
 ### **Backend (`~/IdeaProjects/glucose-monitor-be`)**
 ```
-├── build.gradle                    # Gradle build config
-├── src/main/java/                 # Java source code
-│   └── che/glucosemonitorbe/
-│       ├── controller/            # REST controllers
-│       ├── service/               # Business logic
-│       ├── domain/                # JPA entities
-│       ├── dto/                   # Data transfer objects
-│       └── config/                # Configuration classes
-├── src/main/resources/            # Application properties
-└── ./gradlew                      # Gradle wrapper
+├-- build.gradle                    # Gradle build config
+├-- src/main/java/                 # Java source code
+│   └-- che/glucosemonitorbe/
+│       ├-- controller/            # REST controllers
+│       ├-- service/               # Business logic
+│       ├-- domain/                # JPA entities
+│       ├-- dto/                   # Data transfer objects
+│       └-- config/                # Configuration classes
+├-- src/main/resources/            # Application properties
+└-- ./gradlew                      # Gradle wrapper
 ```
 
 ### **Frontend (`~/cursorai`)**
 ```
-├── package.json                   # Node.js dependencies
-├── src/                          # React source code
-│   ├── components/               # React components
-│   ├── services/                 # API services
-│   ├── hooks/                    # React hooks
-│   └── types/                    # TypeScript types
-├── public/                       # Static assets
-└── npm start                     # Start development server
+├-- package.json                   # Node.js dependencies
+├-- src/                          # React source code
+│   ├-- components/               # React components
+│   ├-- services/                 # API services
+│   ├-- hooks/                    # React hooks
+│   └-- types/                    # TypeScript types
+├-- public/                       # Static assets
+└-- npm start                     # Start development server
 ```
 
 ## ⚠️ **Common Confusion Points**
@@ -114,4 +114,3 @@ cd ~/cursorai && npm run build --dry-run
 ---
 *Last Updated: $(date)*
 *Keep this file in your home directory for quick reference!*
-

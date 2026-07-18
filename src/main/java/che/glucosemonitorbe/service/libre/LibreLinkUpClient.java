@@ -19,7 +19,7 @@ import java.util.UUID;
  * (gzip/BOM-aware) byte responses to {@link JsonNode} via {@link LibreLinkUpResponseParser}.
  *
  * <p>Isolating transport here lets {@code LibreLinkUpService} (orchestration + mapping) be unit-tested
- * against a mocked client without a live network — previously impossible.
+ * against a mocked client without a live network - previously impossible.
  */
 @Component
 public class LibreLinkUpClient {
@@ -42,7 +42,7 @@ public class LibreLinkUpClient {
     }
 
     /**
-     * Canonical LibreLinkUp headers — verified against pylibrelinkup 0.10.0 and the khskekec dump.
+     * Canonical LibreLinkUp headers - verified against pylibrelinkup 0.10.0 and the khskekec dump.
      * cache-control and Connection casing are required exactly; deviations cause 400/430 on some edges.
      */
     private HttpHeaders loginHeaders(String locale) {
@@ -70,7 +70,7 @@ public class LibreLinkUpClient {
         if (accountId != null) {
             headers.set("account-id", accountId);   // required: SHA-256(data.user.id from login response)
         } else {
-            logger.warn("account-id not available for user {} — authenticated request may fail (RequiredHeaderMissing)", userId);
+            logger.warn("account-id not available for user {} - authenticated request may fail (RequiredHeaderMissing)", userId);
         }
         return headers;
     }
@@ -82,7 +82,7 @@ public class LibreLinkUpClient {
     public ResponseEntity<byte[]> postLogin(String apiBaseUrl, LibreAuthRequest authRequest) {
         String url = LibreLinkUpRegionResolver.normalizeBaseUrl(apiBaseUrl) + "/llu/auth/login";
         String locale = authRequest != null ? authRequest.getLocale() : null;
-        // LibreLinkUp only accepts {"email","password"} — extra fields (locale, etc.) cause 400.
+        // LibreLinkUp only accepts {"email","password"} - extra fields (locale, etc.) cause 400.
         Map<String, String> body = new LinkedHashMap<>();
         body.put("email", authRequest != null ? authRequest.getEmail() : "");
         body.put("password", authRequest != null ? authRequest.getPassword() : "");
@@ -115,7 +115,7 @@ public class LibreLinkUpClient {
         String detail = LibreLinkUpResponseParser.formatErrorBody(e.getResponseBodyAsByteArray());
         String msg = "LibreLinkUp authentication failed: HTTP " + code;
         if (!detail.isEmpty()) {
-            msg += " — " + detail;
+            msg += " - " + detail;
         }
         msg += extra;
         return new RuntimeException(msg, e);

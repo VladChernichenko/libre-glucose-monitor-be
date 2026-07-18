@@ -23,4 +23,3 @@ public class NightscoutEntryDto {
     private String sysTime;
 }
 
-

@@ -55,7 +55,7 @@ public class DigitalTwinController {
         return ResponseEntity.ok(calibrationService.getStatus(userId));
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void requireFeature() {
         if (!featureToggleService.isEnabled("digital-twin-enabled")) {

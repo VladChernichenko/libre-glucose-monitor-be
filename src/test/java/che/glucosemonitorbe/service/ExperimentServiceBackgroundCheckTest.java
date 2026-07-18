@@ -71,10 +71,10 @@ class ExperimentServiceBackgroundCheckTest {
                 .thenReturn(inputs(List.of(), List.of()));
     }
 
-    // ── Clean states ──────────────────────────────────────────────────────────
+    // -- Clean states ----------------------------------------------------------
 
     @Test
-    @DisplayName("No active entries → isClean true, COB=0.0, IOB=0.0, cleanInMinutes=0")
+    @DisplayName("No active entries -> isClean true, COB=0.0, IOB=0.0, cleanInMinutes=0")
     void noNotes_isClean() {
         stubClean();
 
@@ -87,7 +87,7 @@ class ExperimentServiceBackgroundCheckTest {
     }
 
     @Test
-    @DisplayName("COB just below threshold → isClean true")
+    @DisplayName("COB just below threshold -> isClean true")
     void cobJustBelowThreshold_isClean() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(4.9);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -97,7 +97,7 @@ class ExperimentServiceBackgroundCheckTest {
     }
 
     @Test
-    @DisplayName("IOB just below threshold → isClean true")
+    @DisplayName("IOB just below threshold -> isClean true")
     void iobJustBelowThreshold_isClean() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -106,10 +106,10 @@ class ExperimentServiceBackgroundCheckTest {
         assertThat(service.checkBackground(userId, null).isClean()).isTrue();
     }
 
-    // ── Dirty states ──────────────────────────────────────────────────────────
+    // -- Dirty states ----------------------------------------------------------
 
     @Test
-    @DisplayName("Active carbs above threshold → isClean false, cobGrams reported")
+    @DisplayName("Active carbs above threshold -> isClean false, cobGrams reported")
     void highCOB_isDirty() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(12.3);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -122,7 +122,7 @@ class ExperimentServiceBackgroundCheckTest {
     }
 
     @Test
-    @DisplayName("Active insulin above threshold → isClean false, iobUnits reported")
+    @DisplayName("Active insulin above threshold -> isClean false, iobUnits reported")
     void highIOB_isDirty() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -135,7 +135,7 @@ class ExperimentServiceBackgroundCheckTest {
     }
 
     @Test
-    @DisplayName("COB exactly at threshold (5.0 g) → isClean false (strict less-than)")
+    @DisplayName("COB exactly at threshold (5.0 g) -> isClean false (strict less-than)")
     void cobExactlyAtThreshold_isDirty() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(5.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -145,7 +145,7 @@ class ExperimentServiceBackgroundCheckTest {
     }
 
     @Test
-    @DisplayName("IOB exactly at threshold (0.3 u) → isClean false (strict less-than)")
+    @DisplayName("IOB exactly at threshold (0.3 u) -> isClean false (strict less-than)")
     void iobExactlyAtThreshold_isDirty() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -155,7 +155,7 @@ class ExperimentServiceBackgroundCheckTest {
     }
 
     @Test
-    @DisplayName("Clean COB but dirty IOB → still dirty (both must be below threshold)")
+    @DisplayName("Clean COB but dirty IOB -> still dirty (both must be below threshold)")
     void cleanCobDirtyIob_isDirty() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(1.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
@@ -164,16 +164,16 @@ class ExperimentServiceBackgroundCheckTest {
         assertThat(service.checkBackground(userId, null).isClean()).isFalse();
     }
 
-    // ── Regression: insulin must use DIA/peak, not carbHalfLife ─────────────
+    // -- Regression: insulin must use DIA/peak, not carbHalfLife -------------
 
     @Test
-    @DisplayName("REGRESSION — IOB delegated to InsulinCalculatorService with user's DIA and peak, not carbHalfLife")
+    @DisplayName("REGRESSION - IOB delegated to InsulinCalculatorService with user's DIA and peak, not carbHalfLife")
     void iobUsesDiaAndPeak_notCarbHalfLife() {
         /*
          * Before the fix: ExperimentService applied carbHalfLife (180 min) to insulin:
-         *   7.0 u × 0.5^(330/180) ≈ 2.0 u  → marked as dirty when user was actually clean.
+         *   7.0 u × 0.5^(330/180) ≈ 2.0 u  -> marked as dirty when user was actually clean.
          * After the fix: delegates to InsulinCalculatorService which uses the proper
-         *   OpenAPS exponential IOB curve (DIA=5h, peak=55min) → 0.0 u after 5.5h.
+         *   OpenAPS exponential IOB curve (DIA=5h, peak=55min) -> 0.0 u after 5.5h.
          * The DIA/peak now arrive via the shared inputs (inputs.rapidIob()).
          */
         stubClean();
@@ -196,7 +196,7 @@ class ExperimentServiceBackgroundCheckTest {
     }
 
     @Test
-    @DisplayName("REGRESSION — carbHalfLife setting is NOT used as insulin half-life")
+    @DisplayName("REGRESSION - carbHalfLife setting is NOT used as insulin half-life")
     void carbHalfLifeValue_notPassedToInsulinCalculator() {
         // If the bug were still present, diaHours would end up as carbHalfLife/60 = 3.0 h
         stubClean();
@@ -208,11 +208,11 @@ class ExperimentServiceBackgroundCheckTest {
 
         double buggyDiaHours = SETTINGS_WITH_SLOW_CARB_HALFLIFE.getCarbHalfLife() / 60.0; // 3.0
         assertThat(diaCaptor.getValue())
-                .as("diaHours must NOT equal carbHalfLife/60 — that would be the old bug")
+                .as("diaHours must NOT equal carbHalfLife/60 - that would be the old bug")
                 .isNotEqualTo(buggyDiaHours);
     }
 
-    // ── Shared-source delegation ──────────────────────────────────────────────
+    // -- Shared-source delegation ----------------------------------------------
 
     @Test
     @DisplayName("COB/IOB inputs come from the shared GlucoseCalculationsService (same source as the dashboard)")
@@ -222,7 +222,7 @@ class ExperimentServiceBackgroundCheckTest {
         service.checkBackground(userId, null);
 
         // The Experiments background check must read its COB/IOB inputs from the exact same
-        // method the dashboard headline uses — that is the whole point of the fix.
+        // method the dashboard headline uses - that is the whole point of the fix.
         verify(calculationsService).activeCobIobInputs(eq(userId), any(LocalDateTime.class));
     }
 
@@ -252,7 +252,7 @@ class ExperimentServiceBackgroundCheckTest {
         assertThat(doseCaptor.getValue()).containsExactly(dose);
     }
 
-    // ── cleanInMinutes estimation ─────────────────────────────────────────────
+    // -- cleanInMinutes estimation ---------------------------------------------
 
     @Test
     @DisplayName("cleanInMinutes is 0 when state is already clean")
@@ -267,8 +267,8 @@ class ExperimentServiceBackgroundCheckTest {
     void cleanInMinutes_forwardSampledFromDecayCurves() {
         // Dirty now; clean at the first forward sample (+5 min)
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class)))
-                .thenReturn(7.0)   // t=now  → dirty
-                .thenReturn(2.0);  // t=+5m  → clean
+                .thenReturn(7.0)   // t=now  -> dirty
+                .thenReturn(2.0);  // t=+5m  -> clean
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
                 .thenReturn(0.0);
 
@@ -294,7 +294,7 @@ class ExperimentServiceBackgroundCheckTest {
                 .isEqualTo(600);
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // -- helpers ---------------------------------------------------------------
 
     private void stubClean() {
         when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);

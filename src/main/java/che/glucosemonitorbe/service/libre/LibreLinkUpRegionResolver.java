@@ -22,7 +22,7 @@ public class LibreLinkUpRegionResolver {
 
     /**
      * When a host returns HTTP 403 or 430 (edge/WAF), try these after the configured base.
-     * Not used for 429 (rate limit) — each host hit counts toward Cloudflare 1015.
+     * Not used for 429 (rate limit) - each host hit counts toward Cloudflare 1015.
      */
     private static final String[] FALLBACK_BASES = {
             "https://api-eu.libreview.io",

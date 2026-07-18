@@ -37,7 +37,7 @@ app:
   glucose-sync:
     enabled: false
   observer:
-    interval-ms: 86400000   # 24 h — prevents detector firing during integration tests
+    interval-ms: 86400000   # 24 h - prevents detector firing during integration tests
 
 cors:
   allowed-origins: http://localhost:3000

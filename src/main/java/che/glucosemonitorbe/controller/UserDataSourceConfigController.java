@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
-@Tag(name = "Data Source Config", description = "CGM data source configuration — Nightscout and LibreLinkUp credentials")
+@Tag(name = "Data Source Config", description = "CGM data source configuration - Nightscout and LibreLinkUp credentials")
 @Slf4j
 @RestController
 @RequestMapping("/api/user/data-source-config")
@@ -291,4 +291,3 @@ public class UserDataSourceConfigController {
         }
     }
 }
-

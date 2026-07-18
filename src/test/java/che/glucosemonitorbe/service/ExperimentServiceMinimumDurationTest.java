@@ -34,15 +34,15 @@ import static org.mockito.Mockito.when;
  * Pins the minimum-elapsed-time contract on {@code ExperimentService.completeExperiment}.
  *
  * <p>Before this contract, an experiment could be completed as soon as 2 readings were
- * captured — for a Basal Rate Check that meant a "result" after ~62 minutes (baseline +
- * first hourly checkpoint), even though the documented protocol requires 4–6 hours. The
+ * captured - for a Basal Rate Check that meant a "result" after ~62 minutes (baseline +
+ * first hourly checkpoint), even though the documented protocol requires 4-6 hours. The
  * computed max-min delta is mathematically valid but clinically meaningless over 1 h.</p>
  *
  * <p>Per-type minima (matches {@code ExperimentService.MIN_ELAPSED_MINUTES}):</p>
  * <ul>
- *   <li>BASAL_CHECK — 180 min (3 h floor; protocol target 4–6 h)</li>
- *   <li>CARB_FACTOR — 60 min</li>
- *   <li>ISF_ONE_UNIT — 180 min (3 h floor; protocol target 4–5 h)</li>
+ *   <li>BASAL_CHECK - 180 min (3 h floor; protocol target 4-6 h)</li>
+ *   <li>CARB_FACTOR - 60 min</li>
+ *   <li>ISF_ONE_UNIT - 180 min (3 h floor; protocol target 4-5 h)</li>
  * </ul>
  *
  * <p><b>RED before fix, GREEN after.</b> The "premature" cases below will start throwing
@@ -96,10 +96,10 @@ class ExperimentServiceMinimumDurationTest {
                 .build();
     }
 
-    // ── BASAL_CHECK ──────────────────────────────────────────────────────────
+    // -- BASAL_CHECK ----------------------------------------------------------
 
     @Test
-    @DisplayName("BASAL_CHECK with 62 min elapsed → 400 (below 180 min minimum)")
+    @DisplayName("BASAL_CHECK with 62 min elapsed -> 400 (below 180 min minimum)")
     void basalCheck_completedTooEarly_isRejected() {
         Experiment exp = inProgress(Type.BASAL_CHECK, 62, /* readings */ 7.0, 7.5);
         stubFetch(exp);
@@ -111,7 +111,7 @@ class ExperimentServiceMinimumDurationTest {
     }
 
     @Test
-    @DisplayName("BASAL_CHECK with 180 min elapsed → completes (at the floor)")
+    @DisplayName("BASAL_CHECK with 180 min elapsed -> completes (at the floor)")
     void basalCheck_atMinimum_completes() {
         Experiment exp = inProgress(Type.BASAL_CHECK, 180, 7.0, 7.5);
         stubFetch(exp);
@@ -123,7 +123,7 @@ class ExperimentServiceMinimumDurationTest {
     }
 
     @Test
-    @DisplayName("BASAL_CHECK with 4h elapsed → completes (well past the floor)")
+    @DisplayName("BASAL_CHECK with 4h elapsed -> completes (well past the floor)")
     void basalCheck_atProtocolTarget_completes() {
         Experiment exp = inProgress(Type.BASAL_CHECK, 240, 6.5, 7.8);
         stubFetch(exp);
@@ -133,10 +133,10 @@ class ExperimentServiceMinimumDurationTest {
         assertThat(result).isNotNull();
     }
 
-    // ── CARB_FACTOR ──────────────────────────────────────────────────────────
+    // -- CARB_FACTOR ----------------------------------------------------------
 
     @Test
-    @DisplayName("CARB_FACTOR with 30 min elapsed → 400 (below 60 min minimum)")
+    @DisplayName("CARB_FACTOR with 30 min elapsed -> 400 (below 60 min minimum)")
     void carbFactor_completedTooEarly_isRejected() {
         Experiment exp = inProgress(Type.CARB_FACTOR, 30, 6.0, 8.5);
         exp.setGramsConsumed(15.0);
@@ -149,7 +149,7 @@ class ExperimentServiceMinimumDurationTest {
     }
 
     @Test
-    @DisplayName("CARB_FACTOR with 60 min elapsed → completes")
+    @DisplayName("CARB_FACTOR with 60 min elapsed -> completes")
     void carbFactor_atMinimum_completes() {
         Experiment exp = inProgress(Type.CARB_FACTOR, 60, 6.0, 9.2);
         exp.setGramsConsumed(15.0);
@@ -160,10 +160,10 @@ class ExperimentServiceMinimumDurationTest {
         assertThat(result.getComputedCarbRatio()).isGreaterThan(0);
     }
 
-    // ── ISF_ONE_UNIT ─────────────────────────────────────────────────────────
+    // -- ISF_ONE_UNIT ---------------------------------------------------------
 
     @Test
-    @DisplayName("ISF_ONE_UNIT with 90 min elapsed → 400 (below 180 min minimum)")
+    @DisplayName("ISF_ONE_UNIT with 90 min elapsed -> 400 (below 180 min minimum)")
     void isf_completedTooEarly_isRejected() {
         Experiment exp = inProgress(Type.ISF_ONE_UNIT, 90, 12.0, 9.0);
         exp.setUnitsInjected(1.0);
@@ -176,7 +176,7 @@ class ExperimentServiceMinimumDurationTest {
     }
 
     @Test
-    @DisplayName("ISF_ONE_UNIT with 180 min elapsed → completes")
+    @DisplayName("ISF_ONE_UNIT with 180 min elapsed -> completes")
     void isf_atMinimum_completes() {
         Experiment exp = inProgress(Type.ISF_ONE_UNIT, 180, 12.0, 8.0);
         exp.setUnitsInjected(1.0);
@@ -187,10 +187,10 @@ class ExperimentServiceMinimumDurationTest {
         assertThat(result.getComputedIsf()).isGreaterThan(0);
     }
 
-    // ── Existing contracts still enforced ────────────────────────────────────
+    // -- Existing contracts still enforced ------------------------------------
 
     @Test
-    @DisplayName("Existing contract preserved: < 2 readings → 400 (readings check still fires)")
+    @DisplayName("Existing contract preserved: < 2 readings -> 400 (readings check still fires)")
     void belowMinReadings_stillRejected() {
         Experiment exp = inProgress(Type.BASAL_CHECK, 300 /* well past floor */, 7.0);
         stubFetch(exp);
@@ -201,7 +201,7 @@ class ExperimentServiceMinimumDurationTest {
     }
 
     @Test
-    @DisplayName("Existing contract preserved: completing non-IN_PROGRESS → 400")
+    @DisplayName("Existing contract preserved: completing non-IN_PROGRESS -> 400")
     void notInProgress_stillRejected() {
         Experiment exp = inProgress(Type.BASAL_CHECK, 300, 7.0, 7.5);
         exp.setStatus(Status.COMPLETED);
@@ -212,9 +212,9 @@ class ExperimentServiceMinimumDurationTest {
                 .hasMessageContaining("not IN_PROGRESS");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     private Experiment inProgress(Type type, int elapsedMinutes, double... glucoseValues) {
         UUID id = UUID.randomUUID();

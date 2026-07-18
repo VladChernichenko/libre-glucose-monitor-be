@@ -44,7 +44,7 @@ class CgmReadingServiceTest {
         );
     }
 
-    // ── storeChartData / NIGHTSCOUT ───────────────────────────────────────────────
+    // -- storeChartData / NIGHTSCOUT -----------------------------------------------
 
     @Test
     @DisplayName("storeChartData inserts every new entry and tags them NIGHTSCOUT")
@@ -77,7 +77,7 @@ class CgmReadingServiceTest {
         assertEquals(2, captor.getValue().size());
     }
 
-    // ── storeChartData / LIBRE_LINK_UP ────────────────────────────────────────────
+    // -- storeChartData / LIBRE_LINK_UP --------------------------------------------
 
     @Test
     @DisplayName("storeChartData with LIBRE_LINK_UP tags rows correctly and scopes the existence check")
@@ -168,11 +168,11 @@ class CgmReadingServiceTest {
         when(repository.findExistingExternalIds(any(), any(), anyList()))
                 .thenThrow(new RuntimeException("db down"));
 
-        // Should not throw — async writer absorbs the failure and logs it.
+        // Should not throw - async writer absorbs the failure and logs it.
         chartDataService.storeChartDataAsync(testUserId, testEntries, CgmReading.DataSource.NIGHTSCOUT);
     }
 
-    // ── read paths ───────────────────────────────────────────────────────────────
+    // -- read paths ---------------------------------------------------------------
 
     @Test
     @DisplayName("getChartData returns rows ordered by timestamp")
@@ -229,7 +229,7 @@ class CgmReadingServiceTest {
         verify(repository, times(1)).deleteByUserId(testUserId);
     }
 
-    // ── getChartDataAsEntriesSince ────────────────────────────────────────────────
+    // -- getChartDataAsEntriesSince ------------------------------------------------
 
     @Test
     @DisplayName("getChartDataAsEntriesSince delegates to the correct repository method with the given timestamp")

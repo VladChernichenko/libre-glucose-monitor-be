@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 
 /**
  * Persists CGM readings into the shared {@code cgm_readings} table. Receives points
- * already normalised into {@link NightscoutEntryDto} shape — Nightscout entries land
+ * already normalised into {@link NightscoutEntryDto} shape - Nightscout entries land
  * there directly; LibreLinkUp entries are adapted into the same DTO upstream.
  *
  * <p>Replaces the legacy {@code NightscoutChartDataService}. The {@code dataSource}
@@ -146,7 +146,7 @@ public class CgmReadingService {
                                     List<NightscoutEntryDto> entries,
                                     CgmReading.DataSource dataSource) {
         // @Transactional is declared here (not delegated to storeChartData) because self-invocation
-        // through `this` bypasses the proxy — without it, the inner call would run without a tx.
+        // through `this` bypasses the proxy - without it, the inner call would run without a tx.
         try {
             storeChartData(userId, entries, dataSource);
         } catch (Exception e) {

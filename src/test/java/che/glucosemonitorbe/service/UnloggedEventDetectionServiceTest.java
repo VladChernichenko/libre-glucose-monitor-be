@@ -14,7 +14,7 @@ class UnloggedEventDetectionServiceTest {
     @Test
     @DisplayName("robustScale is the MAD-based spread, floored at 0.3 and robust to a minority of outliers")
     void robustScaleIsMadFloored() {
-        // All-equal residuals → MAD 0 → floored to 0.3.
+        // All-equal residuals -> MAD 0 -> floored to 0.3.
         assertThat(UnloggedEventDetectionService.robustScale(List.of(1.0, 1.0, 1.0, 1.0)))
                 .isEqualTo(0.3);
 
@@ -37,13 +37,13 @@ class UnloggedEventDetectionServiceTest {
         for (int i = 0; i < 13; i++) { t.add(new long[]{i * 5L * 60_000L}); r.add(4.0); }
         int persistence = 45;
 
-        // robustScale turns each user's own residual spread into σ: quiet baseline → floor 0.3;
-        // noisy baseline → a large σ. (This is what makes the threshold per-user adaptive.)
+        // robustScale turns each user's own residual spread into σ: quiet baseline -> floor 0.3;
+        // noisy baseline -> a large σ. (This is what makes the threshold per-user adaptive.)
         double quietSigma = UnloggedEventDetectionService.robustScale(List.of(0.0, 0.1, -0.1, 0.0));
         double noisySigma = UnloggedEventDetectionService.robustScale(List.of(-4.0, -4.0, 4.0, 4.0));
         assertThat(quietSigma).isLessThan(noisySigma);
 
-        // Same run: flags at the low-σ user's threshold (2·0.3), not at the high-σ user's (2·~4).
+        // Same run: flags at the low-σ user's threshold (2*0.3), not at the high-σ user's (2*~4).
         assertThat(UnloggedEventDetectionService.strongestRun(t, r, 2.0 * quietSigma, persistence)).isNotNull();
         assertThat(UnloggedEventDetectionService.strongestRun(t, r, 2.0 * noisySigma, persistence)).isNull();
     }

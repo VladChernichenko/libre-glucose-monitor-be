@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
-@Tag(name = "Insulin Preferences", description = "Per-user insulin preferences — ISF, carb ratio, selected insulin type")
+@Tag(name = "Insulin Preferences", description = "Per-user insulin preferences - ISF, carb ratio, selected insulin type")
 @RestController
 @RequestMapping("/api/user/insulin-preferences")
 @RequiredArgsConstructor

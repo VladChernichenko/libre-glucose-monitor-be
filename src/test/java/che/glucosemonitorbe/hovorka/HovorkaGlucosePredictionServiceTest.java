@@ -26,15 +26,15 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
- * TDD Red→Green tests for the EGP steady-state bug.
+ * TDD Red->Green tests for the EGP steady-state bug.
  *
  * <h3>Bug</h3>
  * When no long-acting insulin is logged, {@link BasalInsulinResolver#resolveEgpSuppression}
  * returns 0.0, causing {@code egpNow = EGP0 = 1.127 mmol/min} (>> f01 = 0.679 mmol/min).
- * Net +0.448 mmol/min drives glucose from 7.2 to ~16 mmol/L in 4 h — even with no COB or IOB.
+ * Net +0.448 mmol/min drives glucose from 7.2 to ~16 mmol/L in 4 h - even with no COB or IOB.
  *
  * <h3>Fix</h3>
- * When {@code longActingNotes} is empty, default {@code egpNow = f01()} — the steady-state
+ * When {@code longActingNotes} is empty, default {@code egpNow = f01()} - the steady-state
  * assumption for a T1D patient on continuous background basal that isn't individually logged.
  */
 @ExtendWith(MockitoExtension.class)
@@ -71,15 +71,15 @@ class HovorkaGlucosePredictionServiceTest {
                 .thenReturn(new RapidInsulinIobParameters(4.5, 55.0));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // RED before fix, GREEN after fix
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void noCobNoIob_noLongActing_glucoseRemainsNearBaseline() {
-        // No carbs, no bolus, no long-acting notes → glucose must stay flat.
-        // Before fix: egpNow = EGP0 = 1.127 >> f01 = 0.679 → net +0.448 mmol/min → FAILS.
-        // After fix:  egpNow = f01 (steady-state default)   → glucose stays flat → PASSES.
+        // No carbs, no bolus, no long-acting notes -> glucose must stay flat.
+        // Before fix: egpNow = EGP0 = 1.127 >> f01 = 0.679 -> net +0.448 mmol/min -> FAILS.
+        // After fix:  egpNow = f01 (steady-state default)   -> glucose stays flat -> PASSES.
         double g0 = 7.2;
 
         List<PredictionPointDTO> curve = service.buildPredictionPath(
@@ -94,20 +94,20 @@ class HovorkaGlucosePredictionServiceTest {
                         .isBetween(5.7, 8.7));   // g0 ± 1.5 mmol/L
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Regression: meal logged at exactly "now" (minsAgo=0) must not be dropped
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void prospectiveMealAtNow_glucoseRisesDespiteTimestampEqualsNow() {
         // Bug: GlucosePredictService adds the prospective meal with timestamp=now.
-        // minsAgo=0 → buildFutureCarbTimeline stored it at key=0.
-        // Integration loop starts at min=1 → key=0 is NEVER consumed → flat curve.
+        // minsAgo=0 -> buildFutureCarbTimeline stored it at key=0.
+        // Integration loop starts at min=1 -> key=0 is NEVER consumed -> flat curve.
         // Fix: clamp futureMin to max(1, abs(minsAgo)).
         double g0 = 5.8;
 
         CarbsEntry meal = CarbsEntry.builder()
-                .timestamp(NOW)   // exactly "now" → minsAgo=0 → was silently dropped before fix
+                .timestamp(NOW)   // exactly "now" -> minsAgo=0 -> was silently dropped before fix
                 .carbs(35.0)
                 .build();
 
@@ -150,9 +150,9 @@ class HovorkaGlucosePredictionServiceTest {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Regression: IOB timeline must not "fold" a past dose back toward full IOB
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("past insulin dose: glucose falls from the first prediction point (no flat 'fold' artifact)")
@@ -160,7 +160,7 @@ class HovorkaGlucosePredictionServiceTest {
         // Bolus given 35 min ago, no carbs, no long-acting basal logged.
         // Bug: minsAgoAtStep = minsAgoDose - m made IOB *rise* toward the full
         // dose for m in [0, 35), so iobActivityRate = max(0, IOB[m]-IOB[m+1]) was
-        // 0 for the first ~35 min — a flat prediction even though insulin (already
+        // 0 for the first ~35 min - a flat prediction even though insulin (already
         // near its activity peak) should be lowering glucose immediately.
         double g0 = 8.3;
 
@@ -176,22 +176,22 @@ class HovorkaGlucosePredictionServiceTest {
 
         assertThat(curve).isNotEmpty();
         assertThat(curve.get(0).getPredictedGlucose())
-                .as("G at t=5min must already be below baseline (%.1f) — insulin given 35 min ago "
+                .as("G at t=5min must already be below baseline (%.1f) - insulin given 35 min ago "
                     + "is near its activity peak and should be lowering glucose immediately, "
                     + "not held flat for ~35 min.", g0)
                 .isLessThan(g0);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Regression: prospective insulin dose (minsAgoDose < 0) must not act early
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("future-timestamped insulin dose: prediction matches no-dose curve until delivery, "
                   + "then diverges lower")
     void prospectiveInsulinDose_matchesBaselineUntilDelivery_thenDivergesLower() {
         // A bolus dosed 20 min in the future (minsAgoDose = -20) must contribute zero
-        // IOB/activity until its delivery minute — mirroring
+        // IOB/activity until its delivery minute - mirroring
         // pastCarbEntry_minsAgoNegative_deliveredAtCorrectFutureMinute for carbs.
         double g0 = 8.0;
 
@@ -205,26 +205,26 @@ class HovorkaGlucosePredictionServiceTest {
         List<PredictionPointDTO> noDose = service.buildPredictionPath(
                 params, g0, NOW, List.of(), List.of(), List.of(), USER_ID, 60);
 
-        // Before delivery (t=5,15min): identical to the no-dose curve — the prospective
+        // Before delivery (t=5,15min): identical to the no-dose curve - the prospective
         // dose must contribute zero IOB/activity before its delivery minute.
         assertThat(glucoseAt(withDose, 5))
-                .as("G at t=5min must match the no-dose curve — dose is not delivered for 20 more minutes")
+                .as("G at t=5min must match the no-dose curve - dose is not delivered for 20 more minutes")
                 .isEqualTo(glucoseAt(noDose, 5));
         assertThat(glucoseAt(withDose, 15))
-                .as("G at t=15min must match the no-dose curve — dose is not delivered for 5 more minutes")
+                .as("G at t=15min must match the no-dose curve - dose is not delivered for 5 more minutes")
                 .isEqualTo(glucoseAt(noDose, 15));
 
         // After delivery (t=60min): the dose has been active ~40 min and must lower
         // glucose relative to the no-dose curve.
         assertThat(glucoseAt(withDose, 60))
-                .as("G at t=60min must be lower than the no-dose curve — dose delivered at t=20min "
+                .as("G at t=60min must be lower than the no-dose curve - dose delivered at t=20min "
                     + "has been active ~40 min")
                 .isLessThan(glucoseAt(noDose, 60));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Regression: IOB activity rate must align with the simulation step it's applied to
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("regression: insulin activity rate at step `min` reflects IOB decay during "
@@ -249,7 +249,7 @@ class HovorkaGlucosePredictionServiceTest {
         double iob5 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 5, diaHours, peakMinutes);
 
         // The activity applied during the step that produces the t=5min point (step min=5)
-        // must be the IOB decay during [now+4,now+5] — iob[4]-iob[5] — not [now+5,now+6].
+        // must be the IOB decay during [now+4,now+5] - iob[4]-iob[5] - not [now+5,now+6].
         double activityRate = Math.max(0.0, iob4 - iob5);
         double insulinEffect = params.isf() * params.effectiveInsulinVolume() * activityRate;
         double insulinEff = -insulinEffect * 5; // DENSE_STEP_MIN
@@ -260,10 +260,10 @@ class HovorkaGlucosePredictionServiceTest {
                 .isEqualTo(expected);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Regression: manual per-meal-window ISF override (isfBreakfast/isfLunch/isfDinner)
     // must apply to the Hovorka insulin-effect term, not just the OpenAPS path.
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     @DisplayName("regression: a dose given in a meal window with an ISF override uses "
@@ -294,7 +294,7 @@ class HovorkaGlucosePredictionServiceTest {
         double iob5 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 5, diaHours, peakMinutes);
         double activityRate = Math.max(0.0, iob4 - iob5);
 
-        // Expected using isfBreakfast(0.5), resolved from the dose's own 09:40 timestamp —
+        // Expected using isfBreakfast(0.5), resolved from the dose's own 09:40 timestamp -
         // NOT the static Hovorka-calibrated isf (2.2).
         double expectedEffect = -(0.5 * params.effectiveInsulinVolume() * activityRate) * 5;
         double expectedRounded = Math.round(expectedEffect * 100.0) / 100.0;
@@ -308,7 +308,7 @@ class HovorkaGlucosePredictionServiceTest {
 
     @Test
     @DisplayName("regression: a dose's ISF is resolved from its OWN administration time, "
-                  + "not the wall-clock time its insulin activity is later consumed — a "
+                  + "not the wall-clock time its insulin activity is later consumed - a "
                   + "dinner-time correction bolus keeps isfDinner even once its activity "
                   + "plays out after the dinner window ends")
     void insulinEffect_resolvesIsfFromDoseTimestamp_evenWhenActivityCrossesIntoNight() {
@@ -322,7 +322,7 @@ class HovorkaGlucosePredictionServiceTest {
         // which is NIGHT (22:00-04:59, no ISF override) per MealWindow.
         LocalDateTime now = LocalDateTime.of(2024, 6, 1, 21, 55);
 
-        // Dose given at 21:35 — still within DINNER.
+        // Dose given at 21:35 - still within DINNER.
         InsulinDose dose = InsulinDose.builder()
                 .timestamp(now.minusMinutes(minsAgoDose))
                 .units(units)
@@ -341,7 +341,7 @@ class HovorkaGlucosePredictionServiceTest {
         double iob5 = InsulinCalculatorService.iobOpenApsExponential(units, minsAgoDose + 5, diaHours, peakMinutes);
         double activityRate = Math.max(0.0, iob4 - iob5);
 
-        // Expected using isfDinner(4.0), resolved from the dose's 21:35 timestamp — NOT
+        // Expected using isfDinner(4.0), resolved from the dose's 21:35 timestamp - NOT
         // the NIGHT fallback isf (2.2) that applies at the 22:00 consumption time.
         double expectedEffect = -(4.0 * params.effectiveInsulinVolume() * activityRate) * 5;
         double expectedRounded = Math.round(expectedEffect * 100.0) / 100.0;
@@ -355,7 +355,7 @@ class HovorkaGlucosePredictionServiceTest {
 
     @Test
     @DisplayName("regression: two doses given in different meal windows each use their own "
-                  + "resolved ISF, summed independently — not a single ISF for the whole path")
+                  + "resolved ISF, summed independently - not a single ISF for the whole path")
     void insulinEffect_multipleDoses_eachUsesOwnDoseTimeIsf_summedIndependently() {
         double g0 = 8.0;
         double unitsBreakfast = 2.0;
@@ -366,14 +366,14 @@ class HovorkaGlucosePredictionServiceTest {
         // "now" = 11:05 (LUNCH, 11:00-15:59).
         LocalDateTime now = LocalDateTime.of(2024, 6, 1, 11, 5);
 
-        // Dose A given at 10:40 — BREAKFAST (05:00-10:59) -> isfBreakfast.
+        // Dose A given at 10:40 - BREAKFAST (05:00-10:59) -> isfBreakfast.
         long minsAgoA = 25;
         InsulinDose doseBreakfast = InsulinDose.builder()
                 .timestamp(now.minusMinutes(minsAgoA))
                 .units(unitsBreakfast)
                 .build();
 
-        // Dose B given at 11:00 — LUNCH (11:00-15:59) -> isfLunch.
+        // Dose B given at 11:00 - LUNCH (11:00-15:59) -> isfLunch.
         long minsAgoB = 5;
         InsulinDose doseLunch = InsulinDose.builder()
                 .timestamp(now.minusMinutes(minsAgoB))
@@ -381,7 +381,7 @@ class HovorkaGlucosePredictionServiceTest {
                 .build();
 
         UserSettingsDTO settings = new UserSettingsDTO();
-        settings.setIsf(params.isf());   // 2.2, fallback (unused here — both doses have overrides)
+        settings.setIsf(params.isf());   // 2.2, fallback (unused here - both doses have overrides)
         settings.setIsfBreakfast(0.5);
         settings.setIsfLunch(1.5);
 
@@ -399,7 +399,7 @@ class HovorkaGlucosePredictionServiceTest {
         double activityRateB = Math.max(0.0, iobB4 - iobB5);
 
         // Each dose's own ISF (0.5 for the 10:40 BREAKFAST dose, 1.5 for the 11:00 LUNCH
-        // dose) applies to that dose's own activity — neither uses the other's ISF nor
+        // dose) applies to that dose's own activity - neither uses the other's ISF nor
         // the global fallback (2.2).
         double expectedEffect = -((0.5 * activityRateA + 1.5 * activityRateB) * params.effectiveInsulinVolume()) * 5;
         double expectedRounded = Math.round(expectedEffect * 100.0) / 100.0;
@@ -410,12 +410,12 @@ class HovorkaGlucosePredictionServiceTest {
                 .isEqualTo(expectedRounded);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // MARK: Gap 1 — K_ABS scaling with tMaxG (FPU gastric-emptying effect)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
+    // MARK: Gap 1 - K_ABS scaling with tMaxG (FPU gastric-emptying effect)
+    // ---
 
     @Test
-    @DisplayName("high-fat params (tMaxG × 3) → glucose peak appears later than pure-carb params")
+    @DisplayName("high-fat params (tMaxG × 3) -> glucose peak appears later than pure-carb params")
     void highFatTMaxG_glucosePeakShiftsRight() {
         double baseTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN;      // ≈ 26.8 min (pure carb)
         double hfTMaxG   = baseTMaxG * 3.0;                        // ≈ 80.4 min (high fat/protein)
@@ -442,7 +442,7 @@ class HovorkaGlucosePredictionServiceTest {
     }
 
     @Test
-    @DisplayName("high-fat params → lower early glucose (t=60 min) than pure-carb")
+    @DisplayName("high-fat params -> lower early glucose (t=60 min) than pure-carb")
     void highFatTMaxG_lowerEarlyGlucose() {
         double baseTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN;
         double hfTMaxG   = baseTMaxG * 3.0;
@@ -518,14 +518,14 @@ class HovorkaGlucosePredictionServiceTest {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Regression guard: EGP suppression still active when basal IS logged
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void noCobNoIob_longActingLogged_plateauEgpSuppression_glucoseAlsoStaysFlat() {
-        // A long-acting note injected 6h ago → suppressionCurve returns PEAK_X3_BASAL (0.40)
-        // egpNow = EGP0 * (1 - 0.40) ≈ f01 → steady state → glucose flat.
+        // A long-acting note injected 6h ago -> suppressionCurve returns PEAK_X3_BASAL (0.40)
+        // egpNow = EGP0 * (1 - 0.40) ≈ f01 -> steady state -> glucose flat.
         // This guards that the EGP suppression path still works correctly after the fix.
         double g0 = 7.2;
 
@@ -546,20 +546,20 @@ class HovorkaGlucosePredictionServiceTest {
                         .isBetween(5.7, 8.7));
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Regression guard: logging today's long-acting dose must not itself trigger
     // a rising forecast
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     @Test
     void noCobNoIob_longActingLoggedMinutesAgo_doesNotTriggerRise() {
         // A long-acting (Tresiba) note injected 42 min ago. Before the fix, the ramp-up
         // arm of suppressionCurve() returned ~0.14 (instead of the plateau 0.40), so
-        // egpNow > f01 and the forecast rose by several mmol/L over 4 h — even though
+        // egpNow > f01 and the forecast rose by several mmol/L over 4 h - even though
         // the user just took their normal daily basal dose.
         //
         // After the fix: a freshly logged dose is in the plateau region from t=0,
-        // so egpNow ≈ f01 and glucose stays flat — same as the no-notes default.
+        // so egpNow ≈ f01 and glucose stays flat - same as the no-notes default.
         double g0 = 4.6;
 
         che.glucosemonitorbe.entity.Note longActing = new che.glucosemonitorbe.entity.Note();
@@ -579,9 +579,9 @@ class HovorkaGlucosePredictionServiceTest {
                         .isBetween(3.1, 6.1));   // g0 ± 1.5 mmol/L
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
     // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ---
 
     /** Build params with a given tMaxG and all other fields at population defaults. */
     private HovorkaParameters paramsWithTMaxG(double tMaxG) {

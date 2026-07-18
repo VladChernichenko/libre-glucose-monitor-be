@@ -33,15 +33,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * End-to-end tests for the long-acting (basal) insulin feature, exercised through the real HTTP
- * stack (controller → service → JPA → Postgres via Testcontainers) with a registered, authenticated
+ * stack (controller -> service -> JPA -> Postgres via Testcontainers) with a registered, authenticated
  * user.
  *
- * <p>Part A — the daily injection-time preference round-trip
+ * <p>Part A - the daily injection-time preference round-trip
  * ({@code PUT/GET /api/user/insulin-preferences}): the exact persistence path that was failing in
  * the field. Guards save, second-save update, empty-clear, omit-leaves-unchanged, invalid-format,
  * defaults, and auth.
  *
- * <p>Part B — long-acting notes must never be treated as rapid-acting boluses: a basal dose is
+ * <p>Part B - long-acting notes must never be treated as rapid-acting boluses: a basal dose is
  * excluded from {@code activeInsulinOnBoard} in {@code POST /api/glucose-calculations/}, while an
  * ordinary bolus is counted (control).
  */
@@ -82,10 +82,10 @@ class LongActingInsulinE2ETest {
         authHeaders = registerAndLogin();
     }
 
-    // ── Part A: injection-time preference round-trip ──────────────────────────
+    // -- Part A: injection-time preference round-trip --------------------------
 
     @Test
-    @DisplayName("A1 · PUT injection time 23:01 is persisted and read back by GET")
+    @DisplayName("A1 * PUT injection time 23:01 is persisted and read back by GET")
     void injectionTime_savedAndReadBack() throws Exception {
         ResponseEntity<String> put = putPrefs(prefsBody("FIASP", "TRESIBA", "23:01"));
         assertEquals(HttpStatus.OK, put.getStatusCode(), put.getBody());
@@ -96,7 +96,7 @@ class LongActingInsulinE2ETest {
     }
 
     @Test
-    @DisplayName("A2 · a second PUT updates the stored time (regression: 'second save not saved')")
+    @DisplayName("A2 * a second PUT updates the stored time (regression: 'second save not saved')")
     void injectionTime_secondSaveUpdates() throws Exception {
         putPrefs(prefsBody("FIASP", "TRESIBA", "23:01"));
         putPrefs(prefsBody("FIASP", "TRESIBA", "07:15"));
@@ -105,7 +105,7 @@ class LongActingInsulinE2ETest {
     }
 
     @Test
-    @DisplayName("A3 · empty string clears the stored time")
+    @DisplayName("A3 * empty string clears the stored time")
     void injectionTime_emptyStringClears() throws Exception {
         putPrefs(prefsBody("FIASP", "TRESIBA", "23:01"));
         putPrefs(prefsBody("FIASP", "TRESIBA", ""));
@@ -114,7 +114,7 @@ class LongActingInsulinE2ETest {
     }
 
     @Test
-    @DisplayName("A4 · omitting the field leaves the stored time unchanged")
+    @DisplayName("A4 * omitting the field leaves the stored time unchanged")
     void injectionTime_omittedLeavesUnchanged() throws Exception {
         putPrefs(prefsBody("FIASP", "TRESIBA", "23:01"));
         // Body without the longActingInjectionTime key at all.
@@ -124,14 +124,14 @@ class LongActingInsulinE2ETest {
     }
 
     @Test
-    @DisplayName("A5 · invalid time format returns 400")
+    @DisplayName("A5 * invalid time format returns 400")
     void injectionTime_invalidFormat_returns400() {
         ResponseEntity<String> put = putPrefs(prefsBody("FIASP", "TRESIBA", "9pm"));
         assertEquals(HttpStatus.BAD_REQUEST, put.getStatusCode(), put.getBody());
     }
 
     @Test
-    @DisplayName("A6 · a fresh user gets default insulins and a null injection time")
+    @DisplayName("A6 * a fresh user gets default insulins and a null injection time")
     void getPrefs_freshUser_defaults() throws Exception {
         JsonNode prefs = getPrefs();
         assertEquals("FIASP", prefs.path("rapidInsulinCode").asText());
@@ -140,38 +140,38 @@ class LongActingInsulinE2ETest {
     }
 
     @Test
-    @DisplayName("A7 · GET without authentication is rejected")
+    @DisplayName("A7 * GET without authentication is rejected")
     void getPrefs_unauthenticated_isRejected() {
         ResponseEntity<String> r = rest.getForEntity("/api/user/insulin-preferences", String.class);
         assertEquals(HttpStatus.UNAUTHORIZED, r.getStatusCode());
     }
 
-    // ── Part B: long-acting notes excluded from bolus IOB ─────────────────────
+    // -- Part B: long-acting notes excluded from bolus IOB ---------------------
 
     @Test
-    @DisplayName("B1 · a long-acting (basal) dose is NOT counted as bolus IOB in predictions")
+    @DisplayName("B1 * a long-acting (basal) dose is NOT counted as bolus IOB in predictions")
     void longActingNote_excludedFromActiveInsulinOnBoard() throws Exception {
-        // 20 U of long-acting taken 30 min ago — a huge phantom IOB if mis-classified.
+        // 20 U of long-acting taken 30 min ago - a huge phantom IOB if mis-classified.
         postNote(0.0, 20.0, "Tresiba", "long_acting", 30);
 
         double iob = calculate(8.0).path("activeInsulinOnBoard").asDouble();
 
         assertEquals(0.0, iob, 0.01,
-                "Long-acting (basal) doses must be excluded from activeInsulinOnBoard — got: " + iob);
+                "Long-acting (basal) doses must be excluded from activeInsulinOnBoard - got: " + iob);
     }
 
     @Test
-    @DisplayName("B2 · control — an ordinary 20 U bolus 30 min ago DOES count as IOB")
+    @DisplayName("B2 * control - an ordinary 20 U bolus 30 min ago DOES count as IOB")
     void normalNote_countsTowardActiveInsulinOnBoard() throws Exception {
-        postNote(0.0, 20.0, "Correction", null, 30); // type omitted → normal bolus
+        postNote(0.0, 20.0, "Correction", null, 30); // type omitted -> normal bolus
 
         double iob = calculate(8.0).path("activeInsulinOnBoard").asDouble();
 
         assertTrue(iob > 0.0,
-                "A normal bolus must count toward IOB (control for the exclusion test) — got: " + iob);
+                "A normal bolus must count toward IOB (control for the exclusion test) - got: " + iob);
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
+    // -- Helpers ----------------------------------------------------------------
 
     private HttpHeaders registerAndLogin() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
@@ -225,7 +225,7 @@ class LongActingInsulinE2ETest {
         n.setCarbs(carbs);
         n.setInsulin(insulin > 0 ? insulin : null);
         n.setMeal(meal);
-        n.setType(type); // null → backend defaults to "normal"; "long_acting" for basal
+        n.setType(type); // null -> backend defaults to "normal"; "long_acting" for basal
         rest.exchange("/api/notes", HttpMethod.POST, new HttpEntity<>(n, authHeaders), String.class);
     }
 
