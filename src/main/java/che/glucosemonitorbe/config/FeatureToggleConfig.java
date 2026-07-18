@@ -38,6 +38,11 @@ public class FeatureToggleConfig {
     // per-environment in application.yml).
     private boolean unloggedEventDetectionEnabled = false;
 
+    // Activity logging: user-logged activity notes (type/intensity/duration) feed the glucose model's
+    // activity signal a(t). When off, activity notes may still be stored but are not consumed by
+    // prediction/detector/calibration. Enabled per-environment in application.yml.
+    private boolean activityLoggingEnabled = false;
+
     // Phase 2–4 integration gates (all off by default — toggle on per feature-flag)
     private boolean foodPhotoAnalysisEnabled = false;
     private boolean arSpatialEnabled = false;

@@ -35,15 +35,24 @@ public class TokenBlacklistService {
     public static final String LOGOUT_ALL_DEVICES_PREFIX = "LOGOUT_ALL_DEVICES:";
 
     private static final long FALLBACK_TTL_MS = TimeUnit.HOURS.toMillis(24);
-    private static final long LOGOUT_ALL_TTL_MS = TimeUnit.DAYS.toMillis(30);
+    /** Extra buffer so the sentinel outlives clock skew past the last refresh token. */
+    private static final long LOGOUT_ALL_TTL_BUFFER_MS = TimeUnit.HOURS.toMillis(1);
 
     private final TokenBlacklistRepository repository;
 
     @Value("${security.jwt.secret}")
     private String jwtSecret;
 
+    /** Must cover the full refresh-token lifetime so stolen refresh tokens cannot revive after logout-all. */
+    @Value("${security.jwt.refresh-expiration-ms}")
+    private long refreshExpirationMs;
+
     public TokenBlacklistService(TokenBlacklistRepository repository) {
         this.repository = repository;
+    }
+
+    private long logoutAllTtlMs() {
+        return Math.max(refreshExpirationMs, FALLBACK_TTL_MS) + LOGOUT_ALL_TTL_BUFFER_MS;
     }
 
     private SecretKey getSigningKey() {
@@ -75,9 +84,21 @@ public class TokenBlacklistService {
         if (username == null || username.isBlank()) {
             return;
         }
-        long expiration = System.currentTimeMillis() + LOGOUT_ALL_TTL_MS;
+        long expiration = System.currentTimeMillis() + logoutAllTtlMs();
         store(LOGOUT_ALL_DEVICES_PREFIX + username.trim(), expiration);
         log.info("Global logout sentinel registered for user {} until {}", username, new Date(expiration));
+    }
+
+    /**
+     * Clears the logout-all sentinel so a successful password login can issue usable tokens again.
+     */
+    @Transactional
+    public void clearGlobalLogout(String username) {
+        if (username == null || username.isBlank()) {
+            return;
+        }
+        repository.deleteById(sha256Hex(LOGOUT_ALL_DEVICES_PREFIX + username.trim()));
+        log.info("Global logout sentinel cleared for user {}", username);
     }
 
     @Transactional(readOnly = true)
@@ -94,7 +115,7 @@ public class TokenBlacklistService {
             return;
         }
         if (token.startsWith(LOGOUT_ALL_DEVICES_PREFIX)) {
-            store(token, System.currentTimeMillis() + LOGOUT_ALL_TTL_MS);
+            store(token, System.currentTimeMillis() + logoutAllTtlMs());
             return;
         }
         Long expirationTime = extractExpirationTime(token);

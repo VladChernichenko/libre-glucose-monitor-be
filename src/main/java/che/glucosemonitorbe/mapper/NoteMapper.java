@@ -29,6 +29,9 @@ public class NoteMapper {
         dto.setNutritionProfile(note.getNutritionProfile());
         dto.setAbsorptionMode(note.getAbsorptionMode());
         dto.setType(note.getType());
+        dto.setActivityType(note.getActivityType());
+        dto.setIntensity(note.getIntensity());
+        dto.setDurationMin(note.getDurationMin());
         dto.setMockData(note.isMockData());
         dto.setCreatedAt(note.getCreatedAt());
         dto.setUpdatedAt(note.getUpdatedAt());
@@ -60,6 +63,9 @@ public class NoteMapper {
         if (dto.getType() != null) {
             note.setType(dto.getType());
         }
+        note.setActivityType(dto.getActivityType());
+        note.setIntensity(dto.getIntensity());
+        note.setDurationMin(dto.getDurationMin());
         note.setMockData(dto.isMockData());
 
         return note;

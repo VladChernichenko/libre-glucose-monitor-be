@@ -137,6 +137,24 @@ class AuthServiceTest {
 
         assertThat(response.getAccessToken()).isEqualTo("access-token");
         assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
+        verify(tokenBlacklistService).clearGlobalLogout("user");
+    }
+
+    @Test
+    void refreshToken_whenGloballyLoggedOut_rejectsWithoutMinting() {
+        when(tokenProvider.validateToken("refresh-token")).thenReturn(true);
+        when(tokenProvider.isRefreshToken("refresh-token")).thenReturn(true);
+        when(tokenProvider.getUsernameFromToken("refresh-token")).thenReturn("user");
+        when(tokenBlacklistService.isUserGloballyLoggedOut("user")).thenReturn(true);
+
+        RefreshTokenRequest request = new RefreshTokenRequest();
+        request.setRefreshToken("refresh-token");
+
+        assertThatThrownBy(() -> authService.refreshToken(request))
+                .isInstanceOf(che.glucosemonitorbe.exception.InvalidTokenException.class)
+                .hasMessageContaining("revoked");
+        verify(tokenBlacklistService, never()).blacklistTokenIfAbsent(anyString());
+        verify(tokenProvider, never()).generateTokenFromUsername(anyString());
     }
 
     // ── logout ─────────────────────────────────────────────────────────────────

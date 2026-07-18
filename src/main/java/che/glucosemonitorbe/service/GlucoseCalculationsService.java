@@ -247,10 +247,16 @@ public class GlucoseCalculationsService {
             List<Note> longActingNotes = getLongActingNotes(userUUID, currentTime);
             int pathMinutes = resolvePathDurationMinutes(carbsEntries);
             log.debug("Using Hovorka ODE model for user={} pathMinutes={}", userUUID, pathMinutes);
+            // Account for logged activity (inert when the feature is off or no activity is logged).
+            che.glucosemonitorbe.hovorka.ActivityProvider activity =
+                    featureToggleConfig.isActivityLoggingEnabled()
+                            ? che.glucosemonitorbe.hovorka.NotesActivityProvider.fromNotes(
+                                    getRecentNotes(userUUID, currentTime))
+                            : che.glucosemonitorbe.hovorka.ActivityProvider.NONE;
             return hovorkaService.buildPredictionPath(
                     currentGlucose, currentTime,
                     carbsEntries, insulinEntries,
-                    longActingNotes, userUUID, pathMinutes);
+                    longActingNotes, userUUID, pathMinutes, activity);
         }
 
         // ── OpenAPS exponential model (default) ───────────────────────────────

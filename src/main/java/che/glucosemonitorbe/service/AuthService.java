@@ -30,6 +30,9 @@ public class AuthService {
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
 
+        // Password login proves identity - clear logout-all so newly minted tokens are accepted.
+        tokenBlacklistService.clearGlobalLogout(request.getUsername());
+
         String accessToken = tokenProvider.generateToken(authentication);
         String refreshToken = tokenProvider.generateRefreshToken(request.getUsername());
 
@@ -79,6 +82,11 @@ public class AuthService {
             throw new InvalidTokenException("Invalid refresh token");
         }
 
+        String username = tokenProvider.getUsernameFromToken(request.getRefreshToken());
+        if (tokenBlacklistService.isUserGloballyLoggedOut(username)) {
+            throw new InvalidTokenException("Session revoked - please log in again");
+        }
+
         // Atomically claim this refresh token for rotation (DB-level INSERT ... ON CONFLICT DO
         // NOTHING). This replaces a separate check-then-blacklist pair, which raced: two requests
         // with the same token could both pass the blacklist check before either finished writing,
@@ -89,7 +97,6 @@ public class AuthService {
             throw new InvalidTokenException("Refresh token has been revoked");
         }
 
-        String username = tokenProvider.getUsernameFromToken(request.getRefreshToken());
         String accessToken = tokenProvider.generateTokenFromUsername(username);
         String refreshToken = tokenProvider.generateRefreshToken(username);
 

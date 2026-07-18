@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS notes (
     absorption_mode     VARCHAR(32),
     type                VARCHAR(20)      NOT NULL DEFAULT 'normal',
     photo_key           VARCHAR(500),
+    -- Activity logging (type = 'activity'): the exercise the user logged.
+    activity_type       VARCHAR(20),
+    intensity           VARCHAR(12),
+    duration_min        INTEGER,
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_notes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

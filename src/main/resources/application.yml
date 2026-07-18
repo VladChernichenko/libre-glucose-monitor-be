@@ -22,7 +22,7 @@ spring:
       ddl-auto: validate  # Use Flyway for migrations
     show-sql: false
     open-in-view: false  # Disable to prevent lazy loading issues
-    properties:
+    properties:=
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -155,6 +155,8 @@ app:
     digital-twin-enabled: ${APP_FEATURES_DIGITAL_TWIN_ENABLED:true}
     # Unlogged-event detector: periodic scan flagging glucose moves the logged inputs don't explain.
     unlogged-event-detection-enabled: ${APP_FEATURES_UNLOGGED_EVENT_DETECTION_ENABLED:true}
+    # Activity logging: logged activity notes feed the model's activity signal a(t).
+    activity-logging-enabled: ${APP_FEATURES_ACTIVITY_LOGGING_ENABLED:true}
     food-photo-analysis-enabled: false
     ar-spatial-enabled: false
     cgm-service-external: false
