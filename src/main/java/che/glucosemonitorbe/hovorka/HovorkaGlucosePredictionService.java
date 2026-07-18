@@ -444,8 +444,8 @@ public class HovorkaGlucosePredictionService {
     /**
      * Pre-computes, for each past or prospective dose, its IOB timeline from the OpenAPS
      * curve and the ISF in effect when it was administered: the user's manual
-     * isfBreakfast/isfLunch/isfDinner override for the dose's own meal window, or
-     * {@code fallbackIsf} if none applies (e.g. doses given overnight).
+     * isfBreakfast/isfLunch/isfDinner/isfNight override for the dose's own meal window, or
+     * {@code fallbackIsf} if none applies.
      */
     private List<DoseActivity> buildDoseActivities(
             List<InsulinDose> doses,
@@ -480,7 +480,7 @@ public class HovorkaGlucosePredictionService {
 
     /**
      * Resolves the ISF [mmol/L per unit] in effect at {@code time}: the user's manual
-     * per-meal-window override (isfBreakfast/isfLunch/isfDinner) if one applies to
+     * per-meal-window override (isfBreakfast/isfLunch/isfDinner/isfNight) if one applies to
      * {@code time}'s meal window, otherwise {@code fallbackIsf} (the Hovorka-calibrated
      * ISF from {@link HovorkaParameterService#buildForUser}).
      */

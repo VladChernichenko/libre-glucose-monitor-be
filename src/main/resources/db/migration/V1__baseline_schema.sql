@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     isf_breakfast       DOUBLE PRECISION,                        -- manual ISF override for 05:00-11:00; NULL = use autotuned `isf`
     isf_lunch           DOUBLE PRECISION,                        -- manual ISF override for 11:00-16:00; NULL = use autotuned `isf`
     isf_dinner          DOUBLE PRECISION,                        -- manual ISF override for 16:00-22:00; NULL = use autotuned `isf`
+    isf_night           DOUBLE PRECISION,                        -- manual ISF override for 22:00-05:00; NULL = use autotuned `isf`
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -55,7 +56,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
     CONSTRAINT chk_user_settings_weight_positive CHECK (body_weight_kg IS NULL OR body_weight_kg > 0),
     CONSTRAINT chk_user_settings_isf_breakfast_positive CHECK (isf_breakfast IS NULL OR isf_breakfast > 0),
     CONSTRAINT chk_user_settings_isf_lunch_positive CHECK (isf_lunch IS NULL OR isf_lunch > 0),
-    CONSTRAINT chk_user_settings_isf_dinner_positive CHECK (isf_dinner IS NULL OR isf_dinner > 0)
+    CONSTRAINT chk_user_settings_isf_dinner_positive CHECK (isf_dinner IS NULL OR isf_dinner > 0),
+    CONSTRAINT chk_user_settings_isf_night_positive CHECK (isf_night IS NULL OR isf_night > 0)
 );
 CREATE INDEX IF NOT EXISTS idx_user_settings_user_id    ON user_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_settings_created_at ON user_settings(created_at);

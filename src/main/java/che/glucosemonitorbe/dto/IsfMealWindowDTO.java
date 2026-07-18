@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class IsfMealWindowDTO {
 
-    /** {@code BREAKFAST | LUNCH | DINNER} — wire format mirrors the enum name. */
+    /** {@code BREAKFAST | LUNCH | DINNER | NIGHT} - wire format mirrors the enum name. */
     private String mealWindow;
 
     /** Inclusive start hour 0–23 (e.g. 5 for breakfast). */

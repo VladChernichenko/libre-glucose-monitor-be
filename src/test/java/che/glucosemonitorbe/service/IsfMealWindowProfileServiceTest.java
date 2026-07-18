@@ -38,7 +38,7 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for {@link IsfMealWindowProfileService}. Covers:
  * <ul>
- *   <li>Meal-window classification (incl. night exclusion)</li>
+ *   <li>Meal-window classification (incl. NIGHT)</li>
  *   <li>Per-event ISF deconvolution algebra (correction vs meal weighting)</li>
  *   <li>Edge cases: stacked boluses, missing CGM, implausible values, long-acting filter</li>
  *   <li>Bucket threshold + DTO {@code hasData} mapping</li>
@@ -111,10 +111,10 @@ class IsfMealWindowProfileServiceTest {
         }
 
         @Test
-        @DisplayName("Night hours 22, 23, 0–4 map to empty (skipped)")
+        @DisplayName("Night hours 22, 23, 0-4 map to NIGHT")
         void night() {
             for (int h : new int[]{22, 23, 0, 1, 2, 3, 4}) {
-                assertThat(MealWindow.fromHour(h)).as("hour=%d", h).isEmpty();
+                assertThat(MealWindow.fromHour(h)).as("hour=%d", h).hasValue(MealWindow.NIGHT);
             }
         }
 
@@ -130,8 +130,8 @@ class IsfMealWindowProfileServiceTest {
     // ── Empty-data behaviour ──────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Empty data → 3 buckets returned, all hasData=false, isfMmolPerU=null")
-    void emptyData_threeBucketsAllEmpty() {
+    @DisplayName("Empty data -> 4 buckets returned, all hasData=false, isfMmolPerU=null")
+    void emptyData_fourBucketsAllEmpty() {
         when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
                 .thenReturn(List.of());
         when(cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(eq(userId), any()))
@@ -140,9 +140,9 @@ class IsfMealWindowProfileServiceTest {
 
         IsfMealWindowProfileResponse response = service.recomputeForUser(userId);
 
-        assertThat(response.getWindows()).hasSize(3);
+        assertThat(response.getWindows()).hasSize(4);
         assertThat(response.getWindows()).extracting(IsfMealWindowDTO::getMealWindow)
-                .containsExactly("BREAKFAST", "LUNCH", "DINNER");
+                .containsExactly("BREAKFAST", "LUNCH", "DINNER", "NIGHT");
         assertThat(response.getWindows()).allMatch(w -> !w.isHasData());
         assertThat(response.getWindows()).allMatch(w -> w.getIsfMmolPerU() == null);
         assertThat(response.getHistoryDays()).isEqualTo(14);
@@ -228,8 +228,8 @@ class IsfMealWindowProfileServiceTest {
     // ── Night exclusion ───────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Bolus at 02:00 is skipped (night excluded from all three buckets)")
-    void nightBolus_excluded() {
+    @DisplayName("Bolus at 02:00 is bucketed into NIGHT")
+    void nightBolus_bucketedIntoNight() {
         LocalDateTime t = today(2, 0);
         Note bolus = bolus(t, 2.0);
         List<CgmReading> cgm = List.of(
@@ -239,12 +239,14 @@ class IsfMealWindowProfileServiceTest {
 
         service.recomputeForUser(userId);
 
-        // All three buckets should be empty
-        for (MealWindow w : MealWindow.values()) {
+        IsfMealWindowSnapshot night = captureSavedSnapshot(MealWindow.NIGHT);
+        assertThat(night.getRawSampleCount()).isEqualTo(1);
+        assertThat(night.getWeightedSamples()).isEqualTo(1.0);
+        assertThat(night.getIsfMmolPerU()).isNull(); // below MIN_WEIGHTED_SAMPLES
+
+        for (MealWindow w : List.of(MealWindow.BREAKFAST, MealWindow.LUNCH, MealWindow.DINNER)) {
             IsfMealWindowSnapshot saved = captureSavedSnapshot(w);
             assertThat(saved.getRawSampleCount()).as("window=%s", w).isZero();
-            assertThat(saved.getWeightedSamples()).as("window=%s", w).isZero();
-            assertThat(saved.getIsfMmolPerU()).as("window=%s", w).isNull();
         }
     }
 
@@ -346,7 +348,7 @@ class IsfMealWindowProfileServiceTest {
     // ── getProfile read path ──────────────────────────────────────────────────
 
     @Test
-    @DisplayName("getProfile returns all 3 buckets in canonical order, even if DB has only some")
+    @DisplayName("getProfile returns all 4 buckets in canonical order, even if DB has only some")
     void getProfile_fillsMissingBucketsWithEmpty() {
         IsfMealWindowSnapshot lunchSnap = IsfMealWindowSnapshot.builder()
                 .userId(userId)
@@ -360,7 +362,7 @@ class IsfMealWindowProfileServiceTest {
 
         IsfMealWindowProfileResponse response = service.getProfile(userId);
 
-        assertThat(response.getWindows()).hasSize(3);
+        assertThat(response.getWindows()).hasSize(4);
         assertThat(response.getWindows().get(0).getMealWindow()).isEqualTo("BREAKFAST");
         assertThat(response.getWindows().get(0).isHasData()).isFalse();
         assertThat(response.getWindows().get(1).getMealWindow()).isEqualTo("LUNCH");
@@ -368,6 +370,8 @@ class IsfMealWindowProfileServiceTest {
         assertThat(response.getWindows().get(1).getIsfMmolPerU()).isEqualTo(2.4);
         assertThat(response.getWindows().get(2).getMealWindow()).isEqualTo("DINNER");
         assertThat(response.getWindows().get(2).isHasData()).isFalse();
+        assertThat(response.getWindows().get(3).getMealWindow()).isEqualTo("NIGHT");
+        assertThat(response.getWindows().get(3).isHasData()).isFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

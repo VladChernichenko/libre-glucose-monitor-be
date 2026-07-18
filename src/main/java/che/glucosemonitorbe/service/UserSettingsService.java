@@ -50,10 +50,11 @@ public class UserSettingsService {
     @CacheEvict(value = "userSettings", key = "#userId")
     public UserSettingsDTO saveUserSettings(UUID userId, UserSettingsDTO settingsDTO) {
         log.info("saveUserSettings request for userId={}: carbRatio={}, isf={}, carbHalfLife={}, " +
-                        "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}",
+                        "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}, isfNight={}",
                 userId, settingsDTO.getCarbRatio(), settingsDTO.getIsf(), settingsDTO.getCarbHalfLife(),
                 settingsDTO.getMaxCOBDuration(), settingsDTO.getBodyWeightKg(),
-                settingsDTO.getIsfBreakfast(), settingsDTO.getIsfLunch(), settingsDTO.getIsfDinner());
+                settingsDTO.getIsfBreakfast(), settingsDTO.getIsfLunch(), settingsDTO.getIsfDinner(),
+                settingsDTO.getIsfNight());
 
         Optional<UserSettings> existingSettings = userSettingsRepository.findByUserId(userId);
 
@@ -68,9 +69,9 @@ public class UserSettingsService {
         }
 
         UserSettings savedSettings = userSettingsRepository.save(settings);
-        log.info("saveUserSettings persisted for userId={}: isf={}, isfBreakfast={}, isfLunch={}, isfDinner={}",
+        log.info("saveUserSettings persisted for userId={}: isf={}, isfBreakfast={}, isfLunch={}, isfDinner={}, isfNight={}",
                 userId, savedSettings.getIsf(), savedSettings.getIsfBreakfast(),
-                savedSettings.getIsfLunch(), savedSettings.getIsfDinner());
+                savedSettings.getIsfLunch(), savedSettings.getIsfDinner(), savedSettings.getIsfNight());
         return convertToDTO(savedSettings);
     }
     
@@ -124,6 +125,9 @@ public class UserSettingsService {
         if (settingsDTO.getIsfDinner() != null) {
             settings.setIsfDinner(settingsDTO.getIsfDinner());
         }
+        if (settingsDTO.getIsfNight() != null) {
+            settings.setIsfNight(settingsDTO.getIsfNight());
+        }
     }
 
     /**
@@ -140,7 +144,8 @@ public class UserSettingsService {
             settings.getBodyWeightKg(),
             settings.getIsfBreakfast(),
             settings.getIsfLunch(),
-            settings.getIsfDinner()
+            settings.getIsfDinner(),
+            settings.getIsfNight()
         );
     }
 }

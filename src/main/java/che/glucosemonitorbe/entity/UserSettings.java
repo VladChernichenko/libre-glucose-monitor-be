@@ -53,6 +53,10 @@ public class UserSettings {
     @Column(name = "isf_dinner")
     private Double isfDinner;
 
+    /** Manual ISF override for 22:00-05:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
+    @Column(name = "isf_night")
+    private Double isfNight;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

@@ -28,6 +28,8 @@ public class UserSettingsDTO {
     private Double isfLunch;
     /** Manual ISF override for 16:00-22:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
     private Double isfDinner;
+    /** Manual ISF override for 22:00-05:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
+    private Double isfNight;
 
     // Constructors
     public UserSettingsDTO() {}
@@ -55,6 +57,12 @@ public class UserSettingsDTO {
 
     public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
                            Double bodyWeightKg, Double isfBreakfast, Double isfLunch, Double isfDinner) {
+        this(id, userId, carbRatio, isf, carbHalfLife, maxCOBDuration, bodyWeightKg,
+                isfBreakfast, isfLunch, isfDinner, null);
+    }
+
+    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
+                           Double bodyWeightKg, Double isfBreakfast, Double isfLunch, Double isfDinner, Double isfNight) {
         this.id = id;
         this.userId = userId;
         this.carbRatio = carbRatio;
@@ -65,15 +73,20 @@ public class UserSettingsDTO {
         this.isfBreakfast = isfBreakfast;
         this.isfLunch = isfLunch;
         this.isfDinner = isfDinner;
+        this.isfNight = isfNight;
     }
 
     /**
      * Returns the ISF (mmol/L per unit) in effect at {@code time}: the manual per-meal-window
      * override if the user has set one for that window, otherwise the autotuned {@link #isf}.
-     * Night hours (22:00-04:59, outside all meal windows) always use the autotuned {@link #isf}.
      */
     public Double getEffectiveIsf(LocalDateTime time) {
-        return MealWindow.fromTimestamp(time).map(this::overrideFor).orElseGet(() -> isf);
+        return MealWindow.fromTimestamp(time)
+                .map(w -> {
+                    Double override = overrideFor(w);
+                    return override != null ? override : isf;
+                })
+                .orElse(isf);
     }
 
     private Double overrideFor(MealWindow window) {
@@ -81,7 +94,7 @@ public class UserSettingsDTO {
             case BREAKFAST -> isfBreakfast;
             case LUNCH -> isfLunch;
             case DINNER -> isfDinner;
-            default -> null;
+            case NIGHT -> isfNight;
         };
     }
 }

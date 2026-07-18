@@ -6,17 +6,17 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
- * Meal-window classification for circadian ISF analysis.
+ * Meal-window classification for circadian ISF analysis and per-window manual overrides.
  *
- * <p>A bolus's {@link LocalDateTime#getHour()} maps to one of the three windows below.
- * Night hours (22:00–04:59) intentionally map to {@code Optional.empty()} — corrections
- * during sleep are rare and signal-noisy, so we exclude them from the ISF profile.</p>
+ * <p>Together the four windows partition the full day:
+ * BREAKFAST 05:00-10:59, LUNCH 11:00-15:59, DINNER 16:00-21:59, NIGHT 22:00-04:59.</p>
  */
 @Getter
 public enum MealWindow {
-    BREAKFAST(5, 11),   // 05:00–10:59
-    LUNCH(11, 16),      // 11:00–15:59
-    DINNER(16, 22);     // 16:00–21:59
+    BREAKFAST(5, 11),   // 05:00-10:59
+    LUNCH(11, 16),      // 11:00-15:59
+    DINNER(16, 22),     // 16:00-21:59
+    NIGHT(22, 5);       // 22:00-04:59 (wraps midnight)
 
     private final int startHourInclusive;
     private final int endHourExclusive;
@@ -26,15 +26,31 @@ public enum MealWindow {
         this.endHourExclusive = endHourExclusive;
     }
 
+    /** True when the window crosses midnight ({@link #NIGHT}). */
+    public boolean wrapsMidnight() {
+        return startHourInclusive > endHourExclusive;
+    }
+
+    /** Whether {@code hour} (0-23) falls in this window. */
+    public boolean containsHour(int hour) {
+        if (hour < 0 || hour > 23) {
+            return false;
+        }
+        if (wrapsMidnight()) {
+            return hour >= startHourInclusive || hour < endHourExclusive;
+        }
+        return hour >= startHourInclusive && hour < endHourExclusive;
+    }
+
     /**
-     * Classifies an hour-of-day into a meal window, or returns empty for night (22:00–04:59).
+     * Classifies an hour-of-day into a meal window. Hours outside 0-23 return empty.
      */
     public static Optional<MealWindow> fromHour(int hour) {
         if (hour < 0 || hour > 23) {
             return Optional.empty();
         }
         for (MealWindow window : values()) {
-            if (hour >= window.startHourInclusive && hour < window.endHourExclusive) {
+            if (window.containsHour(hour)) {
                 return Optional.of(window);
             }
         }

@@ -34,7 +34,7 @@ import java.util.*;
  *   <li>Residual drop attributable to insulin: {@code Δinsulin = Δcarb − (postCGM − preCGM)}.</li>
  *   <li>Per-event ISF estimate: {@code ISF = Δinsulin / B.units}.</li>
  *   <li>Weight: 1.0 if no carbs nearby (correction bolus), else 0.4 (deconvolved meal bolus).</li>
- *   <li>Bucket by {@link MealWindow#fromTimestamp(LocalDateTime)} — night events are dropped.</li>
+ *   <li>Bucket by {@link MealWindow#fromTimestamp(LocalDateTime)} (full 24h: B/L/D/NIGHT).</li>
  * </ol>
  *
  * <p>Per-meal-window result is the weighted mean of all per-event ISF estimates in that bucket.
@@ -83,8 +83,8 @@ public class IsfMealWindowProfileService {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Returns the cached profile for the user. Always returns 3 entries
-     * (BREAKFAST, LUNCH, DINNER) — missing buckets surface as {@code hasData=false}.
+     * Returns the cached profile for the user. Always returns 4 entries
+     * (BREAKFAST, LUNCH, DINNER, NIGHT) - missing buckets surface as {@code hasData=false}.
      */
     @Transactional(readOnly = true)
     public IsfMealWindowProfileResponse getProfile(UUID userId) {
@@ -105,8 +105,8 @@ public class IsfMealWindowProfileService {
     }
 
     /**
-     * Recomputes all three meal-window snapshots from scratch for the user and persists them.
-     * Idempotent — safe to call from both the daily scheduler and an on-bolus hook.
+     * Recomputes all meal-window snapshots from scratch for the user and persists them.
+     * Idempotent - safe to call from both the daily scheduler and an on-bolus hook.
      */
     @Transactional
     public IsfMealWindowProfileResponse recomputeForUser(UUID userId) {
@@ -127,9 +127,6 @@ public class IsfMealWindowProfileService {
             if (bolus.getInsulin() == null || bolus.getInsulin() <= 0) continue;
             if (bolus.isLongActing()) continue;
             if (bolus.getTimestamp() == null) continue;
-
-            Optional<MealWindow> windowOpt = MealWindow.fromTimestamp(bolus.getTimestamp());
-            if (windowOpt.isEmpty()) continue; // night — skip
 
             EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, carbRatio);
             if (est != null) {
@@ -157,11 +154,12 @@ public class IsfMealWindowProfileService {
             snapshotRepository.save(snap);
         }
 
-        log.info("ISF profile recomputed user={} estimates={} breakfast={} lunch={} dinner={}",
+        log.info("ISF profile recomputed user={} estimates={} breakfast={} lunch={} dinner={} night={}",
                 userId, estimates.size(),
                 byWindow.get(MealWindow.BREAKFAST).summary(),
                 byWindow.get(MealWindow.LUNCH).summary(),
-                byWindow.get(MealWindow.DINNER).summary());
+                byWindow.get(MealWindow.DINNER).summary(),
+                byWindow.get(MealWindow.NIGHT).summary());
 
         return getProfile(userId);
     }
