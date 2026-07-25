@@ -96,7 +96,7 @@ public class DallaManGutModel {
      */
     public static double caloricScale(double tHalfMealMin) {
         double scale = BASE_T_HALF_MIN / Math.max(tHalfMealMin, 1.0);
-        return Math.max(0.4, Math.min(1.5, scale));
+        return Math.clamp(scale, 0.4, 1.5);
     }
 
     /**

@@ -21,6 +21,8 @@ import org.springframework.stereotype.Component;
  *   dQsto2/dt = K_GRI*Qsto1 − kempt*Qsto2
  *   dQgut/dt  = kempt*Qsto2 − K_ABS*Qgut
  *   dInc/dt   = K_INC*Ra − K_DEL*Inc
+ *   dx3/dt    = 0.0  (stub — wired in Task 7)
+ *   dProtFatGut/dt = 0.0 (stub — wired in Task 6)
  * </pre>
  */
 @Component
@@ -51,8 +53,10 @@ public class HovorkaOdeSolver {
 
     /**
      * Advance the state by exactly one minute using the classical RK4 method.
+     * Delegates to the master 7-arg overload with mealGI=state.activeGI(), protFatKcal=0,
+     * activityRate=0.
      *
-     * @param state         current 6-variable state + meal reference
+     * @param state         current 8-variable state + tracking fields
      * @param p             Hovorka parameters
      * @param carbMmolNow   carbs delivered at this minute [mmol] - impulse input to Qsto1
      * @param insulinEffect ISF × VG × iobActivityRate [mmol/min]
@@ -63,13 +67,14 @@ public class HovorkaOdeSolver {
             HovorkaParameters p,
             double carbMmolNow,
             double insulinEffect) {
-        return step(state, p, carbMmolNow, insulinEffect, 0.0);
+        return step(state, p, carbMmolNow, state.activeGI(), 0.0, insulinEffect, 0.0);
     }
 
     /**
      * Advance the state by one minute, with an optional insulin-independent activity glucose-uptake
      * rate {@code activityUptakeRate} [per min] (contraction-mediated clearance during exercise);
      * 0 = no activity, which reproduces the un-modulated model exactly.
+     * Delegates to the master 7-arg overload with mealGI=state.activeGI(), protFatKcal=0.
      */
     public HovorkaState step(
             HovorkaState state,
@@ -77,65 +82,95 @@ public class HovorkaOdeSolver {
             double carbMmolNow,
             double insulinEffect,
             double activityUptakeRate) {
-
-        // Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
-        //
-        // D (mealMmol) is the saturation reference for k_empt - it must be the stomach
-        // content of the *current* emptying episode, NOT the cumulative sum of every meal
-        // ever eaten. Using a cumulative sum made a fresh meal that lands on top of a
-        // partly-digested earlier meal be treated as a half-full large meal, throttling
-        // k_empt toward K_MIN and badly delaying absorption. This is hit by virtually every
-        // mixed meal because GlucosePredictService injects a second (FPU-equivalent) carb
-        // entry. Refresh D to the post-ingestion stomach load so a new meal empties from the
-        // "full stomach -> near K_MAX" branch as the physiology requires.
-        HovorkaState s0;
-        if (carbMmolNow > 0) {
-            double newQsto1   = state.qsto1() + carbMmolNow;
-            double stomachLoad = newQsto1 + state.qsto2();
-            s0 = new HovorkaState(
-                    state.q1(), state.q2(),
-                    newQsto1, state.qsto2(), state.qgut(), state.inc(),
-                    stomachLoad);
-        } else {
-            s0 = state;
-        }
-
-        double mealMmol = s0.mealMmol();   // constant throughout this RK4 step
-
-        double[] y  = toArray(s0);
-        double[] k1 = derivatives(y,                   p, mealMmol, insulinEffect, activityUptakeRate);
-        double[] k2 = derivatives(add(y, scale(k1, 0.5)), p, mealMmol, insulinEffect, activityUptakeRate);
-        double[] k3 = derivatives(add(y, scale(k2, 0.5)), p, mealMmol, insulinEffect, activityUptakeRate);
-        double[] k4 = derivatives(add(y, k3),             p, mealMmol, insulinEffect, activityUptakeRate);
-
-        double[] yn = new double[6];
-        for (int i = 0; i < 6; i++) {
-            yn[i] = y[i] + (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) / 6.0;
-        }
-        return fromArray(yn, mealMmol).clampNonNegative();
+        return step(state, p, carbMmolNow, state.activeGI(), 0.0, insulinEffect, activityUptakeRate);
     }
 
     /**
-     * Compute the 6 ODE derivatives.
+     * Master step: advance state by 1 minute with full new inputs.
      *
-     * <p>y[0]=Q1, y[1]=Q2, y[2]=Qsto1, y[3]=Qsto2, y[4]=Qgut, y[5]=Inc</p>
+     * <p>Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
+     * D (mealMmol) is the saturation reference for k_empt - it must be the stomach
+     * content of the <em>current</em> emptying episode, NOT the cumulative sum of every meal
+     * ever eaten.</p>
      *
-     * @param y             current state as double array (6 elements)
+     * @param carbMmolNow    carbs ingested at this minute [mmol]
+     * @param mealGI         glycemic index of the arriving carbs [0-100]; use state.activeGI() if no new meal
+     * @param protFatKcalNow protein+fat caloric load entering gut at this minute [kcal]
+     * @param insulinEffect  glucose removal from bolus insulin [mmol/min]
+     * @param activityRate   insulin-independent muscle uptake rate [/min]
+     */
+    public HovorkaState step(
+            HovorkaState state,
+            HovorkaParameters p,
+            double carbMmolNow,
+            int    mealGI,
+            double protFatKcalNow,
+            double insulinEffect,
+            double activityRate) {
+
+        HovorkaState s0 = state;
+        int activeGI = state.activeGI();
+
+        if (carbMmolNow > 0) {
+            double newQsto1    = state.qsto1() + carbMmolNow;
+            double stomachLoad = newQsto1 + state.qsto2();
+            activeGI = mealGI;
+            s0 = new HovorkaState(
+                    state.q1(), state.q2(),
+                    newQsto1, state.qsto2(), state.qgut(), state.inc(),
+                    state.x3(), state.protFatGut(),
+                    stomachLoad, activeGI);
+        }
+        if (protFatKcalNow > 0) {
+            s0 = new HovorkaState(
+                    s0.q1(), s0.q2(), s0.qsto1(), s0.qsto2(), s0.qgut(), s0.inc(),
+                    s0.x3(), s0.protFatGut() + protFatKcalNow,
+                    s0.mealMmol(), s0.activeGI());
+        }
+
+        final int gi = activeGI;
+        double mealMmol = s0.mealMmol();
+        double[] y  = toArray(s0);
+        double[] k1 = derivatives(y, p, mealMmol, gi, insulinEffect, activityRate);
+        double[] k2 = derivatives(add(y, scale(k1, 0.5)), p, mealMmol, gi, insulinEffect, activityRate);
+        double[] k3 = derivatives(add(y, scale(k2, 0.5)), p, mealMmol, gi, insulinEffect, activityRate);
+        double[] k4 = derivatives(add(y, k3),             p, mealMmol, gi, insulinEffect, activityRate);
+
+        double[] yn = new double[8];
+        for (int i = 0; i < 8; i++) {
+            yn[i] = y[i] + (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) / 6.0;
+        }
+        return fromArray(yn, mealMmol, gi).clampNonNegative();
+    }
+
+    /**
+     * Compute the 8 ODE derivatives (4-arg backward-compat delegate).
+     *
+     * <p>y[0]=Q1, y[1]=Q2, y[2]=Qsto1, y[3]=Qsto2, y[4]=Qgut, y[5]=Inc,
+     * y[6]=x3 (stub), y[7]=protFatGut (stub)</p>
+     *
+     * @param y             current state as double array (8 elements)
      * @param p             Hovorka parameters
      * @param mealMmol      reference meal dose [mmol] for k_empt (constant per step)
      * @param insulinEffect glucose removal rate from bolus insulin [mmol/min]
      */
     double[] derivatives(double[] y, HovorkaParameters p,
                          double mealMmol, double insulinEffect) {
-        return derivatives(y, p, mealMmol, insulinEffect, 0.0);
+        // Expand legacy 6-element arrays (pre-Task-4 callers) to 8 elements.
+        double[] y8 = y.length >= 8 ? y : java.util.Arrays.copyOf(y, 8);
+        return derivatives(y8, p, mealMmol, 70, insulinEffect, 0.0);
     }
 
     /**
-     * Compute the 6 ODE derivatives, with an insulin-independent activity glucose-uptake rate
+     * Compute the 8 ODE derivatives, with an insulin-independent activity glucose-uptake rate
      * {@code activityUptakeRate} [per min] applied as an extra first-order clearance on Q1.
+     *
+     * <p>y[6]=x3 and y[7]=protFatGut are read but their derivatives are 0.0 stubs,
+     * to be wired in Tasks 7 and 6 respectively.</p>
      */
     double[] derivatives(double[] y, HovorkaParameters p,
-                         double mealMmol, double insulinEffect, double activityUptakeRate) {
+                         double mealMmol, int gi,
+                         double insulinEffect, double activityUptakeRate) {
 
         double q1    = Math.max(0.0, y[0]);
         double q2    = Math.max(0.0, y[1]);
@@ -143,6 +178,8 @@ public class HovorkaOdeSolver {
         double qsto2 = Math.max(0.0, y[3]);
         double qgut  = Math.max(0.0, y[4]);
         double inc   = Math.max(0.0, y[5]);
+        double x3         = Math.max(0.0, y[6]);
+        double protFatGut = Math.max(0.0, y[7]);
 
         double g    = p.glucoseClamped(q1);
         double f01c = p.f01clamped(g);
@@ -190,28 +227,35 @@ public class HovorkaOdeSolver {
         // Incretin GLP-1
         double dinc = K_INC * ra - K_DEL * inc;
 
-        return new double[]{dq1, dq2, dqsto1, dqsto2, dqgut, dinc};
+        // x3 and protFatGut derivatives — stubs for Tasks 7 and 6 respectively
+        // Variables x3, protFatGut, and gi are read above; derivatives wired later.
+        double dx3 = 0.0;          // Task 7: EGP dynamic suppression
+        double dProtFatGut = 0.0;  // Task 6: protein/fat gut kinetics
+
+        return new double[]{dq1, dq2, dqsto1, dqsto2, dqgut, dinc, dx3, dProtFatGut};
     }
 
     // -- Array helpers ---------------------------------------------------------
 
     private double[] toArray(HovorkaState s) {
-        return new double[]{s.q1(), s.q2(), s.qsto1(), s.qsto2(), s.qgut(), s.inc()};
+        return new double[]{s.q1(), s.q2(), s.qsto1(), s.qsto2(), s.qgut(), s.inc(),
+                            s.x3(), s.protFatGut()};
     }
 
-    private HovorkaState fromArray(double[] y, double mealMmol) {
-        return new HovorkaState(y[0], y[1], y[2], y[3], y[4], y[5], mealMmol);
+    private HovorkaState fromArray(double[] y, double mealMmol, int activeGI) {
+        return new HovorkaState(y[0], y[1], y[2], y[3], y[4], y[5], y[6], y[7],
+                                mealMmol, activeGI);
     }
 
     private double[] add(double[] a, double[] b) {
-        double[] r = new double[6];
-        for (int i = 0; i < 6; i++) r[i] = a[i] + b[i];
+        double[] r = new double[8];
+        for (int i = 0; i < 8; i++) r[i] = a[i] + b[i];
         return r;
     }
 
     private double[] scale(double[] a, double s) {
-        double[] r = new double[6];
-        for (int i = 0; i < 6; i++) r[i] = a[i] * s;
+        double[] r = new double[8];
+        for (int i = 0; i < 8; i++) r[i] = a[i] * s;
         return r;
     }
 }

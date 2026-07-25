@@ -195,7 +195,8 @@ class HovorkaOdeSolverTest {
     @Test
     void derivatives_atSteadyState_allZero() {
         HovorkaState ss = HovorkaState.steadyState(5.5, params);
-        double[] y = new double[]{ss.q1(), ss.q2(), ss.qsto1(), ss.qsto2(), ss.qgut(), ss.inc()};
+        double[] y = new double[]{ss.q1(), ss.q2(), ss.qsto1(), ss.qsto2(), ss.qgut(), ss.inc(),
+                                   ss.x3(), ss.protFatGut()};
 
         double[] dy = solver.derivatives(y, params, 0.0, 0.0);
 
@@ -263,13 +264,13 @@ class HovorkaOdeSolverTest {
 
         // Euglycemia (G=5.5 < KE2=9.0) - FR must not fire
         double q1Low = 5.5 * params.vG();
-        double[] yLow = {q1Low, q2Ratio * q1Low, 0, 0, 0, 0};
+        double[] yLow = {q1Low, q2Ratio * q1Low, 0, 0, 0, 0, 0, 0};
         double[] dyLow = solver.derivatives(yLow, params, 0.0, 0.0);
         assertThat(dyLow[0]).isCloseTo(0.0, within(1e-4));
 
         // Hyperglycemia (G=12 > KE2=9.0) - FR fires, pulling Q1 down
         double q1High = 12.0 * params.vG();
-        double[] yHigh = {q1High, q2Ratio * q1High, 0, 0, 0, 0};
+        double[] yHigh = {q1High, q2Ratio * q1High, 0, 0, 0, 0, 0, 0};
         double[] dyHigh = solver.derivatives(yHigh, params, 0.0, 0.0);
         assertThat(dyHigh[0]).isLessThan(0.0);
 
@@ -292,7 +293,7 @@ class HovorkaOdeSolverTest {
         // Manually construct a state with high inc, Qsto1 empty, Qsto2 full (mid-emptying)
         // This isolates the draining effect without interference from Qsto1->Qsto2 flow
         HovorkaState highInc = new HovorkaState(
-                state.q1(), state.q2(), 0.0, 50.0, 0.0, 10.0, mealMmol);
+                state.q1(), state.q2(), 0.0, 50.0, 0.0, 10.0, 0.0, 0.0, mealMmol, 70);
 
         HovorkaState next = solver.step(highInc, params, 0.0, 0.0);
         // Qsto2 should drain (kemptEff > 0 always), not be frozen at the clamp floor
@@ -311,7 +312,7 @@ class HovorkaOdeSolverTest {
         // Isolate Qsto2 draining: Qsto1 empty, Qsto2 at half-full (50 mmol)
         // At qsto=50 with mealMmol=100, kempt is reduced toward K_MIN
         HovorkaState withStomach = new HovorkaState(
-                state.q1(), state.q2(), 0.0, 100.0, 0.0, 0.0, mealMmol);
+                state.q1(), state.q2(), 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, mealMmol, 70);
         HovorkaState next = solver.step(withStomach, params, 0.0, 0.0);
         // With qsto=100 (full), kempt ≈ K_MAX ≈ 0.0558; phi=1.0
         // drain = 100 * 0.0558 * 1.0 ≈ 5.58 mmol/min
@@ -337,6 +338,16 @@ class HovorkaOdeSolverTest {
         }
 
         assertThat(maxInc).isGreaterThan(0.005);
+    }
+
+    // -- Sentinel: HovorkaState 10-field record (Task 4) -----------------------
+
+    @Test
+    void hovorkaState_hasX3Field() {
+        HovorkaState s = new HovorkaState(1, 2, 3, 4, 5, 6, 0.0, 0.0, 0.0, 70);
+        assertThat(s.x3()).isEqualTo(0.0);
+        assertThat(s.protFatGut()).isEqualTo(0.0);
+        assertThat(s.activeGI()).isEqualTo(70);
     }
 
     // -- Helper: OpenAPS IOB (same formula as InsulinCalculatorService) --------

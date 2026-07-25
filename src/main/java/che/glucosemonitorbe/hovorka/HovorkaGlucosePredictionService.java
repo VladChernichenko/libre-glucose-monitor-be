@@ -432,7 +432,7 @@ public class HovorkaGlucosePredictionService {
         }
 
         HovorkaState warm = new HovorkaState(
-                ss.q1(), ss.q2(), qsto1, qsto2, qgut, 0.0, dRef);
+                ss.q1(), ss.q2(), qsto1, qsto2, qgut, 0.0, 0.0, 0.0, dRef, 70);
 
         log.debug("Dalla Man warm state: G={}mmol/L Q1={} Qsto1={} Qsto2={} Qgut={}",
                 currentGlucose, warm.q1(), warm.qsto1(), warm.qsto2(), warm.qgut());
