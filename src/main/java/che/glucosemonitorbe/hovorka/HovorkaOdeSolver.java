@@ -192,9 +192,18 @@ public class HovorkaOdeSolver {
         // tMaxG = t½/1.68 → t½_meal = tMaxG * 1.68
         double tHalfMeal = p.tMaxG() * 1.68;
         double cCal      = DallaManGutModel.caloricScale(tHalfMeal);
-        double kMaxEff   = DallaManGutModel.K_MAX * cCal;
-        double kMinEff   = DallaManGutModel.K_MIN * cCal;
-        double kGriEff   = DallaManGutModel.K_GRI * cCal;
+
+        // GI scaling: k_abs and k_gri scale linearly with GI/100 (Palumbo 2026).
+        // Clamped [0.3, 1.5]: never below 30% (very low GI) nor above 150% (glucose solutions).
+        double giScale  = Math.max(0.3, Math.min(1.5, gi / 100.0));
+
+        // Apply GI scale ON TOP OF caloric correction
+        double kGriEff  = DallaManGutModel.K_GRI * cCal * giScale;
+        double kMaxEff  = DallaManGutModel.K_MAX * cCal * giScale;
+        double kMinEff  = DallaManGutModel.K_MIN * cCal * giScale;
+
+        // kAbsEff: existing tMaxG scale PLUS GI scale
+        double kAbsEff  = DallaManGutModel.effectiveKAbs(p.tMaxG()) * giScale;
 
         double qsto  = qsto1 + qsto2;
         double kempt = gutModel.kEmpt(qsto, mealMmol, kMaxEff, kMinEff);
@@ -206,10 +215,9 @@ public class HovorkaOdeSolver {
         double phi      = 1.0 / (1.0 + KAPPA_GLP1 * inc);
         double kemptEff = kempt * phi;
 
-        // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix).
+        // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix) plus GI scale.
         // A high-fat/protein meal has a longer tMaxG -> slower intestinal drain
         // -> Ra peak shifts right without changing total absorbed glucose.
-        double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
         double ra    = gutModel.ra(qgut, kAbsEff);
 
         // Glucose compartments (activityUptakeRate = insulin-independent, contraction-mediated uptake)
@@ -219,7 +227,7 @@ public class HovorkaOdeSolver {
                    - activityUptakeRate * q1;
         double dq2 = p.k12() * q1 - p.k21() * q2;
 
-        // Dalla Man gut compartments (use kemptEff to apply ileal brake; kGriEff for caloric scale)
+        // Dalla Man gut compartments (use kemptEff to apply ileal brake; kGriEff for GI+caloric scale)
         double dqsto1 = -kGriEff * qsto1;
         double dqsto2 = kGriEff * qsto1 - kemptEff * qsto2;
         double dqgut  = kemptEff * qsto2 - kAbsEff * qgut;

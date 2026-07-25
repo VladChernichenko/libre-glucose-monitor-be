@@ -214,8 +214,9 @@ class CGMacrosBacktestTest {
         assertThat(peakIns).as("peak glucose - with bolus").isLessThan(peakNoIns);
 
         // Without counterregulatory hormones the model correctly shows late-phase hypo risk
-        // from a CR=10 bolus (slightly aggressive). Guard > 2.0 catches sign errors / runaway.
-        assertThat(minIns).as("minimum glucose - with bolus").isGreaterThan(2.0);
+        // from a CR=10 bolus (slightly aggressive). Guard > 1.5 catches sign errors / runaway.
+        // (GI=70 default slows absorption relative to the Fiasp-like peak, increasing hypo risk)
+        assertThat(minIns).as("minimum glucose - with bolus").isGreaterThan(1.5);
 
         // At +2 h the insulin-treated trajectory must be clearly lower
         assertThat(gIns120).as("glucose at +120 min - with bolus").isLessThan(gNoIns120);

@@ -426,10 +426,12 @@ class HovorkaGlucosePredictionServiceTest {
         // 60 g carbs at t=0; no insulin
         CarbsEntry meal = CarbsEntry.builder().timestamp(NOW).carbs(60.0).build();
 
+        // Window extended to 500 min: GI=70 default (giScale=0.70) slows absorption,
+        // pushing the pure-carb peak beyond 300 min. 500 min lets both peaks resolve.
         List<PredictionPointDTO> curveBase = service.buildPredictionPath(
-                baseP, 5.5, NOW, List.of(meal), List.of(), List.of(), USER_ID, 300);
+                baseP, 5.5, NOW, List.of(meal), List.of(), List.of(), USER_ID, 500);
         List<PredictionPointDTO> curveHF = service.buildPredictionPath(
-                hfP,   5.5, NOW, List.of(meal), List.of(), List.of(), USER_ID, 300);
+                hfP,   5.5, NOW, List.of(meal), List.of(), List.of(), USER_ID, 500);
 
         int peakMinBase = peakMinute(curveBase);
         int peakMinHF   = peakMinute(curveHF);

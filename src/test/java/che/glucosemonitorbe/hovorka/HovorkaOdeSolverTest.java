@@ -314,9 +314,10 @@ class HovorkaOdeSolverTest {
         HovorkaState withStomach = new HovorkaState(
                 state.q1(), state.q2(), 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, mealMmol, 70);
         HovorkaState next = solver.step(withStomach, params, 0.0, 0.0);
-        // With qsto=100 (full), kempt ≈ K_MAX ≈ 0.0558; phi=1.0
-        // drain = 100 * 0.0558 * 1.0 ≈ 5.58 mmol/min
-        assertThat(100.0 - next.qsto2()).isCloseTo(100.0 * DallaManGutModel.K_MAX, within(1.0));
+        // With qsto=100 (full), kempt ≈ K_MAX * giScale; phi=1.0, activeGI=70 -> giScale=0.70
+        // drain = 100 * 0.0558 * 0.70 ≈ 3.906 mmol/min
+        double giScale = 70.0 / 100.0;  // default activeGI = 70
+        assertThat(100.0 - next.qsto2()).isCloseTo(100.0 * DallaManGutModel.K_MAX * giScale, within(0.5));
     }
 
     // ---
@@ -338,6 +339,31 @@ class HovorkaOdeSolverTest {
         }
 
         assertThat(maxInc).isGreaterThan(0.005);
+    }
+
+    // ---
+    // Test 14: GI scaling - low GI absorbs slower than high GI
+    // ---
+
+    @Test
+    void giScaling_lowGI_absorbsSlowerThanHighGI() {
+        // Two identical 50g carb meals, GI=30 vs GI=100
+        // After 60 min, high-GI should have less remaining in qsto2 and qgut
+        double carbMmol = 50.0 / 0.18;  // ~277.8 mmol
+        HovorkaState ssHi = HovorkaState.steadyState(5.5, params);
+        HovorkaState ssLo = HovorkaState.steadyState(5.5, params);
+
+        HovorkaState stateHi = solver.step(ssHi, params, carbMmol, 100, 0.0, 0.0, 0.0);
+        HovorkaState stateLo = solver.step(ssLo, params, carbMmol, 30,  0.0, 0.0, 0.0);
+
+        for (int i = 0; i < 59; i++) {
+            stateHi = solver.step(stateHi, params, 0.0, 100, 0.0, 0.0, 0.0);
+            stateLo = solver.step(stateLo, params, 0.0, 30,  0.0, 0.0, 0.0);
+        }
+        // High GI empties the stomach (qsto1) faster
+        assertThat(stateHi.qsto1()).isLessThan(stateLo.qsto1());
+        // High GI raises blood glucose faster (more Ra delivered)
+        assertThat(stateHi.q1()).isGreaterThan(stateLo.q1());
     }
 
     // -- Sentinel: HovorkaState 10-field record (Task 4) -----------------------

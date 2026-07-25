@@ -272,9 +272,10 @@ public class HovorkaGlucosePredictionService {
         Map<Integer, Double> futureCarbs = buildFutureCarbTimeline(
                 pastCarbsEntries, currentTime, pAdj);
 
+        // -- Future GI timeline: parallel map of minute -> GI for future meals --
+        Map<Integer, Integer> futureGiMap = buildFutureGiTimeline(pastCarbsEntries, currentTime);
+
         // -- Integration loop (1-min steps) -----------------------------------
-        // Pre-compute effective K_ABS once - same tMaxG for the whole prediction.
-        double kAbsEff = DallaManGutModel.effectiveKAbs(pAdj.tMaxG());
 
         List<PredictionPointDTO> points = new ArrayList<>();
         int nextEmit = DENSE_STEP_MIN;
@@ -310,14 +311,15 @@ public class HovorkaGlucosePredictionService {
 
             // Future carbs delivered to gut D1 at this minute [mmol]
             double carbMmol = futureCarbs.getOrDefault(min, 0.0);
+            int    mealGI   = futureGiMap.getOrDefault(min, state.activeGI());
 
             if (hasActivity) {
                 double aInst = activityProvider.intensityAt(currentTime.plusMinutes(min));
                 double aSens = activity.stepSensitivity(aInst);
                 double insulinEffectMod = insulinEffect * activity.insulinSensitivityFactor(aSens);
-                state = odeSolver.step(state, pAdj, carbMmol, insulinEffectMod, activity.uptakeRate(aInst));
+                state = odeSolver.step(state, pAdj, carbMmol, mealGI, 0.0, insulinEffectMod, activity.uptakeRate(aInst));
             } else {
-                state = odeSolver.step(state, pAdj, carbMmol, insulinEffect);
+                state = odeSolver.step(state, pAdj, carbMmol, mealGI, 0.0, insulinEffect, 0.0);
             }
 
             if (min == nextEmit) {
@@ -328,7 +330,9 @@ public class HovorkaGlucosePredictionService {
                 // physiological range. NONE provider (calibration replay) leaves gPred untouched.
                 double correction = residualProvider.residualMmol(userId, pointTime);
                 double gAdj = Math.max(G_MIN, Math.min(G_MAX, gPred + correction));
-                double carbEffect  = gutModel.ra(state.qgut(), kAbsEff) * DENSE_STEP_MIN;
+                double giScaleDisplay = Math.max(0.3, Math.min(1.5, state.activeGI() / 100.0));
+                double kAbsDisplay = DallaManGutModel.effectiveKAbs(pAdj.tMaxG()) * giScaleDisplay;
+                double carbEffect  = gutModel.ra(state.qgut(), kAbsDisplay) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
                 // Probabilistic band: predicted ± z*σ(horizon), σ from the digital-twin uncertainty
@@ -543,6 +547,28 @@ public class HovorkaGlucosePredictionService {
             if (carbMmol > 0) {
                 timeline.merge(futureMin, carbMmol, Double::sum);
             }
+        }
+        return timeline;
+    }
+
+    /**
+     * Builds a map of minute -> GI for future carb events only.
+     * Mirrors the minute-offset logic of {@link #buildFutureCarbTimeline}: past entries
+     * (minsAgo > 0) are captured in the warm-up and excluded here.
+     * Default GI of 70 is used when {@code estimatedGi} is null.
+     */
+    private Map<Integer, Integer> buildFutureGiTimeline(
+            List<CarbsEntry> carbsEntries, LocalDateTime now) {
+        Map<Integer, Integer> timeline = new HashMap<>();
+        for (CarbsEntry entry : carbsEntries) {
+            if (entry.getTimestamp() == null) continue;
+            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
+            if (minsAgo > 0) continue; // past - captured in warm-up
+            int futureMin = Math.max(1, (int) Math.abs(minsAgo));
+            int gi = entry.getEstimatedGi() != null
+                    ? entry.getEstimatedGi().intValue()
+                    : 70;
+            timeline.put(futureMin, gi);
         }
         return timeline;
     }
