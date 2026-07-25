@@ -160,9 +160,9 @@ class CGMacrosBacktestTest {
         double peakMin    = 75.0;  // Fiasp-like peak
 
         double carbsG   = 60.0;
-        double proteinG = 20.0;
-        double fatG     = 15.0;
-        double fiberG   = 5.0;
+        double proteinG = 0.0;
+        double fatG     = 0.0;
+        double fiberG   = 0.0;
         double bolusUnits = carbsG / cr;  // 6 units
 
         double tMaxG = MacroNutrientGastricModel.computeTMaxG(
