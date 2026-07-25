@@ -1,7 +1,7 @@
 # Backend functional schema
 
 · Source: `glucose-monitor-be` (Spring Boot, package `che.glucosemonitorbe`)  
-· Persistence: Postgres + Flyway V1–V11  
+· Persistence: Postgres + Flyway V1–V10  
 · Encoding: UTF-8
 
 ## Mental model
@@ -143,7 +143,7 @@ Clean background: COB < 5 g and IOB < 0.3 U via shared dashboard inputs.
 | `AiAnalysisTrace` | Audit trail for LLM outputs |
 | `RevokedToken` | Logout / blacklist durability |
 
-**Flyway themes:** V1 baseline → V2–V4 seeds → V5 experiments → V6 verification → V7 ISF windows → V8 twin → V9 unlogged flags → V10 activity columns → V11 ISF suggestions.
+**Flyway themes:** V1 baseline (incl. activity + meal-window ISF columns) → V2–V4 seeds → V5 experiments → V6 verification → V7 ISF windows → V8 twin → V9 unlogged flags → V10 ISF suggestions.
 
 ## 8. Feature flags
 

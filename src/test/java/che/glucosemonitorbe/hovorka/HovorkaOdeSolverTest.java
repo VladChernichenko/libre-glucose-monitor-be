@@ -279,34 +279,43 @@ class HovorkaOdeSolverTest {
     }
 
     // ---
-    // Test 12: Ileal brake - elevated Inc reduces gastric emptying to the floor
+    // Test 12: Ileal brake - elevated Inc reduces gastric emptying (saturating form)
     // ---
 
     @Test
-    void ilealBrake_elevatedInc_slowsGastricEmptyingToFloor() {
-        // dqsto2 = K_GRI*qsto1 − kemptEff*qsto2
-        // With qsto1=0: dqsto2 = −kemptEff*qsto2.
-        // kemptEff = kempt × max(MIN_KEMPT_FRACTION, 1 − PHI_GLP1*Inc)
-        // Inc=0   -> kemptEff = kempt      -> drain = kempt*qsto2
-        // Inc=100 -> 1−0.5×100=−49 -> floor -> kemptEff = kempt×0.20 -> drain = kempt×0.20×qsto2
-        // Ratio: dyHigh[3] / dyBase[3] ≈ 0.20 (the floor fraction)
-        HovorkaState ss = HovorkaState.steadyState(5.5, params);
-        double q1 = ss.q1(), q2 = ss.q2();
-        double qsto2Fixed = 50.0;  // mmol fixed in Qsto2
-        double mealMmol   = 100.0; // half-full reference for k_empt
+    void glp1Inhibition_highInc_kemptNeverReachesZero() {
+        // With old linear formula and PHI_GLP1=0.5, inc=2.0 would give 1-0.5*2=0 -> floor at 0.20
+        // New saturating formula: 1/(1+2.0*2.0) = 0.20 naturally, no clamp needed
+        // At inc=10: 1/(1+20) = 0.048 — strictly positive
+        HovorkaState state = HovorkaState.steadyState(6.0, params);
+        double mealMmol = 100.0;  // full stomach reference
+        // Manually construct a state with high inc, Qsto1 empty, Qsto2 full (mid-emptying)
+        // This isolates the draining effect without interference from Qsto1->Qsto2 flow
+        HovorkaState highInc = new HovorkaState(
+                state.q1(), state.q2(), 0.0, 50.0, 0.0, 10.0, mealMmol);
 
-        double[] yBaseInc = {q1, q2, 0, qsto2Fixed, 0, 0.0};
-        double[] yHighInc = {q1, q2, 0, qsto2Fixed, 0, 100.0};
+        HovorkaState next = solver.step(highInc, params, 0.0, 0.0);
+        // Qsto2 should drain (kemptEff > 0 always), not be frozen at the clamp floor
+        assertThat(next.qsto2()).isLessThan(50.0);
+        // With qsto=50 (half-full), kempt is reduced toward K_MIN; with phi ≈ 0.048
+        // drain should be noticeable but not huge
+        // Old form would have drained more (0.20 floor). New form is more gentle (~0.048).
+        assertThat(50.0 - next.qsto2()).isLessThan(5.0);  // new form drains <5 mmol/min at high inc
+    }
 
-        double[] dyBase = solver.derivatives(yBaseInc, params, mealMmol, 0.0);
-        double[] dyHigh = solver.derivatives(yHighInc, params, mealMmol, 0.0);
-
-        // High Inc -> less drainage from Qsto2 -> dqsto2 is less negative
-        assertThat(dyHigh[3]).isGreaterThan(dyBase[3]);
-
-        // At floor: ratio of drain rates equals MIN_KEMPT_FRACTION
-        double ratio = dyHigh[3] / dyBase[3];
-        assertThat(ratio).isCloseTo(HovorkaOdeSolver.MIN_KEMPT_FRACTION, within(0.01));
+    @Test
+    void glp1Inhibition_zeroInc_noEffect() {
+        // When inc=0, phi=1/(1+0)=1.0 -> kemptEff = kempt (no change)
+        HovorkaState state = HovorkaState.steadyState(6.0, params);
+        double mealMmol = 100.0;  // full stomach reference
+        // Isolate Qsto2 draining: Qsto1 empty, Qsto2 at half-full (50 mmol)
+        // At qsto=50 with mealMmol=100, kempt is reduced toward K_MIN
+        HovorkaState withStomach = new HovorkaState(
+                state.q1(), state.q2(), 0.0, 100.0, 0.0, 0.0, mealMmol);
+        HovorkaState next = solver.step(withStomach, params, 0.0, 0.0);
+        // With qsto=100 (full), kempt ≈ K_MAX ≈ 0.0558; phi=1.0
+        // drain = 100 * 0.0558 * 1.0 ≈ 5.58 mmol/min
+        assertThat(100.0 - next.qsto2()).isCloseTo(100.0 * DallaManGutModel.K_MAX, within(1.0));
     }
 
     // ---

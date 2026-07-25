@@ -37,9 +37,11 @@ public class HovorkaOdeSolver {
     static final double KE2 = 9.0;     // renal glucose threshold [mmol/L]
 
     // -- Ileal brake: GLP-1 inhibition of gastric emptying --------------------
-    // Protein/fat -> GLP-1 rises -> k_empt × (1 − Φ_GLP1 × Inc) decreases
-    static final double PHI_GLP1           = 0.50;  // inhibition coefficient [per Inc unit]
-    static final double MIN_KEMPT_FRACTION = 0.20;  // floor: k_empt never below 20% of base
+    // Protein/fat -> GLP-1 rises -> k_empt × Φ_GLP1(Inc) decreases
+    // Φ_GLP1(t) = 1 / (1 + KAPPA_GLP1 × Inc(t))  — saturating, never reaches zero
+    /** Saturation coefficient for GLP-1 inhibition of gastric emptying [per Inc unit].
+     *  Φ_GLP1(t) = 1 / (1 + KAPPA_GLP1 × Inc(t))  — Palumbo (2026). */
+    static final double KAPPA_GLP1 = 2.0;
 
     private final DallaManGutModel gutModel;
 
@@ -155,7 +157,9 @@ public class HovorkaOdeSolver {
         // Ileal brake: elevated GLP-1 (Inc) inhibits gastric emptying.
         // After protein/fat intake Inc rises via K_INC×Ra, which delays subsequent
         // carb absorption - the "food sequencing" effect (Palumbo modification).
-        double kemptEff = kempt * Math.max(MIN_KEMPT_FRACTION, 1.0 - PHI_GLP1 * inc);
+        // Saturating form ensures kemptEff never reaches zero for large Inc.
+        double phi      = 1.0 / (1.0 + KAPPA_GLP1 * inc);
+        double kemptEff = kempt * phi;
 
         // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix).
         // A high-fat/protein meal has a longer tMaxG -> slower intestinal drain
