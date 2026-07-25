@@ -223,6 +223,8 @@ class HovorkaOdeSolverTest {
         assertThat(dy[3]).isCloseTo(0.0, within(1e-6)); // dQsto2/dt = 0
         assertThat(dy[4]).isCloseTo(0.0, within(1e-6)); // dQgut/dt  = 0
         assertThat(dy[5]).isCloseTo(0.0, within(1e-6)); // dInc/dt   = 0
+        assertThat(dy[6]).isCloseTo(0.0, within(1e-6)); // dx3 at steady state
+        assertThat(dy[7]).isCloseTo(0.0, within(1e-6)); // dProtFatGut at steady state
     }
 
     // ---
