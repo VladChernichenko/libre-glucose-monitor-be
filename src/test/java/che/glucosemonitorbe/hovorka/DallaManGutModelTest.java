@@ -156,6 +156,44 @@ class DallaManGutModelTest {
         assertThat(peakRaForMeal(400.0)).isGreaterThan(peakRaForMeal(100.0));
     }
 
+    // ---
+    // caloricScale tests (Task 3)
+    // ---
+
+    @Test
+    void caloricScale_basalMeal_returnsOne() {
+        // BASE_T_HALF_MIN = 45 min → scale = 45/45 = 1.0
+        double scale = DallaManGutModel.caloricScale(DallaManGutModel.BASE_T_HALF_MIN);
+        assertThat(scale).isCloseTo(1.0, within(1e-9));
+    }
+
+    @Test
+    void caloricScale_highCalorieMeal_returnsLessThanOne() {
+        // pizza: d ≈ 2 kcal/mL → t½ ≈ 9 + 55 = 64 min → scale = 45/64 ≈ 0.70
+        double tHalfPizza = 9 + 27.5 * 2.0;   // = 64 min
+        double scale = DallaManGutModel.caloricScale(tHalfPizza);
+        assertThat(scale).isLessThan(1.0);
+        assertThat(scale).isGreaterThan(0.4);  // clamp floor
+        assertThat(scale).isCloseTo(45.0 / 64.0, within(0.01));
+    }
+
+    @Test
+    void caloricScale_clampsAtFloor() {
+        // Extremely dense meal (t½ = 200 min) → scale = 45/200 = 0.225 → clamped to 0.4
+        double scale = DallaManGutModel.caloricScale(200.0);
+        assertThat(scale).isEqualTo(0.4);
+    }
+
+    @Test
+    void kEmpt_4arg_scalesWithKMax() {
+        double D = 100.0;
+        double kMaxEff = DallaManGutModel.K_MAX * 0.7;
+        double kMinEff = DallaManGutModel.K_MIN * 0.7;
+        // At full stomach (Qsto ≈ D), k_empt should ≈ kMaxEff
+        double kempt = model.kEmpt(D, D, kMaxEff, kMinEff);
+        assertThat(kempt).isCloseTo(kMaxEff, within(kMaxEff * 0.05));
+    }
+
     // -- Helper ----------------------------------------------------------------
 
     private double peakRaForMeal(double mealMmol) {

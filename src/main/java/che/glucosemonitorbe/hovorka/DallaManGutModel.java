@@ -42,6 +42,14 @@ public class DallaManGutModel {
     public static final double D_LOW  = 0.010;    // lower saturation threshold (fraction of D)
 
     /**
+     * Baseline gastric half-emptying time for a pure-carbohydrate meal [min].
+     * Calvert formula: t½ = 9 + 27.5×d, d = 4 kcal/g × 1 g/mL (pure carb, 1 kcal/mL average)
+     * → t½_basal = 9 + 27.5×1 = 36.5. In practice we use 45 min (the established Hovorka carb half-life)
+     * as the reference so C_caloric = 1.0 for a typical carb meal.
+     */
+    public static final double BASE_T_HALF_MIN = 45.0;
+
+    /**
      * Nonlinear gastric emptying rate k_empt [min⁻¹].
      *
      * Shape: near K_MAX at Qsto = D (full), near K_MIN at Qsto = 0.5×D (half-full),
@@ -58,6 +66,37 @@ public class DallaManGutModel {
                 * (Math.tanh(alpha * (qstoMmol - B     * mealMmol))
                 -  Math.tanh(c     * (qstoMmol - D_LOW * mealMmol))
                 + 2.0);
+    }
+
+    /**
+     * Nonlinear gastric emptying rate with caller-supplied k_max/k_min effective values.
+     * Used when the caloric density correction (C_caloric) has been applied upstream.
+     *
+     * @param qstoMmol  total stomach content Qsto1+Qsto2 [mmol]
+     * @param mealMmol  original meal dose [mmol]
+     * @param kMaxEff   effective maximum emptying rate [/min] = K_MAX × C_caloric × giScale
+     * @param kMinEff   effective minimum emptying rate [/min] = K_MIN × C_caloric × giScale
+     */
+    public double kEmpt(double qstoMmol, double mealMmol, double kMaxEff, double kMinEff) {
+        if (mealMmol <= 0.0) return kMinEff;
+        double alpha = 5.0 / (2.0 * (1.0 - B) * mealMmol);
+        double c     = 5.0 / (2.0 * D_LOW  * mealMmol);
+        return kMinEff + (kMaxEff - kMinEff) / 2.0
+                * (Math.tanh(alpha * (qstoMmol - B     * mealMmol))
+                -  Math.tanh(c     * (qstoMmol - D_LOW * mealMmol))
+                + 2.0);
+    }
+
+    /**
+     * Caloric scale factor C_caloric = BASE_T_HALF_MIN / t½_meal.
+     * Scales k_max and k_min proportionally to stretch the k_empt sigmoid for high-calorie
+     * dense meals (fat/protein slow gastric motility). Clamped to [0.4, 1.5].
+     *
+     * @param tHalfMealMin  computed half-emptying time for the meal [min] (from Calvert formula)
+     */
+    public static double caloricScale(double tHalfMealMin) {
+        double scale = BASE_T_HALF_MIN / Math.max(tHalfMealMin, 1.0);
+        return Math.max(0.4, Math.min(1.5, scale));
     }
 
     /**

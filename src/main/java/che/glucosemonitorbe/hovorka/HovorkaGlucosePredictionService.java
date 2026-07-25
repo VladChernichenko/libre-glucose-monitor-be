@@ -381,6 +381,13 @@ public class HovorkaGlucosePredictionService {
         // so a meal's Qgut carries over consistently across the warm-up/forward boundary.
         double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
 
+        // Caloric correction mirrors HovorkaOdeSolver.derivatives(): scale k_max, k_min, k_gri
+        double tHalfMeal = p.tMaxG() * 1.68;
+        double cCal      = DallaManGutModel.caloricScale(tHalfMeal);
+        double kGriEff   = DallaManGutModel.K_GRI * cCal;
+        double kMaxEff   = DallaManGutModel.K_MAX * cCal;
+        double kMinEff   = DallaManGutModel.K_MIN * cCal;
+
         // Collect past meals (delivered before "now") as age-in-minutes -> carb mmol.
         // We replay ALL of them through ONE shared gut chain in chronological order - not
         // isolated per-meal chains - so the k_empt D reference is refreshed to the stomach
@@ -415,9 +422,9 @@ public class HovorkaGlucosePredictionService {
                 dRef   = qsto1 + qsto2;   // refresh D = stomach load, like step()
             }
             double qsto  = qsto1 + qsto2;
-            double kempt = dRef > 0 ? gutModel.kEmpt(qsto, dRef) : 0.0;
-            double dQsto1 = -DallaManGutModel.K_GRI * qsto1;
-            double dQsto2 = DallaManGutModel.K_GRI * qsto1 - kempt * qsto2;
+            double kempt = dRef > 0 ? gutModel.kEmpt(qsto, dRef, kMaxEff, kMinEff) : 0.0;
+            double dQsto1 = -kGriEff * qsto1;
+            double dQsto2 = kGriEff * qsto1 - kempt * qsto2;
             double dQgut  = kempt * qsto2 - kAbsEff * qgut;
             qsto1 = Math.max(0.0, qsto1 + dQsto1);
             qsto2 = Math.max(0.0, qsto2 + dQsto2);

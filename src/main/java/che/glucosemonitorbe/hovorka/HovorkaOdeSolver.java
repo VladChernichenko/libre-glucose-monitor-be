@@ -151,8 +151,16 @@ public class HovorkaOdeSolver {
         // FR = ke1 × (Q1 − ke2×VG) when G > ke2, zero otherwise.
         double fr = (g > KE2) ? KE1 * (q1 - KE2 * p.vG()) : 0.0;
 
+        // Caloric correction: scale k_max, k_min, and k_gri by C_caloric derived from tMaxG.
+        // tMaxG = t½/1.68 → t½_meal = tMaxG * 1.68
+        double tHalfMeal = p.tMaxG() * 1.68;
+        double cCal      = DallaManGutModel.caloricScale(tHalfMeal);
+        double kMaxEff   = DallaManGutModel.K_MAX * cCal;
+        double kMinEff   = DallaManGutModel.K_MIN * cCal;
+        double kGriEff   = DallaManGutModel.K_GRI * cCal;
+
         double qsto  = qsto1 + qsto2;
-        double kempt = gutModel.kEmpt(qsto, mealMmol);
+        double kempt = gutModel.kEmpt(qsto, mealMmol, kMaxEff, kMinEff);
 
         // Ileal brake: elevated GLP-1 (Inc) inhibits gastric emptying.
         // After protein/fat intake Inc rises via K_INC×Ra, which delays subsequent
@@ -174,9 +182,9 @@ public class HovorkaOdeSolver {
                    - activityUptakeRate * q1;
         double dq2 = p.k12() * q1 - p.k21() * q2;
 
-        // Dalla Man gut compartments (use kemptEff to apply ileal brake)
-        double dqsto1 = -DallaManGutModel.K_GRI * qsto1;
-        double dqsto2 = DallaManGutModel.K_GRI * qsto1 - kemptEff * qsto2;
+        // Dalla Man gut compartments (use kemptEff to apply ileal brake; kGriEff for caloric scale)
+        double dqsto1 = -kGriEff * qsto1;
+        double dqsto2 = kGriEff * qsto1 - kemptEff * qsto2;
         double dqgut  = kemptEff * qsto2 - kAbsEff * qgut;
 
         // Incretin GLP-1
