@@ -15,13 +15,13 @@ import org.springframework.stereotype.Component;
  *   kempt  = K_MIN + (K_MAX-K_MIN)/2 × {tanh[α(Qsto−b*D)] − tanh[c(Qsto−d*D)] + 2}
  *   Ra     = F × K_ABS × Qgut
  *
- *   dQ1/dt    = −F01_c − k12*Q1 + k21*Q2 + Ra + egpNet − insulinEffect − α_inc*Inc*Q1
+ *   dQ1/dt    = −F01_c − k12*Q1 + k21*Q2 + Ra + EGP(t) − insulinEffect − α_inc*Inc*Q1
  *   dQ2/dt    = k12*Q1 − k21*Q2
  *   dQsto1/dt = −K_GRI*Qsto1               (meal u(t) added before RK4 step)
  *   dQsto2/dt = K_GRI*Qsto1 − kempt*Qsto2
  *   dQgut/dt  = kempt*Qsto2 − K_ABS*Qgut
- *   dInc/dt   = K_INC_PF*ProtFatGut − K_DEL*Inc
- *   dx3/dt    = 0.0  (stub — wired in Task 7)
+ *   dInc/dt   = K_INC_PF*protFatGut − K_DEL*Inc
+ *   dx3/dt    = -KA3*x3 + KB3*plasmInsulin
  *   dProtFatGut/dt = -K_PF_DRAIN*ProtFatGut
  * </pre>
  */
@@ -158,7 +158,8 @@ public class HovorkaOdeSolver {
      * Compute the 8 ODE derivatives (4-arg backward-compat delegate).
      *
      * <p>y[0]=Q1, y[1]=Q2, y[2]=Qsto1, y[3]=Qsto2, y[4]=Qgut, y[5]=Inc,
-     * y[6]=x3 (stub), y[7]=protFatGut (stub)</p>
+     * y[6]=x3 (EGP insulin-suppression state variable; driven by plasma insulin),
+     * y[7]=protFatGut (protein+fat gut load compartment; drives GLP-1 incretin (Inc))</p>
      *
      * @param y             current state as double array (8 elements)
      * @param p             Hovorka parameters
@@ -176,8 +177,8 @@ public class HovorkaOdeSolver {
      * Compute the 8 ODE derivatives, with an insulin-independent activity glucose-uptake rate
      * {@code activityUptakeRate} [per min] applied as an extra first-order clearance on Q1.
      *
-     * <p>y[6]=x3 derivative is a 0.0 stub to be wired in Task 7.
-     * y[7]=protFatGut is fully implemented: drains at K_PF_DRAIN and drives Inc via K_INC_PF.</p>
+     * <p>y[6]=x3 (EGP insulin-suppression state variable; driven by plasma insulin).
+     * y[7]=protFatGut (protein+fat gut load compartment; drives GLP-1 incretin (Inc)).</p>
      */
     double[] derivatives(double[] y, HovorkaParameters p,
                          double mealMmol, int gi,
@@ -261,6 +262,7 @@ public class HovorkaOdeSolver {
         double dProtFatGut = -K_PF_DRAIN * protFatGut;
 
         // Incretin GLP-1: driven by protein+fat transit rate (NOT carb Ra).
+        // Inc driven by K_INC_PF × protFatGut (protein/fat gut transit)
         // Pre-loading protein/fat triggers ileal brake before carbs arrive.
         double dinc = K_INC_PF * protFatGut - K_DEL * inc;
 

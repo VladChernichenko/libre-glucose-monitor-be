@@ -258,11 +258,11 @@ public class HovorkaGlucosePredictionService {
             egpNow = p.f01();
         }
         // Re-parameterise: set egpNet = egpNow (basal-adjusted) and egp0 = egpNow as well.
-        // Setting egp0 = egpNow ensures that EGP(t) = egpNow*(1-x3(t)) starts at egpNow when
-        // x3=0 and stays near egpNow as long as no strong insulin drives x3 up significantly.
-        // The full population egp0 (> egpNet) would require continuous basal insulin in the ODE
-        // to hold x3 at x3_ss — insulin that the short-horizon IOB curve does not supply stably.
-        // Bolus corrections will still raise x3 (suppressing EGP below egpNow) via the bridge.
+        // Gap 1 (EGP suppression) is fully active during active boluses: x3 rises with plasma
+        // insulin, suppressing EGP beyond its basal level. However, the basal/fasting case is
+        // not improved here — egp0 is set equal to egpNow so EGP(t=0) = egpNow regardless of
+        // x3's value, keeping it stable without a modelled basal PK compartment. A complete
+        // basal EGP bias correction requires a steady-state PK compartment (future work).
         HovorkaParameters pAdj = new HovorkaParameters(
                 p.vG(), p.f01(), egpNow, egpNow, p.k12(), p.k21(),
                 p.tMaxG(), p.aG(), p.isf(), p.weightKg());
@@ -400,6 +400,10 @@ public class HovorkaGlucosePredictionService {
         double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
 
         // Caloric correction mirrors HovorkaOdeSolver.derivatives(): scale k_max, k_min, k_gri
+        // Note: GI scaling is not applied during warm-up — only caloric scale (C_caloric) is threaded
+        // through. Any residual gut content from a past low-GI meal therefore transitions to the
+        // forward loop with a slight absorption-rate discontinuity. Impact is bounded to meals
+        // eaten within ~30 min before the prediction anchor.
         double tHalfMeal = p.tMaxG() * 1.68;
         double cCal      = DallaManGutModel.caloricScale(tHalfMeal);
         double kGriEff   = DallaManGutModel.K_GRI * cCal;
