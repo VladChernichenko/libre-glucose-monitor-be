@@ -20,16 +20,19 @@ import org.springframework.stereotype.Component;
  *   dQsto1/dt = −K_GRI*Qsto1               (meal u(t) added before RK4 step)
  *   dQsto2/dt = K_GRI*Qsto1 − kempt*Qsto2
  *   dQgut/dt  = kempt*Qsto2 − K_ABS*Qgut
- *   dInc/dt   = K_INC*Ra − K_DEL*Inc
+ *   dInc/dt   = K_INC_PF*ProtFatGut − K_DEL*Inc
  *   dx3/dt    = 0.0  (stub — wired in Task 7)
- *   dProtFatGut/dt = 0.0 (stub — wired in Task 6)
+ *   dProtFatGut/dt = -K_PF_DRAIN*ProtFatGut
  * </pre>
  */
 @Component
 public class HovorkaOdeSolver {
 
     // -- Incretin GLP-1 parameters ---------------------------------------------
-    static final double K_INC    = 0.005;   // secretion [min/mmol] per unit Ra
+    /** Protein+fat gut drain rate [/min] — t½ ≈ 87 min. */
+    static final double K_PF_DRAIN = 0.008;
+    /** GLP-1 secretion rate [per kcal in gut per min]. */
+    static final double K_INC_PF   = 0.003;
     static final double K_DEL    = 0.020;   // clearance rate [/min]  (t½ ≈ 35 min)
     static final double ALPHA_INC = 0.001;  // incretin effect on glucose uptake [/min]
 
@@ -165,8 +168,8 @@ public class HovorkaOdeSolver {
      * Compute the 8 ODE derivatives, with an insulin-independent activity glucose-uptake rate
      * {@code activityUptakeRate} [per min] applied as an extra first-order clearance on Q1.
      *
-     * <p>y[6]=x3 and y[7]=protFatGut are read but their derivatives are 0.0 stubs,
-     * to be wired in Tasks 7 and 6 respectively.</p>
+     * <p>y[6]=x3 derivative is a 0.0 stub to be wired in Task 7.
+     * y[7]=protFatGut is fully implemented: drains at K_PF_DRAIN and drives Inc via K_INC_PF.</p>
      */
     double[] derivatives(double[] y, HovorkaParameters p,
                          double mealMmol, int gi,
@@ -232,15 +235,19 @@ public class HovorkaOdeSolver {
         double dqsto2 = kGriEff * qsto1 - kemptEff * qsto2;
         double dqgut  = kemptEff * qsto2 - kAbsEff * qgut;
 
-        // Incretin GLP-1
-        double dinc = K_INC * ra - K_DEL * inc;
+        // Protein+fat gut compartment drains independently (GLP-1 driver)
+        double dProtFatGut = -K_PF_DRAIN * protFatGut;
 
-        // x3 and protFatGut derivatives — stubs for Tasks 7 and 6 respectively
-        // Variables x3, protFatGut, and gi are read above; derivatives wired later.
+        // Incretin GLP-1: driven by protein+fat transit rate (NOT carb Ra).
+        // Pre-loading protein/fat triggers ileal brake before carbs arrive.
+        double dinc = K_INC_PF * protFatGut - K_DEL * inc;
+
+        // x3 derivative — stub for Task 7 (EGP dynamic suppression)
+        // Variable x3 is read above; derivative wired later.
         double dx3 = 0.0;          // Task 7: EGP dynamic suppression
-        double dProtFatGut = 0.0;  // Task 6: protein/fat gut kinetics
 
         return new double[]{dq1, dq2, dqsto1, dqsto2, dqgut, dinc, dx3, dProtFatGut};
+        //                                                           ^^^  x3 stub still 0 (Task 7)
     }
 
     // -- Array helpers ---------------------------------------------------------

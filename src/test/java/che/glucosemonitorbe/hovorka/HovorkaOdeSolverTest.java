@@ -326,15 +326,17 @@ class HovorkaOdeSolverTest {
 
     @Test
     void incGlp1_risesDuringMealAbsorption_peaksAboveBaseline() {
-        // dInc/dt = K_INC*Ra − K_DEL*Inc; Ra peaks as Qgut drains.
-        // After a 60 g meal, Inc_peak ≈ K_INC/K_DEL × Ra_peak > 0.
+        // dInc/dt = K_INC_PF*ProtFatGut − K_DEL*Inc; ProtFatGut drains at K_PF_DRAIN.
+        // Inc is now driven by protein+fat gut transit (NOT carb Ra — Gap 4 fix).
+        // Inject 400 kcal protein+fat alongside the carb meal; Inc must peak above baseline.
         HovorkaState state = HovorkaState.steadyState(5.5, params);
         double carbMmol = 60.0 * params.aG() / 0.18;
-        state = solver.step(state, params, carbMmol, 0.0);
+        // 400 kcal protein+fat drives GLP-1; carbs alone leave Inc at 0 in the new model
+        state = solver.step(state, params, carbMmol, 70, 400.0, 0.0, 0.0);
 
         double maxInc = 0.0;
         for (int m = 1; m <= 120; m++) {
-            state = solver.step(state, params, 0.0, 0.0);
+            state = solver.step(state, params, 0.0, 70, 0.0, 0.0, 0.0);
             maxInc = Math.max(maxInc, state.inc());
         }
 
@@ -342,7 +344,38 @@ class HovorkaOdeSolverTest {
     }
 
     // ---
-    // Test 14: GI scaling - low GI absorbs slower than high GI
+    // Test 14 (new): GLP-1 driver - protein+fat loaded, Inc rises and protFatGut drains
+    // ---
+
+    @Test
+    void glp1Driver_protFatLoaded_incRises() {
+        // Load 500 kcal protein+fat into protFatGut — Inc should rise over 60 min
+        HovorkaState s0 = HovorkaState.steadyState(5.5, params);
+        // Manually inject 500 kcal into protFatGut via the protFatKcalNow argument
+        HovorkaState withPF = new HovorkaState(
+                s0.q1(), s0.q2(), 0, 0, 0, 0.0, 0.0, 500.0, 0.0, 70);
+
+        HovorkaState s60 = withPF;
+        for (int i = 0; i < 60; i++) {
+            s60 = solver.step(s60, params, 0.0, 70, 0.0, 0.0, 0.0);
+        }
+        assertThat(s60.inc()).isGreaterThan(0.1);        // Inc must have risen from protein/fat
+        assertThat(s60.protFatGut()).isLessThan(500.0);  // protFatGut drains
+    }
+
+    @Test
+    void glp1Driver_noProtFat_incStaysZero() {
+        // Without protein/fat, Inc should stay at 0
+        HovorkaState s0 = HovorkaState.steadyState(5.5, params);
+        HovorkaState s60 = s0;
+        for (int i = 0; i < 60; i++) {
+            s60 = solver.step(s60, params, 0.0, 70, 0.0, 0.0, 0.0);
+        }
+        assertThat(s60.inc()).isLessThan(0.001);
+    }
+
+    // ---
+    // Test 15 (renumbered): GI scaling - low GI absorbs slower than high GI
     // ---
 
     @Test

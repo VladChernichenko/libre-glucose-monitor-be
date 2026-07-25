@@ -275,6 +275,9 @@ public class HovorkaGlucosePredictionService {
         // -- Future GI timeline: parallel map of minute -> GI for future meals --
         Map<Integer, Integer> futureGiMap = buildFutureGiTimeline(pastCarbsEntries, currentTime);
 
+        // -- Future protein+fat timeline: drives protFatGut compartment (GLP-1 ileal brake) --
+        Map<Integer, Double> futureProtFat = buildFutureProtFatTimeline(pastCarbsEntries, currentTime);
+
         // -- Integration loop (1-min steps) -----------------------------------
 
         List<PredictionPointDTO> points = new ArrayList<>();
@@ -312,14 +315,15 @@ public class HovorkaGlucosePredictionService {
             // Future carbs delivered to gut D1 at this minute [mmol]
             double carbMmol = futureCarbs.getOrDefault(min, 0.0);
             int    mealGI   = futureGiMap.getOrDefault(min, state.activeGI());
+            double protFatKcalNow = futureProtFat.getOrDefault(min, 0.0);
 
             if (hasActivity) {
                 double aInst = activityProvider.intensityAt(currentTime.plusMinutes(min));
                 double aSens = activity.stepSensitivity(aInst);
                 double insulinEffectMod = insulinEffect * activity.insulinSensitivityFactor(aSens);
-                state = odeSolver.step(state, pAdj, carbMmol, mealGI, 0.0, insulinEffectMod, activity.uptakeRate(aInst));
+                state = odeSolver.step(state, pAdj, carbMmol, mealGI, protFatKcalNow, insulinEffectMod, activity.uptakeRate(aInst));
             } else {
-                state = odeSolver.step(state, pAdj, carbMmol, mealGI, 0.0, insulinEffect, 0.0);
+                state = odeSolver.step(state, pAdj, carbMmol, mealGI, protFatKcalNow, insulinEffect, 0.0);
             }
 
             if (min == nextEmit) {
@@ -585,6 +589,29 @@ public class HovorkaGlucosePredictionService {
             double totalCarbs = carbWeightMap.getOrDefault(min, 1.0);
             timeline.put(min, (int) Math.round(weightedGi / totalCarbs));
         });
+        return timeline;
+    }
+
+    /**
+     * Maps future minute-offset → protein+fat caloric load [kcal] entering the gut.
+     * Used to drive the protFatGut compartment (GLP-1 ileal brake).
+     *
+     * <p>Mirrors the minute-offset logic of {@link #buildFutureCarbTimeline}: past entries
+     * (minsAgo &gt; 0) are already captured in the warm-up and excluded here.</p>
+     */
+    private Map<Integer, Double> buildFutureProtFatTimeline(
+            List<CarbsEntry> carbsEntries, LocalDateTime now) {
+        Map<Integer, Double> timeline = new HashMap<>();
+        for (CarbsEntry entry : carbsEntries) {
+            if (entry.getTimestamp() == null) continue;
+            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
+            if (minsAgo > 0) continue; // past - captured in warm-up
+            int futureMin = Math.max(1, (int) Math.abs(minsAgo));
+            double proteinKcal = entry.getProtein() != null ? entry.getProtein() * 4.0 : 0.0;
+            double fatKcal     = entry.getFat()     != null ? entry.getFat()     * 9.0 : 0.0;
+            double kcal = proteinKcal + fatKcal;
+            if (kcal > 0) timeline.merge(futureMin, kcal, Double::sum);
+        }
         return timeline;
     }
 
