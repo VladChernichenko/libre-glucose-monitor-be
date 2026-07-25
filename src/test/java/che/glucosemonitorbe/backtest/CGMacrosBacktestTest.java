@@ -178,9 +178,10 @@ class CGMacrosBacktestTest {
         HovorkaState stateNoIns = HovorkaState.steadyState(g0mmol, p);
         HovorkaState stateIns   = HovorkaState.steadyState(g0mmol, p);
 
-        // Minute 0: inject carbs (bolus timing is implicit in the IOB curve starting at m=1)
-        stateNoIns = solver.step(stateNoIns, p, carbMmol, 0.0);
-        stateIns   = solver.step(stateIns,   p, carbMmol, 0.0);
+        // Minute 0: inject carbs with explicit GI=100 (pure-glucose pipeline test)
+        // (bolus timing is implicit in the IOB curve starting at m=1)
+        stateNoIns = solver.step(stateNoIns, p, carbMmol, 100, 0.0, 0.0, 0.0);
+        stateIns   = solver.step(stateIns,   p, carbMmol, 100, 0.0, 0.0, 0.0);
 
         double peakNoIns = stateNoIns.glucoseMmolL(p);
         double peakIns   = stateIns.glucoseMmolL(p);
@@ -214,9 +215,9 @@ class CGMacrosBacktestTest {
         assertThat(peakIns).as("peak glucose - with bolus").isLessThan(peakNoIns);
 
         // Without counterregulatory hormones the model correctly shows late-phase hypo risk
-        // from a CR=10 bolus (slightly aggressive). Guard > 1.5 catches sign errors / runaway.
-        // (GI=70 default slows absorption relative to the Fiasp-like peak, increasing hypo risk)
-        assertThat(minIns).as("minimum glucose - with bolus").isGreaterThan(1.5);
+        // from a CR=10 bolus (slightly aggressive). Guard > 2.0 catches sign errors / runaway.
+        // With GI=100 (pure glucose) the absorption is faster, reducing hypo risk.
+        assertThat(minIns).as("minimum glucose - with bolus").isGreaterThan(2.0);
 
         // At +2 h the insulin-treated trajectory must be clearly lower
         assertThat(gIns120).as("glucose at +120 min - with bolus").isLessThan(gNoIns120);

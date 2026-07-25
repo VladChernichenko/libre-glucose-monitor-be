@@ -556,20 +556,35 @@ public class HovorkaGlucosePredictionService {
      * Mirrors the minute-offset logic of {@link #buildFutureCarbTimeline}: past entries
      * (minsAgo > 0) are captured in the warm-up and excluded here.
      * Default GI of 70 is used when {@code estimatedGi} is null.
+     *
+     * <p>When multiple meals land at the same minute, computes the carb-weighted average GI
+     * instead of silently dropping the first meal (which would happen with {@code put}).
+     * Accumulates weighted numerator (gi × carbMmol) and carb denominator separately,
+     * then divides to get the final weighted-average GI per minute.</p>
      */
     private Map<Integer, Integer> buildFutureGiTimeline(
             List<CarbsEntry> carbsEntries, LocalDateTime now) {
-        Map<Integer, Integer> timeline = new HashMap<>();
+        Map<Integer, Double> giWeightedSum = new HashMap<>();
+        Map<Integer, Double> carbWeightMap  = new HashMap<>();
+
         for (CarbsEntry entry : carbsEntries) {
             if (entry.getTimestamp() == null) continue;
             long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
             if (minsAgo > 0) continue; // past - captured in warm-up
+
             int futureMin = Math.max(1, (int) Math.abs(minsAgo));
-            int gi = entry.getEstimatedGi() != null
-                    ? entry.getEstimatedGi().intValue()
-                    : 70;
-            timeline.put(futureMin, gi);
+            double carbs = entry.getCarbs() != null ? entry.getCarbs() : 0.0;
+            if (carbs <= 0.0) continue;
+            int gi = entry.getEstimatedGi() != null ? entry.getEstimatedGi().intValue() : 70;
+            giWeightedSum.merge(futureMin, carbs * gi, Double::sum);
+            carbWeightMap.merge(futureMin, carbs, Double::sum);
         }
+
+        Map<Integer, Integer> timeline = new HashMap<>();
+        giWeightedSum.forEach((min, weightedGi) -> {
+            double totalCarbs = carbWeightMap.getOrDefault(min, 1.0);
+            timeline.put(min, (int) Math.round(weightedGi / totalCarbs));
+        });
         return timeline;
     }
 
