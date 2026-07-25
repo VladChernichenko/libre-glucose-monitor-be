@@ -238,13 +238,16 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     /** Apply the active scales (ISF, A_G, EGP₀) to a parameter set. tMaxGScale stays neutral. */
     private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {
         return new HovorkaParameters(
-                p.vG(), p.f01(), p.egpNet() * s.egpScale(), p.k12(), p.k21(),
+                p.vG(), p.f01(),
+                p.egpNet() * s.egpScale(),
+                p.egp0()   * s.egpScale(),
+                p.k12(), p.k21(),
                 p.tMaxG(), p.aG() * s.agScale(), p.isf() * s.isfScale(), p.weightKg());
     }
 
     private static HovorkaParameters withTMaxG(HovorkaParameters p, double tMaxG) {
         return new HovorkaParameters(
-                p.vG(), p.f01(), p.egpNet(), p.k12(), p.k21(),
+                p.vG(), p.f01(), p.egpNet(), p.egp0(), p.k12(), p.k21(),
                 tMaxG, p.aG(), p.isf(), p.weightKg());
     }
 

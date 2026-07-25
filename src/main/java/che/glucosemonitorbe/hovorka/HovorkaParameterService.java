@@ -127,11 +127,15 @@ public class HovorkaParameterService {
                 ? settings.getIsf()
                 : DEFAULT_ISF;
 
-        log.debug("HovorkaParams user={} weight={}kg vG={}L f01={} egpNet={} tMaxG={}min aG={} isf={}",
-                userId, weight, vG, f01, egpNet, tMaxG, aG, isf);
+        // -- Raw hepatic glucose production before insulin suppression --------
+        double egp0 = HovorkaParameters.EGP0_PER_KG * weight;
+
+        log.debug("HovorkaParams user={} weight={}kg vG={}L f01={} egpNet={} egp0={} tMaxG={}min aG={} isf={}",
+                userId, weight, vG, f01, egpNet, egp0, tMaxG, aG, isf);
 
         return new HovorkaParameters(
                 vG, f01, egpNet,
+                egp0,
                 HovorkaParameters.K12_POP,
                 HovorkaParameters.K21_POP,
                 tMaxG, aG, isf, weight
@@ -194,7 +198,10 @@ public class HovorkaParameterService {
     private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {
         TwinScales c = s.clamped();
         return new HovorkaParameters(
-                p.vG(), p.f01(), p.egpNet() * c.egpScale(), p.k12(), p.k21(),
+                p.vG(), p.f01(),
+                p.egpNet() * c.egpScale(),
+                p.egp0()   * c.egpScale(),
+                p.k12(), p.k21(),
                 p.tMaxG(), p.aG() * c.agScale(), p.isf() * c.isfScale(), p.weightKg());
     }
 }

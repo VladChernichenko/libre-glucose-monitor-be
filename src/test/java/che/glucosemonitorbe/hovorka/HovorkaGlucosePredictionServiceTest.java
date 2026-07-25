@@ -62,8 +62,9 @@ class HovorkaGlucosePredictionServiceTest {
         double weight = 70.0;
         double vG  = HovorkaParameters.VG_PER_KG * weight;
         double f01 = HovorkaParameters.F01_PER_KG * weight;
+        double egp0 = HovorkaParameters.EGP0_PER_KG * weight;
         params = new HovorkaParameters(
-                vG, f01, f01,
+                vG, f01, f01, egp0,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 45.0 / 1.68, 0.80, 2.2, weight);
 
@@ -588,10 +589,12 @@ class HovorkaGlucosePredictionServiceTest {
     /** Build params with a given tMaxG and all other fields at population defaults. */
     private HovorkaParameters paramsWithTMaxG(double tMaxG) {
         double weight = 70.0;
+        double egp0 = HovorkaParameters.EGP0_PER_KG * weight;
         return new HovorkaParameters(
                 HovorkaParameters.VG_PER_KG  * weight,
                 HovorkaParameters.F01_PER_KG * weight,
                 HovorkaParameters.F01_PER_KG * weight,   // egpNet = f01 (steady state)
+                egp0,
                 HovorkaParameters.K12_POP,
                 HovorkaParameters.K21_POP,
                 tMaxG, 0.80, 2.2, weight);

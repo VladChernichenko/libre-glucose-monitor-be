@@ -28,10 +28,12 @@ class GutModelMealTypeTest {
 
     private static HovorkaParameters params() {
         double weight = 70.0;
+        double egp0 = HovorkaParameters.EGP0_PER_KG * weight;
         return new HovorkaParameters(
                 HovorkaParameters.VG_PER_KG * weight,
                 HovorkaParameters.F01_PER_KG * weight,
                 HovorkaParameters.F01_PER_KG * weight,
+                egp0,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 45.0 / 1.68, 0.80, 2.2, weight);
     }

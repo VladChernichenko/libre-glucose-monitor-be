@@ -228,7 +228,8 @@ class CGMacrosBacktestTest {
     private static HovorkaParameters buildParams(double weightKg, double tMaxG) {
         double vG  = HovorkaParameters.VG_PER_KG * weightKg;
         double f01 = HovorkaParameters.F01_PER_KG * weightKg;
-        return new HovorkaParameters(vG, f01, f01,
+        double egp0 = HovorkaParameters.EGP0_PER_KG * weightKg;
+        return new HovorkaParameters(vG, f01, f01, egp0,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 tMaxG, 1.0, 2.2, weightKg);
     }

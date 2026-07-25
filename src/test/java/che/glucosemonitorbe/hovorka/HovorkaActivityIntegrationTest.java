@@ -92,9 +92,10 @@ class HovorkaActivityIntegrationTest {
     private List<PredictionPointDTO> predict(double g0, List<InsulinDose> insulin,
                                              ActivityProvider provider, int horizon) {
         double w = 70.0;
+        double egp0 = HovorkaParameters.EGP0_PER_KG * w;
         HovorkaParameters p = new HovorkaParameters(
                 HovorkaParameters.VG_PER_KG * w, HovorkaParameters.F01_PER_KG * w,
-                HovorkaParameters.F01_PER_KG * w, HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
+                HovorkaParameters.F01_PER_KG * w, egp0, HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 45.0 / 1.68, 1.0, 2.0, w);
         if (provider == null) {
             return predictor.buildPredictionPath(p, IOB, null, g0, T0, List.of(), insulin, List.of(),

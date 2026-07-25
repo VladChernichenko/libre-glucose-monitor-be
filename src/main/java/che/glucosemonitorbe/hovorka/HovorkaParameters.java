@@ -12,11 +12,12 @@ package che.glucosemonitorbe.hovorka;
  *   G       = Q1 / vG              [mmol/L]  - blood glucose concentration
  *   F01_c   = f01 * min(1, G/4.5)  [mmol/min] - non-insulin-dependent utilisation
  *
- *   dQ1/dt  = -F01_c - k12*Q1 + k21*Q2 + Ra(t) + egpNet - insulinEffect(t)
+ *   dQ1/dt  = -F01_c - k12*Q1 + k21*Q2 + Ra(t) + EGP(t) - insulinEffect(t)
  *   dQ2/dt  = k12*Q1 - k21*Q2
  *   dD1/dt  = aG * carbRateMmolPerMin(t) - D1/tMaxG
  *   dD2/dt  = D1/tMaxG - D2/tMaxG
  *   Ra(t)   = D2 / tMaxG
+ *   EGP(t)  = egp0 * max(0, 1 - x3(t))
  *
  *   insulinEffect(t) = isf * vG * iobActivityRate(t)   [mmol/min]
  * </pre>
@@ -24,6 +25,7 @@ package che.glucosemonitorbe.hovorka;
  * @param vG        Glucose distribution volume [L] = 0.16 * weightKg
  * @param f01       Non-insulin-dependent glucose utilisation [mmol/min] = 0.0097 * weightKg
  * @param egpNet    Net endogenous glucose production at steady state [mmol/min] = f01 (by definition)
+ * @param egp0      Raw hepatic glucose production before insulin suppression [mmol/min] = EGP0_PER_KG * weightKg
  * @param k12       Intercompartmental transfer rate Q1->Q2 [/min] (population 0.066)
  * @param k21       Intercompartmental transfer rate Q2->Q1 [/min] (population 0.066)
  * @param tMaxG     Gut absorption time constant [min] = carbHalfLife / 1.68
@@ -38,6 +40,7 @@ public record HovorkaParameters(
         double vG,
         double f01,
         double egpNet,
+        double egp0,
         double k12,
         double k21,
         double tMaxG,

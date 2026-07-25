@@ -290,7 +290,7 @@ public final class BacktestHarness {
                         domCarbs, domProtein, domFat, domFiber,
                         HovorkaParameterService.HALF_LIFE_TO_TMAX_G);
                 anchorParams = new HovorkaParameters(
-                        params.vG(), params.f01(), params.egpNet(), params.k12(), params.k21(),
+                        params.vG(), params.f01(), params.egpNet(), params.egp0(), params.k12(), params.k21(),
                         tMaxG, params.aG(), params.isf(), params.weightKg());
             }
 
@@ -329,8 +329,9 @@ public final class BacktestHarness {
         double vG  = HovorkaParameters.VG_PER_KG * cfg.weightKg;
         double f01 = HovorkaParameters.F01_PER_KG * cfg.weightKg;
         double tMaxG = cfg.carbHalfLifeMin / HovorkaParameterService.HALF_LIFE_TO_TMAX_G;
+        double egp0 = HovorkaParameters.EGP0_PER_KG * cfg.weightKg;
         return new HovorkaParameters(
-                vG, f01, f01,
+                vG, f01, f01, egp0,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 tMaxG, cfg.aG, cfg.isf, cfg.weightKg);
     }

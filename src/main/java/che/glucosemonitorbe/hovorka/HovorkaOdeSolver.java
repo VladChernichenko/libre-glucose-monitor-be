@@ -28,6 +28,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class HovorkaOdeSolver {
 
+    // -- x3 EGP suppression parameters (Hovorka 2004, Table 1) ----------------
+    /** x3 deactivation rate [/min] — Hovorka (2004) Table 1. */
+    static final double KA3       = 0.03;
+    /** x3 induction rate [/min per mU/L]. S_IE ≈ 5×10⁻⁴ → KB3 = KA3 × S_IE. */
+    static final double KB3       = 0.000015;
+    /** Empirical bridge: mU/L per normalised insulin effect rate unit. */
+    static final double V_I_SCALE = 12.0;
+
     // -- Incretin GLP-1 parameters ---------------------------------------------
     /** Protein+fat gut drain rate [/min] — t½ ≈ 87 min. */
     static final double K_PF_DRAIN = 0.008;
@@ -223,9 +231,23 @@ public class HovorkaOdeSolver {
         // -> Ra peak shifts right without changing total absorbed glucose.
         double ra    = gutModel.ra(qgut, kAbsEff);
 
+        // Approximate plasma insulin I(t) from the insulin effect rate via an empirical bridge.
+        // Full S1->S2->I PK model is deferred; this preserves the IOB pharmacokinetics already
+        // computed by the OpenAPS curve while avoiding a separate compartment integration.
+        double plasmInsulin = (p.isf() * p.effectiveInsulinVolume() > 0)
+                ? insulinEffect / (p.isf() * p.effectiveInsulinVolume()) * V_I_SCALE
+                : 0.0;
+
+        // x3: delayed insulin action on EGP suppression (Hovorka 2004)
+        double dx3 = -KA3 * x3 + KB3 * plasmInsulin;
+
+        // Dynamic EGP: EGP(t) = egp0 × max(0, 1 − x3(t))
+        // At basal steady state, x3_ss = 1 - egpNow/egp0, so EGP(ss) = egpNow.
+        double egp = p.egp0() * Math.max(0.0, 1.0 - x3);
+
         // Glucose compartments (activityUptakeRate = insulin-independent, contraction-mediated uptake)
         double dq1 = -f01c - fr - p.k12() * q1 + p.k21() * q2
-                   + ra + p.egpNet() - insulinEffect
+                   + ra + egp - insulinEffect
                    - ALPHA_INC * inc * q1
                    - activityUptakeRate * q1;
         double dq2 = p.k12() * q1 - p.k21() * q2;
@@ -242,12 +264,7 @@ public class HovorkaOdeSolver {
         // Pre-loading protein/fat triggers ileal brake before carbs arrive.
         double dinc = K_INC_PF * protFatGut - K_DEL * inc;
 
-        // x3 derivative — stub for Task 7 (EGP dynamic suppression)
-        // Variable x3 is read above; derivative wired later.
-        double dx3 = 0.0;          // Task 7: EGP dynamic suppression
-
         return new double[]{dq1, dq2, dqsto1, dqsto2, dqgut, dinc, dx3, dProtFatGut};
-        //                                                           ^^^  x3 stub still 0 (Task 7)
     }
 
     // -- Array helpers ---------------------------------------------------------

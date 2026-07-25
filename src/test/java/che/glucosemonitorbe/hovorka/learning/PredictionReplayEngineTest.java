@@ -75,7 +75,8 @@ class PredictionReplayEngineTest {
         double w = 70.0;
         double vG = HovorkaParameters.VG_PER_KG * w;
         double f01 = HovorkaParameters.F01_PER_KG * w;
-        return new HovorkaParameters(vG, f01, f01,
+        double egp0 = HovorkaParameters.EGP0_PER_KG * w;
+        return new HovorkaParameters(vG, f01, f01, egp0,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 45.0 / 1.68, 1.0, 2.2, w);
     }

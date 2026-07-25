@@ -63,6 +63,7 @@ class GlucosePredictServiceTest {
             0.16 * 70,   // vG
             0.0097 * 70, // f01
             0.0097 * 70, // egpNet
+            0.0161 * 70, // egp0
             0.066, 0.066,
             45.0 / 1.68, // tMaxG ≈ 26.8 min (from 45-min carb half-life)
             0.80,

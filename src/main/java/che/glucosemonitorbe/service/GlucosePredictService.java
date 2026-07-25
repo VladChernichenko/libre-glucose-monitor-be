@@ -102,7 +102,7 @@ public class GlucosePredictService {
                 : baseParams.tMaxG();
 
         HovorkaParameters mealParams = new HovorkaParameters(
-                baseParams.vG(), baseParams.f01(), baseParams.egpNet(),
+                baseParams.vG(), baseParams.f01(), baseParams.egpNet(), baseParams.egp0(),
                 baseParams.k12(), baseParams.k21(),
                 tMaxGMod, baseParams.aG(), baseParams.isf(), baseParams.weightKg());
 
