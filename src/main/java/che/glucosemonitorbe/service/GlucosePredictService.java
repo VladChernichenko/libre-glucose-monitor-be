@@ -52,12 +52,16 @@ public class GlucosePredictService {
     /** Mild multiplier for points between the hypo threshold and target (low side of 5.5). */
     private static final double  LOW_SIDE_WEIGHT      = 2.0;
 
-    // -- Fat-Protein Unit (FPU) slow-glucose modelling -------------------------
-    /** Onset delay for protein gluconeogenesis / fat-delayed absorption [min]. */
-    private static final int    FPU_ONSET_MIN    = 90;
-    /** Carb-equivalent per FPU (Warsaw Protocol: 1 FPU ≈ 10 g slow carbs). */
-    private static final double FPU_CARB_EQUIV_G = 10.0;
-    /** Minimum FPU-equiv carbs [g] to emit a secondary entry (≈ 0.2 FPU threshold). */
+    // -- Protein gluconeogenesis (PGN) slow-glucose modelling ------------------
+    /** Onset for protein gluconeogenesis: protein GNG peaks at 3-4h, onset at 2h. */
+    private static final int    PGN_ONSET_MIN   = 120;
+    /**
+     * Grams of slow-carb-equivalent glucose per gram of protein (Warsaw Protocol adapted):
+     * 4 kcal/g ÷ 100 kcal/FPU × 10 g carb/FPU = 0.40 g/g.
+     * Fat contribution removed — fat's gastric delay is already in MacroNutrientGastricModel.
+     */
+    private static final double PGN_CARB_FACTOR = 0.40;
+    /** Minimum PGN-equiv carbs [g] to emit a secondary entry (≈ 0.2 FPU threshold). */
     private static final double FPU_MIN_EQUIV_G  = 2.0;
 
     private final HovorkaGlucosePredictionService hovorkaService;
@@ -117,27 +121,22 @@ public class GlucosePredictService {
                     .build());
         }
 
-        // -- 3b. Add FPU-equivalent slow glucose from protein/fat -------------
-        // Protein gluconeogenesis and fat-delayed gastric emptying cause a secondary
-        // glucose rise not captured by the carb ODE.  The Warsaw Protocol models this
-        // as a delayed slow-carb bolus: 1 FPU (100 kcal non-carb) ≈ 10 g carbs.
-        //
-        // When the YOLO vision service supplies type-aware fields, we use:
-        //   lctFatG            - excludes MCT fat (oxidised directly, no portal glucose)
-        //   gluconeogenicFrac  - weighted by protein type (ANIMAL 50%, PLANT 35%, etc.)
-        //   fpuOnset           - weighted protein-type onset (CASEIN 120 min, WHEY 60 min...)
-        double lctFatG       = req.getLctFatG() != null ? safe(req.getLctFatG()) : fatG;
-        double glucFrac      = req.getGluconeogenicFraction() != null
-                               ? req.getGluconeogenicFraction() : 0.50;
-        int    fpuOnset      = req.getFpuOnsetMin() != null
-                               ? req.getFpuOnsetMin() : FPU_ONSET_MIN;
+        // -- 3b. Protein gluconeogenesis slow-glucose contribution -------------------
+        // Protein converts to glucose via GNG (~55% glucogenic fraction, 2-4h onset).
+        // Fat's effect on gastric emptying is already modelled by MacroNutrientGastricModel
+        // via BETA_FAT=2.20 in computeTMaxG(); adding fat kcal here caused +1.1 mmol/L
+        // meal-tail overshoot in the backtest (Variant B).
+        double glucFrac = req.getGluconeogenicFraction() != null
+                ? req.getGluconeogenicFraction() : 0.50;
+        int    pgnOnset = req.getFpuOnsetMin() != null
+                ? req.getFpuOnsetMin() : PGN_ONSET_MIN;
 
-        double fpuEquivCarbs = (proteinG * 4.0 * glucFrac + lctFatG * 9.0) / 100.0 * FPU_CARB_EQUIV_G;
-        if (fpuEquivCarbs >= FPU_MIN_EQUIV_G) {
+        double pgnEquivCarbs = proteinG * glucFrac * PGN_CARB_FACTOR;
+        if (pgnEquivCarbs >= FPU_MIN_EQUIV_G) {
             carbsWithMeal.add(CarbsEntry.builder()
                     .id(UUID.randomUUID())
-                    .timestamp(now.plusMinutes(fpuOnset))
-                    .carbs(fpuEquivCarbs)
+                    .timestamp(now.plusMinutes(pgnOnset))
+                    .carbs(pgnEquivCarbs)
                     .mealType("fpu-equiv")
                     .userId(userId)
                     .build());

@@ -17,6 +17,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -597,9 +599,9 @@ class GlucosePredictServiceTest {
     // ---
 
     @Test
-    @DisplayName("fat+protein above threshold -> fpu-equiv entry added at t+90 min")
-    void highFatProtein_fpuEntryAddedAt90min() {
-        // 25g protein × 4 = 100 kcal, 30g fat × 9 = 270 kcal -> 370 kcal / 100 × 10 = 37 g equiv
+    @DisplayName("protein above threshold -> fpu-equiv entry added at t+120 min (fat no longer counted)")
+    void highFatProtein_fpuEntryAddedAt120min() {
+        // 25g protein × 0.50 glucFrac × 0.40 factor = 5.0 g equiv (fat no longer included)
         PredictRequest req = simpleRequest(7.0, 0, 40, 25, 30, 0);
 
         sut.predict(req, USERNAME);
@@ -618,14 +620,13 @@ class GlucosePredictServiceTest {
                 .findFirst();
         assertThat(fpuEntry).isPresent();
         assertThat(fpuEntry.get().getCarbs())
-                .as("FPU-equiv carbs = (25×4×0.50 + 30×9) / 100 × 10 = 32 g "
-                    + "(default 50 %% gluconeogenic fraction; no lctFatG override so all fat counts as LCT)")
-                .isCloseTo(32.0, org.assertj.core.api.Assertions.within(0.5));
+                .as("PGN-equiv carbs = 25 × 0.50 × 0.40 = 5.0 g (fat contribution removed)")
+                .isCloseTo(5.0, org.assertj.core.api.Assertions.within(0.05));
     }
 
     @Test
-    @DisplayName("fpu-equiv entry timestamp is exactly now + 90 min")
-    void fpuEntry_timestampIsNowPlus90() {
+    @DisplayName("fpu-equiv entry timestamp is exactly now + 120 min (PGN onset)")
+    void fpuEntry_timestampIsNowPlus120() {
         PredictRequest req = simpleRequest(7.0, 0, 40, 25, 30, 0);
 
         sut.predict(req, USERNAME);
@@ -641,14 +642,11 @@ class GlucosePredictServiceTest {
                 .filter(e -> "fpu-equiv".equals(e.getMealType()))
                 .findFirst();
         assertThat(fpuEntry).isPresent();
+        // Must be ~120 min after now (PGN onset)
         assertThat(fpuEntry.get().getTimestamp())
-                .as("FPU onset must be 90 min after the meal")
-                .isAfter(fpuEntry.get().getTimestamp().minusMinutes(91))
-                .isBefore(fpuEntry.get().getTimestamp().plusMinutes(1));
-        // Specifically: it must be ~90 min after now
-        assertThat(fpuEntry.get().getTimestamp())
-                .isAfterOrEqualTo(java.time.LocalDateTime.now().plusMinutes(89))
-                .isBeforeOrEqualTo(java.time.LocalDateTime.now().plusMinutes(91));
+                .as("PGN onset must be 120 min after the meal")
+                .isAfterOrEqualTo(java.time.LocalDateTime.now().plusMinutes(119))
+                .isBeforeOrEqualTo(java.time.LocalDateTime.now().plusMinutes(121));
     }
 
     @Test
@@ -671,9 +669,9 @@ class GlucosePredictServiceTest {
     }
 
     @Test
-    @DisplayName("trace fat+protein below threshold (< 2 g equiv) -> no fpu-equiv entry")
+    @DisplayName("trace protein below threshold (< 2 g equiv) -> no fpu-equiv entry")
     void traceFatProtein_belowThreshold_noFpuEntry() {
-        // 3g protein × 4 = 12 kcal -> fpuEquivCarbs = 12/100×10 = 1.2 g < 2.0 threshold
+        // 3g protein × 0.50 × 0.40 = 0.6 g < 2.0 threshold
         PredictRequest req = simpleRequest(7.0, 0, 60, 3, 0, 0);
 
         sut.predict(req, USERNAME);
@@ -693,7 +691,7 @@ class GlucosePredictServiceTest {
     @Test
     @DisplayName("pure protein meal (no carbs) still generates an fpu-equiv entry")
     void pureProteinMeal_noCarbs_fpuEntryStillAdded() {
-        // 50g protein × 4 = 200 kcal -> 20 g equiv > 2 g threshold; carbsG=0
+        // 50g protein × 0.50 × 0.40 = 10.0 g equiv > 2 g threshold; carbsG=0
         PredictRequest req = simpleRequest(7.0, 0, 0, 50, 0, 0);
 
         sut.predict(req, USERNAME);
@@ -797,8 +795,69 @@ class GlucosePredictServiceTest {
     }
 
     // ---
+    // MARK: Task 1 - FPU protein-gluconeogenesis formula fix (Gap 6)
+    // ---
+
+    @Test
+    @DisplayName("FPU injection: fat contributes zero slow carbs")
+    void fpuInjection_fatOnly_noCarbsEmitted() {
+        // 0g protein, 40g fat, glucFrac=0.5 -> old formula gave 0.9*40=36g, new gives 0g
+        PredictRequest req = buildRequest(0.0, 0.0, 40.0, 0.0, 0.0);
+        // Capture CarbsEntries passed to hovorkaService
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        when(hovorkaService.buildPredictionPath(any(), anyDouble(), any(),
+                carbsCaptor.capture(), any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        sut.predict(req, USERNAME);
+
+        List<CarbsEntry> entries = carbsCaptor.getValue();
+        boolean hasFpuEntry = entries.stream()
+                .anyMatch(e -> "fpu-equiv".equals(e.getMealType()));
+        assertThat(hasFpuEntry).isFalse();
+    }
+
+    @Test
+    @DisplayName("FPU injection: 30g protein produces 6g slow carbs at t+120min")
+    void fpuInjection_30gProtein_6gCarbsAt120Min() {
+        // 30g protein, glucFrac=0.50 default -> 30 * 0.50 * 0.40 = 6.0g
+        PredictRequest req = buildRequest(0.0, 30.0, 0.0, 0.0, 0.0);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> carbsCaptor = ArgumentCaptor.forClass(List.class);
+        when(hovorkaService.buildPredictionPath(any(), anyDouble(), any(),
+                carbsCaptor.capture(), any(), any(), any(), anyInt())).thenReturn(List.of());
+
+        LocalDateTime before = LocalDateTime.now();
+        sut.predict(req, USERNAME);
+        LocalDateTime after = LocalDateTime.now();
+
+        List<CarbsEntry> entries = carbsCaptor.getValue();
+        CarbsEntry pgnEntry = entries.stream()
+                .filter(e -> "fpu-equiv".equals(e.getMealType()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No fpu-equiv entry found"));
+
+        assertThat(pgnEntry.getCarbs()).isCloseTo(6.0, org.assertj.core.api.Assertions.within(0.01));
+        // onset must be ~120 min after now
+        long minsOffset = Duration.between(before, pgnEntry.getTimestamp()).toMinutes();
+        assertThat(minsOffset).isBetween(119L, 121L);
+    }
+
+    // ---
     // Helpers
     // ---
+
+    private PredictRequest buildRequest(double carbs, double protein, double fat,
+                                        double fiber, double insulin) {
+        PredictRequest req = new PredictRequest();
+        req.setCarbs(carbs);
+        req.setProtein(protein);
+        req.setFat(fat);
+        req.setFiber(fiber);
+        req.setInsulinDose(insulin);
+        req.setCurrentGlucose(6.0);
+        return req;
+    }
 
     private static PredictRequest simpleRequest(
             double glucose, double insulin,
