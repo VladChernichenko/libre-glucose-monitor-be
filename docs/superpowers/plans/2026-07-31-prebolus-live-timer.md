@@ -428,7 +428,7 @@ import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 Replace `toCarbsEntries` (lines 271-283) with:
 
 ```java
-    private List<CarbsEntry> toCarbsEntries(List<Note> notes, UUID userId) {
+    private List<CarbsEntry> toCarbsEntries(List<Note> notes) {
         return notes.stream()
                 .filter(n -> n.getCarbs() != null && n.getCarbs() > 0)
                 .map(noteToCarbsEntryMapper::toCarbsEntry)
@@ -436,7 +436,16 @@ Replace `toCarbsEntries` (lines 271-283) with:
     }
 ```
 
-The `userId` parameter is now unused but stays for call-site stability; the mapper reads `note.getUserId()`, which is the same value.
+The `userId` parameter is dropped — the mapper reads `note.getUserId()`, which is the same
+value, and this is a private method with a single caller. Update that caller at
+`GlucosePredictService.java:87`:
+
+```java
+        List<CarbsEntry>  pastCarbs = toCarbsEntries(recentNotes);
+```
+
+Leave `toInsulinDoses(recentNotes, userId)` on the next line untouched — it still uses its
+`userId` argument.
 
 - [ ] **Step 4: Run test to verify it passes**
 
