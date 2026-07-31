@@ -169,4 +169,42 @@ class PreBolusResolverTest {
         List<Note> notes = List.of(note("pre-bolus", 3.0, 0.0, NOW.minusMinutes(23)));
         assertThat(sut.resolve(null, notes, NOW).orElseThrow().elapsedMinutes()).isEqualTo(23);
     }
+
+    @Test
+    @DisplayName("exactly 120 minutes (2-hour boundary) is expired")
+    void boundaryExactly120Minutes() {
+        List<Note> notes = List.of(note("pre-bolus", 3.0, 0.0, NOW.minusMinutes(120)));
+        assertThat(sut.resolve(null, notes, NOW)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("119 minutes is still valid")
+    void boundaryLastValidMinute() {
+        List<Note> notes = List.of(note("pre-bolus", 3.0, 0.0, NOW.minusMinutes(119)));
+        PreBolusContext ctx = sut.resolve(null, notes, NOW).orElseThrow();
+        assertThat(ctx.elapsedMinutes()).isEqualTo(119);
+    }
+
+    @Test
+    @DisplayName("explicit insulinLoggedAt older than 2 hours is rejected")
+    void explicitOlderThan2Hours() {
+        List<Note> notes = List.of(note("dinner", 6.0, 0.0, NOW.minusMinutes(140)));
+        assertThat(sut.resolve(NOW.minusMinutes(140), notes, NOW)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("note timestamped after now clamps negative elapsed to zero")
+    void negativeElapsedClamped() {
+        // Note is stamped 30 seconds after NOW, loggedAt is 30 seconds before NOW.
+        // This places the note within 1 minute of loggedAt (match tolerance = 1 minute).
+        LocalDateTime noteTime = NOW.plusSeconds(30);
+        LocalDateTime loggedAt = NOW.minusSeconds(30);
+        List<Note> notes = List.of(note("dinner", 6.0, 0.0, noteTime));
+
+        PreBolusContext ctx = sut.resolve(loggedAt, notes, NOW).orElseThrow();
+
+        // Elapsed from note (NOW+30s) to now (NOW) is negative, but clamped to 0
+        assertThat(ctx.elapsedMinutes()).isEqualTo(0);
+        assertThat(ctx.source()).isEqualTo(PreBolusContext.Source.EXPLICIT);
+    }
 }

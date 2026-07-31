@@ -54,7 +54,7 @@ public class PreBolusResolver {
     }
 
     private Optional<PreBolusContext> matchExplicit(LocalDateTime loggedAt, List<Note> notes, LocalDateTime now) {
-        if (loggedAt.isAfter(now) || Duration.between(loggedAt, now).compareTo(MAX_AGE) > 0) {
+        if (loggedAt.isAfter(now) || Duration.between(loggedAt, now).compareTo(MAX_AGE) >= 0) {
             return Optional.empty();
         }
         return notes.stream()
@@ -70,7 +70,7 @@ public class PreBolusResolver {
                 .filter(this::isBolusNote)
                 .filter(n -> PRE_BOLUS_ALIASES.contains(lower(n.getMeal())))
                 .filter(n -> !n.getTimestamp().isAfter(now))
-                .filter(n -> Duration.between(n.getTimestamp(), now).compareTo(MAX_AGE) <= 0)
+                .filter(n -> Duration.between(n.getTimestamp(), now).compareTo(MAX_AGE) < 0)
                 .max(Comparator.comparing(Note::getTimestamp));
 
         if (latest.isEmpty()) {
@@ -99,7 +99,7 @@ public class PreBolusResolver {
         return new PreBolusContext(
                 n.getTimestamp(),
                 n.getInsulin(),
-                (int) Duration.between(n.getTimestamp(), now).toMinutes(),
+                Math.max(0, (int) Duration.between(n.getTimestamp(), now).toMinutes()),
                 source);
     }
 
