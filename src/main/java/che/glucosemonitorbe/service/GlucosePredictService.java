@@ -12,6 +12,8 @@ import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
+import che.glucosemonitorbe.service.prebolus.PreBolusContext;
+import che.glucosemonitorbe.service.prebolus.PreBolusResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -65,11 +68,15 @@ public class GlucosePredictService {
     /** Minimum PGN-equiv carbs [g] to emit a secondary entry (≈ 0.2 FPU threshold). */
     private static final double FPU_MIN_EQUIV_G  = 2.0;
 
+    /** Units of disagreement tolerated between the request dose and the logged note. */
+    private static final double DOSE_MATCH_TOLERANCE_U = 0.05;
+
     private final HovorkaGlucosePredictionService hovorkaService;
     private final HovorkaParameterService         paramService;
     private final UserService                     userService;
     private final NoteRepository                  noteRepository;
     private final NoteToCarbsEntryMapper           noteToCarbsEntryMapper;
+    private final PreBolusResolver                     preBolusResolver;
 
     /**
      * Run the prediction pipeline and return the response.
@@ -144,25 +151,41 @@ public class GlucosePredictService {
                     .build());
         }
 
-        // -- 4. Optimise pre-bolus pause ---------------------------------------
+        // -- 4. Pre-bolus: measured if one is in flight, otherwise recommended -----
         double insulinDose = safe(req.getInsulinDose());
-        int bestPause = optimisePreBolus(
-                req.getCurrentGlucose(), now,
-                carbsWithMeal, pastDoses, longActingNotes,
-                userId, mealParams, insulinDose, horizon);
+        Optional<PreBolusContext> preBolus =
+                preBolusResolver.resolve(req.getInsulinLoggedAt(), recentNotes, now);
 
-        // -- 5. Final simulation with optimal bolus timing ---------------------
+        Integer recommendedPause = null;
+        Integer observedPause    = null;
         List<InsulinDose> finalDoses = new ArrayList<>(pastDoses);
-        if (insulinDose > 0) {
-            finalDoses.add(InsulinDose.builder()
-                    .id(UUID.randomUUID())
-                    .userId(userId)
-                    .units(insulinDose)
-                    .type(InsulinDose.InsulinType.BOLUS)
-                    .timestamp(now.plusMinutes(bestPause))
-                    .build());
+
+        if (preBolus.isPresent()) {
+            PreBolusContext ctx = preBolus.get();
+            observedPause = ctx.elapsedMinutes();
+            if (insulinDose > 0 && Math.abs(insulinDose - ctx.units()) > DOSE_MATCH_TOLERANCE_U) {
+                log.warn("predict user={} request insulinDose={} disagrees with logged pre-bolus units={}; using the note",
+                        userId, insulinDose, ctx.units());
+            }
+            // The dose is already in pastDoses. Adding it again would double-count it.
+        } else {
+            int bestPause = optimisePreBolus(
+                    req.getCurrentGlucose(), now,
+                    carbsWithMeal, pastDoses, longActingNotes,
+                    userId, mealParams, insulinDose, horizon);
+            recommendedPause = bestPause;
+            if (insulinDose > 0) {
+                finalDoses.add(InsulinDose.builder()
+                        .id(UUID.randomUUID())
+                        .userId(userId)
+                        .units(insulinDose)
+                        .type(InsulinDose.InsulinType.BOLUS)
+                        .timestamp(now.plusMinutes(bestPause))
+                        .build());
+            }
         }
 
+        // -- 5. Final simulation ----------------------------------------------
         List<PredictionPointDTO> curve = hovorkaService.buildPredictionPath(
                 mealParams,
                 req.getCurrentGlucose(), now,
@@ -172,12 +195,13 @@ public class GlucosePredictService {
         double betaWeighted = MacroNutrientGastricModel.weightedBeta(carbsG, proteinG, fatG);
         String strategy     = MacroNutrientGastricModel.bolusStrategy(fatG, proteinG);
 
-        log.debug("predict user={} tMaxG={:.1f}min β={:.2f} pause={}min strategy={}",
-                userId, tMaxGMod, betaWeighted, bestPause, strategy);
+        log.debug("predict user={} tMaxG={} beta={} recommendedPause={} observedPause={} strategy={}",
+                userId, tMaxGMod, betaWeighted, recommendedPause, observedPause, strategy);
 
         return PredictResponse.builder()
                 .curve(curve)
-                .preBolusMinutes(bestPause)
+                .preBolusMinutes(recommendedPause)
+                .observedPreBolusMinutes(observedPause)
                 .bolusStrategy(strategy)
                 .tMaxGUsed(Math.round(tMaxGMod * 10.0) / 10.0)
                 .betaWeighted(Math.round(betaWeighted * 100.0) / 100.0)

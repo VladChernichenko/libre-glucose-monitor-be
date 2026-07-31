@@ -9,6 +9,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 /**
  * Request body for {@code POST /api/predict}.
  *
@@ -74,4 +76,11 @@ public class PredictRequest {
 
     /** IANA timezone string (e.g. "Europe/Berlin"). Used for timestamp alignment. */
     private String clientTimezone;
+
+    /**
+     * When the pre-bolus note was written, if the client has already logged the dose
+     * and its timer is running. When present and it matches a stored bolus note, the
+     * server treats the dose as already in history and does not add it again.
+     */
+    private LocalDateTime insulinLoggedAt;
 }

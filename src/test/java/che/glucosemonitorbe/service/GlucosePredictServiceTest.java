@@ -13,6 +13,8 @@ import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
+import che.glucosemonitorbe.service.prebolus.PreBolusContext;
+import che.glucosemonitorbe.service.prebolus.PreBolusResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,7 @@ import java.time.Duration;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,6 +60,7 @@ class GlucosePredictServiceTest {
     private UserService                     userService;
     private NoteRepository                  noteRepository;
     private NoteToCarbsEntryMapper          noteToCarbsEntryMapper;
+    private PreBolusResolver                preBolusResolver;
 
     private GlucosePredictService sut;
 
@@ -80,9 +84,12 @@ class GlucosePredictServiceTest {
         userService    = mock(UserService.class);
         noteRepository = mock(NoteRepository.class);
         noteToCarbsEntryMapper = mock(NoteToCarbsEntryMapper.class);
+        preBolusResolver = mock(PreBolusResolver.class);
+        when(preBolusResolver.resolve(any(), anyList(), any(LocalDateTime.class)))
+                .thenReturn(Optional.empty());
 
         sut = new GlucosePredictService(hovorkaService, paramService, userService,
-                                        noteRepository, noteToCarbsEntryMapper);
+                                        noteRepository, noteToCarbsEntryMapper, preBolusResolver);
 
         // Default stubs
         UserDto userDto = new UserDto();
@@ -213,6 +220,67 @@ class GlucosePredictServiceTest {
         assertThat(resp.getPreBolusMinutes())
                 .as("preBolusMinutes must be one of the candidate pauses")
                 .isIn(0, 5, 10, 15, 20, 25, 30);
+    }
+
+    // ---
+    // MARK: Live-timer pre-bolus branch (Task 4)
+    // ---
+
+    @Test
+    @DisplayName("live timer: the logged dose is not duplicated and no optimiser runs")
+    void liveTimer_doesNotDuplicateDose() {
+        LocalDateTime bolusAt = LocalDateTime.now().minusMinutes(12);
+        Note preBolus = new Note();
+        preBolus.setId(UUID.randomUUID());
+        preBolus.setUserId(USER_ID);
+        preBolus.setTimestamp(bolusAt);
+        preBolus.setMeal("pre-bolus");
+        preBolus.setInsulin(5.0);
+        preBolus.setCarbs(0.0);
+        preBolus.setType(Note.TYPE_NORMAL);
+
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(preBolus));
+        when(preBolusResolver.resolve(any(), anyList(), any(LocalDateTime.class)))
+                .thenReturn(Optional.of(new PreBolusContext(
+                        bolusAt, 5.0, 12, PreBolusContext.Source.DETECTED)));
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .insulinDose(5.0)
+                .build();
+
+        PredictResponse res = sut.predict(req, USERNAME);
+
+        assertThat(res.getObservedPreBolusMinutes()).isEqualTo(12);
+        assertThat(res.getPreBolusMinutes()).isNull();
+
+        ArgumentCaptor<List<InsulinDose>> doses = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, times(1)).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                anyList(), doses.capture(), anyList(), eq(USER_ID), anyInt());
+
+        double totalUnits = doses.getValue().stream().mapToDouble(InsulinDose::getUnits).sum();
+        assertThat(totalUnits).isEqualTo(5.0);
+    }
+
+    @Test
+    @DisplayName("no pre-bolus in flight: advisory path still recommends a pause")
+    void noContext_stillRecommends() {
+        when(preBolusResolver.resolve(any(), anyList(), any(LocalDateTime.class)))
+                .thenReturn(Optional.empty());
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .insulinDose(5.0)
+                .build();
+
+        PredictResponse res = sut.predict(req, USERNAME);
+
+        assertThat(res.getPreBolusMinutes()).isNotNull();
+        assertThat(res.getObservedPreBolusMinutes()).isNull();
     }
 
     // ---

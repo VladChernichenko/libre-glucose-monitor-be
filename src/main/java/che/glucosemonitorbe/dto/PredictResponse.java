@@ -26,9 +26,17 @@ public class PredictResponse {
 
     /**
      * Recommended pre-bolus pause [min] that minimises ∫(G(t) − 5.5)² dt over the horizon.
-     * 0 when no insulin dose was provided.
+     * 0 when no insulin dose was provided. Null when a pre-bolus is already in flight -
+     * see {@link #observedPreBolusMinutes}.
      */
     private Integer preBolusMinutes;
+
+    /**
+     * Measured minutes between the already-logged pre-bolus and this prediction anchor.
+     * Non-null only when a pre-bolus was in flight, in which case
+     * {@link #preBolusMinutes} is null - no recommendation is computed.
+     */
+    private Integer observedPreBolusMinutes;
 
     /**
      * Recommended bolus strategy:
