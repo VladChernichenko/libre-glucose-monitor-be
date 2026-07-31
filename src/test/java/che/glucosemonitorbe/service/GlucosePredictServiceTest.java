@@ -23,6 +23,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Duration;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -101,25 +102,33 @@ class GlucosePredictServiceTest {
         when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
                 .thenReturn(List.of());
 
-        // ODE engine stub: always returns two fixed points
-        List<PredictionPointDTO> fixedCurve = List.of(
-                PredictionPointDTO.builder()
-                        .timestamp(LocalDateTime.now().plusMinutes(5))
-                        .predictedGlucose(7.0)
-                        .absorptionMode("HOVORKA_2COMP")
-                        .build(),
-                PredictionPointDTO.builder()
-                        .timestamp(LocalDateTime.now().plusMinutes(10))
-                        .predictedGlucose(6.8)
-                        .absorptionMode("HOVORKA_2COMP")
-                        .build()
-        );
+        // ODE engine stub: generates a point every 5 minutes across the FULL requested
+        // pathMinutes span, like the real buildPredictionPath does. A fixed-length stub
+        // (e.g. always 2 points near t=0) would starve any candidate whose scoring window
+        // starts after those points - passing tests for the wrong reason instead of
+        // exercising the cost function. Glucose is a flat 7.0 mmol/L so cost differences
+        // between candidates come only from window length, matching the pre-Task-5 "flat
+        // curve -> ties broken toward pause=0" behaviour relied on by other tests here;
+        // tests that need a specific trajectory (e.g. the hypo-avoidance test) override
+        // this stub for themselves.
         when(hovorkaService.buildPredictionPath(
                 any(HovorkaParameters.class),
                 anyDouble(), any(LocalDateTime.class),
                 anyList(), anyList(), anyList(),
                 eq(USER_ID), anyInt()))
-                .thenReturn(fixedCurve);
+                .thenAnswer(inv -> {
+                    LocalDateTime callNow     = inv.getArgument(2);
+                    int            pathMinutes = inv.getArgument(7);
+                    List<PredictionPointDTO> points = new ArrayList<>();
+                    for (int m = 5; m <= pathMinutes; m += 5) {
+                        points.add(PredictionPointDTO.builder()
+                                .timestamp(callNow.plusMinutes(m))
+                                .predictedGlucose(7.0)
+                                .absorptionMode("HOVORKA_2COMP")
+                                .build());
+                    }
+                    return points;
+                });
     }
 
     // ---
