@@ -12,6 +12,7 @@ import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,7 @@ class GlucosePredictServiceTest {
     private HovorkaParameterService         paramService;
     private UserService                     userService;
     private NoteRepository                  noteRepository;
+    private NoteToCarbsEntryMapper          noteToCarbsEntryMapper;
 
     private GlucosePredictService sut;
 
@@ -77,8 +79,10 @@ class GlucosePredictServiceTest {
         paramService   = mock(HovorkaParameterService.class);
         userService    = mock(UserService.class);
         noteRepository = mock(NoteRepository.class);
+        noteToCarbsEntryMapper = mock(NoteToCarbsEntryMapper.class);
 
-        sut = new GlucosePredictService(hovorkaService, paramService, userService, noteRepository);
+        sut = new GlucosePredictService(hovorkaService, paramService, userService,
+                                        noteRepository, noteToCarbsEntryMapper);
 
         // Default stubs
         UserDto userDto = new UserDto();
@@ -297,6 +301,55 @@ class GlucosePredictServiceTest {
         assertThat(carbsCaptor.getValue())
                 .as("ODE must receive the past note carbs plus the prospective meal")
                 .hasSizeGreaterThanOrEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("historical meals reach the ODE carrying protein, fat and GI")
+    void historicalMealsCarryMacros() {
+        LocalDateTime mealTime = LocalDateTime.now().minusMinutes(90);
+        Note past = new Note();
+        past.setId(UUID.randomUUID());
+        past.setUserId(USER_ID);
+        past.setTimestamp(mealTime);
+        past.setCarbs(60.0);
+        past.setInsulin(0.0);
+        past.setMeal("lunch");
+
+        CarbsEntry hydrated = CarbsEntry.builder()
+                .id(past.getId())
+                .timestamp(mealTime)
+                .carbs(60.0)
+                .mealType("lunch")
+                .originalCarbs(60.0)
+                .userId(USER_ID)
+                .build();
+        hydrated.setProtein(30.0);
+        hydrated.setFat(20.0);
+        hydrated.setEstimatedGi(35.0);
+
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(past));
+        when(noteToCarbsEntryMapper.toCarbsEntry(past)).thenReturn(hydrated);
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(0.0)
+                .build();
+
+        sut.predict(req, USERNAME);
+
+        ArgumentCaptor<List<CarbsEntry>> captor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                captor.capture(), anyList(), anyList(), eq(USER_ID), anyInt());
+
+        CarbsEntry passed = captor.getValue().stream()
+                .filter(e -> mealTime.equals(e.getTimestamp()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(passed.getProtein()).isEqualTo(30.0);
+        assertThat(passed.getFat()).isEqualTo(20.0);
+        assertThat(passed.getEstimatedGi()).isEqualTo(35.0);
     }
 
     @Test

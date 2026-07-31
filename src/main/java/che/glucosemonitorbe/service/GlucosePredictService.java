@@ -11,6 +11,7 @@ import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -68,6 +69,7 @@ public class GlucosePredictService {
     private final HovorkaParameterService         paramService;
     private final UserService                     userService;
     private final NoteRepository                  noteRepository;
+    private final NoteToCarbsEntryMapper           noteToCarbsEntryMapper;
 
     /**
      * Run the prediction pipeline and return the response.
@@ -84,7 +86,7 @@ public class GlucosePredictService {
         List<Note> recentNotes     = loadRecentNotes(userId, now);
         List<Note> longActingNotes = loadLongActingNotes(userId, now);
 
-        List<CarbsEntry>  pastCarbs = toCarbsEntries(recentNotes, userId);
+        List<CarbsEntry>  pastCarbs = toCarbsEntries(recentNotes);
         List<InsulinDose> pastDoses = toInsulinDoses(recentNotes, userId);
 
         // -- 2. Build macro-modulated Hovorka params ---------------------------
@@ -268,17 +270,10 @@ public class GlucosePredictService {
 
     // -- Note converters -------------------------------------------------------
 
-    private List<CarbsEntry> toCarbsEntries(List<Note> notes, UUID userId) {
+    private List<CarbsEntry> toCarbsEntries(List<Note> notes) {
         return notes.stream()
                 .filter(n -> n.getCarbs() != null && n.getCarbs() > 0)
-                .map(n -> CarbsEntry.builder()
-                        .id(n.getId())
-                        .timestamp(n.getTimestamp())
-                        .carbs(n.getCarbs())
-                        .mealType(n.getMeal())
-                        .originalCarbs(n.getCarbs())
-                        .userId(userId)
-                        .build())
+                .map(noteToCarbsEntryMapper::toCarbsEntry)
                 .collect(java.util.stream.Collectors.toList());
     }
 
