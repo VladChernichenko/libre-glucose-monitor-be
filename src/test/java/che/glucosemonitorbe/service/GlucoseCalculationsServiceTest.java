@@ -6,6 +6,7 @@ import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,21 +41,40 @@ class GlucoseCalculationsServiceTest {
     @Mock private ObjectMapper objectMapper;
     @Mock private FeatureToggleConfig featureToggleConfig;
     @Mock private UserSettingsService userSettingsService;
+    @Mock private NoteToCarbsEntryMapper noteToCarbsEntryMapper;
 
     private GlucoseCalculationsService service;
 
     @BeforeEach
     void setUp() {
+        // Default stub for noteToCarbsEntryMapper: convert Note to basic CarbsEntry
+        doAnswer(invocation -> {
+            Note note = invocation.getArgument(0);
+            CarbsEntry entry = CarbsEntry.builder()
+                .id(note.getId())
+                .timestamp(note.getTimestamp())
+                .carbs(note.getCarbs())
+                .insulin(note.getInsulin() != null ? note.getInsulin() : 0.0)
+                .mealType(note.getMeal())
+                .comment(note.getComment())
+                .glucoseValue(note.getGlucoseLevel())
+                .originalCarbs(note.getCarbs())
+                .userId(note.getUserId())
+                .build();
+            entry.setAbsorptionMode(note.getAbsorptionMode() != null ? note.getAbsorptionMode() : "DEFAULT_DECAY");
+            return entry;
+        }).when(noteToCarbsEntryMapper).toCarbsEntry(any(Note.class));
+
         service = new GlucoseCalculationsService(
                 cobService, insulinCalculatorService, noteRepository,
                 userService, userInsulinPreferencesService, objectMapper,
-                featureToggleConfig, userSettingsService);
+                featureToggleConfig, userSettingsService, noteToCarbsEntryMapper);
     }
 
     @Test
     void determineTrendUsesAdjustedThresholds() throws Exception {
         // Use a minimal service instance for the private-method reflection test
-        GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null);
+        GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null, null);
         Method method = GlucoseCalculationsService.class.getDeclaredMethod("determineTrend", PredictionFactors.class, double.class);
         method.setAccessible(true);
 
@@ -268,7 +288,7 @@ class GlucoseCalculationsServiceTest {
         GlucoseCalculationsService svc = new GlucoseCalculationsService(
                 realCobService, insulinCalculatorService, noteRepository,
                 userService, userInsulinPreferencesService, objectMapper,
-                featureToggleConfig, userSettingsMock);
+                featureToggleConfig, userSettingsMock, noteToCarbsEntryMapper);
 
         String username = "p4user";
         UUID userId = UUID.randomUUID();

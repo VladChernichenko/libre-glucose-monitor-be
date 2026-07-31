@@ -7,6 +7,7 @@ import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -32,7 +33,7 @@ public class GlucoseCalculationsService {
     private final UserInsulinPreferencesService userInsulinPreferencesService;
     private final ObjectMapper objectMapper;
     private final FeatureToggleConfig featureToggleConfig;
-    
+
     // Default constants for glucose calculations
     private static final double DEFAULT_CARB_RATIO = 2.0; // mmol/L per 10g carbs
     private static final double DEFAULT_ISF = 1.0; // mmol/L per unit insulin
@@ -53,6 +54,7 @@ public class GlucoseCalculationsService {
     // Sparse step applies beyond 4 h (HFHP / Dual Wave tail) - 10 min is fine for that region.
     private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 10;
     private final UserSettingsService userSettingsService;
+    private final NoteToCarbsEntryMapper noteToCarbsEntryMapper;
 
     /**
      * Optional: injected only when Hovorka model is on the classpath and enabled.
@@ -524,43 +526,7 @@ public class GlucoseCalculationsService {
      * Convert a Note with carbs data to a CarbsEntry object
      */
     private CarbsEntry convertNoteToCarbsEntry(Note note) {
-        CarbsEntry entry = CarbsEntry.builder()
-            .id(note.getId())
-            .timestamp(note.getTimestamp())
-            .carbs(note.getCarbs())
-            .insulin(note.getInsulin() != null ? note.getInsulin() : 0.0)
-            .mealType(note.getMeal())
-            .comment(note.getComment())
-            .glucoseValue(note.getGlucoseLevel())
-            .originalCarbs(note.getCarbs()) // Use same value as original
-            .userId(note.getUserId())
-            .build();
-        entry.setAbsorptionMode(note.getAbsorptionMode() != null ? note.getAbsorptionMode() : "DEFAULT_DECAY");
-        if (!featureToggleConfig.isNutritionAwarePredictionEnabled()) {
-            entry.setAbsorptionMode("DEFAULT_DECAY");
-            return entry;
-        }
-        if (note.getNutritionProfile() != null && !note.getNutritionProfile().isBlank()) {
-            try {
-                NutritionSnapshot snapshot = objectMapper.readValue(note.getNutritionProfile(), NutritionSnapshot.class);
-                entry.setEstimatedGi(snapshot.getEstimatedGi());
-                entry.setGlycemicLoad(snapshot.getGlycemicLoad());
-                entry.setFiber(snapshot.getFiber());
-                entry.setProtein(snapshot.getProtein());
-                entry.setFat(snapshot.getFat());
-                entry.setAbsorptionSpeedClass(snapshot.getAbsorptionSpeedClass());
-                if (snapshot.getAbsorptionMode() != null) {
-                    entry.setAbsorptionMode(snapshot.getAbsorptionMode());
-                }
-                entry.setBolusStrategy(snapshot.getBolusStrategy());
-                entry.setSuggestedDurationHours(snapshot.getSuggestedDurationHours());
-                entry.setPatternName(snapshot.getPatternName());
-            } catch (Exception e) {
-                log.warn("Failed to parse nutritionProfile for note {}: {}", note.getId(), e.getMessage());
-                entry.setAbsorptionMode("DEFAULT_DECAY");
-            }
-        }
-        return entry;
+        return noteToCarbsEntryMapper.toCarbsEntry(note);
     }
 
     private NutritionSummary summarizeNutrition(List<CarbsEntry> carbsEntries) {
