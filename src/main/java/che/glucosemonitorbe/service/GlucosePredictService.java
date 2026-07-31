@@ -119,37 +119,8 @@ public class GlucosePredictService {
                 ? Math.max(60, Math.min(480, req.getHorizonMinutes()))
                 : DEFAULT_HORIZON_MIN;
 
-        // -- 3. Add prospective meal at t = 0 ---------------------------------
-        List<CarbsEntry> carbsWithMeal = new ArrayList<>(pastCarbs);
-        if (carbsG > 0) {
-            carbsWithMeal.add(CarbsEntry.builder()
-                    .id(UUID.randomUUID())
-                    .timestamp(now)
-                    .carbs(carbsG).protein(proteinG).fat(fatG).fiber(fiberG)
-                    .mealType("predict").userId(userId)
-                    .build());
-        }
-
-        // -- 3b. Protein gluconeogenesis slow-glucose contribution -------------------
-        // Protein converts to glucose via GNG (~55% glucogenic fraction, 2-4h onset).
-        // Fat's effect on gastric emptying is already modelled by MacroNutrientGastricModel
-        // via BETA_FAT=2.20 in computeTMaxG(); adding fat kcal here caused +1.1 mmol/L
-        // meal-tail overshoot in the backtest (Variant B).
-        double glucFrac = req.getGluconeogenicFraction() != null
-                ? req.getGluconeogenicFraction() : 0.50;
-        int    pgnOnset = req.getFpuOnsetMin() != null
-                ? req.getFpuOnsetMin() : PGN_ONSET_MIN;
-
-        double pgnEquivCarbs = proteinG * glucFrac * PGN_CARB_FACTOR;
-        if (pgnEquivCarbs >= FPU_MIN_EQUIV_G) {
-            carbsWithMeal.add(CarbsEntry.builder()
-                    .id(UUID.randomUUID())
-                    .timestamp(now.plusMinutes(pgnOnset))
-                    .carbs(pgnEquivCarbs)
-                    .mealType("fpu-equiv")
-                    .userId(userId)
-                    .build());
-        }
+        // -- 3. Prospective meal + protein-gluconeogenesis tail, anchored to the meal --
+        List<CarbsEntry> carbsWithMeal = withProspectiveMeal(pastCarbs, req, userId, now);
 
         // -- 4. Pre-bolus: measured if one is in flight, otherwise recommended -----
         double insulinDose = safe(req.getInsulinDose());
@@ -171,16 +142,18 @@ public class GlucosePredictService {
         } else {
             int bestPause = optimisePreBolus(
                     req.getCurrentGlucose(), now,
-                    carbsWithMeal, pastDoses, longActingNotes,
-                    userId, mealParams, insulinDose, horizon);
+                    pastCarbs, pastDoses, longActingNotes,
+                    userId, mealParams, req, insulinDose, horizon);
             recommendedPause = bestPause;
+            carbsWithMeal    = withProspectiveMeal(pastCarbs, req, userId, now.plusMinutes(bestPause));
             if (insulinDose > 0) {
+                // Bolus now, meal after `bestPause` minutes - that is what a pre-bolus is.
                 finalDoses.add(InsulinDose.builder()
                         .id(UUID.randomUUID())
                         .userId(userId)
                         .units(insulinDose)
                         .type(InsulinDose.InsulinType.BOLUS)
-                        .timestamp(now.plusMinutes(bestPause))
+                        .timestamp(now)
                         .build());
             }
         }
@@ -220,11 +193,12 @@ public class GlucosePredictService {
     private int optimisePreBolus(
             double currentGlucose,
             LocalDateTime now,
-            List<CarbsEntry> carbsEntries,
+            List<CarbsEntry> history,
             List<InsulinDose> baseDoses,
             List<Note> longActingNotes,
             UUID userId,
             HovorkaParameters params,
+            PredictRequest req,
             double insulinDose,
             int horizon) {
 
@@ -234,34 +208,45 @@ public class GlucosePredictService {
         double bestCost  = Double.MAX_VALUE;
 
         for (int pause : PREBOLUS_CANDIDATES) {
+            LocalDateTime mealTime = now.plusMinutes(pause);
+
+            // Bolus now, meal after `pause` minutes - that is what a pre-bolus is.
             List<InsulinDose> doses = new ArrayList<>(baseDoses);
             doses.add(InsulinDose.builder()
                     .id(UUID.randomUUID())
                     .userId(userId)
                     .units(insulinDose)
                     .type(InsulinDose.InsulinType.BOLUS)
-                    .timestamp(now.plusMinutes(pause))
+                    .timestamp(now)
                     .build());
 
+            List<CarbsEntry> entries = withProspectiveMeal(history, req, userId, mealTime);
+
+            // Extend the simulation by `pause` so every candidate is scored over an equal
+            // post-meal window. With a fixed horizon a 30-min pause would see 30 fewer
+            // minutes of post-meal curve than a 0-min pause and win on arithmetic alone.
             List<PredictionPointDTO> sim = hovorkaService.buildPredictionPath(
                     params, currentGlucose, now,
-                    carbsEntries, doses, longActingNotes, userId, horizon);
+                    entries, doses, longActingNotes, userId, horizon + pause);
 
-            double cost = sim.stream().mapToDouble(pt -> {
-                double g   = pt.getPredictedGlucose() != null ? pt.getPredictedGlucose() : currentGlucose;
-                double err = g - TARGET_GLUCOSE;
-                double base = err * err;
-                // Asymmetric, clinically-weighted penalty: an aggressive pre-bolus that drives
-                // a predicted hypo is far more dangerous than mild residual hyperglycaemia, so
-                // a symmetric ∫(G−5.5)² could happily recommend a pause that bottoms out at 3.0.
-                if (g < HYPO_THRESHOLD) {
-                    double below = HYPO_THRESHOLD - g;
-                    base += HYPO_PENALTY_WEIGHT * below * below;
-                } else if (g < TARGET_GLUCOSE) {
-                    base *= LOW_SIDE_WEIGHT;   // gently bias away from the low side of target
-                }
-                return base;
-            }).sum();
+            double cost = sim.stream()
+                    .filter(pt -> pt.getTimestamp() != null && !pt.getTimestamp().isBefore(mealTime))
+                    .mapToDouble(pt -> {
+                        double g   = pt.getPredictedGlucose() != null ? pt.getPredictedGlucose() : currentGlucose;
+                        double err = g - TARGET_GLUCOSE;
+                        double base = err * err;
+                        // Asymmetric, clinically-weighted penalty: an aggressive pre-bolus that
+                        // drives a predicted hypo is far more dangerous than mild residual
+                        // hyperglycaemia, so a symmetric integral could happily recommend a
+                        // pause that bottoms out at 3.0.
+                        if (g < HYPO_THRESHOLD) {
+                            double below = HYPO_THRESHOLD - g;
+                            base += HYPO_PENALTY_WEIGHT * below * below;
+                        } else if (g < TARGET_GLUCOSE) {
+                            base *= LOW_SIDE_WEIGHT;
+                        }
+                        return base;
+                    }).sum();
 
             if (cost < bestCost) {
                 bestCost  = cost;
@@ -269,6 +254,56 @@ public class GlucosePredictService {
             }
         }
         return bestPause;
+    }
+
+    /**
+     * Returns {@code history} plus the prospective meal at {@code mealTime} and, when the
+     * protein load warrants it, a slow-carb gluconeogenesis entry at
+     * {@code mealTime + onset}.
+     *
+     * <p>Both entries are anchored to the meal rather than to "now", so a candidate
+     * pre-bolus pause shifts them together.</p>
+     */
+    private List<CarbsEntry> withProspectiveMeal(List<CarbsEntry> history,
+                                                 PredictRequest req,
+                                                 UUID userId,
+                                                 LocalDateTime mealTime) {
+        double carbsG   = safe(req.getCarbs());
+        double proteinG = safe(req.getProtein());
+        double fatG     = safe(req.getFat());
+        double fiberG   = safe(req.getFiber());
+
+        List<CarbsEntry> entries = new ArrayList<>(history);
+
+        if (carbsG > 0) {
+            entries.add(CarbsEntry.builder()
+                    .id(UUID.randomUUID())
+                    .timestamp(mealTime)
+                    .carbs(carbsG).protein(proteinG).fat(fatG).fiber(fiberG)
+                    .mealType("predict").userId(userId)
+                    .build());
+        }
+
+        // Protein converts to glucose via gluconeogenesis (~50 % glucogenic, 2-4 h onset).
+        // Fat's effect on gastric emptying is already modelled by MacroNutrientGastricModel
+        // via BETA_FAT = 2.20 in computeTMaxG(); adding fat kcal here caused +1.1 mmol/L
+        // meal-tail overshoot in the backtest (Variant B).
+        double glucFrac = req.getGluconeogenicFraction() != null
+                ? req.getGluconeogenicFraction() : 0.50;
+        int    pgnOnset = req.getFpuOnsetMin() != null
+                ? req.getFpuOnsetMin() : PGN_ONSET_MIN;
+
+        double pgnEquivCarbs = proteinG * glucFrac * PGN_CARB_FACTOR;
+        if (pgnEquivCarbs >= FPU_MIN_EQUIV_G) {
+            entries.add(CarbsEntry.builder()
+                    .id(UUID.randomUUID())
+                    .timestamp(mealTime.plusMinutes(pgnOnset))
+                    .carbs(pgnEquivCarbs)
+                    .mealType("fpu-equiv")
+                    .userId(userId)
+                    .build());
+        }
+        return entries;
     }
 
     // -- Note loaders ---------------------------------------------------------

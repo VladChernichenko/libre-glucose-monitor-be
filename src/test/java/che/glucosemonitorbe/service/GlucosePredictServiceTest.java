@@ -966,6 +966,99 @@ class GlucosePredictServiceTest {
     }
 
     // ---
+    // MARK: Task 5 - advisory path bolus/meal ordering
+    // ---
+
+    @Test
+    @DisplayName("advisory path: the bolus never lands after the meal")
+    void advisory_bolusPrecedesMeal() {
+        when(preBolusResolver.resolve(any(), anyList(), any(LocalDateTime.class)))
+                .thenReturn(Optional.empty());
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .insulinDose(5.0)
+                .build();
+
+        sut.predict(req, USERNAME);
+
+        ArgumentCaptor<List<CarbsEntry>>  meals = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<InsulinDose>> doses = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                meals.capture(), doses.capture(), anyList(), eq(USER_ID), anyInt());
+
+        for (int i = 0; i < doses.getAllValues().size(); i++) {
+            LocalDateTime bolusAt = doses.getAllValues().get(i).stream()
+                    .map(InsulinDose::getTimestamp)
+                    .max(LocalDateTime::compareTo).orElseThrow();
+            LocalDateTime mealAt = meals.getAllValues().get(i).stream()
+                    .filter(e -> "predict".equals(e.getMealType()))
+                    .map(CarbsEntry::getTimestamp)
+                    .findFirst().orElseThrow();
+            assertThat(bolusAt)
+                    .as("candidate %d: bolus must not follow the meal", i)
+                    .isBeforeOrEqualTo(mealAt);
+        }
+    }
+
+    @Test
+    @DisplayName("advisory path: the PGN entry is anchored to the meal, not to now")
+    void advisory_pgnFollowsMeal() {
+        when(preBolusResolver.resolve(any(), anyList(), any(LocalDateTime.class)))
+                .thenReturn(Optional.empty());
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .protein(40.0)
+                .insulinDose(5.0)
+                .fpuOnsetMin(120)
+                .build();
+
+        sut.predict(req, USERNAME);
+
+        ArgumentCaptor<List<CarbsEntry>> meals = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                meals.capture(), anyList(), anyList(), eq(USER_ID), anyInt());
+
+        for (List<CarbsEntry> entries : meals.getAllValues()) {
+            LocalDateTime mealAt = entries.stream()
+                    .filter(e -> "predict".equals(e.getMealType()))
+                    .map(CarbsEntry::getTimestamp).findFirst().orElseThrow();
+            LocalDateTime pgnAt = entries.stream()
+                    .filter(e -> "fpu-equiv".equals(e.getMealType()))
+                    .map(CarbsEntry::getTimestamp).findFirst().orElseThrow();
+            assertThat(Duration.between(mealAt, pgnAt).toMinutes()).isEqualTo(120);
+        }
+    }
+
+    @Test
+    @DisplayName("advisory path: each candidate simulates horizon + its own pause")
+    void advisory_horizonExtendedPerCandidate() {
+        when(preBolusResolver.resolve(any(), anyList(), any(LocalDateTime.class)))
+                .thenReturn(Optional.empty());
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .insulinDose(5.0)
+                .horizonMinutes(300)
+                .build();
+
+        sut.predict(req, USERNAME);
+
+        ArgumentCaptor<Integer> horizons = ArgumentCaptor.forClass(Integer.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                anyList(), anyList(), anyList(), eq(USER_ID), horizons.capture());
+
+        assertThat(horizons.getAllValues()).contains(300, 305, 310, 315, 320, 325, 330);
+    }
+
+    // ---
     // Helpers
     // ---
 
