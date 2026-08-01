@@ -29,6 +29,16 @@ public class PredictRequest {
     @DecimalMin(value = "0.1", message = "currentGlucose must be positive")
     private Double currentGlucose;      // mmol/L - current CGM reading
 
+    /**
+     * Prospective rapid-acting bolus [U] at t = 0.
+     *
+     * <p><b>Ignored when a pre-bolus is already in flight.</b> If {@link #insulinLoggedAt}
+     * (or an auto-detected pre-bolus note) resolves to a logged dose and this value disagrees
+     * with that note's units by more than 0.05 U, the server logs a warning and simulates the
+     * note's units - the database is the source of truth for what was actually injected. The
+     * difference is not simulated on top: send a second dose as its own note if more insulin
+     * was really given.</p>
+     */
     @DecimalMin(value = "0.0", message = "insulinDose must be non-negative")
     private Double insulinDose;         // units - prospective rapid-acting bolus at t=0
 

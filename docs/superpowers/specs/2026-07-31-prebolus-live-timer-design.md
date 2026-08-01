@@ -172,12 +172,27 @@ Exactly one of the two fields is non-null in any response.
 - Bolus at `now`, meal at `now + pause`. This is the defect-1 sign fix.
 - The PGN-equivalent entry is anchored to the meal, so it moves to
   `now + pause + pgnOnset`.
-- Each candidate is scored over a window anchored to its own meal — `meal` to
-  `meal + horizon` — rather than `now` to `now + horizon`. With a fixed horizon a
-  30-minute pause would receive 30 fewer minutes of post-meal curve than a 0-minute
-  pause, biasing the optimiser toward longer pauses for purely numerical reasons. Each
-  candidate therefore simulates `horizon + pause` minutes and scores the final
-  `horizon` window.
+- Each candidate simulates `horizon + pause` minutes and is scored over that whole
+  window — `now` to `now + horizon + pause` — from the injection onward. With a fixed
+  `horizon` a 30-minute pause would receive 30 fewer minutes of post-meal curve than a
+  0-minute pause, biasing the optimiser toward longer pauses for purely numerical
+  reasons; extending the simulation by the pause removes that bias.
+- The window deliberately includes the pre-meal interval `[now, meal)` rather than
+  starting at the meal. That interval is exactly where an over-long pre-bolus does its
+  damage — insulin acting with no carbs yet — and it grows with the pause, so excluding
+  it would weaken the hypo penalty precisely for the most aggressive candidates.
+- The per-point penalties are aggregated as a **trapezoidal time-weighted mean**,
+  `Σ ½(cᵢ + cᵢ₊₁)·Δtᵢ / (t_last − t_first)`, not a per-sample average. The ODE grid is
+  not uniform — 5-minute steps below 240 min, 10-minute steps beyond — so a per-sample
+  mean counts a sparse-tail point as worth the same as a dense-head point, at half its
+  true duration. Since the window length varies with the pause, so does the dense/sparse
+  mix, and a candidate could win on emission arithmetic rather than on modelled glucose.
+  Weighting by Δt makes the score a mean penalty per minute, independent of both sample
+  count and emission density. A window yielding fewer than two points scores
+  `Double.MAX_VALUE`, never 0.0, so a degenerate window can never win.
+- The final client-facing simulation also runs for `horizon + bestPause`, so the returned
+  curve is the winning candidate's own curve rather than one truncated `bestPause`
+  minutes short of every window that was scored.
 - Consequently the meal entry and the PGN entry are rebuilt inside the candidate loop
   rather than hoisted above it.
 - `preBolusMinutes = bestPause`, `observedPreBolusMinutes = null`.

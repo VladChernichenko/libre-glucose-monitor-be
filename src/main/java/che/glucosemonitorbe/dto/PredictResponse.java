@@ -21,13 +21,26 @@ import java.util.List;
 @AllArgsConstructor
 public class PredictResponse {
 
-    /** Predicted glucose trajectory - one point every 5 min (0-4 h) or 10 min (4-8 h). */
+    /**
+     * Predicted glucose trajectory - one point every 5 min (0-4 h) or 10 min (4-8 h).
+     *
+     * <p>Spans the requested horizon from now, extended by {@link #preBolusMinutes} when a
+     * pause is recommended, so the curve always covers the full horizon past the meal.</p>
+     */
     private List<PredictionPointDTO> curve;
 
     /**
-     * Recommended pre-bolus pause [min] that minimises ∫(G(t) − 5.5)² dt over the horizon.
-     * 0 when no insulin dose was provided. Null when a pre-bolus is already in flight -
-     * see {@link #observedPreBolusMinutes}.
+     * Recommended pre-bolus pause [min]: how long to wait between injecting and eating.
+     *
+     * <p>Chosen from [0, 5, 10, 15, 20, 25, 30] as the candidate minimising a time-weighted
+     * mean deviation from 5.5 mmol/L, scored from the injection onward - the pre-meal
+     * interval included, since that is where an over-long pre-bolus causes a hypo.
+     * Deviations below 3.9 mmol/L are penalised far more heavily than equivalent
+     * hyperglycaemia, so the recommendation is deliberately hypo-averse.</p>
+     *
+     * <p>0 when no insulin dose was provided. Null when a pre-bolus is already in flight,
+     * in which case no recommendation is computed and the measured elapsed time is returned
+     * as {@link #observedPreBolusMinutes} instead.</p>
      */
     private Integer preBolusMinutes;
 
