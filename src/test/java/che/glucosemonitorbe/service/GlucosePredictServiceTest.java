@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.IntToDoubleFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -920,6 +921,82 @@ class GlucosePredictServiceTest {
     }
 
     @Test
+    @DisplayName("optimiser weights cost by elapsed time, not by sample count")
+    void preBolusOptimiser_weightsCostByTime_notBySampleCount() {
+        // Pins the trapezoidal time-weighted mean against a curve where the two aggregations
+        // genuinely disagree. The ODE grid is NOT uniform - 5-min steps below 240 min, 10-min
+        // steps beyond - so a per-sample mean under-weights the sparse tail by exactly 2x
+        // relative to its true duration, and the dense/sparse mix shifts with the pause.
+        //
+        // Each candidate is flat at `dense` up to 240 min and exactly on target (5.5) beyond,
+        // so the tail is free and only the window length differs:
+        //   pause 0  -> 6.50  (cost 1.000000 per dense point)
+        //   pause 10 -> 6.513 (cost 1.026169 per dense point - very slightly worse)
+        //   others   -> 7.50  (cost 4.0, decisively worse)
+        // Pause 10 buys a longer zero-cost tail at the price of a marginally worse dense
+        // region. Under `.average()` that trade loses (0.888889 < 0.895566 -> pause 0); under
+        // the trapezoidal time-weighted mean it wins (0.807477 < 0.813559 -> pause 10),
+        // because the tail's real duration is finally counted. Reverting the production
+        // aggregation to `.average()` flips this assertion to 0.
+        when(hovorkaService.buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                anyList(), anyList(), anyList(), eq(USER_ID), anyInt()))
+                .thenAnswer(inv -> {
+                    LocalDateTime now         = inv.getArgument(2);
+                    int           pathMinutes = inv.getArgument(7);
+                    int           pause       = pauseOf(now, inv.getArgument(3));
+                    double dense = switch (pause) {
+                        case 0  -> 6.5;
+                        case 10 -> 6.513;
+                        default -> 7.5;
+                    };
+                    return emitCurve(now, pathMinutes, m -> m <= 240 ? dense : 5.5);
+                });
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .insulinDose(5.0)
+                .horizonMinutes(300)
+                .build();
+
+        PredictResponse resp = sut.predict(req, USERNAME);
+
+        assertThat(resp.getPreBolusMinutes())
+                .as("cost must be a time average; per-sample averaging would pick 0 here")
+                .isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("a candidate window with fewer than two points scores worst, never best")
+    void preBolusOptimiser_degenerateWindowNeverWins() {
+        // The guard that stops an empty or single-point window scoring a perfect 0.0 and
+        // winning outright. pause=0 emits nothing; pause=15 is uniquely on target.
+        when(hovorkaService.buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                anyList(), anyList(), anyList(), eq(USER_ID), anyInt()))
+                .thenAnswer(inv -> {
+                    LocalDateTime now         = inv.getArgument(2);
+                    int           pathMinutes = inv.getArgument(7);
+                    int           pause       = pauseOf(now, inv.getArgument(3));
+                    if (pause == 0) return List.of();
+                    return emitCurve(now, pathMinutes, pause == 15 ? 5.5 : 9.0);
+                });
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .insulinDose(5.0)
+                .build();
+
+        PredictResponse resp = sut.predict(req, USERNAME);
+
+        assertThat(resp.getPreBolusMinutes())
+                .as("an empty window must score Double.MAX_VALUE, not 0.0")
+                .isEqualTo(15);
+    }
+
+    @Test
     @DisplayName("advisory path: final simulation reproduces the winning candidate - bolus at now, meal at now + preBolusMinutes")
     void advisory_finalLegMatchesWinningCandidate() {
         // Pins ruling 1 (the final-leg bolus timestamp fix): stubs a curve where a genuinely
@@ -957,9 +1034,11 @@ class GlucosePredictServiceTest {
         ArgumentCaptor<LocalDateTime>     nowCaptor   = ArgumentCaptor.forClass(LocalDateTime.class);
         ArgumentCaptor<List<CarbsEntry>>  mealsCaptor = ArgumentCaptor.forClass(List.class);
         ArgumentCaptor<List<InsulinDose>> dosesCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Integer>           pathCaptor  = ArgumentCaptor.forClass(Integer.class);
         verify(hovorkaService, atLeastOnce()).buildPredictionPath(
                 any(HovorkaParameters.class), anyDouble(), nowCaptor.capture(),
-                mealsCaptor.capture(), dosesCaptor.capture(), anyList(), eq(USER_ID), anyInt());
+                mealsCaptor.capture(), dosesCaptor.capture(), anyList(), eq(USER_ID),
+                pathCaptor.capture());
 
         LocalDateTime now = nowCaptor.getValue();
         List<CarbsEntry>  finalMeals = mealsCaptor.getAllValues().get(mealsCaptor.getAllValues().size() - 1);
@@ -979,6 +1058,14 @@ class GlucosePredictServiceTest {
         assertThat(finalMealAt)
                 .as("final simulation's meal must be at now + preBolusMinutes")
                 .isEqualTo(now.plusMinutes(resp.getPreBolusMinutes()));
+
+        // The returned curve must be the winning candidate's own curve. Running the final leg
+        // for `horizon` alone would end `bestPause` minutes short of every window the optimiser
+        // scored, cutting the post-meal excursion the client asked about off the end.
+        List<Integer> paths = pathCaptor.getAllValues();
+        assertThat(paths.get(paths.size() - 1))
+                .as("final simulation must span horizon + preBolusMinutes (300 + 20)")
+                .isEqualTo(300 + resp.getPreBolusMinutes());
     }
 
     // ---
@@ -1161,16 +1248,36 @@ class GlucosePredictServiceTest {
      * {@code setUp()} stub for why a uniform-density stub would hide a real bias.
      */
     private static List<PredictionPointDTO> emitCurve(LocalDateTime now, int pathMinutes, double glucose) {
+        return emitCurve(now, pathMinutes, m -> glucose);
+    }
+
+    /**
+     * As {@link #emitCurve(LocalDateTime, int, double)}, but the glucose value is a function of
+     * the elapsed minute, so a test can give the dense (&lt; 240 min) and sparse (&ge; 240 min)
+     * halves of the grid different values - the only way to make per-sample and time-weighted
+     * aggregation disagree.
+     */
+    private static List<PredictionPointDTO> emitCurve(LocalDateTime now, int pathMinutes,
+                                                      IntToDoubleFunction glucoseAt) {
         List<PredictionPointDTO> points = new ArrayList<>();
         int m = 5;
         while (m <= pathMinutes) {
             points.add(PredictionPointDTO.builder()
                     .timestamp(now.plusMinutes(m))
-                    .predictedGlucose(glucose)
+                    .predictedGlucose(glucoseAt.applyAsDouble(m))
                     .absorptionMode("HOVORKA_2COMP")
                     .build());
             m += (m < 240 ? 5 : 10);
         }
         return points;
+    }
+
+    /** The candidate pause a stubbed ODE call is being asked about, read off its meal entry. */
+    private static int pauseOf(LocalDateTime now, List<CarbsEntry> entries) {
+        return entries.stream()
+                .filter(e -> "predict".equals(e.getMealType()))
+                .map(CarbsEntry::getTimestamp)
+                .mapToInt(t -> (int) Duration.between(now, t).toMinutes())
+                .findFirst().orElse(0);
     }
 }

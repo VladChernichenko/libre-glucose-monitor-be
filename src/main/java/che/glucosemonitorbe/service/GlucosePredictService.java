@@ -19,8 +19,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,11 +35,24 @@ import java.util.UUID;
  *   <li>Load 8-hour carb and insulin history from the database.</li>
  *   <li>Build Hovorka parameters for the user; override tMaxG via
  *       {@link MacroNutrientGastricModel} (Elashoff + fiber viscosity).</li>
- *   <li>Add the prospective meal as a future CarbsEntry at t = 0.</li>
- *   <li>Optimise pre-bolus pause: run the ODE for candidate pauses
- *       [0, 5, 10, 15, 20, 25, 30] min and pick the one that minimises
- *       ∫(G(t) − 5.5)² dt over the horizon.</li>
- *   <li>Return the final prediction curve, recommended pause, and bolus strategy.</li>
+ *   <li>Resolve whether a pre-bolus is already in flight ({@link PreBolusResolver}), then
+ *       take one of two branches.</li>
+ *   <li><b>Live-timer branch</b> - a logged pre-bolus is in flight. Its dose is already in
+ *       the loaded history and is not added again; the meal stays at {@code now}; no
+ *       optimisation runs. The response reports the measured
+ *       {@code observedPreBolusMinutes} and leaves {@code preBolusMinutes} null.</li>
+ *   <li><b>Advisory branch</b> - no pre-bolus in flight. The bolus is placed at {@code now}
+ *       and the prospective meal (plus its protein-gluconeogenesis tail) at
+ *       {@code now + pause} for each candidate pause [0, 5, 10, 15, 20, 25, 30] min. Each
+ *       candidate simulates {@code horizon + pause} minutes and is scored over that whole
+ *       window from the injection onward - including the pre-meal interval, where an
+ *       over-long pre-bolus causes its hypo - as a trapezoidal time-weighted mean of the
+ *       hypo-weighted squared deviation from 5.5 mmol/L (see
+ *       {@link #timeWeightedMeanCost}). The response reports the winning pause as
+ *       {@code preBolusMinutes} and leaves {@code observedPreBolusMinutes} null.</li>
+ *   <li>Return the final prediction curve - on the advisory branch it spans
+ *       {@code horizon + recommendedPause}, so it is the winning candidate's own curve -
+ *       together with the pause fields and the bolus strategy.</li>
  * </ol>
  */
 @Slf4j
@@ -159,11 +174,19 @@ public class GlucosePredictService {
         }
 
         // -- 5. Final simulation ----------------------------------------------
+        // On the advisory path the meal sits at now + recommendedPause, so simulating only
+        // `horizon` would return a curve ending `recommendedPause` minutes short of every
+        // window the optimiser scored - at the clamp floor (horizon 60, pause 30) the curve
+        // would stop before the meal it was asked about had even peaked. Extending by the
+        // pause makes the returned curve the winning candidate's own curve. On the live-timer
+        // path recommendedPause is null and the meal is already at now, so `horizon` stands.
+        int finalPathMinutes = horizon + (recommendedPause != null ? recommendedPause : 0);
+
         List<PredictionPointDTO> curve = hovorkaService.buildPredictionPath(
                 mealParams,
                 req.getCurrentGlucose(), now,
                 carbsWithMeal, finalDoses, longActingNotes,
-                userId, horizon);
+                userId, finalPathMinutes);
 
         double betaWeighted = MacroNutrientGastricModel.weightedBeta(carbsG, proteinG, fatG);
         String strategy     = MacroNutrientGastricModel.bolusStrategy(fatG, proteinG);
@@ -185,9 +208,9 @@ public class GlucosePredictService {
 
     /**
      * Finds the pre-bolus pause [min] from {@link #PREBOLUS_CANDIDATES} that minimises the
-     * mean squared deviation from 5.5 mmol/L, scored over the entire simulated window from
-     * the bolus (at {@code now}) through {@code horizon} minutes past that candidate's own
-     * meal time.
+     * time-weighted mean deviation from 5.5 mmol/L (see {@link #timeWeightedMeanCost}),
+     * scored over the entire simulated window from the bolus (at {@code now}) through
+     * {@code horizon} minutes past that candidate's own meal time.
      *
      * <p>Runs at most {@code PREBOLUS_CANDIDATES.length} ODE simulations - each is
      * a few milliseconds, so the total overhead is negligible.</p>
@@ -234,31 +257,8 @@ public class GlucosePredictService {
             // The interval [now, mealTime) is exactly where an over-long pre-bolus does its
             // damage (insulin acting with no carbs yet), and that interval grows with the
             // pause, so excluding it would weaken the hypo penalty precisely for the most
-            // aggressive candidates. Average rather than sum: the ODE emits every 5 min below
-            // 240 min and every 10 min beyond, so a longer `horizon + pause` window has both
-            // more points AND a lower average point density than a shorter one. Summing would
-            // let a longer pause win on sample-count/density arithmetic alone, independent of
-            // the actual glucose values - the same "wins on arithmetic" failure this method
-            // exists to avoid, just moved from the horizon to the emission schedule. Averaging
-            // makes candidates comparable regardless of how many points they happen to emit;
-            // `orElse` also removes the "empty window scores a perfect 0.0" degenerate case.
-            double cost = sim.stream()
-                    .mapToDouble(pt -> {
-                        double g   = pt.getPredictedGlucose() != null ? pt.getPredictedGlucose() : currentGlucose;
-                        double err = g - TARGET_GLUCOSE;
-                        double base = err * err;
-                        // Asymmetric, clinically-weighted penalty: an aggressive pre-bolus that
-                        // drives a predicted hypo is far more dangerous than mild residual
-                        // hyperglycaemia, so a symmetric average could happily recommend a
-                        // pause that bottoms out at 3.0.
-                        if (g < HYPO_THRESHOLD) {
-                            double below = HYPO_THRESHOLD - g;
-                            base += HYPO_PENALTY_WEIGHT * below * below;
-                        } else if (g < TARGET_GLUCOSE) {
-                            base *= LOW_SIDE_WEIGHT;
-                        }
-                        return base;
-                    }).average().orElse(Double.MAX_VALUE);
+            // aggressive candidates.
+            double cost = timeWeightedMeanCost(sim, currentGlucose);
 
             if (cost < bestCost) {
                 bestCost  = cost;
@@ -266,6 +266,80 @@ public class GlucosePredictService {
             }
         }
         return bestPause;
+    }
+
+    /**
+     * Trapezoidal time-weighted mean of {@link #pointPenalty} over a candidate's window:
+     * {@code Σ ½(cᵢ + cᵢ₊₁)·Δtᵢ / (t_last − t_first)}.
+     *
+     * <p>Time-weighted rather than per-sample. The ODE grid is not uniform - it emits every
+     * 5 minutes while the elapsed minute is below 240 and every 10 minutes beyond - so a
+     * per-sample mean silently counts a point in the sparse tail as worth the same as a point
+     * in the dense head, i.e. half its true duration. Because the window is
+     * {@code horizon + pause} long, the dense/sparse mix differs per candidate, so the
+     * effective weighting would shift with the pause and let a candidate win on emission
+     * arithmetic rather than on the modelled glucose. Weighting by Δt removes both the
+     * sample-count and the density dependence: the score is the mean penalty per minute.</p>
+     *
+     * <p>A window with fewer than two usable points, or one whose points span no time, scores
+     * {@link Double#MAX_VALUE} rather than 0.0 - an empty or degenerate window must never win.</p>
+     *
+     * @param sim             the candidate's emitted curve
+     * @param fallbackGlucose value substituted for points with a null predicted glucose
+     */
+    private double timeWeightedMeanCost(List<PredictionPointDTO> sim, double fallbackGlucose) {
+        if (sim == null || sim.size() < 2) {
+            return Double.MAX_VALUE;
+        }
+        List<PredictionPointDTO> pts = sim.stream()
+                .filter(p -> p.getTimestamp() != null)
+                .sorted(Comparator.comparing(PredictionPointDTO::getTimestamp))
+                .toList();
+        if (pts.size() < 2) {
+            return Double.MAX_VALUE;
+        }
+
+        double spanMin = minutesBetween(pts.get(0).getTimestamp(),
+                                        pts.get(pts.size() - 1).getTimestamp());
+        if (spanMin <= 0) {
+            return Double.MAX_VALUE;
+        }
+
+        double integral = 0.0;
+        double prevCost = pointPenalty(pts.get(0), fallbackGlucose);
+        for (int i = 1; i < pts.size(); i++) {
+            double cost = pointPenalty(pts.get(i), fallbackGlucose);
+            double dt   = minutesBetween(pts.get(i - 1).getTimestamp(), pts.get(i).getTimestamp());
+            integral += 0.5 * (prevCost + cost) * dt;
+            prevCost = cost;
+        }
+        return integral / spanMin;
+    }
+
+    /**
+     * Clinical penalty for a single predicted point: squared deviation from
+     * {@link #TARGET_GLUCOSE}, asymmetrically weighted.
+     *
+     * <p>An aggressive pre-bolus that drives a predicted hypo is far more dangerous than mild
+     * residual hyperglycaemia, so a symmetric cost could happily recommend a pause that bottoms
+     * out at 3.0 mmol/L.</p>
+     */
+    private double pointPenalty(PredictionPointDTO pt, double fallbackGlucose) {
+        double g    = pt.getPredictedGlucose() != null ? pt.getPredictedGlucose() : fallbackGlucose;
+        double err  = g - TARGET_GLUCOSE;
+        double base = err * err;
+        if (g < HYPO_THRESHOLD) {
+            double below = HYPO_THRESHOLD - g;
+            base += HYPO_PENALTY_WEIGHT * below * below;
+        } else if (g < TARGET_GLUCOSE) {
+            base *= LOW_SIDE_WEIGHT;
+        }
+        return base;
+    }
+
+    /** Fractional minutes between two instants - the ODE grid is not always whole-minute. */
+    private static double minutesBetween(LocalDateTime from, LocalDateTime to) {
+        return Duration.between(from, to).toNanos() / 60_000_000_000.0;
     }
 
     /**
