@@ -192,19 +192,49 @@ class PreBolusResolverTest {
         assertThat(sut.resolve(NOW.minusMinutes(140), notes, NOW)).isEmpty();
     }
 
+    /**
+     * Pins {@code matchExplicit}'s own max-age boundary, mirroring
+     * {@link #boundaryExactly120Minutes()} / {@link #boundaryLastValidMinute()} for
+     * {@code detect}. {@link #explicitOlderThan2Hours()} at 140 minutes is rejected by
+     * both {@code >= MAX_AGE} and a loosened {@code > MAX_AGE}, so it cannot catch a
+     * regression of the comparator - only the exact-120 case can.
+     */
+    @Test
+    @DisplayName("explicit insulinLoggedAt at exactly 120 minutes (2-hour boundary) is rejected")
+    void explicitBoundaryExactly120Minutes() {
+        LocalDateTime at = NOW.minusMinutes(120);
+        List<Note> notes = List.of(note("dinner", 6.0, 0.0, at));
+        assertThat(sut.resolve(at, notes, NOW)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("explicit insulinLoggedAt at 119 minutes is still valid")
+    void explicitBoundaryLastValidMinute() {
+        LocalDateTime at = NOW.minusMinutes(119);
+        List<Note> notes = List.of(note("dinner", 6.0, 0.0, at));
+
+        PreBolusContext ctx = sut.resolve(at, notes, NOW).orElseThrow();
+
+        assertThat(ctx.source()).isEqualTo(PreBolusContext.Source.EXPLICIT);
+        assertThat(ctx.elapsedMinutes()).isEqualTo(119);
+    }
+
     @Test
     @DisplayName("note timestamped after now clamps negative elapsed to zero")
     void negativeElapsedClamped() {
-        // Note is stamped 30 seconds after NOW, loggedAt is 30 seconds before NOW.
-        // This places the note within 1 minute of loggedAt (match tolerance = 1 minute).
-        LocalDateTime noteTime = NOW.plusSeconds(30);
-        LocalDateTime loggedAt = NOW.minusSeconds(30);
+        // 60 seconds is the largest future skew that still matches: matchExplicit rejects a
+        // loggedAt after `now`, and the note must sit within MATCH_TOLERANCE (1 min) of it.
+        // So loggedAt == NOW and the note at NOW + 60s. Duration.between(note, now) is then
+        // exactly -1 minute, and Math.max(0, ...) is what turns it into 0 - a smaller skew
+        // (e.g. 30s) truncates to 0 on its own and would pass with or without the clamp.
+        LocalDateTime noteTime = NOW.plusSeconds(60);
         List<Note> notes = List.of(note("dinner", 6.0, 0.0, noteTime));
 
-        PreBolusContext ctx = sut.resolve(loggedAt, notes, NOW).orElseThrow();
+        PreBolusContext ctx = sut.resolve(NOW, notes, NOW).orElseThrow();
 
-        // Elapsed from note (NOW+30s) to now (NOW) is negative, but clamped to 0
-        assertThat(ctx.elapsedMinutes()).isEqualTo(0);
+        assertThat(ctx.elapsedMinutes())
+                .as("raw elapsed is -1 min; the clamp must floor it at 0")
+                .isEqualTo(0);
         assertThat(ctx.source()).isEqualTo(PreBolusContext.Source.EXPLICIT);
     }
 }
