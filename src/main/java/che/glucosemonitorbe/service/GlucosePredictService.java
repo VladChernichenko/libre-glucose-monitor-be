@@ -184,8 +184,10 @@ public class GlucosePredictService {
     // -- Pre-bolus optimisation ------------------------------------------------
 
     /**
-     * Finds the pre-bolus pause [min] from {@link #PREBOLUS_CANDIDATES} that minimises
-     * the integral of squared deviation from 5.5 mmol/L over the prediction horizon.
+     * Finds the pre-bolus pause [min] from {@link #PREBOLUS_CANDIDATES} that minimises the
+     * mean squared deviation from 5.5 mmol/L, scored over the entire simulated window from
+     * the bolus (at {@code now}) through {@code horizon} minutes past that candidate's own
+     * meal time.
      *
      * <p>Runs at most {@code PREBOLUS_CANDIDATES.length} ODE simulations - each is
      * a few milliseconds, so the total overhead is negligible.</p>
@@ -222,22 +224,32 @@ public class GlucosePredictService {
 
             List<CarbsEntry> entries = withProspectiveMeal(history, req, userId, mealTime);
 
-            // Extend the simulation by `pause` so every candidate is scored over an equal
-            // post-meal window. With a fixed horizon a 30-min pause would see 30 fewer
-            // minutes of post-meal curve than a 0-min pause and win on arithmetic alone.
+            // Extend the simulation by `pause` so every candidate's post-meal excursion is
+            // fully covered by the same `horizon`-length window past its own meal time.
             List<PredictionPointDTO> sim = hovorkaService.buildPredictionPath(
                     params, currentGlucose, now,
                     entries, doses, longActingNotes, userId, horizon + pause);
 
+            // Score every emitted point from the bolus (now) onward - NOT just from the meal.
+            // The interval [now, mealTime) is exactly where an over-long pre-bolus does its
+            // damage (insulin acting with no carbs yet), and that interval grows with the
+            // pause, so excluding it would weaken the hypo penalty precisely for the most
+            // aggressive candidates. Average rather than sum: the ODE emits every 5 min below
+            // 240 min and every 10 min beyond, so a longer `horizon + pause` window has both
+            // more points AND a lower average point density than a shorter one. Summing would
+            // let a longer pause win on sample-count/density arithmetic alone, independent of
+            // the actual glucose values - the same "wins on arithmetic" failure this method
+            // exists to avoid, just moved from the horizon to the emission schedule. Averaging
+            // makes candidates comparable regardless of how many points they happen to emit;
+            // `orElse` also removes the "empty window scores a perfect 0.0" degenerate case.
             double cost = sim.stream()
-                    .filter(pt -> pt.getTimestamp() != null && !pt.getTimestamp().isBefore(mealTime))
                     .mapToDouble(pt -> {
                         double g   = pt.getPredictedGlucose() != null ? pt.getPredictedGlucose() : currentGlucose;
                         double err = g - TARGET_GLUCOSE;
                         double base = err * err;
                         // Asymmetric, clinically-weighted penalty: an aggressive pre-bolus that
                         // drives a predicted hypo is far more dangerous than mild residual
-                        // hyperglycaemia, so a symmetric integral could happily recommend a
+                        // hyperglycaemia, so a symmetric average could happily recommend a
                         // pause that bottoms out at 3.0.
                         if (g < HYPO_THRESHOLD) {
                             double below = HYPO_THRESHOLD - g;
@@ -246,7 +258,7 @@ public class GlucosePredictService {
                             base *= LOW_SIDE_WEIGHT;
                         }
                         return base;
-                    }).sum();
+                    }).average().orElse(Double.MAX_VALUE);
 
             if (cost < bestCost) {
                 bestCost  = cost;

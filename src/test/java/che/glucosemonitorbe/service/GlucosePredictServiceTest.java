@@ -102,33 +102,23 @@ class GlucosePredictServiceTest {
         when(noteRepository.findByUserIdAndTimestampBetween(eq(USER_ID), any(), any()))
                 .thenReturn(List.of());
 
-        // ODE engine stub: generates a point every 5 minutes across the FULL requested
-        // pathMinutes span, like the real buildPredictionPath does. A fixed-length stub
-        // (e.g. always 2 points near t=0) would starve any candidate whose scoring window
-        // starts after those points - passing tests for the wrong reason instead of
-        // exercising the cost function. Glucose is a flat 7.0 mmol/L so cost differences
-        // between candidates come only from window length, matching the pre-Task-5 "flat
-        // curve -> ties broken toward pause=0" behaviour relied on by other tests here;
-        // tests that need a specific trajectory (e.g. the hypo-avoidance test) override
-        // this stub for themselves.
+        // ODE engine stub: mirrors the real buildPredictionPath's emission SCHEDULE (5-min
+        // steps below 240 min, 10-min steps beyond - see emitCurve()), not just its span.
+        // A stub that got the span right but kept a uniform grid would still hide a density
+        // bias: optimisePreBolus averages per-sample cost, and a longer `horizon + pause`
+        // window has a lower average point density than a shorter one under the real
+        // schedule, which could let a longer pause win (or lose) on sampling arithmetic
+        // rather than on the modelled glucose. Glucose here is a flat 7.0 mmol/L, so every
+        // candidate's average cost is identical regardless of density or window length,
+        // matching the pre-Task-5 "flat curve -> pause=0" behaviour other tests in this file
+        // rely on. Tests that need a specific trajectory (e.g. the hypo-avoidance test)
+        // override this stub for themselves.
         when(hovorkaService.buildPredictionPath(
                 any(HovorkaParameters.class),
                 anyDouble(), any(LocalDateTime.class),
                 anyList(), anyList(), anyList(),
                 eq(USER_ID), anyInt()))
-                .thenAnswer(inv -> {
-                    LocalDateTime callNow     = inv.getArgument(2);
-                    int            pathMinutes = inv.getArgument(7);
-                    List<PredictionPointDTO> points = new ArrayList<>();
-                    for (int m = 5; m <= pathMinutes; m += 5) {
-                        points.add(PredictionPointDTO.builder()
-                                .timestamp(callNow.plusMinutes(m))
-                                .predictedGlucose(7.0)
-                                .absorptionMode("HOVORKA_2COMP")
-                                .build());
-                    }
-                    return points;
-                });
+                .thenAnswer(inv -> emitCurve(inv.getArgument(2), inv.getArgument(7), 7.0));
     }
 
     // ---
@@ -893,28 +883,32 @@ class GlucosePredictServiceTest {
     // ---
 
     @Test
-    @DisplayName("optimiser rejects a pre-bolus that predicts hypoglycaemia even when its ∫(G−5.5)² is smaller")
+    @DisplayName("optimiser rejects a pre-bolus that predicts hypoglycaemia even when its average cost is smaller")
     void preBolusOptimiser_avoidsHypo_despiteLowerSymmetricCost() {
-        // Curve depends on the prospective bolus pause:
-        //   pause < 15 min -> glucose bottoms at 3.5 mmol/L (HYPO, below 3.9)
+        // Curve depends on the candidate's own MEAL time (the pause), not the bolus - the
+        // bolus is always at `now` (Task 5), so deriving pause from the dose offset would
+        // always read 0 and make the "safe" branch below dead code. Derive it from the
+        // prospective "predict" CarbsEntry instead, which really does move per candidate.
+        //   pause < 15 min -> glucose sits at 3.5 mmol/L for the whole window (HYPO, < 3.9)
         //   pause >= 15 min -> glucose sits at 8.0 mmol/L (mild high, but SAFE)
-        // Symmetric ∫(G−5.5)²: hypo curve = (2.0)²*2 = 8.0  <  safe curve = (2.5)²*2 = 12.5,
-        // so an unweighted optimiser would pick the HYPO pause (0). The hypo-weighted cost
-        // must instead pick a safe pause (>= 15).
+        // Unweighted average: hypo curve = (2.0)² = 4.0  <  safe curve = (2.5)² = 6.25, so an
+        // unweighted optimiser would pick the HYPO pause (0). The hypo-weighted cost must
+        // instead pick a safe pause (>= 15). Points are emitted across the full pathMinutes
+        // span (via emitCurve) so no candidate's window is starved.
         when(hovorkaService.buildPredictionPath(
                 any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
                 anyList(), anyList(), anyList(), eq(USER_ID), anyInt()))
                 .thenAnswer(inv -> {
-                    LocalDateTime now = inv.getArgument(2);
-                    List<InsulinDose> doses = inv.getArgument(4);
-                    int pause = doses.stream()
-                            .filter(d -> d.getType() == InsulinDose.InsulinType.BOLUS && d.getTimestamp() != null)
-                            .mapToInt(d -> (int) java.time.Duration.between(now, d.getTimestamp()).toMinutes())
-                            .max().orElse(0);
+                    LocalDateTime    now         = inv.getArgument(2);
+                    List<CarbsEntry> entries     = inv.getArgument(3);
+                    int              pathMinutes = inv.getArgument(7);
+                    int pause = entries.stream()
+                            .filter(e -> "predict".equals(e.getMealType()))
+                            .map(CarbsEntry::getTimestamp)
+                            .mapToInt(t -> (int) Duration.between(now, t).toMinutes())
+                            .findFirst().orElse(0);
                     double g = pause < 15 ? 3.5 : 8.0;
-                    return List.of(
-                            PredictionPointDTO.builder().timestamp(now.plusMinutes(5)).predictedGlucose(g).build(),
-                            PredictionPointDTO.builder().timestamp(now.plusMinutes(10)).predictedGlucose(g).build());
+                    return emitCurve(now, pathMinutes, g);
                 });
 
         PredictRequest req = simpleRequest(7.0, 4.0, 50, 0, 0, 0);
@@ -923,6 +917,68 @@ class GlucosePredictServiceTest {
         assertThat(resp.getPreBolusMinutes())
                 .as("optimiser must choose a pre-bolus that avoids the predicted hypo")
                 .isGreaterThanOrEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("advisory path: final simulation reproduces the winning candidate - bolus at now, meal at now + preBolusMinutes")
+    void advisory_finalLegMatchesWinningCandidate() {
+        // Pins ruling 1 (the final-leg bolus timestamp fix): stubs a curve where a genuinely
+        // non-zero pause (20 min) wins outright - perfect target (cost 0) only at pause=20,
+        // worse everywhere else - so bestPause cannot be the tie-break default of 0. Under a
+        // flat/tied curve this assertion would degenerate to `now <= now` and pin nothing;
+        // see the coordinator's review note on this gap.
+        when(hovorkaService.buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), any(LocalDateTime.class),
+                anyList(), anyList(), anyList(), eq(USER_ID), anyInt()))
+                .thenAnswer(inv -> {
+                    LocalDateTime    now         = inv.getArgument(2);
+                    List<CarbsEntry> entries     = inv.getArgument(3);
+                    int              pathMinutes = inv.getArgument(7);
+                    int pause = entries.stream()
+                            .filter(e -> "predict".equals(e.getMealType()))
+                            .map(CarbsEntry::getTimestamp)
+                            .mapToInt(t -> (int) Duration.between(now, t).toMinutes())
+                            .findFirst().orElse(0);
+                    double g = (pause == 20) ? 5.5 : 9.0;
+                    return emitCurve(now, pathMinutes, g);
+                });
+
+        PredictRequest req = PredictRequest.builder()
+                .currentGlucose(7.0)
+                .carbs(50.0)
+                .insulinDose(5.0)
+                .build();
+
+        PredictResponse resp = sut.predict(req, USERNAME);
+        assertThat(resp.getPreBolusMinutes())
+                .as("optimiser must land on the uniquely-best, non-zero candidate")
+                .isEqualTo(20);
+
+        ArgumentCaptor<LocalDateTime>     nowCaptor   = ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<List<CarbsEntry>>  mealsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<InsulinDose>> dosesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(hovorkaService, atLeastOnce()).buildPredictionPath(
+                any(HovorkaParameters.class), anyDouble(), nowCaptor.capture(),
+                mealsCaptor.capture(), dosesCaptor.capture(), anyList(), eq(USER_ID), anyInt());
+
+        LocalDateTime now = nowCaptor.getValue();
+        List<CarbsEntry>  finalMeals = mealsCaptor.getAllValues().get(mealsCaptor.getAllValues().size() - 1);
+        List<InsulinDose> finalDoses = dosesCaptor.getAllValues().get(dosesCaptor.getAllValues().size() - 1);
+
+        LocalDateTime finalMealAt = finalMeals.stream()
+                .filter(e -> "predict".equals(e.getMealType()))
+                .map(CarbsEntry::getTimestamp)
+                .findFirst().orElseThrow();
+        LocalDateTime finalBolusAt = finalDoses.stream()
+                .map(InsulinDose::getTimestamp)
+                .max(LocalDateTime::compareTo).orElseThrow();
+
+        assertThat(finalBolusAt)
+                .as("final simulation's bolus must be at now, matching the optimiser's own candidates")
+                .isEqualTo(now);
+        assertThat(finalMealAt)
+                .as("final simulation's meal must be at now + preBolusMinutes")
+                .isEqualTo(now.plusMinutes(resp.getPreBolusMinutes()));
     }
 
     // ---
@@ -1094,5 +1150,27 @@ class GlucosePredictServiceTest {
                 .fat(fat)
                 .fiber(fiber)
                 .build();
+    }
+
+    /**
+     * Builds a synthetic ODE curve using the SAME emission schedule as the real
+     * {@code HovorkaGlucosePredictionService.buildPredictionPath}: a point every 5 minutes
+     * while the elapsed minute is below 240, then every 10 minutes beyond that, up to
+     * {@code pathMinutes}. Density (not just span) matters to any test exercising
+     * {@code optimisePreBolus}'s cost, which averages per-sample - see the comment on the
+     * {@code setUp()} stub for why a uniform-density stub would hide a real bias.
+     */
+    private static List<PredictionPointDTO> emitCurve(LocalDateTime now, int pathMinutes, double glucose) {
+        List<PredictionPointDTO> points = new ArrayList<>();
+        int m = 5;
+        while (m <= pathMinutes) {
+            points.add(PredictionPointDTO.builder()
+                    .timestamp(now.plusMinutes(m))
+                    .predictedGlucose(glucose)
+                    .absorptionMode("HOVORKA_2COMP")
+                    .build());
+            m += (m < 240 ? 5 : 10);
+        }
+        return points;
     }
 }
