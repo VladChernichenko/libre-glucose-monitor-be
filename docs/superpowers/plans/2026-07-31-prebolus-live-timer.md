@@ -757,7 +757,9 @@ public class PreBolusResolver {
     }
 
     private Optional<PreBolusContext> matchExplicit(LocalDateTime loggedAt, List<Note> notes, LocalDateTime now) {
-        if (loggedAt.isAfter(now) || Duration.between(loggedAt, now).compareTo(MAX_AGE) > 0) {
+        // Strictly less than MAX_AGE: iOS treats exactly 2 h as expired
+        // (DashboardExtras.swift:74 - `if elapsed >= 2 * 3600 { ... }`).
+        if (loggedAt.isAfter(now) || Duration.between(loggedAt, now).compareTo(MAX_AGE) >= 0) {
             return Optional.empty();
         }
         return notes.stream()
@@ -773,7 +775,7 @@ public class PreBolusResolver {
                 .filter(this::isBolusNote)
                 .filter(n -> PRE_BOLUS_ALIASES.contains(lower(n.getMeal())))
                 .filter(n -> !n.getTimestamp().isAfter(now))
-                .filter(n -> Duration.between(n.getTimestamp(), now).compareTo(MAX_AGE) <= 0)
+                .filter(n -> Duration.between(n.getTimestamp(), now).compareTo(MAX_AGE) < 0)
                 .max(Comparator.comparing(Note::getTimestamp));
 
         if (latest.isEmpty()) {
@@ -1282,15 +1284,22 @@ Replace the whole method (lines 194-246) with:
 
             List<CarbsEntry> entries = withProspectiveMeal(history, req, userId, mealTime);
 
-            // Extend the simulation by `pause` so every candidate is scored over an equal
-            // post-meal window. With a fixed horizon a 30-min pause would see 30 fewer
-            // minutes of post-meal curve than a 0-min pause and win on arithmetic alone.
+            // Extend the simulation by `pause` so every candidate's post-meal excursion is
+            // fully covered inside its own window.
             List<PredictionPointDTO> sim = hovorkaService.buildPredictionPath(
                     params, currentGlucose, now,
                     entries, doses, longActingNotes, userId, horizon + pause);
 
+            // Score the WHOLE window from injection onward, including the pre-meal interval:
+            // that is where an over-long pre-bolus drives a hypo (insulin acting with no carbs),
+            // and the interval grows with the pause, so excluding it would make the safety
+            // penalty weakest for the most aggressive candidate.
+            //
+            // Average, not sum: the engine emits every 5 min up to minute 240 and every 10 min
+            // after, so extending the horizon adds tail samples at half the density of the early
+            // ones. An unweighted sum of non-negative terms would hand longer pauses a discount
+            // on sample count alone (54/54/54/53/53/52/52 at horizon 300).
             double cost = sim.stream()
-                    .filter(pt -> pt.getTimestamp() != null && !pt.getTimestamp().isBefore(mealTime))
                     .mapToDouble(pt -> {
                         double g   = pt.getPredictedGlucose() != null ? pt.getPredictedGlucose() : currentGlucose;
                         double err = g - TARGET_GLUCOSE;
@@ -1306,7 +1315,7 @@ Replace the whole method (lines 194-246) with:
                             base *= LOW_SIDE_WEIGHT;
                         }
                         return base;
-                    }).sum();
+                    }).average().orElse(Double.MAX_VALUE);
 
             if (cost < bestCost) {
                 bestCost  = cost;
