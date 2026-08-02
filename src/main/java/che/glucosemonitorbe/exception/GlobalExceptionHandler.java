@@ -8,6 +8,7 @@ import org.apache.catalina.connector.ClientAbortException;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -76,6 +77,33 @@ public class GlobalExceptionHandler {
     public ResponseEntity<CustomErrorResponse> handleAccessDenied(
             AccessDeniedException ex, HttpServletRequest request) {
         return build(HttpStatus.FORBIDDEN, "Forbidden", "You do not have permission to access this resource.", request);
+    }
+
+    /**
+     * A dose could not be computed safely. 422 rather than 400: the request was well-formed,
+     * but acting on it would be clinically unsafe. The reason code goes in {@code error} so
+     * clients can branch on it; the internal detail is logged, not returned.
+     */
+    @ExceptionHandler(DosingRefusedException.class)
+    public ResponseEntity<CustomErrorResponse> handleDosingRefused(
+            DosingRefusedException ex, HttpServletRequest request) {
+        log.info("Dosing refused on {} [{}]: reason={} detail={}",
+                request.getRequestURI(), correlationId(), ex.getReason(), ex.getDetail());
+        return build(HttpStatus.UNPROCESSABLE_ENTITY, ex.getReason().name(),
+                ex.getReason().getMessage(), request);
+    }
+
+    /**
+     * Database unreachable or failing. 503, not 500: it is transient and the client should
+     * retry rather than treat the response as data. Safety-critical readings (IOB, COB) must
+     * never degrade to a fabricated zero on this path.
+     */
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<CustomErrorResponse> handleDataAccess(
+            DataAccessException ex, HttpServletRequest request) {
+        log.error("Data access failure on {} [{}]", request.getRequestURI(), correlationId(), ex);
+        return build(HttpStatus.SERVICE_UNAVAILABLE, "Service unavailable",
+                "Your data is temporarily unavailable. Please try again shortly.", request);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
