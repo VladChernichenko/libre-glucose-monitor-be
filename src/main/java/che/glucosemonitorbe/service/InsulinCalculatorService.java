@@ -5,6 +5,8 @@ import che.glucosemonitorbe.dto.ActiveInsulinResponse;
 import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.InsulinCalculationResponse;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
+import che.glucosemonitorbe.exception.DosingRefusalReason;
+import che.glucosemonitorbe.exception.DosingRefusedException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -17,8 +19,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class InsulinCalculatorService {
 
-    /** Safe ISF fallback (mmol/L per unit) used when user has no configured value. */
-    private static final double DEFAULT_ISF = 2.2;
+    /** Physiological envelope for the derived insulin:carb ratio, grams per unit. */
+    private static final double MIN_GRAMS_PER_UNIT = 3.0;
+    private static final double MAX_GRAMS_PER_UNIT = 30.0;
 
     private final UserSettingsService userSettingsService;
 
@@ -208,36 +211,75 @@ public class InsulinCalculatorService {
     }
 
     /**
-     * Resolve ISF for a user: reads from UserSettings when userId is present,
-     * falls back to DEFAULT_ISF (2.2 mmol/L per unit) when not configured.
+     * Loads the user's settings, refusing when they cannot support a dose calculation.
+     * Unlike the display paths, dosing never substitutes a population default: an
+     * unconfigured parameter is a reason to stop, not a reason to guess.
      */
-    private double resolveIsf(String userIdStr) {
-        if (userIdStr != null && !userIdStr.isBlank()) {
-            try {
-                UUID userId = UUID.fromString(userIdStr);
-                UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
-                if (settings != null && settings.getIsf() != null && settings.getIsf() > 0) {
-                    return settings.getIsf();
-                }
-            } catch (IllegalArgumentException ignored) {
-                // malformed userId - fall through to default
-            }
+    private UserSettingsDTO requireSettings(String userIdStr) {
+        if (userIdStr == null || userIdStr.isBlank()) {
+            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID, "userId absent");
         }
-        return DEFAULT_ISF;
+        UUID userId;
+        try {
+            userId = UUID.fromString(userIdStr);
+        } catch (IllegalArgumentException e) {
+            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID,
+                    "userId not a UUID: " + userIdStr);
+        }
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
+        if (settings == null) {
+            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID,
+                    "no settings row for " + userId);
+        }
+        return settings;
+    }
+
+    /**
+     * Derives the insulin:carb ratio in grams per unit.
+     *
+     * <p>{@code carbRatio} is mmol/L of rise per 10 g; {@code isf} is mmol/L per unit. So
+     * {@code gramsPerUnit = 10 * isf / carbRatio}. Deriving it means the ratio inherits the
+     * digital twin's per-user calibration of both parameters for free.
+     *
+     * <p>The envelope is a refusal boundary, not a clamp: a derived 1 g/U means ISF and
+     * carbRatio are mutually inconsistent, and silently substituting 3.0 would hide that
+     * while still producing a wrong dose.
+     */
+    private double resolveGramsPerUnit(UserSettingsDTO settings) {
+        Double isf = settings.getIsf();
+        Double carbRatio = settings.getCarbRatio();
+        if (isf == null || carbRatio == null
+                || !Double.isFinite(isf) || !Double.isFinite(carbRatio)
+                || isf <= 0 || carbRatio <= 0) {
+            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID,
+                    "isf=" + isf + " carbRatio=" + carbRatio);
+        }
+        double gramsPerUnit = 10.0 * isf / carbRatio;
+        if (gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
+            throw new DosingRefusedException(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
+                    "derived gramsPerUnit=" + gramsPerUnit + " from isf=" + isf + " carbRatio=" + carbRatio);
+        }
+        return gramsPerUnit;
     }
 
     public InsulinCalculationResponse calculateRecommendedInsulin(InsulinCalculationRequest request) {
-        double recommendedInsulin = request.getCarbs() / 12.0;
+        UserSettingsDTO settings = requireSettings(request.getUserId());
+        double gramsPerUnit = resolveGramsPerUnit(settings);
+        double isf = settings.getIsf();
 
-        if (request.getCurrentGlucose() != null && request.getCurrentGlucose() > request.getTargetGlucose()) {
-            // BE-4 fix: read user-configured ISF from UserSettings instead of hardcoded 1.0
-            double isf = resolveIsf(request.getUserId());
-            double correctionDose = (request.getCurrentGlucose() - request.getTargetGlucose()) / isf;
-            recommendedInsulin += correctionDose;
+        if (request.getCarbs() == null || request.getCurrentGlucose() == null
+                || request.getTargetGlucose() == null) {
+            throw new DosingRefusedException(DosingRefusalReason.INVALID_INPUT,
+                    "carbs/currentGlucose/targetGlucose must all be present");
         }
+        double carbs = request.getCarbs();
+        double currentGlucose = request.getCurrentGlucose();
+        double targetGlucose = request.getTargetGlucose();
 
+        double mealDose = carbs / gramsPerUnit;
+        double correctionDose = (currentGlucose - targetGlucose) / isf;
         double activeInsulin = request.getActiveInsulin() != null ? request.getActiveInsulin() : 0.0;
-        recommendedInsulin = Math.max(0.0, recommendedInsulin - activeInsulin);
+        double recommendedInsulin = Math.max(0.0, mealDose + correctionDose - activeInsulin);
 
         return InsulinCalculationResponse.builder()
                 .recommendedInsulin(Math.round(recommendedInsulin * 100.0) / 100.0)

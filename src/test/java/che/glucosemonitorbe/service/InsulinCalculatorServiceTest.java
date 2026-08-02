@@ -2,7 +2,10 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.ActiveInsulinResponse;
+import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
+import che.glucosemonitorbe.exception.DosingRefusalReason;
+import che.glucosemonitorbe.exception.DosingRefusedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -11,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -193,7 +197,9 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void recommendedInsulin_correctionUsesConfiguredIsf() {
-        // ISF=2.2: correction = (12.0 - 6.0) / 2.2 ≈ 2.73 u; carb bolus = 60/12 = 5 u -> total ≈ 7.73
+        // C1: carbRatio=1.0, ISF=2.2 -> 10*2.2/1.0 = 22 g/U.
+        // carb bolus = 60/22 ≈ 2.73 u; correction = (12.0 - 6.0) / 2.2 ≈ 2.73 u -> total ≈ 5.45.
+        // The old hardcoded 12 g/U gave 7.73 for the same user.
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(60.0);
         request.setCurrentGlucose(12.0);
@@ -201,21 +207,22 @@ class InsulinCalculatorServiceTest {
         request.setUserId(USER_ID.toString());
 
         var response = service.calculateRecommendedInsulin(request);
-        // With ISF=2.2: correction≈2.73, carb=5 -> total≈7.73; with old ISF=1.0: total=11
-        assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
+        assertThat(response.getRecommendedInsulin()).isCloseTo(5.45, within(0.01));
     }
 
     @Test
-    void recommendedInsulin_noUserIdFallsBackToDefaultIsf() {
-        // No userId -> DEFAULT_ISF=2.2 used directly
+    void recommendedInsulin_noUserId_refuses() {
+        // C1/H4: dosing never substitutes a population default for a missing user.
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(60.0);
         request.setCurrentGlucose(12.0);
         request.setTargetGlucose(6.0);
         request.setUserId(null);
 
-        var response = service.calculateRecommendedInsulin(request);
-        assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(request))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
     }
 
     // -- NotebookLM scenario 3: DIA edge cases --------------------------------
@@ -291,7 +298,7 @@ class InsulinCalculatorServiceTest {
         request.setActiveInsulin(5.0);
         request.setUserId(USER_ID.toString());
 
-        // carb bolus = 30/12 = 2.5; active=5 -> max(0, 2.5-5) = 0
+        // carb bolus = 30/22 ≈ 1.36; active=5 -> max(0, 1.36-5) = 0
         var response = service.calculateRecommendedInsulin(request);
         assertThat(response.getRecommendedInsulin()).isEqualTo(0.0);
     }
@@ -414,20 +421,22 @@ class InsulinCalculatorServiceTest {
     // -- resolveIsf fallback paths (malformed/missing user settings) ----------
 
     @Test
-    void recommendedInsulin_malformedUserId_fallsBackToDefaultIsf() {
+    void recommendedInsulin_malformedUserId_refuses() {
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(60.0);
         request.setCurrentGlucose(12.0);
         request.setTargetGlucose(6.0);
         request.setUserId("not-a-uuid");
 
-        var response = service.calculateRecommendedInsulin(request);
-        // Falls back to DEFAULT_ISF=2.2: correction≈2.73, carb=5 -> total≈7.73
-        assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
+        // C1/H4: a userId that cannot be resolved is a reason to stop, not to guess an ISF.
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(request))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
     }
 
     @Test
-    void recommendedInsulin_settingsWithNullIsf_fallsBackToDefault() {
+    void recommendedInsulin_settingsWithNullIsf_refuses() {
         UUID userId = UUID.randomUUID();
         when(userSettingsService.getUserSettings(userId))
                 .thenReturn(new UserSettingsDTO(UUID.randomUUID(), userId, 1.0, null, 45, 240));
@@ -438,12 +447,15 @@ class InsulinCalculatorServiceTest {
         request.setTargetGlucose(6.0);
         request.setUserId(userId.toString());
 
-        var response = service.calculateRecommendedInsulin(request);
-        assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
+        // C1/H4: an unconfigured ISF must block the calculation, not default to 2.2.
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(request))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
     }
 
     @Test
-    void recommendedInsulin_settingsNull_fallsBackToDefault() {
+    void recommendedInsulin_settingsNull_refuses() {
         UUID userId = UUID.randomUUID();
         when(userSettingsService.getUserSettings(userId)).thenReturn(null);
 
@@ -453,35 +465,134 @@ class InsulinCalculatorServiceTest {
         request.setTargetGlucose(6.0);
         request.setUserId(userId.toString());
 
-        var response = service.calculateRecommendedInsulin(request);
-        assertThat(response.getRecommendedInsulin()).isCloseTo(7.73, within(0.1));
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(request))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
     }
 
     // -- correction skipped when not hyperglycemic -----------------------------
 
     @Test
-    void recommendedInsulin_currentGlucoseAtTarget_noCorrectionApplied() {
+    void recommendedInsulin_belowTarget_reducesTheMealDose() {
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
-        // Real-life: 36g carbs, glucose 5.4 mmol/L (in-range), target 6.0 -> no correction
+        // Real-life: 36g carbs, glucose 5.4 mmol/L (in-range but below target 6.0).
         request.setCarbs(36.0);
         request.setCurrentGlucose(5.4);
         request.setTargetGlucose(6.0);
         request.setUserId(USER_ID.toString());
 
         var response = service.calculateRecommendedInsulin(request);
-        // Just the carb bolus: 36/12 = 3.0
-        assertThat(response.getRecommendedInsulin()).isEqualTo(3.0);
+        // C2: carb bolus 36/22 ≈ 1.64, correction (5.4-6.0)/2.2 ≈ -0.27 -> 1.36.
+        // Previously the below-target case was ignored entirely and this returned 3.0.
+        assertThat(response.getRecommendedInsulin()).isCloseTo(1.36, within(0.01));
     }
 
     @Test
-    void recommendedInsulin_nullCurrentGlucose_noCorrectionApplied() {
+    void recommendedInsulin_nullCurrentGlucose_refuses() {
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
         request.setCarbs(30.0);
         request.setCurrentGlucose(null);
         request.setTargetGlucose(6.0);
         request.setUserId(USER_ID.toString());
 
-        var response = service.calculateRecommendedInsulin(request);
-        assertThat(response.getRecommendedInsulin()).isEqualTo(2.5);
+        // C2: dosing without a glucose reading is not something to do silently.
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(request))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.INVALID_INPUT);
+    }
+
+    // -- C1: derived insulin:carb ratio ----------------------------------------
+
+    /** Settings stub: 7-arg constructor is (id, userId, carbRatio, isf, halfLife, maxCob, bodyWeightKg). */
+    private void givenSettings(Double carbRatio, Double isf, Double bodyWeightKg) {
+        UserSettingsDTO settings = new UserSettingsDTO(
+                UUID.randomUUID(), USER_ID, carbRatio, isf, 45, 240, bodyWeightKg);
+        when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
+    }
+
+    private InsulinCalculationRequest doseRequest(double carbs, double currentGlucose, double targetGlucose) {
+        return InsulinCalculationRequest.builder()
+                .carbs(carbs)
+                .currentGlucose(currentGlucose)
+                .targetGlucose(targetGlucose)
+                .activeInsulin(0.0)
+                .userId(USER_ID.toString())
+                .build();
+    }
+
+    private static DosingRefusalReason refusalReasonOf(Throwable ex) {
+        return ((DosingRefusedException) ex).getReason();
+    }
+
+    @Test
+    void mealDose_usesRatioDerivedFromIsfAndCarbRatio_notTheOldHardcoded12() {
+        // carbRatio 2.0 mmol/L per 10 g, ISF 2.2 mmol/L/U -> 10 * 2.2 / 2.0 = 11.0 g/U
+        givenSettings(2.0, 2.2, 70.0);
+
+        // No correction: current == target. 55 g / 11 g/U = 5.0 U
+        var response = service.calculateRecommendedInsulin(doseRequest(55.0, 6.0, 6.0));
+
+        assertThat(response.getRecommendedInsulin()).isEqualTo(5.0);
+    }
+
+    @Test
+    void insulinSensitiveUser_getsSmallerMealDoseThanTheOldConstant() {
+        // carbRatio 1.0, ISF 2.5 -> 25 g/U. 50 g -> 2.0 U (the old code gave 50/12 = 4.17 U).
+        givenSettings(1.0, 2.5, 70.0);
+
+        var response = service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0));
+
+        assertThat(response.getRecommendedInsulin()).isEqualTo(2.0);
+    }
+
+    @Test
+    void derivedRatioBelowEnvelope_refuses_ratherThanClamping() {
+        // carbRatio 8.0, ISF 1.0 -> 1.25 g/U, below the 3.0 floor
+        givenSettings(8.0, 1.0, 70.0);
+
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT);
+    }
+
+    @Test
+    void derivedRatioAboveEnvelope_refuses() {
+        // carbRatio 0.5, ISF 4.0 -> 80 g/U, above the 30.0 ceiling
+        givenSettings(0.5, 4.0, 70.0);
+
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT);
+    }
+
+    @Test
+    void nonPositiveOrMissingSettings_refuse() {
+        givenSettings(2.0, 0.0, 70.0);
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
+
+        givenSettings(2.0, null, 70.0);
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
+    }
+
+    @Test
+    void missingCarbsOrGlucose_refusesAsInvalidInput() {
+        givenSettings(2.0, 2.2, 70.0);
+        InsulinCalculationRequest noCarbs = InsulinCalculationRequest.builder()
+                .currentGlucose(6.0).targetGlucose(6.0).userId(USER_ID.toString()).build();
+
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(noCarbs))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.INVALID_INPUT);
     }
 }
