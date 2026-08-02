@@ -584,6 +584,45 @@ class InsulinCalculatorServiceTest {
                 .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
     }
 
+    // -- C2: hypoglycemia handling ---------------------------------------------
+
+    @Test
+    void glucoseBelowHypoThreshold_refuses_noDoseReturned() {
+        givenSettings(2.0, 2.2, 70.0);
+
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 3.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD);
+    }
+
+    @Test
+    void glucoseExactlyAtThreshold_isAllowed() {
+        givenSettings(2.0, 2.2, 70.0);
+        // 3.9 is the refusal floor, not itself refused.
+        assertThat(service.calculateRecommendedInsulin(doseRequest(0.0, 3.9, 3.9))
+                .getRecommendedInsulin()).isEqualTo(0.0);
+    }
+
+    @Test
+    void belowTargetButAboveThreshold_reducesTheMealDose() {
+        givenSettings(2.0, 2.2, 70.0);
+        // 11 g/U -> 55 g = 5.0 U meal. Correction (5.0 - 6.0) / 2.2 = -0.4545 U.
+        // 5.0 - 0.4545 = 4.55 U after rounding.
+        var response = service.calculateRecommendedInsulin(doseRequest(55.0, 5.0, 6.0));
+
+        assertThat(response.getRecommendedInsulin()).isEqualTo(4.55);
+    }
+
+    @Test
+    void largeNegativeCorrection_floorsAtZero_neverNegative() {
+        givenSettings(2.0, 2.2, 70.0);
+        // Tiny meal, well below target: correction dominates and would go negative.
+        var response = service.calculateRecommendedInsulin(doseRequest(5.0, 4.0, 9.0));
+
+        assertThat(response.getRecommendedInsulin()).isEqualTo(0.0);
+    }
+
     @Test
     void missingCarbsOrGlucose_refusesAsInvalidInput() {
         givenSettings(2.0, 2.2, 70.0);

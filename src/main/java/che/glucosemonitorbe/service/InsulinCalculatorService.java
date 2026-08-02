@@ -23,6 +23,9 @@ public class InsulinCalculatorService {
     private static final double MIN_GRAMS_PER_UNIT = 3.0;
     private static final double MAX_GRAMS_PER_UNIT = 30.0;
 
+    /** ADA/ATTD Level 1 hypoglycemia. Below this the clinical action is to treat, not to bolus. */
+    private static final double HYPO_REFUSAL_THRESHOLD_MMOL = 3.9;
+
     private final UserSettingsService userSettingsService;
 
     /** Defaults match catalog {@code FIASP} (user-specific curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}). */
@@ -275,6 +278,11 @@ public class InsulinCalculatorService {
         double carbs = request.getCarbs();
         double currentGlucose = request.getCurrentGlucose();
         double targetGlucose = request.getTargetGlucose();
+
+        if (currentGlucose < HYPO_REFUSAL_THRESHOLD_MMOL) {
+            throw new DosingRefusedException(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
+                    "currentGlucose=" + currentGlucose + " < " + HYPO_REFUSAL_THRESHOLD_MMOL);
+        }
 
         double mealDose = carbs / gramsPerUnit;
         double correctionDose = (currentGlucose - targetGlucose) / isf;
