@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.*;
@@ -623,5 +625,41 @@ class GlucoseCalculationsServiceTest {
         assertThat(method.isAnnotationPresent(Cacheable.class))
                 .as("NotesService.getAllNotes must be @Cacheable to avoid repeated full scans (BUG: P5)")
                 .isTrue();
+    }
+
+    // -- C3: fail closed when notes cannot be loaded ---------------------------
+
+    @Test
+    void noteLoadFailure_propagates_ratherThanReportingZeroIob() {
+        String username = "alice";
+        UUID userId = UUID.randomUUID();
+        when(userService.getUserByUsername(username))
+                .thenReturn(UserDto.builder().id(userId).username(username).build());
+
+        UserSettingsDTO userSettings = new UserSettingsDTO();
+        userSettings.setUserId(userId);
+        userSettings.setCarbRatio(2.0);
+        userSettings.setIsf(1.0);
+        userSettings.setCarbHalfLife(45);
+        userSettings.setMaxCOBDuration(240);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(userSettings);
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+
+        when(noteRepository.findByUserIdAndTimestampBetween(
+                any(UUID.class), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenThrow(new DataAccessResourceFailureException("connection refused"));
+
+        GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
+                .currentGlucose(8.0)
+                .userId(username)
+                .includePredictionFactors(false)
+                .build();
+
+        // A swallowed exception here returned activeInsulinOnBoard = 0.00 as an HTTP 200,
+        // which the iOS client caches - a patient who bolused 30 min ago would see
+        // "no active insulin" and could stack a correction dose.
+        assertThatThrownBy(() -> service.calculateGlucoseData(request))
+                .isInstanceOf(DataAccessResourceFailureException.class);
     }
 }

@@ -492,18 +492,16 @@ public class GlucoseCalculationsService {
      * Load long-acting (basal) insulin notes from the last 36 hours.
      * Lantus/Tresiba have a DIA of ~24-28 h, so a dose taken yesterday must be included
      * for accurate EGP suppression modelling in the Hovorka path.
+     *
+     * <p>C3: repository failures propagate deliberately. Returning an empty list here would
+     * report zero basal on board as fact.
      */
     private List<Note> getLongActingNotes(UUID userId, LocalDateTime currentTime) {
-        try {
-            LocalDateTime since = currentTime.minusHours(36);
-            return noteRepository.findByUserIdAndTimestampBetween(userId, since, currentTime)
-                    .stream()
-                    .filter(Note::isLongActing)
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Failed to fetch long-acting notes for user {}: {}", userId, e.getMessage());
-            return new ArrayList<>();
-        }
+        LocalDateTime since = currentTime.minusHours(36);
+        return noteRepository.findByUserIdAndTimestampBetween(userId, since, currentTime)
+                .stream()
+                .filter(Note::isLongActing)
+                .toList();
     }
 
     /**
@@ -511,15 +509,15 @@ public class GlucoseCalculationsService {
      * BUG P1 fix: accepts UUID directly so getUserByUsername is only called once per request.
      * BUG L2 fix: window extended from 6 h to 8 h so high-fat/high-protein (HFHP) meals
      * whose absorption peaks at up to 8 h are included in the COB calculation.
+     *
+     * <p>C3: repository failures propagate. A swallowed exception here produced
+     * {@code activeInsulinOnBoard = 0.00} as an HTTP 200, which the iOS client caches - a
+     * patient who bolused 30 minutes ago would see "no active insulin" and could stack a
+     * correction dose. An error is the only representation that cannot be misread as data.
      */
     private List<Note> getRecentNotes(UUID userId, LocalDateTime currentTime) {
-        try {
-            LocalDateTime startTime = currentTime.minusHours(8);
-            return noteRepository.findByUserIdAndTimestampBetween(userId, startTime, currentTime);
-        } catch (Exception e) {
-            log.warn("Failed to fetch recent notes for user {}: {}", userId, e.getMessage());
-            return new ArrayList<>();
-        }
+        LocalDateTime startTime = currentTime.minusHours(8);
+        return noteRepository.findByUserIdAndTimestampBetween(userId, startTime, currentTime);
     }
     
     /**
