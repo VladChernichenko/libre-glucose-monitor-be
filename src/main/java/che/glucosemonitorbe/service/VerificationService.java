@@ -38,6 +38,11 @@ public class VerificationService {
     private static final double MIN_CARBS = 20.0;
     private static final double MAX_CARBS = 80.0;
 
+    /** ADA/ATTD Level 1 hypoglycemia. A meal whose window contains a low cannot titrate carb ratio. */
+    private static final double HYPO_THRESHOLD_MMOL = 3.9;
+    /** Post-meal observation window, matching the +2 h evaluation point. */
+    private static final int EVALUATION_WINDOW_HOURS = 2;
+
     // Max distance between a target time (baseline / +2h) and the CGM reading matched to it
     private static final long CGM_MATCH_TOLERANCE_MS = 20 * 60 * 1000L;  // ±20 minutes
 
@@ -276,6 +281,28 @@ public class VerificationService {
         boolean stacked = prior.stream().anyMatch(n -> !n.getId().equals(note.getId())
                 && n.getInsulin() != null && n.getInsulin() > 0);
         if (stacked) return "insulin_stacking";
+
+        // H1: a low anywhere in the observation window makes actualDelta uninterpretable.
+        // Rescue carbs turn the recovery into an apparent post-meal rise, which would push
+        // the carb ratio UP - directly increasing future doses and causing more lows.
+        LocalDateTime windowEnd = note.getTimestamp().plusHours(EVALUATION_WINDOW_HOURS);
+        List<CgmReading> windowReadings = cgmReadingRepository
+                .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                        userId, toEpochMs(note.getTimestamp()), toEpochMs(windowEnd));
+        boolean hypo = windowReadings.stream()
+                .filter(r -> r.getSgv() != null)
+                .anyMatch(r -> (r.getSgv() / 18.0) < HYPO_THRESHOLD_MMOL);
+        if (hypo) return "hypo_in_window";
+
+        // A carbs-only note in the window is a rescue treatment, not part of the meal.
+        List<Note> inWindow = noteRepository.findByUserIdAndTimestampBetween(
+                userId, note.getTimestamp(), windowEnd);
+        boolean rescueCarbs = inWindow.stream()
+                .filter(n -> !n.getId().equals(note.getId()))
+                .anyMatch(n -> n.getCarbs() != null && n.getCarbs() > 0
+                        && (n.getInsulin() == null || n.getInsulin() <= 0));
+        if (rescueCarbs) return "rescue_carbs_in_window";
+
         return null;
     }
 
