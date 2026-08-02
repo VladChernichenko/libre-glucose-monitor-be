@@ -26,6 +26,11 @@ public class InsulinCalculatorService {
     /** ADA/ATTD Level 1 hypoglycemia. Below this the clinical action is to treat, not to bolus. */
     private static final double HYPO_REFUSAL_THRESHOLD_MMOL = 3.9;
 
+    /** Maximum single bolus, units per kg of body weight. 0.3 U/kg is large for any patient. */
+    private static final double MAX_BOLUS_UNITS_PER_KG = 0.3;
+    /** Population fallback when body weight is unset (matches the schema comment on body_weight_kg). */
+    private static final double DEFAULT_BODY_WEIGHT_KG = 70.0;
+
     private final UserSettingsService userSettingsService;
 
     /** Defaults match catalog {@code FIASP} (user-specific curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}). */
@@ -265,6 +270,14 @@ public class InsulinCalculatorService {
         return gramsPerUnit;
     }
 
+    /** Weight-scaled ceiling, so the bound is sane for a child and for an adult alike. */
+    private double maxBolusUnits(UserSettingsDTO settings) {
+        Double weight = settings.getBodyWeightKg();
+        double effectiveWeight = (weight != null && Double.isFinite(weight) && weight > 0)
+                ? weight : DEFAULT_BODY_WEIGHT_KG;
+        return MAX_BOLUS_UNITS_PER_KG * effectiveWeight;
+    }
+
     public InsulinCalculationResponse calculateRecommendedInsulin(InsulinCalculationRequest request) {
         UserSettingsDTO settings = requireSettings(request.getUserId());
         double gramsPerUnit = resolveGramsPerUnit(settings);
@@ -288,6 +301,14 @@ public class InsulinCalculatorService {
         double correctionDose = (currentGlucose - targetGlucose) / isf;
         double activeInsulin = request.getActiveInsulin() != null ? request.getActiveInsulin() : 0.0;
         double recommendedInsulin = Math.max(0.0, mealDose + correctionDose - activeInsulin);
+
+        // Checked on the FINAL dose - after meal, correction and IOB - because that is the
+        // number a patient would act on.
+        double maxBolus = maxBolusUnits(settings);
+        if (recommendedInsulin > maxBolus) {
+            throw new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS,
+                    "recommended=" + recommendedInsulin + " exceeds max=" + maxBolus);
+        }
 
         return InsulinCalculationResponse.builder()
                 .recommendedInsulin(Math.round(recommendedInsulin * 100.0) / 100.0)

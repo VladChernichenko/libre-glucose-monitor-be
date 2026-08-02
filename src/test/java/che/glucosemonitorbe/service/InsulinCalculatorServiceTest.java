@@ -584,6 +584,50 @@ class InsulinCalculatorServiceTest {
                 .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
     }
 
+    // -- C2: maximum bolus ceiling ---------------------------------------------
+
+    @Test
+    void doseAboveWeightBasedCeiling_refuses_ratherThanClamping() {
+        // 60 kg -> ceiling 18.0 U. 11 g/U, 250 g -> 22.7 U meal alone.
+        givenSettings(2.0, 2.2, 60.0);
+
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(250.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS);
+    }
+
+    @Test
+    void nullBodyWeight_usesThe70kgFallbackCeiling() {
+        // null weight -> 70 kg -> ceiling 21.0 U. 11 g/U, 240 g -> 21.8 U, just over.
+        givenSettings(2.0, 2.2, null);
+
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(240.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS);
+    }
+
+    @Test
+    void doseUnderCeiling_isReturnedNormally() {
+        givenSettings(2.0, 2.2, 60.0);
+        // 110 g / 11 = 10.0 U, under the 18.0 U ceiling.
+        assertThat(service.calculateRecommendedInsulin(doseRequest(110.0, 6.0, 6.0))
+                .getRecommendedInsulin()).isEqualTo(10.0);
+    }
+
+    @Test
+    void ceilingIsCheckedAfterIobSubtraction_notBefore() {
+        givenSettings(2.0, 2.2, 60.0);   // ceiling 18.0 U
+        // 220 g / 11 = 20.0 U gross, minus 5 U IOB = 15.0 U net -> allowed.
+        InsulinCalculationRequest request = InsulinCalculationRequest.builder()
+                .carbs(220.0).currentGlucose(6.0).targetGlucose(6.0)
+                .activeInsulin(5.0).userId(USER_ID.toString()).build();
+
+        assertThat(service.calculateRecommendedInsulin(request).getRecommendedInsulin())
+                .isEqualTo(15.0);
+    }
+
     // -- C2: hypoglycemia handling ---------------------------------------------
 
     @Test
