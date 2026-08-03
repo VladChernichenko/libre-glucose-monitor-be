@@ -59,12 +59,6 @@ public class HovorkaGlucosePredictionService {
     private static final int SPARSE_STEP_MIN  = 10;
     private static final int DENSE_LIMIT_MIN  = 240;
 
-    // -- Confidence band -------------------------------------------------------
-    /** Confidence covered by [lower, upper]. Prediction is probabilistic, so each point ships a band
-     *  rather than a bare line; the half-width is z*σ(horizon) from the digital-twin uncertainty model. */
-    private static final double BAND_CONFIDENCE = 0.90;
-    /** Normal quantile for {@link #BAND_CONFIDENCE} (two-sided): 90% -> 1.6449. */
-    private static final double BAND_Z          = 1.6449;
     private static final double G_MIN           = 1.0;
     private static final double G_MAX           = 25.0;
 
@@ -349,24 +343,13 @@ public class HovorkaGlucosePredictionService {
                 double carbEffect  = gutModel.ra(state.qgut(), kAbsDisplay) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
-                // Probabilistic band: predicted ± z*σ(horizon), σ from the digital-twin uncertainty
-                // model (personal when calibrated, else population prior; 0 -> no band during replay).
-                double sd = residualProvider.uncertaintySdMmol(userId, min);
-                double half = BAND_Z * sd;
-
-                PredictionPointDTO.PredictionPointDTOBuilder pt = PredictionPointDTO.builder()
+                points.add(PredictionPointDTO.builder()
                         .timestamp(pointTime)
                         .predictedGlucose(Math.round(gAdj * 10.0) / 10.0)
                         .carbAbsorptionEffect(Math.round(carbEffect * 100.0) / 100.0)
                         .insulinActivityEffect(Math.round(insulinEff * 100.0) / 100.0)
-                        .absorptionMode("DALLA_MAN_3COMP");
-                if (sd > 0.0) {
-                    pt.predictedGlucoseLower(round1(Math.max(G_MIN, gAdj - half)))
-                      .predictedGlucoseUpper(round1(Math.min(G_MAX, gAdj + half)))
-                      .uncertaintySd(Math.round(sd * 100.0) / 100.0)
-                      .confidenceLevel(BAND_CONFIDENCE);
-                }
-                points.add(pt.build());
+                        .absorptionMode("DALLA_MAN_3COMP")
+                        .build());
 
                 nextEmit += (min < DENSE_LIMIT_MIN ? DENSE_STEP_MIN : SPARSE_STEP_MIN);
             }
