@@ -287,6 +287,10 @@ public class HovorkaGlucosePredictionService {
         List<PredictionPointDTO> points = new ArrayList<>();
         int nextEmit = DENSE_STEP_MIN;
 
+        // CGM measurement model: what the sensor would read, not what plasma does. Seeded at the
+        // anchor, where interstitial and plasma coincide. Pass-through unless the lag is configured.
+        InterstitialLagModel sensor = InterstitialLagModel.startingAt(state.glucoseMmolL(pAdj));
+
         // -- Activity modulation (a(t) -> insulin-sensitivity amplification + insulin-independent
         //    uptake). Inert with the NONE provider - that path is bit-identical to the base model. --
         boolean hasActivity = activityProvider != ActivityProvider.NONE;
@@ -330,9 +334,12 @@ public class HovorkaGlucosePredictionService {
                 state = odeSolver.step(state, pAdj, carbMmol, mealGI, protFatKcalNow, insulinEffect, 0.0);
             }
 
+            // Advance the sensor model every minute, not only at emission points.
+            double gSensed = sensor.step(state.glucoseMmolL(pAdj));
+
             if (min == nextEmit) {
                 LocalDateTime pointTime = currentTime.plusMinutes(min);
-                double gPred = state.glucoseMmolL(pAdj);
+                double gPred = gSensed;
                 // Digital-twin residual correction (predictions only): add the learned per-hour bias
                 // that the physiology can't express from logged inputs, then re-clamp to the
                 // physiological range. NONE provider (calibration replay) leaves gPred untouched.

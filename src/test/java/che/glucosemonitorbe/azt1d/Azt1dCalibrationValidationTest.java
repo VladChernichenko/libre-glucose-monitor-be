@@ -7,9 +7,13 @@ import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.HovorkaOdeSolver;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
+import che.glucosemonitorbe.hovorka.InterstitialLagModel;
+import che.glucosemonitorbe.hovorka.learning.AnchorSample;
 import che.glucosemonitorbe.hovorka.learning.DigitalTwinCalibrator;
 import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
+import che.glucosemonitorbe.hovorka.learning.ReplayMetrics;
+import che.glucosemonitorbe.hovorka.learning.TwinScales;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import org.junit.jupiter.api.Assumptions;
@@ -73,6 +77,11 @@ class Azt1dCalibrationValidationTest {
         cfg.maxAnchors = 120; // keep the 25-subject sweep quick
 
         List<Row> rows = new ArrayList<>();
+        // Held-out samples pooled across subjects, for the persistence comparison below.
+        List<AnchorSample> allRaw = new ArrayList<>();
+        List<AnchorSample> allEffective = new ArrayList<>();
+        int beatsPersistence = 0, scoredSubjects = 0;
+
         for (Azt1dDataset.Subject s : subjects) {
             if (s.cgm().size() < MIN_CGM) continue;
 
@@ -90,6 +99,20 @@ class Azt1dCalibrationValidationTest {
             DigitalTwinCalibrator.Result r = new DigitalTwinCalibrator().calibrate(train, val);
             double effective = r.improved() ? r.maeCalibrated() : r.maeBaseline();
             var u = r.uncertainty();
+
+            // Same held-out anchors, scored against the no-change forecast. "Effective" mirrors what
+            // a user would actually get: the calibrated twin only when the gate let it ship. The
+            // per-subject residual is folded into `predicted` here so pooled scoring stays correct.
+            List<AnchorSample> raw = val.replay(TwinScales.neutral());
+            List<AnchorSample> eff = r.improved()
+                    ? withResidual(val.replay(r.scales()), r.residual())
+                    : raw;
+            allRaw.addAll(raw);
+            allEffective.addAll(eff);
+            if (!raw.isEmpty()) {
+                scoredSubjects++;
+                if (ReplayMetrics.overall(eff, null).beatsPersistence()) beatsPersistence++;
+            }
             rows.add(new Row(s.id(), train.anchorCount(), r.valSamples(),
                     r.maeBaseline(), r.maeCalibrated(), effective,
                     r.scales().isfScale(), r.scales().agScale(), r.improved(), r.confidence(),
@@ -97,6 +120,19 @@ class Azt1dCalibrationValidationTest {
         }
 
         System.out.print(render(rows));
+
+        // -- The question the calibration report cannot answer ---------------------
+        // Baseline/calibrated MAE only compare the model to itself. Persistence is the honest
+        // reference: if a constant line wins, the ODE is not earning its place at that horizon.
+        System.out.print(ReplayMetrics.render(
+                "═════════ vs PERSISTENCE - raw model (no twin), held-out ═════════",
+                ReplayMetrics.byHorizon(allRaw, null), ReplayMetrics.overall(allRaw, null)));
+        System.out.print(ReplayMetrics.render(
+                "═════════ vs PERSISTENCE - effective (twin where it shipped) ═════════",
+                ReplayMetrics.byHorizon(allEffective, null),
+                ReplayMetrics.overall(allEffective, null)));
+        System.out.printf("subjects where the effective model beats persistence: %d / %d%n",
+                beatsPersistence, scoredSubjects);
 
         // Safety guarantee: the out-of-sample gate must never let a twin ship that is worse than the
         // un-calibrated model. Effective MAE (what a user would actually get) <= baseline for everyone.
@@ -112,6 +148,81 @@ class Azt1dCalibrationValidationTest {
             assertThat(row.sd90()).isLessThanOrEqualTo(row.sd120() + 1e-9);
         }
         assertThat(rows).isNotEmpty();
+    }
+
+    /**
+     * Sweeps the CGM interstitial lag and reports skill vs persistence at each setting, for the raw
+     * model and for the effective (calibrated) one. The twin partly compensates for a missing lag,
+     * so both curves are needed to see what the measurement model actually buys.
+     */
+    @Test
+    void interstitialLagSweep() throws Exception {
+        Path root = datasetRoot();
+        Assumptions.assumeTrue(!root.toString().isBlank() && Files.isDirectory(root.resolve("CGM Records")),
+                "AZT1D dataset not present - set -Dazt1d.dir=\"/path/to/AZT1D 2025\" to run");
+
+        List<Azt1dDataset.Subject> subjects = Azt1dDataset.loadAll(root);
+        HovorkaGlucosePredictionService predictor = rawPredictor();
+        RapidInsulinIobParameters rapidIob = new RapidInsulinIobParameters(4.5, 55.0);
+        PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
+        cfg.maxAnchors = 120;
+
+        double restore = InterstitialLagModel.tauMinutes;
+        StringBuilder report = new StringBuilder(
+                "\n═════════ CGM LAG SWEEP - skill vs persistence (held-out) ═════════\n");
+        report.append(String.format("%-8s %10s %10s %10s %10s %10s %8s%n",
+                "tau,min", "raw+30", "raw+120", "eff+30", "eff+60", "eff+120", "eff pool"));
+        try {
+            for (double tau : new double[]{0, 12, 25, 50, 100}) {
+                InterstitialLagModel.tauMinutes = tau;
+                List<AnchorSample> raw = new ArrayList<>();
+                List<AnchorSample> eff = new ArrayList<>();
+                for (Azt1dDataset.Subject s : subjects) {
+                    if (s.cgm().size() < MIN_CGM) continue;
+                    HovorkaParameters baseParams = personalParams(s.profile());
+                    int boundary = (int) Math.floor(s.cgm().size() * TRAIN_FRACTION);
+                    PredictionReplayEngine train = new PredictionReplayEngine(predictor, baseParams,
+                            rapidIob, null, USER, s.cgm().subList(0, boundary), s.events(), cfg);
+                    PredictionReplayEngine val = new PredictionReplayEngine(predictor, baseParams,
+                            rapidIob, null, USER, s.cgm().subList(boundary, s.cgm().size()),
+                            s.events(), cfg);
+                    DigitalTwinCalibrator.Result r = new DigitalTwinCalibrator().calibrate(train, val);
+                    List<AnchorSample> rawS = val.replay(TwinScales.neutral());
+                    raw.addAll(rawS);
+                    eff.addAll(r.improved() ? withResidual(val.replay(r.scales()), r.residual()) : rawS);
+                }
+                report.append(String.format("%-8.0f %9.1f%% %9.1f%% %9.1f%% %9.1f%% %9.1f%% %7.1f%%%n",
+                        tau,
+                        100 * skillAt(raw, 30), 100 * skillAt(raw, 120),
+                        100 * skillAt(eff, 30), 100 * skillAt(eff, 60), 100 * skillAt(eff, 120),
+                        100 * ReplayMetrics.overall(eff, null).skill()));
+                System.out.print(report.substring(report.lastIndexOf("\n", report.length() - 2) + 1));
+            }
+        } finally {
+            InterstitialLagModel.tauMinutes = restore;
+        }
+        System.out.print(report);
+        assertThat(subjects).isNotEmpty();
+    }
+
+    private static double skillAt(List<AnchorSample> samples, int horizon) {
+        for (ReplayMetrics.Stats s : ReplayMetrics.byHorizon(samples, null)) {
+            if (s.horizonMin() == horizon) return s.skill();
+        }
+        return Double.NaN;
+    }
+
+    /** Fold a per-subject residual grid into {@code predicted} so pooled scoring stays correct. */
+    private static List<AnchorSample> withResidual(
+            List<AnchorSample> samples, che.glucosemonitorbe.hovorka.learning.ResidualBiasModel residual) {
+        if (residual == null || residual.isNeutral()) return samples;
+        List<AnchorSample> out = new ArrayList<>(samples.size());
+        for (AnchorSample s : samples) {
+            out.add(new AnchorSample(s.horizonMin(),
+                    s.predicted() + residual.correctionAt(s.hourOfDay()),
+                    s.actual(), s.baseline(), s.regime(), s.hourOfDay()));
+        }
+        return out;
     }
 
     // -- Report rendering -----------------------------------------------------
