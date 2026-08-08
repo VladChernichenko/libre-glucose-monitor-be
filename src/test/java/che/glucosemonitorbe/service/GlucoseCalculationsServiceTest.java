@@ -5,6 +5,8 @@ import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.hovorka.ActivityProvider;
+import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,8 +21,10 @@ import org.mockito.quality.Strictness;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.DataAccessResourceFailureException;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,6 +48,7 @@ class GlucoseCalculationsServiceTest {
     @Mock private FeatureToggleConfig featureToggleConfig;
     @Mock private UserSettingsService userSettingsService;
     @Mock private NoteToCarbsEntryMapper noteToCarbsEntryMapper;
+    @Mock private HovorkaGlucosePredictionService hovorkaService;
 
     private GlucoseCalculationsService service;
 
@@ -434,6 +439,74 @@ class GlucoseCalculationsServiceTest {
 
         response.getPredictionPath().forEach(point ->
                 assertThat(point.getPredictedGlucose()).isBetween(1.0, 25.0));
+    }
+
+    // -- Headline "2h forecast" must agree with the chart it sits above ------------
+
+    /**
+     * BUG: dashboard headline ("2h forecast") and the forecast chart (predictionPath) are
+     * computed by two independent models that are never reconciled. twoHourPrediction comes
+     * from calculatePredictedGlucose() (COB/IOB-only formula, baselineContribution hardcoded
+     * to 0.0). predictionPath comes from HovorkaGlucosePredictionService. The "4h forecast"
+     * headline is safe because ContentView.swift reads it straight off predictionPath.last -
+     * but "2h forecast" is not, because it reads calc.twoHourPrediction instead.
+     *
+     * Reproduces an observed case (2026-08-07 10:36 screenshot): current=9.0, COB=2.5g
+     * (post-breakfast, absorbing out), IOB=0.00u. The analytical formula sees only the
+     * carb-absorption delta and predicts a further RISE to ~9.3. The Hovorka chart, driven
+     * by whatever is actually pulling glucose down post-meal, shows a steep FALL to ~5.7 by
+     * the 2h mark and ~3.8 by 4h - the opposite direction. A user trusting the headline would
+     * not expect the near-hypo the chart is already forecasting.
+     *
+     * This test FAILS today because twoHourPrediction never looks at predictionPath.
+     */
+    @Test
+    void twoHourPrediction_mustTrackPredictionPath_whenHovorkaModelDrivesTheChart() throws Exception {
+        String username = "hovorka_user";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+        when(featureToggleConfig.isHovorkaModelEnabled()).thenReturn(true);
+        // Real observed inputs: 2.5g COB now, fully absorbed by the 2h mark.
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(LocalDateTime.class), any(UserSettingsDTO.class)))
+                .thenReturn(2.5, 0.0);
+
+        Field f = GlucoseCalculationsService.class.getDeclaredField("hovorkaService");
+        f.setAccessible(true);
+        f.set(service, hovorkaService);
+
+        double current = 9.0;
+        LocalDateTime t0 = LocalDateTime.now();
+        // Synthetic Hovorka output shaped like the screenshot's chart: peaks at "now" (9.0),
+        // descends to ~5.7 by minute 120, ~3.8 by minute 240 (piecewise-linear through both
+        // observed anchor points).
+        List<PredictionPointDTO> fallingPath = new ArrayList<>();
+        for (int minute = 5; minute <= 240; minute += 5) {
+            double g = minute <= 120
+                    ? 9.0 - 3.3 * (minute / 120.0)
+                    : 5.7 - 1.9 * ((minute - 120) / 120.0);
+            fallingPath.add(PredictionPointDTO.builder()
+                    .timestamp(t0.plusMinutes(minute))
+                    .predictedGlucose(Math.round(g * 10.0) / 10.0)
+                    .build());
+        }
+        when(hovorkaService.buildPredictionPath(
+                anyDouble(), any(LocalDateTime.class), anyList(), anyList(), anyList(),
+                any(UUID.class), anyInt(), any(ActivityProvider.class)))
+                .thenReturn(fallingPath);
+
+        GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
+                .currentGlucose(current).userId(username).build();
+
+        var response = service.calculateGlucoseData(request);
+
+        double chartAt2h = response.getPredictionPath().get(23).getPredictedGlucose(); // minute 120, ~5.7
+
+        assertThat(response.getTwoHourPrediction())
+                .as("Headline '2h forecast' (%.1f) must agree with the chart's 2h point (%.1f) - "
+                        + "instead the headline predicts a further rise from current=%.1f while the "
+                        + "chart the user is looking at shows a steep fall toward hypo range",
+                        response.getTwoHourPrediction(), chartAt2h, current)
+                .isCloseTo(chartAt2h, within(0.5));
     }
 
     // -- Per-meal-window ISF overrides must be time-aware along the prediction curve --

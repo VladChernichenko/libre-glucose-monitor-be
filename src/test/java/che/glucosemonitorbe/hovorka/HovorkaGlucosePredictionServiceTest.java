@@ -5,6 +5,7 @@ import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
+import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -93,6 +95,43 @@ class HovorkaGlucosePredictionServiceTest {
                 assertThat(pt.getPredictedGlucose())
                         .as("G at %s (COB=0, IOB=0, no basal logged)", pt.getTimestamp())
                         .isBetween(5.7, 8.7));   // g0 ± 1.5 mmol/L
+    }
+
+    // ---
+    // Bug candidate: does the chart jump right at "now", or rise gradually?
+    // ---
+
+    @Test
+    @DisplayName("Waning basal (22h post-injection): rises over 4h but must not jump at t+5min")
+    void waningBasal_noCobNoIob_risesGraduallyWithoutInitialJump() {
+        double g0 = 6.1;
+        Note basal = new Note();
+        basal.setUserId(USER_ID);
+        basal.setTimestamp(NOW.minusHours(22));
+        basal.setInsulin(20.0);
+        basal.setType(Note.TYPE_LONG_ACTING);
+        basal.setMeal("Long-acting");
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, NOW,
+                List.of(), List.of(), List.of(basal),
+                USER_ID, 240);
+
+        assertThat(curve).isNotEmpty();
+
+        // Sanity: waning basal (20-28h taper) should raise glucose over the 4h window even
+        // with zero COB/IOB - this is the expected/legitimate model behaviour.
+        double at2h = curve.get(23).getPredictedGlucose(); // minute 120
+        assertThat(at2h).as("EGP suppression fading over the 20-28h taper should raise glucose "
+                + "above baseline by the 2h mark").isGreaterThan(g0);
+
+        // Bug candidate: the chart in the screenshots shows a near-vertical jump right at
+        // "now", not a gradual rise. The very first emitted point (t+5min) should differ
+        // from the current sensor reading by a clinically plausible amount only, not jump.
+        double firstPoint = curve.get(0).getPredictedGlucose(); // minute 5
+        assertThat(firstPoint).as("First 5-min point %.2f should be close to currentGlucose %.2f - "
+                + "a large gap here would show up as a visible jump at the chart's solid/dashed boundary",
+                firstPoint, g0).isCloseTo(g0, within(0.15));
     }
 
     // ---

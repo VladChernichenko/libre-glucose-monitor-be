@@ -127,16 +127,12 @@ public class GlucoseCalculationsService {
         // Calculate prediction factors using user-specific settings
         PredictionFactors factors = calculatePredictionFactors(
             activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes, carbsEntries, currentTime);
-        
-        // Calculate predicted glucose
-        double predictedGlucose = calculatePredictedGlucose(
-            request.getCurrentGlucose(), factors, predictionHorizon);
-        
+
         // Determine trend
         String trend = determineTrend(factors, predictionHorizon);
-        
+
         // Calculate confidence based on data quality
-        double confidence = calculateConfidence(carbsEntries.size(), insulinEntries.size(), 
+        double confidence = calculateConfidence(carbsEntries.size(), insulinEntries.size(),
             request.getCurrentGlucose());
 
         List<PredictionPointDTO> predictionPath = buildPredictionPath(
@@ -150,7 +146,22 @@ public class GlucoseCalculationsService {
                 rapidIob,
                 request.getCurrentTrendMmolPerMin()
         );
-        
+
+        // twoHourPrediction MUST come from the same predictionPath the chart renders, not a
+        // separate COB/IOB-only formula - otherwise the headline and the chart can (and did)
+        // disagree, including in direction (headline predicting a rise while the chart the
+        // user is looking at is falling toward hypo range). Mirrors how fourHourPrediction
+        // below is already read off predictionPath. Falls back to the analytical formula only
+        // if the path is unexpectedly empty.
+        int twoHourIndex = (int) Math.round(predictionHorizon / PREDICTION_PATH_STEP_MINUTES) - 1;
+        double predictedGlucose;
+        if (!predictionPath.isEmpty()) {
+            int idx2h = Math.max(0, Math.min(twoHourIndex, predictionPath.size() - 1));
+            predictedGlucose = predictionPath.get(idx2h).getPredictedGlucose();
+        } else {
+            predictedGlucose = calculatePredictedGlucose(request.getCurrentGlucose(), factors, predictionHorizon);
+        }
+
         // fourHourPrediction = point at exactly 240 min (PREDICTION_PATH_MINUTES).
         // eightHourPrediction = last point when path extends beyond 4 h (HFHP / Dual Wave).
         // BE-P0-1: with step=5 min the 4 h path has 48 points (240/5); index 47.
