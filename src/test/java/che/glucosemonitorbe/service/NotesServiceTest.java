@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -94,6 +95,102 @@ class NotesServiceTest {
         NoteDto result = notesService.updateNote(userId, noteId, new UpdateNoteRequest());
 
         assertNull(result);
+    }
+
+    /**
+     * The client's own macros must survive an edit. {@code updateNote} used to store the
+     * request's profile and then run text enrichment unconditionally, which overwrote it with a
+     * snapshot derived only from detailedInput/comment/carbs - so protein and fat typed into the
+     * Edit Note screen came back as 0 g.
+     */
+    @Test
+    void updateNoteKeepsClientSuppliedNutritionProfile() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        existingNote.setUserId(userId);
+        existingNote.setCarbs(15.0);
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
+        when(noteRepository.save(any(Note.class))).thenAnswer(i -> i.getArgument(0));
+        when(noteMapper.toDto(any(Note.class))).thenReturn(new NoteDto());
+
+        String clientProfile = "{\"totalCarbs\":15.0,\"protein\":30.0,\"fat\":20.0,\"fiber\":3.0}";
+        UpdateNoteRequest request = new UpdateNoteRequest();
+        request.setCarbs(15.0);
+        request.setNutritionProfile(clientProfile);
+
+        notesService.updateNote(userId, noteId, request);
+
+        assertEquals(clientProfile, capturedSavedNote().getNutritionProfile());
+        verify(nutritionEnrichmentService, never()).enrichFromText(any(), any(), any());
+    }
+
+    /**
+     * An edit that carries no profile of its own (e.g. only the time changed) must not discard the
+     * profile already stored on the note - that downgraded photo-scanned meals from GI_GL_ENHANCED
+     * back to DEFAULT_DECAY and dropped patternName / suggestedDurationHours.
+     */
+    @Test
+    void updateNoteKeepsStoredProfileWhenRequestCarriesNone() {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        String storedProfile = "{\"absorptionMode\":\"GI_GL_ENHANCED\",\"patternName\":\"Double Wave\"}";
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        existingNote.setUserId(userId);
+        existingNote.setCarbs(60.0);
+        existingNote.setNutritionProfile(storedProfile);
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
+        when(noteRepository.save(any(Note.class))).thenAnswer(i -> i.getArgument(0));
+        when(noteMapper.toDto(any(Note.class))).thenReturn(new NoteDto());
+
+        UpdateNoteRequest request = new UpdateNoteRequest();
+        request.setMeal("Dinner");
+
+        notesService.updateNote(userId, noteId, request);
+
+        assertEquals(storedProfile, capturedSavedNote().getNutritionProfile());
+        verify(nutritionEnrichmentService, never()).enrichFromText(any(), any(), any());
+    }
+
+    /** A note that has never been enriched still gets a profile from its text on update. */
+    @Test
+    void updateNoteEnrichesNoteWithNoProfileAtAll() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID noteId = UUID.randomUUID();
+        Note existingNote = new Note();
+        existingNote.setId(noteId);
+        existingNote.setUserId(userId);
+        existingNote.setCarbs(45.0);
+        existingNote.setDetailedInput("rice and chicken");
+        when(noteRepository.findByIdAndUserId(noteId, userId)).thenReturn(Optional.of(existingNote));
+        when(noteRepository.save(any(Note.class))).thenAnswer(i -> i.getArgument(0));
+        when(noteMapper.toDto(any(Note.class))).thenReturn(new NoteDto());
+        String enriched = "{\"absorptionMode\":\"GI_GL_ENHANCED\",\"source\":\"KEYWORD_GI\"}";
+        stubEnrichmentReturning(enriched);
+
+        UpdateNoteRequest request = new UpdateNoteRequest();
+        request.setCarbs(45.0);
+
+        notesService.updateNote(userId, noteId, request);
+
+        assertEquals(enriched, capturedSavedNote().getNutritionProfile());
+    }
+
+    private void stubEnrichmentReturning(String json) throws Exception {
+        NutritionSnapshot snapshot = NutritionSnapshot.builder()
+                .absorptionMode("GI_GL_ENHANCED")
+                .source("KEYWORD_GI")
+                .build();
+        when(nutritionEnrichmentService.enrichFromText(any(), any(), any())).thenReturn(snapshot);
+        when(objectMapper.writeValueAsString(snapshot)).thenReturn(json);
+    }
+
+    private Note capturedSavedNote() {
+        ArgumentCaptor<Note> captor = ArgumentCaptor.forClass(Note.class);
+        verify(noteRepository).save(captor.capture());
+        return captor.getValue();
     }
 
     @Test

@@ -187,7 +187,13 @@ public class NotesService {
         if (request.getAbsorptionMode() != null) {
             existingNote.setAbsorptionMode(request.getAbsorptionMode());
         }
-        if (request.getNutritionProfile() != null && !request.getNutritionProfile().isBlank()) {
+        // Same precedence as createNote: a client-computed profile wins over server-side
+        // enrichment. Enriching unconditionally here overwrote it with a snapshot derived only
+        // from detailedInput/comment/carbs, so macros typed on the Edit Note screen came back as
+        // 0 g and photo-scanned meals lost patternName / suggestedDurationHours on every edit.
+        boolean clientProfileSupplied =
+                request.getNutritionProfile() != null && !request.getNutritionProfile().isBlank();
+        if (clientProfileSupplied) {
             existingNote.setNutritionProfile(request.getNutritionProfile());
         }
         if (request.getActivityType() != null) existingNote.setActivityType(request.getActivityType());
@@ -197,8 +203,13 @@ public class NotesService {
             applyActivityFields(existingNote, existingNote.getActivityType(),
                     existingNote.getIntensity(), existingNote.getDurationMin());
         }
-        enrichNutrition(existingNote);
-        
+        // Only enrich a note that has no profile at all - never to replace an existing one.
+        if (!clientProfileSupplied
+                && (existingNote.getNutritionProfile() == null
+                    || existingNote.getNutritionProfile().isBlank())) {
+            enrichNutrition(existingNote);
+        }
+
         Note updatedNote = noteRepository.save(existingNote);
         return toDtoWithPhoto(updatedNote);
     }
