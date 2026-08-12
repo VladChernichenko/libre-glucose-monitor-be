@@ -62,6 +62,28 @@ public class HovorkaGlucosePredictionService {
     private static final double G_MIN           = 1.0;
     private static final double G_MAX           = 25.0;
 
+    /**
+     * Minutes over which the learned residual bias phases in from zero at the anchor.
+     *
+     * <p>{@link che.glucosemonitorbe.hovorka.learning.ResidualBiasModel} is fitted from
+     * {@link che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine.Config#sampleHorizons}
+     * - by default 30/60/90/120 min. It therefore describes how far the model has drifted by
+     * <em>at least</em> half an hour out, and says nothing about shorter horizons. Applying it
+     * at full strength to the first emitted point (+5 min) asserts the model is already wrong
+     * by the full bias when it is anchored on a measured reading and its error is 0 by
+     * construction - which drew a vertical step between "now" and the start of the forecast.
+     *
+     * <p>Ramping to full by the shortest fitted horizon leaves every sampled horizon
+     * (>= 30 min) bit-identical, so calibration and the {@code applied} gate are unaffected.
+     */
+    private static final double RESIDUAL_RAMP_MINUTES = 30.0;
+
+    /** Fraction of the learned residual applied {@code minute} past the anchor. */
+    static double residualRamp(int minute) {
+        if (minute <= 0) return 0.0;
+        return Math.min(1.0, minute / RESIDUAL_RAMP_MINUTES);
+    }
+
     private final HovorkaParameterService       paramService;
     private final HovorkaOdeSolver              odeSolver;
     private final BasalInsulinResolver          basalResolver;
@@ -343,7 +365,8 @@ public class HovorkaGlucosePredictionService {
                 // Digital-twin residual correction (predictions only): add the learned per-hour bias
                 // that the physiology can't express from logged inputs, then re-clamp to the
                 // physiological range. NONE provider (calibration replay) leaves gPred untouched.
-                double correction = residualProvider.residualMmol(userId, pointTime);
+                double correction =
+                        residualProvider.residualMmol(userId, pointTime) * residualRamp(min);
                 double gAdj = Math.max(G_MIN, Math.min(G_MAX, gPred + correction));
                 double giScaleDisplay = Math.max(0.3, Math.min(1.5, state.activeGI() / 100.0));
                 double kAbsDisplay = DallaManGutModel.effectiveKAbs(pAdj.tMaxG()) * giScaleDisplay;
