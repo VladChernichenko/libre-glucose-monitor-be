@@ -707,6 +707,24 @@ class HovorkaGlucosePredictionServiceTest {
                 .isCloseTo(justAhead, within(0.5));
     }
 
+    @Test
+    @DisplayName("a carb meal with no bolus never predicts a fall below baseline")
+    void mealWithoutInsulinNeverPredictsHypo() {
+        double g0 = 6.0;
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, NOW,
+                List.of(pastMeal(30, 60, null, 30.0, 30.0)),
+                List.of(), List.of(), USER_ID, 240);
+
+        double nadir = curve.stream()
+                .mapToDouble(PredictionPointDTO::getPredictedGlucose)
+                .min().orElse(g0);
+        assertThat(nadir)
+                .as("60g carbs with 30g protein + 30g fat and no insulin at all must not drive "
+                        + "the forecast down; the uncalibrated incretin gain took it to 2.2")
+                .isGreaterThanOrEqualTo(g0 - 0.2);
+    }
+
     /** Index of the prediction point with the highest glucose value [minutes from NOW]. */
     private int peakMinute(List<PredictionPointDTO> curve) {
         return curve.stream()

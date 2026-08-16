@@ -15,12 +15,12 @@ import org.springframework.stereotype.Component;
  *   kempt  = K_MIN + (K_MAX-K_MIN)/2 × {tanh[α(Qsto−b*D)] − tanh[c(Qsto−d*D)] + 2}
  *   Ra     = F × K_ABS × Qgut
  *
- *   dQ1/dt    = −F01_c − k12*Q1 + k21*Q2 + Ra + EGP(t) − insulinEffect − α_inc*Inc*Q1
+ *   dQ1/dt    = −F01_c − k12*Q1 + k21*Q2 + Ra + EGP(t) − insulinEffect
  *   dQ2/dt    = k12*Q1 − k21*Q2
  *   dQsto1/dt = −K_GRI*Qsto1               (meal u(t) added before RK4 step)
  *   dQsto2/dt = K_GRI*Qsto1 − kempt*Qsto2
  *   dQgut/dt  = kempt*Qsto2 − K_ABS*Qgut
- *   dInc/dt   = K_INC_PF*protFatGut − K_DEL*Inc
+ *   dInc/dt   = K_INC_PF*ProtFatGut/(ProtFatGut+K_M_PF) − K_DEL*Inc   [Inc ∈ 0..1]
  *   dx3/dt    = -KA3*x3 + KB3*plasmInsulin
  *   dProtFatGut/dt = -K_PF_DRAIN*ProtFatGut
  * </pre>
@@ -39,10 +39,27 @@ public class HovorkaOdeSolver {
     // -- Incretin GLP-1 parameters ---------------------------------------------
     /** Protein+fat gut drain rate [/min] — t½ ≈ 87 min. */
     static final double K_PF_DRAIN = 0.008;
-    /** GLP-1 secretion rate [per kcal in gut per min]. */
-    static final double K_INC_PF   = 0.003;
+    /**
+     * Half-saturation protein+fat gut load for the GLP-1 response [kcal].
+     *
+     * <p>L-cell GLP-1 secretion saturates with nutrient load; it is not proportional to it.
+     * Half-max at 200 kcal spreads the response across the realistic range: a 100 kcal snack
+     * reaches 33 % activation, a 390 kcal mixed meal 66 %, a 1000 kcal meal 83 %. This is a
+     * calibration choice, not a measured constant.</p>
+     */
+    static final double K_M_PF     = 200.0;
+    /**
+     * GLP-1 activation rate at a saturating protein+fat load [/min].
+     *
+     * <p>{@code Inc} is a dimensionless activation <b>fraction</b>: its quasi-steady value is
+     * {@code (K_INC_PF / K_DEL) × saturation}, so setting {@code K_INC_PF = K_DEL} bounds it at
+     * 1.0 for any meal. Previously {@code Inc} was driven linearly by the kcal in the gut, giving
+     * {@code Inc ≈ 0.15 × kcal} — order 30 for a mixed meal and order 150 for a large one, which
+     * drove the ileal brake to a full stop and, through the old insulin-independent uptake term,
+     * consumed glucose faster than F01.</p>
+     */
+    static final double K_INC_PF   = 0.020;
     static final double K_DEL    = 0.020;   // clearance rate [/min]  (t½ ≈ 35 min)
-    static final double ALPHA_INC = 0.001;  // incretin effect on glucose uptake [/min]
 
     // -- Renal glucose clearance (Hovorka 2004, eq. 7) -------------------------
     // FR = ke1 × (Q1 − ke2×VG)  if G > ke2, else 0
@@ -52,9 +69,18 @@ public class HovorkaOdeSolver {
     // -- Ileal brake: GLP-1 inhibition of gastric emptying --------------------
     // Protein/fat -> GLP-1 rises -> k_empt × Φ_GLP1(Inc) decreases
     // Φ_GLP1(t) = 1 / (1 + KAPPA_GLP1 × Inc(t))  — saturating, never reaches zero
-    /** Saturation coefficient for GLP-1 inhibition of gastric emptying [per Inc unit].
-     *  Φ_GLP1(t) = 1 / (1 + KAPPA_GLP1 × Inc(t))  — Palumbo (2026). */
-    static final double KAPPA_GLP1 = 2.0;
+    /**
+     * Strength of GLP-1 inhibition of gastric emptying [per Inc unit].
+     * {@code Φ_GLP1 = 1 / (1 + KAPPA_GLP1 × Inc)} — Palumbo (2026).
+     *
+     * <p>With {@code Inc} bounded at 1.0, {@code KAPPA_GLP1 = 1.0} floors Φ at 0.5: the most a
+     * protein/fat load can do is halve gastric emptying, matching the roughly doubled gastric
+     * half-emptying time reported for high-fat/high-protein mixed meals. Note this composes with
+     * {@link DallaManGutModel#caloricScale} and, on the {@code /api/predict} path, with
+     * {@link MacroNutrientGastricModel}'s tMaxG — fat and protein currently slow absorption
+     * through more than one channel.</p>
+     */
+    static final double KAPPA_GLP1 = 1.0;
 
     /** GI assumed for a meal that carries no glycemic-index estimate. */
     public static final int DEFAULT_GI = 70;
@@ -69,6 +95,29 @@ public class HovorkaOdeSolver {
      */
     public static double giScale(int gi) {
         return Math.max(0.3, Math.min(1.5, gi / 100.0));
+    }
+
+    /**
+     * GLP-1 activation derivative [per min] for a gut protein+fat load and current activation.
+     * Saturating in {@code protFatGut}, so {@code Inc} converges to a fraction in [0, 1].
+     *
+     * <p>Shared with {@link HovorkaGlucosePredictionService}'s warm-up replay. Hand-copying this
+     * expression there once left the warm-up on an older linear form, producing {@code Inc = 7.8}
+     * where the forward path produced 0.013 — a meal one minute old absorbed five times slower
+     * than the same meal one minute ahead.</p>
+     */
+    public static double dIncDt(double protFatGut, double inc) {
+        double saturation = protFatGut / (protFatGut + K_M_PF);
+        return K_INC_PF * saturation - K_DEL * inc;
+    }
+
+    /**
+     * Ileal-brake multiplier Φ_GLP1 applied to gastric emptying for a GLP-1 activation
+     * {@code inc}. Bounded below by {@code 1 / (1 + KAPPA_GLP1)} since {@code Inc <= 1}.
+     * Shared with the warm-up replay for the same reason as {@link #dIncDt}.
+     */
+    public static double ilealBrake(double inc) {
+        return 1.0 / (1.0 + KAPPA_GLP1 * inc);
     }
 
     private final DallaManGutModel gutModel;
@@ -238,8 +287,7 @@ public class HovorkaOdeSolver {
         // After protein/fat intake Inc rises via K_INC×Ra, which delays subsequent
         // carb absorption - the "food sequencing" effect (Palumbo modification).
         // Saturating form ensures kemptEff never reaches zero for large Inc.
-        double phi      = 1.0 / (1.0 + KAPPA_GLP1 * inc);
-        double kemptEff = kempt * phi;
+        double kemptEff = kempt * ilealBrake(inc);
 
         // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix) plus GI scale.
         // A high-fat/protein meal has a longer tMaxG -> slower intestinal drain
@@ -261,9 +309,14 @@ public class HovorkaOdeSolver {
         double egp = p.egp0() * Math.max(0.0, 1.0 - x3);
 
         // Glucose compartments (activityUptakeRate = insulin-independent, contraction-mediated uptake)
+        // Inc does NOT appear here: GLP-1 lowers glucose through insulin secretion (absent in
+        // T1D), glucagon suppression, and delayed gastric emptying — the last of which is already
+        // modelled by kemptEff above. The old -ALPHA_INC*Inc*Q1 term added a fourth,
+        // insulin-independent uptake pathway with no basis in T1D physiology, and at Inc ≈ 30 it
+        // cleared glucose ~3x faster than F01: a 60 g meal with 30 g protein and 30 g fat and no
+        // bolus at all was predicted to fall from 6.0 to 2.2 mmol/L.
         double dq1 = -f01c - fr - p.k12() * q1 + p.k21() * q2
                    + ra + egp - insulinEffect
-                   - ALPHA_INC * inc * q1
                    - activityUptakeRate * q1;
         double dq2 = p.k12() * q1 - p.k21() * q2;
 
@@ -275,10 +328,9 @@ public class HovorkaOdeSolver {
         // Protein+fat gut compartment drains independently (GLP-1 driver)
         double dProtFatGut = -K_PF_DRAIN * protFatGut;
 
-        // Incretin GLP-1: driven by protein+fat transit rate (NOT carb Ra).
-        // Inc driven by K_INC_PF × protFatGut (protein/fat gut transit)
-        // Pre-loading protein/fat triggers ileal brake before carbs arrive.
-        double dinc = K_INC_PF * protFatGut - K_DEL * inc;
+        // Incretin GLP-1: driven by protein+fat in the gut (NOT carb Ra), saturating.
+        // Pre-loading protein/fat triggers the ileal brake before carbs arrive.
+        double dinc = dIncDt(protFatGut, inc);
 
         return new double[]{dq1, dq2, dqsto1, dqsto2, dqgut, dinc, dx3, dProtFatGut};
     }

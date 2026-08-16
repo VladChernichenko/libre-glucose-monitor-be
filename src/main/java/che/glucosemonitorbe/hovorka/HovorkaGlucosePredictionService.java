@@ -496,13 +496,13 @@ public class HovorkaGlucosePredictionService {
             double qsto  = qsto1 + qsto2;
             double kempt = dRef > 0 ? gutModel.kEmpt(qsto, dRef, kMaxEff, kMinEff) : 0.0;
             // Ileal brake: GLP-1 from protein/fat already in the gut slows emptying.
-            double kemptEff = kempt / (1.0 + HovorkaOdeSolver.KAPPA_GLP1 * inc);
+            double kemptEff = kempt * HovorkaOdeSolver.ilealBrake(inc);
 
             double dQsto1 = -kGriEff * qsto1;
             double dQsto2 = kGriEff * qsto1 - kemptEff * qsto2;
             double dQgut  = kemptEff * qsto2 - kAbsEff * qgut;
             double dProtFatGut = -HovorkaOdeSolver.K_PF_DRAIN * protFatGut;
-            double dInc        = HovorkaOdeSolver.K_INC_PF * protFatGut - HovorkaOdeSolver.K_DEL * inc;
+            double dInc        = HovorkaOdeSolver.dIncDt(protFatGut, inc);
 
             qsto1 = Math.max(0.0, qsto1 + dQsto1);
             qsto2 = Math.max(0.0, qsto2 + dQsto2);

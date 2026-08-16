@@ -388,6 +388,74 @@ class HovorkaOdeSolverTest {
         assertThat(s60.protFatGut()).isLessThan(500.0);  // protFatGut drains
     }
 
+    // ---
+    // GLP-1 gain: the incretin must slow gastric emptying, and must not clear glucose itself.
+    // ---
+
+    @Test
+    void glp1_proteinFatAlone_doesNotLowerGlucose() {
+        // GLP-1 lowers glucose through insulin secretion (absent in T1D), glucagon suppression
+        // and delayed gastric emptying - never through insulin-independent uptake. A gut load of
+        // protein and fat with no carbs and no insulin must therefore leave glucose flat.
+        double g0 = 5.5;
+        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
+        HovorkaState s = new HovorkaState(
+                g0 * params.vG(), g0 * params.vG(), 0, 0, 0, 0.0, x3ss, 500.0, 0.0, 70);
+
+        for (int m = 1; m <= 240; m++) {
+            s = solver.step(s, params, 0.0, 70, 0.0, 0.0, 0.0);
+        }
+
+        assertThat(s.glucoseMmolL(params))
+                .as("500 kcal of protein/fat, no carbs, no insulin - GLP-1 must not consume glucose")
+                .isCloseTo(g0, within(0.2));
+    }
+
+    @Test
+    void glp1_brakeIsBounded_hugeProteinFatLoadCannotStallTheStomach() {
+        // The ileal brake is bounded: fat and protein roughly double gastric half-emptying time
+        // for a mixed meal, they do not halt it. Unbounded Inc drove phi = 1/(1 + KAPPA*Inc)
+        // toward zero, leaving the meal stuck in the stomach and its carbs never available.
+        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
+        double carbMmol = 60.0 * params.aG() / 0.18;
+
+        HovorkaState braked = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        braked = solver.step(braked, params, carbMmol, 70, 1000.0, 0.0, 0.0);
+        HovorkaState plain = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        plain = solver.step(plain, params, carbMmol, 70, 0.0, 0.0, 0.0);
+
+        for (int m = 1; m <= 240; m++) {
+            braked = solver.step(braked, params, 0.0, 70, 0.0, 0.0, 0.0);
+            plain  = solver.step(plain,  params, 0.0, 70, 0.0, 0.0, 0.0);
+        }
+
+        assertThat(braked.qsto1() + braked.qsto2())
+                .as("even a 1000 kcal protein/fat load must not retain more than ~2x the "
+                        + "stomach content of the same meal eaten without macros")
+                .isLessThan(2.0 * (plain.qsto1() + plain.qsto2()));
+    }
+
+    @Test
+    void glp1_brakeStillDelaysEmptying() {
+        // Guard against over-correcting: the brake must remain a real effect, not a no-op.
+        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
+        double carbMmol = 60.0 * params.aG() / 0.18;
+
+        HovorkaState braked = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        braked = solver.step(braked, params, carbMmol, 70, 500.0, 0.0, 0.0);
+        HovorkaState plain = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        plain = solver.step(plain, params, carbMmol, 70, 0.0, 0.0, 0.0);
+
+        for (int m = 1; m <= 60; m++) {
+            braked = solver.step(braked, params, 0.0, 70, 0.0, 0.0, 0.0);
+            plain  = solver.step(plain,  params, 0.0, 70, 0.0, 0.0, 0.0);
+        }
+
+        assertThat(braked.qsto1() + braked.qsto2())
+                .as("protein/fat must still hold carbs in the stomach longer than a pure-carb meal")
+                .isGreaterThan(plain.qsto1() + plain.qsto2());
+    }
+
     @Test
     void glp1Driver_noProtFat_incStaysZero() {
         // Without protein/fat, Inc should stay at 0
