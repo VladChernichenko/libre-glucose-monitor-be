@@ -56,6 +56,21 @@ public class HovorkaOdeSolver {
      *  Φ_GLP1(t) = 1 / (1 + KAPPA_GLP1 × Inc(t))  — Palumbo (2026). */
     static final double KAPPA_GLP1 = 2.0;
 
+    /** GI assumed for a meal that carries no glycemic-index estimate. */
+    public static final int DEFAULT_GI = 70;
+
+    /**
+     * Absorption-rate multiplier for a meal's glycemic index (Palumbo 2026): k_abs, k_gri, k_max
+     * and k_min all scale linearly with GI/100, clamped to [0.3, 1.5] - never below 30% (very low
+     * GI) nor above 150% (glucose solutions).
+     *
+     * <p>Shared with {@link HovorkaGlucosePredictionService}'s warm-up replay so an already-logged
+     * meal and a prospective one scale identically.</p>
+     */
+    public static double giScale(int gi) {
+        return Math.max(0.3, Math.min(1.5, gi / 100.0));
+    }
+
     private final DallaManGutModel gutModel;
 
     public HovorkaOdeSolver(DallaManGutModel gutModel) {
@@ -206,8 +221,7 @@ public class HovorkaOdeSolver {
         double cCal      = DallaManGutModel.caloricScale(tHalfMeal);
 
         // GI scaling: k_abs and k_gri scale linearly with GI/100 (Palumbo 2026).
-        // Clamped [0.3, 1.5]: never below 30% (very low GI) nor above 150% (glucose solutions).
-        double giScale  = Math.max(0.3, Math.min(1.5, gi / 100.0));
+        double giScale  = giScale(gi);
 
         // Apply GI scale ON TOP OF caloric correction
         double kGriEff  = DallaManGutModel.K_GRI * cCal * giScale;

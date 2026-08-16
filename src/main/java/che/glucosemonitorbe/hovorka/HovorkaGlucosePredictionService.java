@@ -62,6 +62,9 @@ public class HovorkaGlucosePredictionService {
     private static final double G_MIN           = 1.0;
     private static final double G_MAX           = 25.0;
 
+    /** GI assumed for a meal with no glycemic-index estimate - one definition for both timelines. */
+    private static final int    DEFAULT_GI      = HovorkaOdeSolver.DEFAULT_GI;
+
     /**
      * Minutes over which the learned residual bias phases in from zero at the anchor.
      *
@@ -368,7 +371,7 @@ public class HovorkaGlucosePredictionService {
                 double correction =
                         residualProvider.residualMmol(userId, pointTime) * residualRamp(min);
                 double gAdj = Math.max(G_MIN, Math.min(G_MAX, gPred + correction));
-                double giScaleDisplay = Math.max(0.3, Math.min(1.5, state.activeGI() / 100.0));
+                double giScaleDisplay = HovorkaOdeSolver.giScale(state.activeGI());
                 double kAbsDisplay = DallaManGutModel.effectiveKAbs(pAdj.tMaxG()) * giScaleDisplay;
                 double carbEffect  = gutModel.ra(state.qgut(), kAbsDisplay) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
@@ -398,7 +401,16 @@ public class HovorkaGlucosePredictionService {
      *   <li>Qsto1, Qsto2, Qgut - by replaying each past meal through the
      *       Dalla Man gut ODE up to "now". This gives accurate nonlinear
      *       absorption state without shortcuts.</li>
+     *   <li>ProtFatGut, Inc, activeGI - carried by the same replay, so an already-logged meal
+     *       enters the forward integration with the same GI scaling and GLP-1 state a meal
+     *       timestamped a minute into the future would have.</li>
      * </ul>
+     *
+     * <p>The replay mirrors {@link HovorkaOdeSolver#derivatives} term for term. Anything modelled
+     * there and not here is silently dropped for every meal the user has actually logged: the
+     * warm-up used to hard-code {@code activeGI = 70} and leave {@code protFatGut = 0}, so GI,
+     * protein and fat only ever reached the model through the future-event timelines and a meal
+     * one minute old predicted nothing like the same meal one minute ahead.</p>
      */
     private HovorkaState buildWarmState(
             double currentGlucose,
@@ -410,44 +422,56 @@ public class HovorkaGlucosePredictionService {
 
         // Same macro-modulated drain rate as the forward RK4 integration (HovorkaOdeSolver),
         // so a meal's Qgut carries over consistently across the warm-up/forward boundary.
-        double kAbsEff = DallaManGutModel.effectiveKAbs(p.tMaxG());
+        // GI scaling is applied per tick below, from the meal being absorbed at that tick.
+        double kAbsBase = DallaManGutModel.effectiveKAbs(p.tMaxG());
 
         // Caloric correction mirrors HovorkaOdeSolver.derivatives(): scale k_max, k_min, k_gri
-        // Note: GI scaling is not applied during warm-up — only caloric scale (C_caloric) is threaded
-        // through. Any residual gut content from a past low-GI meal therefore transitions to the
-        // forward loop with a slight absorption-rate discontinuity. Impact is bounded to meals
-        // eaten within ~30 min before the prediction anchor.
         double tHalfMeal = p.tMaxG() * 1.68;
         double cCal      = DallaManGutModel.caloricScale(tHalfMeal);
-        double kGriEff   = DallaManGutModel.K_GRI * cCal;
-        double kMaxEff   = DallaManGutModel.K_MAX * cCal;
-        double kMinEff   = DallaManGutModel.K_MIN * cCal;
 
-        // Collect past meals (delivered before "now") as age-in-minutes -> carb mmol.
-        // We replay ALL of them through ONE shared gut chain in chronological order - not
-        // isolated per-meal chains - so the k_empt D reference is refreshed to the stomach
-        // load at each ingestion exactly like HovorkaOdeSolver.step. This makes stacked
+        // Collect past meals (delivered before "now") as age-in-minutes -> carb mmol, GI and
+        // protein+fat kcal. We replay ALL of them through ONE shared gut chain in chronological
+        // order - not isolated per-meal chains - so the k_empt D reference is refreshed to the
+        // stomach load at each ingestion exactly like HovorkaOdeSolver.step. This makes stacked
         // history meals (e.g. snack then dinner) carry the same emptying dynamics into the
         // forward integration as the forward path itself, and keeps a single fresh meal
         // consistent with a continuous run that started at the meal.
-        Map<Integer, Double> mealsByAge = new HashMap<>();
+        Map<Integer, Double> mealsByAge     = new HashMap<>();
+        Map<Integer, Double> giWeightedByAge = new HashMap<>();
+        Map<Integer, Double> giWeightByAge   = new HashMap<>();
+        Map<Integer, Double> protFatByAge    = new HashMap<>();
         int oldestAge = 0;
         for (CarbsEntry entry : pastCarbs) {
             if (entry.getTimestamp() == null) continue;
             long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
             if (minsAgo <= 0) continue;
             int ageMin = (int) Math.min(minsAgo, 480);
+
+            // Protein/fat drive the GLP-1 ileal brake even when the meal carries no carbs at all.
+            double kcal = protFatKcal(entry);
+            if (kcal > 0) {
+                protFatByAge.merge(ageMin, kcal, Double::sum);
+                oldestAge = Math.max(oldestAge, ageMin);
+            }
+
             double carbMmol = toCarbMmol(entry, p);
             if (carbMmol <= 0) continue;
             mealsByAge.merge(ageMin, carbMmol, Double::sum);
+            // Carb-weighted GI, matching buildFutureGiTimeline: meals landing on the same
+            // minute blend rather than the later one silently winning.
+            double carbs = entry.getCarbs();
+            giWeightedByAge.merge(ageMin, carbs * giOf(entry), Double::sum);
+            giWeightByAge.merge(ageMin, carbs, Double::sum);
             oldestAge = Math.max(oldestAge, ageMin);
         }
 
-        if (mealsByAge.isEmpty()) {
+        if (mealsByAge.isEmpty() && protFatByAge.isEmpty()) {
             return ss;
         }
 
         double qsto1 = 0.0, qsto2 = 0.0, qgut = 0.0, dRef = 0.0;
+        double protFatGut = 0.0, inc = 0.0;
+        int activeGi = DEFAULT_GI;
         // Tick down from the oldest meal's age to 1 minute ago. At each tick, ingest any
         // meal whose age equals the current tick, then advance the gut ODE by one minute.
         for (int age = oldestAge; age >= 1; age--) {
@@ -455,22 +479,44 @@ public class HovorkaGlucosePredictionService {
             if (carbMmol != null) {
                 qsto1 += carbMmol;
                 dRef   = qsto1 + qsto2;   // refresh D = stomach load, like step()
+                activeGi = (int) Math.round(giWeightedByAge.get(age) / giWeightByAge.get(age));
             }
+            Double kcal = protFatByAge.get(age);
+            if (kcal != null) {
+                protFatGut += kcal;
+            }
+
+            // GI scale on top of the caloric correction - identical to derivatives().
+            double giScale = HovorkaOdeSolver.giScale(activeGi);
+            double kGriEff = DallaManGutModel.K_GRI * cCal * giScale;
+            double kMaxEff = DallaManGutModel.K_MAX * cCal * giScale;
+            double kMinEff = DallaManGutModel.K_MIN * cCal * giScale;
+            double kAbsEff = kAbsBase * giScale;
+
             double qsto  = qsto1 + qsto2;
             double kempt = dRef > 0 ? gutModel.kEmpt(qsto, dRef, kMaxEff, kMinEff) : 0.0;
+            // Ileal brake: GLP-1 from protein/fat already in the gut slows emptying.
+            double kemptEff = kempt / (1.0 + HovorkaOdeSolver.KAPPA_GLP1 * inc);
+
             double dQsto1 = -kGriEff * qsto1;
-            double dQsto2 = kGriEff * qsto1 - kempt * qsto2;
-            double dQgut  = kempt * qsto2 - kAbsEff * qgut;
+            double dQsto2 = kGriEff * qsto1 - kemptEff * qsto2;
+            double dQgut  = kemptEff * qsto2 - kAbsEff * qgut;
+            double dProtFatGut = -HovorkaOdeSolver.K_PF_DRAIN * protFatGut;
+            double dInc        = HovorkaOdeSolver.K_INC_PF * protFatGut - HovorkaOdeSolver.K_DEL * inc;
+
             qsto1 = Math.max(0.0, qsto1 + dQsto1);
             qsto2 = Math.max(0.0, qsto2 + dQsto2);
             qgut  = Math.max(0.0, qgut  + dQgut);
+            protFatGut = Math.max(0.0, protFatGut + dProtFatGut);
+            inc        = Math.max(0.0, inc + dInc);
         }
 
         HovorkaState warm = new HovorkaState(
-                ss.q1(), ss.q2(), qsto1, qsto2, qgut, 0.0, 0.0, 0.0, dRef, 70);
+                ss.q1(), ss.q2(), qsto1, qsto2, qgut, inc, 0.0, protFatGut, dRef, activeGi);
 
-        log.debug("Dalla Man warm state: G={}mmol/L Q1={} Qsto1={} Qsto2={} Qgut={}",
-                currentGlucose, warm.q1(), warm.qsto1(), warm.qsto2(), warm.qgut());
+        log.debug("Dalla Man warm state: G={}mmol/L Q1={} Qsto1={} Qsto2={} Qgut={} Inc={} ProtFatGut={} GI={}",
+                currentGlucose, warm.q1(), warm.qsto1(), warm.qsto2(), warm.qgut(),
+                warm.inc(), warm.protFatGut(), warm.activeGI());
         return warm;
     }
 
@@ -606,8 +652,7 @@ public class HovorkaGlucosePredictionService {
             int futureMin = Math.max(1, (int) Math.abs(minsAgo));
             double carbs = entry.getCarbs() != null ? entry.getCarbs() : 0.0;
             if (carbs <= 0.0) continue;
-            int gi = entry.getEstimatedGi() != null ? entry.getEstimatedGi().intValue() : 70;
-            giWeightedSum.merge(futureMin, carbs * gi, Double::sum);
+            giWeightedSum.merge(futureMin, carbs * giOf(entry), Double::sum);
             carbWeightMap.merge(futureMin, carbs, Double::sum);
         }
 
@@ -634,9 +679,7 @@ public class HovorkaGlucosePredictionService {
             long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
             if (minsAgo > 0) continue; // past - captured in warm-up
             int futureMin = Math.max(1, (int) Math.abs(minsAgo));
-            double proteinKcal = entry.getProtein() != null ? entry.getProtein() * 4.0 : 0.0;
-            double fatKcal     = entry.getFat()     != null ? entry.getFat()     * 9.0 : 0.0;
-            double kcal = proteinKcal + fatKcal;
+            double kcal = protFatKcal(entry);
             if (kcal > 0) timeline.merge(futureMin, kcal, Double::sum);
         }
         return timeline;
@@ -659,6 +702,25 @@ public class HovorkaGlucosePredictionService {
     private double toCarbMmol(CarbsEntry entry, HovorkaParameters p) {
         if (entry.getCarbs() == null || entry.getCarbs() <= 0) return 0.0;
         return entry.getCarbs() * p.aG() / 0.18;
+    }
+
+    /**
+     * A meal's glycemic index, or {@link #DEFAULT_GI} when it carries no estimate.
+     * Shared by the warm-up replay and the future timeline so a meal's GI does not depend on
+     * which side of "now" it was logged.
+     */
+    private int giOf(CarbsEntry entry) {
+        return entry.getEstimatedGi() != null ? entry.getEstimatedGi().intValue() : DEFAULT_GI;
+    }
+
+    /**
+     * A meal's protein+fat caloric load [kcal] - the GLP-1 driver behind the ileal brake.
+     * Shared by the warm-up replay and the future timeline, same reason as {@link #giOf}.
+     */
+    private double protFatKcal(CarbsEntry entry) {
+        double proteinKcal = entry.getProtein() != null ? entry.getProtein() * 4.0 : 0.0;
+        double fatKcal     = entry.getFat()     != null ? entry.getFat()     * 9.0 : 0.0;
+        return proteinKcal + fatKcal;
     }
 
     /** Round to 1 decimal place [mmol/L] - matches the predictedGlucose precision. */

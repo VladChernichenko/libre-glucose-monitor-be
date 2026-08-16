@@ -639,6 +639,74 @@ class HovorkaGlucosePredictionServiceTest {
                 tMaxG, 0.80, 2.2, weight);
     }
 
+    // ---
+    // Warm-up threading: an already-logged meal must carry its GI and its protein/fat into
+    // the model, exactly as a meal timestamped a minute into the future does. Before the fix
+    // buildFutureGiTimeline / buildFutureProtFatTimeline skipped anything with minsAgo > 0 and
+    // buildWarmState hard-coded activeGI=70 with protFatGut=0, so every meal the user had
+    // actually logged was modelled as a generic GI-70 pure-carb meal.
+    // ---
+
+    /** Meal {@code minsAgo} minutes in the past, with optional GI and protein/fat. */
+    private CarbsEntry pastMeal(int minsAgo, double carbs, Integer gi, Double protein, Double fat) {
+        CarbsEntry entry = CarbsEntry.builder()
+                .timestamp(NOW.minusMinutes(minsAgo))
+                .carbs(carbs)
+                .build();
+        if (gi != null) entry.setEstimatedGi(gi.doubleValue());
+        entry.setProtein(protein);
+        entry.setFat(fat);
+        return entry;
+    }
+
+    private List<PredictionPointDTO> curveFor(CarbsEntry meal) {
+        return service.buildPredictionPath(params, 6.0, NOW,
+                List.of(meal), List.of(), List.of(), USER_ID, 240);
+    }
+
+    @Test
+    @DisplayName("a logged meal's glycemic index changes the curve")
+    void pastMealGlycemicIndexReachesTheModel() {
+        double lowGi  = glucoseAt(curveFor(pastMeal(30, 50, 40, null, null)), 120);
+        double highGi = glucoseAt(curveFor(pastMeal(30, 50, 100, null, null)), 120);
+
+        assertThat(highGi)
+                .as("GI 100 must absorb faster than GI 40 by the 2h mark, but the warm-up "
+                        + "hard-coded GI 70 for every past meal")
+                .isGreaterThan(lowGi + 0.3);
+    }
+
+    @Test
+    @DisplayName("a logged meal's protein and fat change the curve")
+    void pastMealProteinAndFatReachTheModel() {
+        double pureCarb = glucoseAt(curveFor(pastMeal(30, 50, null, null, null)), 120);
+        double withFpu  = glucoseAt(curveFor(pastMeal(30, 50, null, 30.0, 30.0)), 120);
+
+        assertThat(withFpu)
+                .as("30g protein + 30g fat must slow absorption, but the warm-up never loaded "
+                        + "protFatGut so past meals carried no macros at all")
+                .isLessThan(pureCarb - 0.3);
+    }
+
+    @Test
+    @DisplayName("a meal one minute old predicts like the same meal one minute ahead")
+    void mealJustLoggedMatchesMealJustAhead() {
+        CarbsEntry ahead = CarbsEntry.builder()
+                .timestamp(NOW.plusMinutes(1))
+                .carbs(60.0)
+                .build();
+        ahead.setProtein(30.0);
+        ahead.setFat(30.0);
+
+        double justLogged = glucoseAt(curveFor(pastMeal(1, 60, null, 30.0, 30.0)), 240);
+        double justAhead  = glucoseAt(curveFor(ahead), 240);
+
+        assertThat(justLogged)
+                .as("shifting one identical meal's timestamp by two minutes across 'now' must "
+                        + "not change the 4h forecast; it used to swing it by ~12 mmol/L")
+                .isCloseTo(justAhead, within(0.5));
+    }
+
     /** Index of the prediction point with the highest glucose value [minutes from NOW]. */
     private int peakMinute(List<PredictionPointDTO> curve) {
         return curve.stream()
