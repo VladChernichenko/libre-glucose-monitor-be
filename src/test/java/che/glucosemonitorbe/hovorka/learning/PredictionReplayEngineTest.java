@@ -9,6 +9,7 @@ import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -107,6 +108,28 @@ class PredictionReplayEngineTest {
         // and the round trip returns the wall time the user actually saw
         assertThat(PredictionReplayEngine.toLdt(epoch, ZoneOffset.ofHours(4)))
                 .isEqualTo(storedWallTime);
+    }
+
+    @Test
+    void wallTimeConversionFollowsDstWithinTheCalibrationWindow() {
+        // LOOKBACK_DAYS = 30, so every fit twice a year spans a DST transition. A stored fixed
+        // offset would convert one side of it an hour wrong; a zone id resolves the offset per
+        // instant. Europe/Berlin moved CET->CEST at 02:00 on 2026-03-29.
+        ZoneId berlin = ZoneId.of("Europe/Berlin");
+
+        LocalDateTime beforeDst = LocalDateTime.of(2026, 3, 28, 12, 0);  // CET  (UTC+1)
+        LocalDateTime afterDst  = LocalDateTime.of(2026, 3, 30, 12, 0);  // CEST (UTC+2)
+
+        assertThat(PredictionReplayEngine.toEpochMs(beforeDst, berlin)).isEqualTo(
+                LocalDateTime.of(2026, 3, 28, 11, 0).toInstant(ZoneOffset.UTC).toEpochMilli());
+        assertThat(PredictionReplayEngine.toEpochMs(afterDst, berlin)).isEqualTo(
+                LocalDateTime.of(2026, 3, 30, 10, 0).toInstant(ZoneOffset.UTC).toEpochMilli());
+
+        // and both round-trip to the wall time the user actually saw
+        assertThat(PredictionReplayEngine.toLdt(
+                PredictionReplayEngine.toEpochMs(beforeDst, berlin), berlin)).isEqualTo(beforeDst);
+        assertThat(PredictionReplayEngine.toLdt(
+                PredictionReplayEngine.toEpochMs(afterDst, berlin), berlin)).isEqualTo(afterDst);
     }
 
     private static List<PredictionReplayEngine.Reading> syntheticTrace() {

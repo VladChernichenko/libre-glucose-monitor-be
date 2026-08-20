@@ -90,12 +90,16 @@ public class GlucoseCalculationsService {
         // time while cgm_readings holds true UTC epochs - which put every meal userOffset away from
         // the glucose response it caused (audit F26). Written only when it changes, so the 30 s
         // dashboard poll stays read-only and does not evict the settings cache.
-        Integer clientUtcOffset = request.getClientTimeInfo() != null
-                ? request.getClientTimeInfo().getTimezoneOffset()
-                : null;
-        if (clientUtcOffset != null && !clientUtcOffset.equals(userSettings.getUtcOffsetMinutes())) {
-            userSettingsService.recordUtcOffset(userUUID, clientUtcOffset);
-            userSettings.setUtcOffsetMinutes(clientUtcOffset);
+        ClientTimeInfo clientTime = request.getClientTimeInfo();
+        String  clientZone      = clientTime != null ? clientTime.getTimezone()       : null;
+        Integer clientUtcOffset = clientTime != null ? clientTime.getTimezoneOffset() : null;
+        boolean zoneChanged   = clientZone != null && !clientZone.equals(userSettings.getTimezone());
+        boolean offsetChanged = clientUtcOffset != null
+                && !clientUtcOffset.equals(userSettings.getUtcOffsetMinutes());
+        if (zoneChanged || offsetChanged) {
+            userSettingsService.recordClientZone(userUUID, clientZone, clientUtcOffset);
+            if (clientZone != null)      userSettings.setTimezone(clientZone);
+            if (clientUtcOffset != null) userSettings.setUtcOffsetMinutes(clientUtcOffset);
         }
 
         // Prospective (un-persisted) what-if events are an OVERLAY: they shape the prediction

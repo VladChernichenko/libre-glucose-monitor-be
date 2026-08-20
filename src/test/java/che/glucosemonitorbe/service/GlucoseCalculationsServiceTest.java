@@ -103,7 +103,7 @@ class GlucoseCalculationsServiceTest {
     // offset is observable is the dashboard call. Persist it there - without writing on every poll.
     // ---
 
-    private UserSettingsDTO stubDashboardCall(UUID userId, String username, Integer storedOffset) {
+    private UserSettingsDTO stubDashboardCall(UUID userId, String username, String storedZone, Integer storedOffset) {
         when(userService.getUserByUsername(username))
                 .thenReturn(UserDto.builder().id(userId).username(username).build());
         UserSettingsDTO settings = new UserSettingsDTO();
@@ -113,6 +113,7 @@ class GlucoseCalculationsServiceTest {
         settings.setCarbHalfLife(45);
         settings.setMaxCOBDuration(240);
         settings.setUtcOffsetMinutes(storedOffset);
+        settings.setTimezone(storedZone);
         when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
         when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(List.of());
@@ -126,9 +127,13 @@ class GlucoseCalculationsServiceTest {
     }
 
     private static GlucoseCalculationsRequest requestWithOffset(String username, Integer offsetMinutes) {
+        return requestWithZone(username, "Asia/Tbilisi", offsetMinutes);
+    }
+
+    private static GlucoseCalculationsRequest requestWithZone(String username, String zone, Integer offsetMinutes) {
         ClientTimeInfo t = new ClientTimeInfo();
         t.setTimestamp("2026-08-20T14:12:00");
-        t.setTimezone("Asia/Tbilisi");
+        t.setTimezone(zone);
         t.setTimezoneOffset(offsetMinutes);
         return GlucoseCalculationsRequest.builder()
                 .currentGlucose(5.5).userId(username).includePredictionFactors(false)
@@ -138,32 +143,32 @@ class GlucoseCalculationsServiceTest {
     @Test
     void persistsTheClientsUtcOffsetWhenItIsNotYetKnown() {
         UUID userId = UUID.randomUUID();
-        stubDashboardCall(userId, "alice", null);
+        stubDashboardCall(userId, "alice", null, null);
 
         service.calculateGlucoseData(requestWithOffset("alice", 240));
 
-        verify(userSettingsService).recordUtcOffset(userId, 240);
+        verify(userSettingsService).recordClientZone(userId, "Asia/Tbilisi", 240);
     }
 
     @Test
     void doesNotRewriteTheUtcOffsetOnEveryPollWhenItIsUnchanged() {
         UUID userId = UUID.randomUUID();
-        stubDashboardCall(userId, "alice", 240);
+        stubDashboardCall(userId, "alice", "Asia/Tbilisi", 240);
 
         service.calculateGlucoseData(requestWithOffset("alice", 240));
 
         // The dashboard polls every 30 s; an unchanged offset must not cost a write or a cache evict.
-        verify(userSettingsService, never()).recordUtcOffset(any(), any());
+        verify(userSettingsService, never()).recordClientZone(any(), any(), any());
     }
 
     @Test
-    void persistsTheNewUtcOffsetWhenTheUserTravels() {
+    void persistsTheNewZoneWhenTheUserTravels() {
         UUID userId = UUID.randomUUID();
-        stubDashboardCall(userId, "alice", 240);
+        stubDashboardCall(userId, "alice", "Asia/Tbilisi", 240);
 
-        service.calculateGlucoseData(requestWithOffset("alice", -300));
+        service.calculateGlucoseData(requestWithZone("alice", "America/New_York", -300));
 
-        verify(userSettingsService).recordUtcOffset(userId, -300);
+        verify(userSettingsService).recordClientZone(userId, "America/New_York", -300);
     }
 
     @Test

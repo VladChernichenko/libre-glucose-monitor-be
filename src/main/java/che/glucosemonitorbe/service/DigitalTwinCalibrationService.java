@@ -130,16 +130,13 @@ public class DigitalTwinCalibrationService {
         // client local time - which also makes the fitted hour-of-day a local hour, matching the
         // hour the residual grid is applied at. Unknown offset falls back to UTC (audit F26/F27).
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
-        Integer offsetMinutes = settings != null ? settings.getUtcOffsetMinutes() : null;
-        ZoneOffset userOffset = offsetMinutes != null
-                ? ZoneOffset.ofTotalSeconds(offsetMinutes * 60)
-                : ZoneOffset.UTC;
+        java.time.ZoneId userZone = resolveUserZone(settings, userId);
 
         LocalDateTime now = LocalDateTime.now();
         long cutoffMs = Instant.now().minus(java.time.Duration.ofDays(LOOKBACK_DAYS)).toEpochMilli();
         // Note bounds live on the user's wall clock, or a UTC+N user's most recent N hours of notes
         // sort after "now" and are silently dropped from the fit.
-        LocalDateTime nowUserWall = LocalDateTime.ofInstant(Instant.now(), userOffset);
+        LocalDateTime nowUserWall = LocalDateTime.ofInstant(Instant.now(), userZone);
         LocalDateTime windowStart = nowUserWall.minusDays(LOOKBACK_DAYS);
 
         // -- Load CGM ----------------------------------------------------------
@@ -164,7 +161,7 @@ public class DigitalTwinCalibrationService {
         List<PredictionReplayEngine.Event> events = new ArrayList<>(notes.size());
         for (Note n : notes) {
             if (n.getTimestamp() == null) continue;
-            long epochMs = PredictionReplayEngine.toEpochMs(n.getTimestamp(), userOffset);
+            long epochMs = PredictionReplayEngine.toEpochMs(n.getTimestamp(), userZone);
             String profile = n.getNutritionProfile();
             events.add(new PredictionReplayEngine.Event(
                     epochMs,
@@ -194,9 +191,9 @@ public class DigitalTwinCalibrationService {
 
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
         PredictionReplayEngine train = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userOffset);
+                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userZone);
         PredictionReplayEngine val = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity, userOffset);
+                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity, userZone);
 
         // -- Fit -----------------------------------------------------------------
         DigitalTwinCalibrator.Result result = new DigitalTwinCalibrator().calibrate(train, val);
@@ -207,6 +204,27 @@ public class DigitalTwinCalibrationService {
                 userId, result.status(),
                 round(result.scales().isfScale()), round(result.scales().agScale()));
         return result;
+    }
+
+    /**
+     * The clock to replay this user on: their IANA zone if known (DST-aware, and a 30-day window
+     * spans a transition twice a year), else the raw offset they last reported, else UTC - which
+     * reproduces the behaviour from before the offset was persisted.
+     */
+    private java.time.ZoneId resolveUserZone(UserSettingsDTO settings, UUID userId) {
+        if (settings == null) return ZoneOffset.UTC;
+        String tz = settings.getTimezone();
+        if (tz != null && !tz.isBlank()) {
+            try {
+                return java.time.ZoneId.of(tz);
+            } catch (java.time.DateTimeException e) {
+                log.warn("User {}: unparseable timezone '{}' - falling back to the stored offset", userId, tz);
+            }
+        }
+        Integer offsetMinutes = settings.getUtcOffsetMinutes();
+        if (offsetMinutes != null) return ZoneOffset.ofTotalSeconds(offsetMinutes * 60);
+        log.debug("User {}: no timezone recorded - replaying on UTC", userId);
+        return ZoneOffset.UTC;
     }
 
     /** Current twin status for a user (for the API / UI). */
