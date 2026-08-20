@@ -365,16 +365,18 @@ public class ExperimentService {
     /**
      * Rising glucose (observed or forecast) -> increase basal; falling -> decrease.
      * Returns {@code increase}, {@code decrease}, or {@code review}.
+     *
+     * <p>Decided on NUMBERS only - the observed start-&gt;end delta, and the forecast's own 4 h
+     * delta once {@link #assessBasalForecast} has already judged the forecast unstable. The
+     * {@code predictionTrend} LABEL is deliberately not consulted: it is a UI string thresholded
+     * far tighter (+/-0.3 mmol/L) than the {@link #BASAL_MAX_DELTA_MMOL} (1.7) band this check
+     * treats as flat, so in the 0.3-1.7 gap a "rising" label can sit on top of a forecast this
+     * method must treat as stable. Reading it there inverted the advice against the measured
+     * trace - telling a patient whose glucose fell 2 mmol/L to take MORE long-acting insulin.
+     * The output is a dose instruction; it must not be driven by a display label.
      */
     private static String basalAdviceDirection(
             double startGlucose, double endGlucose, BasalForecastAssessment forecast) {
-        String trend = forecast.trend() == null ? "" : forecast.trend().toLowerCase();
-        if (trend.contains("ris")) {
-            return "increase";
-        }
-        if (trend.contains("fall") || trend.contains("drop")) {
-            return "decrease";
-        }
         double net = endGlucose - startGlucose;
         if (!forecast.stable() && forecast.fourHourGlucose() != 0) {
             net = forecast.fourHourGlucose() - endGlucose;
