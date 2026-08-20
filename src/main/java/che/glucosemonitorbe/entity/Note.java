@@ -19,6 +19,8 @@ public class Note {
     public static final String TYPE_LONG_ACTING = "long_acting";
     /** {@link #type} value for a logged physical-activity note (drives the model's activity signal). */
     public static final String TYPE_ACTIVITY = "activity";
+    /** A fast-acting rescue carb taken to treat a hypo (glucose gel, dextrose, juice). */
+    public static final String TYPE_HYPO_TREATMENT = "hypo_treatment";
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -235,6 +237,11 @@ public class Note {
     /** True when this note logs physical activity. */
     public boolean isActivity() {
         return TYPE_ACTIVITY.equals(type);
+    }
+
+    /** True when this note records a fast-acting rescue carb taken to treat a hypo. */
+    public boolean isHypoTreatment() {
+        return TYPE_HYPO_TREATMENT.equals(type);
     }
 
     public String getActivityType() {
