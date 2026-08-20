@@ -154,7 +154,7 @@ public class DigitalTwinCalibrationService {
         }
         // Down-weight (exclude) windows the user's log doesn't explain, so an unlogged/mis-logged event
         // can't bias the fit - unless doing so would starve the fit of data.
-        cgm = excludeFlaggedWindows(userId, cgm);
+        cgm = excludeFlaggedWindows(userId, cgm, userZone);
 
         // -- Load events (meals / boluses / basal) -------------------------------
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, nowUserWall);
@@ -284,7 +284,7 @@ public class DigitalTwinCalibrationService {
      * drop below {@link #MIN_CGM_READINGS} (fitting on that data beats not fitting at all).
      */
     private List<PredictionReplayEngine.Reading> excludeFlaggedWindows(
-            UUID userId, List<PredictionReplayEngine.Reading> cgm) {
+            UUID userId, List<PredictionReplayEngine.Reading> cgm, java.time.ZoneId userZone) {
         if (!featureToggleConfig.isUnloggedEventDetectionEnabled()) return cgm;
         List<UnloggedEventFlag> flags = unloggedEventFlagRepository.findByUserIdAndStateIn(
                 userId, List.of(UnloggedEventFlag.State.OPEN, UnloggedEventFlag.State.CONFIRMED));
@@ -292,8 +292,10 @@ public class DigitalTwinCalibrationService {
 
         long[][] intervals = new long[flags.size()][2];
         for (int i = 0; i < flags.size(); i++) {
-            intervals[i][0] = toEpochMsUtc(flags.get(i).getWindowStart());
-            intervals[i][1] = toEpochMsUtc(flags.get(i).getWindowEnd());
+            // Flag windows are stored in the user's local wall clock (UnloggedEventDetectionService
+            // runs on that clock), so convert with the same zone rather than assuming UTC.
+            intervals[i][0] = PredictionReplayEngine.toEpochMs(flags.get(i).getWindowStart(), userZone);
+            intervals[i][1] = PredictionReplayEngine.toEpochMs(flags.get(i).getWindowEnd(), userZone);
         }
         List<PredictionReplayEngine.Reading> kept = new ArrayList<>(cgm.size());
         for (PredictionReplayEngine.Reading r : cgm) {
@@ -312,10 +314,6 @@ public class DigitalTwinCalibrationService {
         log.info("User {}: excluded {} CGM reading(s) in {} flagged unlogged-event window(s) from calibration",
                 userId, cgm.size() - kept.size(), flags.size());
         return kept;
-    }
-
-    private static long toEpochMsUtc(LocalDateTime ldt) {
-        return ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
     }
 
     // -- Helpers --------------------------------------------------------------
