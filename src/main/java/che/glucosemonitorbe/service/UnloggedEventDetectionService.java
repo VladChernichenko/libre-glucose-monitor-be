@@ -59,7 +59,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UnloggedEventDetectionService {
 
-    private static final double MGDL_PER_MMOL = 18.0182;
+    private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
     private static final String SEED_EMAIL_PATTERN = "azt1d-subject-%@dataset.local";
     private static final int WARMUP_LOOKBACK_HOURS = 8;
 

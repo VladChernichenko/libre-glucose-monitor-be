@@ -20,7 +20,7 @@ import java.util.Map;
  */
 public final class ReplayMetrics {
 
-    private static final double MGDL_PER_MMOL = 18.0182;
+    private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
 
     private ReplayMetrics() {
     }

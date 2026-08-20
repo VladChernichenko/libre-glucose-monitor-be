@@ -55,7 +55,7 @@ public class DigitalTwinCalibrationService {
     private static final double TRAIN_FRACTION = 0.8;
     /** Skip users with fewer CGM readings than this - not enough signal to fit against. */
     private static final int MIN_CGM_READINGS = 200;
-    private static final double MGDL_PER_MMOL = 18.0182;
+    private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
 
     private static final String MACRO_FMT = "\"%s\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)";
 
