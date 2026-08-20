@@ -308,3 +308,53 @@ whether the description targets a planned horizon or an older build.
 **Whether `agScale` and `carbRatio` ever agree in production.** Both estimate carb magnitude from
 outcomes, independently. *Would be settled by* comparing fitted `agScale` against titrated
 `carb_ratio` for real users over the same window.
+
+---
+
+## Addendum — discovered during remediation (branch `fix/dosing-path-safety`)
+
+The audit traced every *reader* of each parameter. Executing plan 1 surfaced defects on the *writer*
+and *consumer* sides that the reader-oriented method could not reach. Recorded here so they are not
+lost with the execution workspace.
+
+**F22 · S1 · `completeCarbFactor` writes a per-gram value into a per-10 g column.**
+*Category: Wrong. Pre-existing, untouched by plan 1, needs its own branch.*
+[ExperimentService.java:459](../../../src/main/java/che/glucosemonitorbe/service/ExperimentService.java#L459)
+computes `carbRatio = rise / gramsConsumed` — mmol/L **per gram** — and saves it straight to
+`user_settings.carb_ratio`, unbounded. Every other consumer reads that column as mmol/L per 10 g:
+`VerificationService` divides it by 10, `GlucoseCalculationsService` divides COB by 10 before
+multiplying, and `InsulinCalculatorService` derives `gramsPerUnit = 10 × isf / carbRatio`. The value
+written is therefore ~10× too small. A CARB_FACTOR run on 8 g of glucose tabs with a 6.0 mmol/L rise
+stores `0.75`; at ISF 2.2 that gives `gramsPerUnit = 29.3`, inside the 3–30 refusal envelope, so
+nothing objects. A 60 g meal then doses **2.0 u instead of 5.5 u**, silently and indefinitely. Small
+experiments are the dangerous case — larger `gramsConsumed` pushes the derived ratio past 30 and hits
+`DosingRefusedException`, which fails safe.
+
+**F23 · S3 · A UI trend label steered a basal-dose instruction.**
+*Category: Wrong. Fixed in `8ad3ca9`.* `basalAdviceDirection` short-circuited on the
+`predictionTrend` string before consulting the observed glucose delta, emitting "Try increasing your
+long-acting basal dose by N units" from a label. Latent until plan 1 gave that label real dynamics —
+previously every term feeding it was identically zero for a fasting BASAL_CHECK, so it always read
+"stable" and the observed delta always governed. Recorded because the *coupling* was the defect and
+predates the branch: a dose instruction must not read a display value.
+
+**F24 · S3 · The titration bound was enforced at suggestion time, not apply time.**
+*Category: Wrong. Fixed in `fdcf423`.* `acceptSuggestion` wrote the stored absolute suggestion with
+no re-clamp against the current setting, so a suggestion computed at one carbRatio and accepted after
+a manual change moved the dose by the difference — 1.0 → 2.50, +150 %, in one tap. The same commit
+added the server-side `suggestionReady` gate; the 7-event window had been a client-side promise on a
+dosing parameter.
+
+**F25 · S4 · `VerificationController` has no `IllegalStateException` → 409 mapping.**
+*Category: Wrong.* The readiness refusal added in `fdcf423` surfaces as a generic 500 via
+`GlobalExceptionHandler`'s `RuntimeException` handler. `IsfMealWindowController:59` maps its sibling
+refusal to 409. The safety property holds either way; the client just cannot distinguish "you raced
+the window" from "the server broke". Fixing it means updating `VerificationE2ETest`'s
+`is2xxSuccessful() || is5xxServerError()` assertion. Track before the iOS client branches on status.
+
+**Residual minors** carried from the branch review, none merge-blocking: `MAX_CR_STEP` and
+`boundedCarbRatioStep` are `public` only for testing and split a coherent constant block;
+`determineTrend`'s index assumes a uniform 5-minute grid and mis-maps above 240 min (inherited
+verbatim from the `twoHourPrediction` block, and no live caller exceeds 240); the iOS repo keeps
+now-dead `suggestedIsf` branches in `VerificationDashboardView` and `VerificationDetailView`
+(decoding is safe — the field is `Double?`, so `decodeIfPresent` tolerates the removed key).
