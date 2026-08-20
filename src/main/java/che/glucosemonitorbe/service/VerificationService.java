@@ -44,16 +44,24 @@ public class VerificationService {
      */
     public static final double MAX_CR_STEP = 0.25;
 
+    /** Fallback carbRatio when the user has none stored. One value for every path that needs it. */
+    private static final double DEFAULT_CARB_RATIO = 2.0;
+
     /**
      * carbRatio after one titration step, bounded to +/-{@link #MAX_CR_STEP}.
      *
      * <p>Total for every double input: a non-finite {@code relError} (NaN or +/-Infinity) is
      * treated as a neutral, no-op step and returns {@code currentCarbRatio} unchanged, rather than
      * clamping or letting NaN propagate through {@link Math#round} - which silently yields
-     * {@code 0L} ({@code Math.round(NaN) == 0}), and since carbRatio feeds
-     * gramsPerUnit = 10 x isf / carbRatio downstream, a silent {@code 0.0} here becomes a division
-     * by zero at the dosing divisor. A non-finite {@code currentCarbRatio} is likewise returned
-     * unchanged rather than risking the same NaN-through-round collapse.
+     * {@code 0L} ({@code Math.round(NaN) == 0}). A non-finite {@code currentCarbRatio} is likewise
+     * returned unchanged rather than risking the same NaN-through-round collapse.
+     *
+     * <p>This is defence in depth, not the last line of defence. carbRatio feeds
+     * gramsPerUnit = 10 x isf / carbRatio downstream, and
+     * {@code InsulinCalculatorService.resolveGramsPerUnit} already refuses outright on
+     * {@code !Double.isFinite(carbRatio) || carbRatio <= 0} before it divides - so a {@code 0.0}
+     * escaping here would be caught there rather than becoming a division by zero. The point of
+     * the guard is to keep a poisoned value from ever reaching a dosing input in the first place.
      */
     public static double boundedCarbRatioStep(double currentCarbRatio, double relError) {
         if (!Double.isFinite(relError) || !Double.isFinite(currentCarbRatio)) {
@@ -61,6 +69,29 @@ public class VerificationService {
         }
         double scale = Math.max(1.0 - MAX_CR_STEP, Math.min(1.0 + MAX_CR_STEP, 1.0 + relError));
         return Math.round(currentCarbRatio * scale * 100.0) / 100.0;
+    }
+
+    /**
+     * Re-bounds an already-stored suggestion to +/-{@link #MAX_CR_STEP} of the carbRatio in force
+     * <em>now</em>.
+     *
+     * <p>{@link #boundedCarbRatioStep} produces an ABSOLUTE value, bounded against carbRatio as it
+     * stood the last time {@code refreshSummary} ran. Nothing invalidates a stored suggestion when
+     * {@code user_settings.carb_ratio} changes afterwards, and two other paths write it. So a
+     * suggestion of 2.50 stored at carbRatio 2.00 (a legal +25 % step) becomes a +150 % step if the
+     * user hypos, manually drops carbRatio to 1.00, and only then taps Accept - multiplying every
+     * subsequent meal bolus by 2.5. The bound has to hold at apply time, against the current value.
+     *
+     * <p>A current value that is non-finite or non-positive gives nothing to bound against, so the
+     * suggestion is refused (carbRatio is returned unchanged) rather than guessed at.
+     */
+    private static double boundSuggestionToCurrent(double currentCarbRatio, double suggested) {
+        if (!Double.isFinite(suggested) || !Double.isFinite(currentCarbRatio) || currentCarbRatio <= 0) {
+            return currentCarbRatio;
+        }
+        double lower = currentCarbRatio * (1.0 - MAX_CR_STEP);
+        double upper = currentCarbRatio * (1.0 + MAX_CR_STEP);
+        return round2(Math.max(lower, Math.min(upper, suggested)));
     }
 
     // Qualifying meal range
@@ -157,7 +188,7 @@ public class VerificationService {
 
         // Compute predicted vs actual
         UserSettings cob = userSettingsRepository.findByUserId(event.getUserId()).orElse(null);
-        double carbRatio = cob != null && cob.getCarbRatio() != null ? cob.getCarbRatio() : 2.0;
+        double carbRatio = cob != null && cob.getCarbRatio() != null ? cob.getCarbRatio() : DEFAULT_CARB_RATIO;
         double isf       = cob != null && cob.getIsf()       != null ? cob.getIsf()       : 1.0;
 
         double carbs   = note.getCarbs()   != null ? note.getCarbs()   : 0.0;
@@ -221,6 +252,9 @@ public class VerificationService {
         // meal with a bolus (carbs 20-80 g, insulin > 0), so the 2 h net error cannot be split
         // between the carb-rise coefficient and the model ISF - adjusting both would double-count
         // the same miss. Only the carb ratio is corrected; there is deliberately no ISF suggestion.
+        // The correction is scaled *relative* to the mean predicted rise rather than by the
+        // absolute mmol error: a fixed absolute step over- and under-corrects small and large
+        // meals alike.
         double meanAbsPredicted = window.stream()
                 .map(VerificationEvent::getPredictedDelta).filter(Objects::nonNull)
                 .mapToDouble(Math::abs).average().orElse(0.0);
@@ -230,12 +264,20 @@ public class VerificationService {
                 && Math.abs(meanError) >= MEAN_ERROR_THRESHOLD_CR
                 && meanAbsPredicted >= MIN_PREDICTED_RISE
                 && cob != null) {
-            double curCR = cob.getCarbRatio() != null ? cob.getCarbRatio() : 2.0;
+            double curCR = cob.getCarbRatio() != null ? cob.getCarbRatio() : DEFAULT_CARB_RATIO;
             // meanError > 0 -> actual exceeded prediction -> predicted rise too low -> raise CR;
             // meanError < 0 -> predicted too high -> lower CR. relError carries both signs.
             double relError = meanError / meanAbsPredicted;
-            summary.setSuggestedCarbRatio(boundedCarbRatioStep(curCR, relError));
-            ready = window.size() >= WINDOW_SIZE;
+            double suggestion = boundedCarbRatioStep(curCR, relError);
+            // Never persist a poisoned suggestion - suppress it. PostgreSQL orders NaN above every
+            // value, so CHECK (carb_ratio > 0) would happily store one, and resolveGramsPerUnit
+            // would then refuse to dose permanently until settings are hand-edited. Unreachable
+            // while curCR comes from a checked column and boundedCarbRatioStep is total; this is
+            // defence against that ever ceasing to hold.
+            if (Double.isFinite(suggestion) && suggestion > 0) {
+                summary.setSuggestedCarbRatio(suggestion);
+                ready = window.size() >= WINDOW_SIZE;
+            }
         }
         summary.setSuggestionReady(ready && window.size() >= WINDOW_SIZE);
         verificationSummaryRepository.save(summary);
@@ -250,12 +292,34 @@ public class VerificationService {
         return toSummaryDTO(s);
     }
 
+    /**
+     * Applies the stored suggestion to {@code user_settings.carb_ratio}.
+     *
+     * <p>Refuses unless the rolling window is full. {@code refreshSummary} starts populating
+     * {@code suggestedCarbRatio} at 2 events but only raises {@code suggestionReady} at
+     * {@link #WINDOW_SIZE}; the iOS client gates its Accept button on that flag, which left the
+     * 7-event window a client-side promise about a dosing parameter. Signalled the way this class
+     * and its sibling {@code IsfMealWindowSuggestionService.accept} already signal a not-ready
+     * refusal: {@link IllegalStateException}.
+     */
     public void acceptSuggestion(UUID userId) {
         VerificationSummary summary = verificationSummaryRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("No verification summary for user " + userId));
 
+        if (!Boolean.TRUE.equals(summary.getSuggestionReady())) {
+            throw new IllegalStateException(
+                    "Verification suggestion is not ready for user " + userId
+                    + " - the " + WINDOW_SIZE + "-event window is not full");
+        }
+
         UserSettings cob = userSettingsRepository.findByUserId(userId).orElseThrow();
-        if (summary.getSuggestedCarbRatio() != null) cob.setCarbRatio(summary.getSuggestedCarbRatio());
+        if (summary.getSuggestedCarbRatio() != null) {
+            // Re-bound against the CURRENT carbRatio: the stored suggestion is an absolute value
+            // computed against whatever carbRatio was when refreshSummary last ran, and settings
+            // can have moved since.
+            double curCR = cob.getCarbRatio() != null ? cob.getCarbRatio() : DEFAULT_CARB_RATIO;
+            cob.setCarbRatio(boundSuggestionToCurrent(curCR, summary.getSuggestedCarbRatio()));
+        }
         userSettingsRepository.save(cob);
 
         // Reset rolling window by marking completed events as stale (re-use skip status)
