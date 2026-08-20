@@ -44,47 +44,88 @@ headline; the trend was missed.
 
 **Files:**
 - Modify: `src/main/java/che/glucosemonitorbe/service/GlucoseCalculationsService.java:132` (call site), `:405-419` (method)
-- Test: `src/test/java/che/glucosemonitorbe/service/GlucoseCalculationsServiceTest.java`
+- Test: `src/test/java/che/glucosemonitorbe/service/GlucoseCalculationsServiceTest.java:82` (existing reflection test binds the OLD signature and must be updated in the same task, or it fails at runtime with NoSuchMethodException)
 
 **Interfaces:**
 - Consumes: `List<PredictionPointDTO> predictionPath` already built at `:138`; `PredictionPointDTO.getPredictedGlucose()`.
 - Produces: `determineTrend(List<PredictionPointDTO> path, double currentGlucose, PredictionFactors factors, double horizonMinutes)` returning `"rising" | "falling" | "stable"`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Update the existing reflection test to the new signature**
 
-Add to `GlucoseCalculationsServiceTest`:
+`GlucoseCalculationsServiceTest:82` already binds this method:
 
 ```java
-@Test
-void trendFollowsThePredictionPathNotTheCarbRatioFormula() {
-    List<PredictionPointDTO> falling = List.of(
-            PredictionPointDTO.builder().timestamp(LocalDateTime.now().plusMinutes(5))
-                    .predictedGlucose(7.0).build(),
-            PredictionPointDTO.builder().timestamp(LocalDateTime.now().plusMinutes(120))
-                    .predictedGlucose(4.0).build());
-    // Factors claim a strong rise; the path falls 3.0 mmol/L. The path must win.
-    PredictionFactors factors = PredictionFactors.builder()
-            .carbContribution(5.0).insulinContribution(0.0)
-            .baselineContribution(0.0).trendContribution(0.0)
-            .preBolusTimingContribution(0.0).build();
-
-    String trend = ReflectionTestUtils.invokeMethod(
-            service, "determineTrend", falling, 7.0, factors, 120.0);
-
-    assertThat(trend).isEqualTo("falling");
-}
+Method method = GlucoseCalculationsService.class.getDeclaredMethod("determineTrend", PredictionFactors.class, double.class);
 ```
 
-- [ ] **Step 2: Run it and confirm it fails**
+That is reflection, so it compiles and fails at runtime with `NoSuchMethodException` once the
+signature changes. Rewrite it to exercise the documented empty-path fallback — same thresholds, same
+three assertions, new signature:
+
+```java
+    @Test
+    void determineTrendUsesAdjustedThresholds() throws Exception {
+        // Use a minimal service instance for the private-method reflection test
+        GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null, null);
+        Method method = GlucoseCalculationsService.class.getDeclaredMethod(
+                "determineTrend", List.class, double.class, PredictionFactors.class, double.class);
+        method.setAccessible(true);
+
+        PredictionFactors rising = PredictionFactors.builder().carbContribution(0.35).insulinContribution(0.0).baselineContribution(0.0).trendContribution(0.0).build();
+        PredictionFactors falling = PredictionFactors.builder().carbContribution(-0.35).insulinContribution(0.0).baselineContribution(0.0).trendContribution(0.0).build();
+        PredictionFactors stable = PredictionFactors.builder().carbContribution(0.1).insulinContribution(-0.1).baselineContribution(0.0).trendContribution(0.0).build();
+
+        // Empty path -> documented fallback to the analytical factors.
+        assertEquals("rising",  method.invoke(svc, List.of(), 7.0, rising, 120.0));
+        assertEquals("falling", method.invoke(svc, List.of(), 7.0, falling, 120.0));
+        assertEquals("stable",  method.invoke(svc, List.of(), 7.0, stable, 120.0));
+    }
+```
+
+Add `import java.util.List;` if the class does not already have it.
+
+- [ ] **Step 2: Write the failing test for the new behaviour**
+
+Add to `GlucoseCalculationsServiceTest`, in the same reflection style as the test above (house style
+for this private method):
+
+```java
+    @Test
+    void trendFollowsThePredictionPathNotTheCarbRatioFormula() throws Exception {
+        GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null, null);
+        Method method = GlucoseCalculationsService.class.getDeclaredMethod(
+                "determineTrend", List.class, double.class, PredictionFactors.class, double.class);
+        method.setAccessible(true);
+
+        // 24 five-minute points; the 2h point (index 23) sits 3.0 mmol/L below "now".
+        List<PredictionPointDTO> falling = new ArrayList<>();
+        for (int i = 1; i <= 24; i++) {
+            falling.add(PredictionPointDTO.builder()
+                    .timestamp(LocalDateTime.now().plusMinutes(5L * i))
+                    .predictedGlucose(i < 24 ? 7.0 : 4.0)
+                    .build());
+        }
+        // The factors claim a strong rise; the path falls. The path must win.
+        PredictionFactors risingFactors = PredictionFactors.builder()
+                .carbContribution(5.0).insulinContribution(0.0)
+                .baselineContribution(0.0).trendContribution(0.0).build();
+
+        assertEquals("falling", method.invoke(svc, falling, 7.0, risingFactors, 120.0));
+    }
+```
+
+Add `import java.util.ArrayList;` and `import che.glucosemonitorbe.dto.PredictionPointDTO;` if absent.
+
+- [ ] **Step 3: Run both tests and confirm they fail**
 
 ```bash
 ./gradlew test --tests 'che.glucosemonitorbe.service.GlucoseCalculationsServiceTest' --offline
 ```
 
-Expected: compilation failure — `determineTrend` currently takes `(PredictionFactors, double)`. That
-is the correct red: the signature does not yet exist.
+Expected: both fail with `NoSuchMethodException: determineTrend(List, double, PredictionFactors, double)`.
+That is the correct red — the four-argument signature does not exist yet.
 
-- [ ] **Step 3: Change the method to read the path**
+- [ ] **Step 4: Change the method to read the path**
 
 Replace `determineTrend` at `GlucoseCalculationsService.java:405`:
 
@@ -122,7 +163,7 @@ private String determineTrend(List<PredictionPointDTO> path, double currentGluco
 }
 ```
 
-- [ ] **Step 4: Move the call site below path construction**
+- [ ] **Step 5: Move the call site below path construction**
 
 `determineTrend` is currently invoked at `:132`, six lines *before* `predictionPath` is built at
 `:138`. Delete the line at `:132`:
@@ -138,7 +179,7 @@ and insert immediately after the `predictionPath` assignment ends (after the clo
                 factors, predictionHorizon);
 ```
 
-- [ ] **Step 5: Run the test and confirm it passes**
+- [ ] **Step 6: Run the tests and confirm they pass**
 
 ```bash
 ./gradlew test --tests 'che.glucosemonitorbe.service.GlucoseCalculationsServiceTest' --offline
@@ -146,7 +187,7 @@ and insert immediately after the `predictionPath` assignment ends (after the clo
 
 Expected: PASS.
 
-- [ ] **Step 6: Run the full suite**
+- [ ] **Step 7: Run the full suite**
 
 ```bash
 ./gradlew build --offline
@@ -154,7 +195,7 @@ Expected: PASS.
 
 Expected: 1002+ tests, only the 3 known DNS failures.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/main/java/che/glucosemonitorbe/service/GlucoseCalculationsService.java \

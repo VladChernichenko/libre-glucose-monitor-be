@@ -190,8 +190,10 @@ public class HovorkaParameterService {
 
     /**
      * Applies the active digital-twin scales (ISF, meal magnitude A_G, and endogenous glucose
-     * production EGP₀) to a base parameter set. {@code egpScale} is fitted by the calibrator from
-     * BASAL_CHECK fasting windows and now flows into the live ODE. {@code tMaxGScale} is still left
+     * production EGP₀) to a base parameter set. {@code egpScale} is fitted by the calibrator from BASAL_CHECK fasting windows but does NOT
+     * reach the ODE: HovorkaGlucosePredictionService.buildWithParams recomputes egp0 from the
+     * population constant and overwrites both egpNet and egp0 (audit finding F1). Perturbing
+     * either field x0.5 vs x5 leaves the emitted curve bit-identical. {@code tMaxGScale} is still left
      * neutral here - it is frequently overridden per-meal by {@link che.glucosemonitorbe.hovorka.MacroNutrientGastricModel},
      * so a global scale would not survive the meal path (see {@link TwinScales}).
      */

@@ -128,9 +128,6 @@ public class GlucoseCalculationsService {
         PredictionFactors factors = calculatePredictionFactors(
             activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes, carbsEntries, currentTime);
 
-        // Determine trend
-        String trend = determineTrend(factors, predictionHorizon);
-
         // Calculate confidence based on data quality
         double confidence = calculateConfidence(carbsEntries.size(), insulinEntries.size(),
             request.getCurrentGlucose());
@@ -146,6 +143,11 @@ public class GlucoseCalculationsService {
                 rapidIob,
                 request.getCurrentTrendMmolPerMin()
         );
+
+        // Determine trend from the same predictionPath the chart renders, not a separate
+        // carbContribution-based formula - see determineTrend's javadoc for why.
+        String trend = determineTrend(predictionPath, request.getCurrentGlucose(),
+                factors, predictionHorizon);
 
         // twoHourPrediction MUST come from the same predictionPath the chart renders, not a
         // separate COB/IOB-only formula - otherwise the headline and the chart can (and did)
@@ -400,15 +402,28 @@ public class GlucoseCalculationsService {
     }
     
     /**
-     * Determine glucose trend based on prediction factors
+     * Trend of the forecast the user is actually looking at: the change from "now" to the horizon
+     * point of {@code path}. Previously derived from carbContribution, which is priced with
+     * {@code carbRatio} - a parameter with no influence on the Hovorka path (audit finding F12), so
+     * the chip could read "rising" while the curve beside it fell toward hypo. Falls back to the
+     * analytical factors only when the path is unexpectedly empty, mirroring twoHourPrediction.
      */
-    private String determineTrend(PredictionFactors factors, double horizonMinutes) {
-        double netEffect = factors.getCarbContribution() + 
-                          factors.getInsulinContribution() + 
-                          factors.getBaselineContribution() + 
-                          factors.getTrendContribution() +
-                          (factors.getPreBolusTimingContribution() != null ? factors.getPreBolusTimingContribution() : 0.0);
-        
+    private String determineTrend(List<PredictionPointDTO> path, double currentGlucose,
+                                  PredictionFactors factors, double horizonMinutes) {
+        double netEffect;
+        if (path != null && !path.isEmpty()) {
+            int idx = (int) Math.round(horizonMinutes / PREDICTION_PATH_STEP_MINUTES) - 1;
+            idx = Math.max(0, Math.min(idx, path.size() - 1));
+            netEffect = path.get(idx).getPredictedGlucose() - currentGlucose;
+        } else {
+            netEffect = factors.getCarbContribution()
+                      + factors.getInsulinContribution()
+                      + factors.getBaselineContribution()
+                      + factors.getTrendContribution()
+                      + (factors.getPreBolusTimingContribution() != null
+                            ? factors.getPreBolusTimingContribution() : 0.0);
+        }
+
         if (netEffect > TREND_RISING_THRESHOLD) {
             return "rising";
         } else if (netEffect < TREND_FALLING_THRESHOLD) {

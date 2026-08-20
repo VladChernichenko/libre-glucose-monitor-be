@@ -230,6 +230,28 @@ class ExperimentServiceMinimumDurationTest {
         assertThat(exp.getResultNotes()).contains("advice=decrease");
     }
 
+    @Test
+    @DisplayName("BASAL_CHECK falling observed drift + mildly rising forecast -> advise -2 U "
+            + "(the forecast trend LABEL must never drive a dose instruction)")
+    void basalCheck_fallingObserved_mildlyRisingForecast_advisesDecrease() {
+        // Observed 9.0 -> 7.0: a 2.0 delta, past the 1.7 band, so the check fails and advice fires.
+        Experiment exp = inProgress(Type.BASAL_CHECK, 240, 9.0, 8.0, 7.0);
+        stubFetch(exp);
+        // The forecast rises only 0.8 mmol/L - inside BASAL_MAX_DELTA_MMOL (1.7), so
+        // assessBasalForecast calls it stable - yet predictionTrend still labels it "rising".
+        // In that 0.3-1.7 band, reading the label would invert the advice against the measured
+        // trace and tell a patient whose glucose is falling to take MORE long-acting insulin.
+        when(calculationsService.calculateGlucoseData(any())).thenReturn(risingForecast(7.0, 7.8));
+
+        ExperimentResultDTO result = service.completeExperiment(exp.getId(), userId, null);
+
+        assertThat(result.getIsStable()).isFalse();
+        assertThat(result.getExplanation())
+                .contains("decreasing your long-acting basal dose by 2 units")
+                .doesNotContain("increasing");
+        assertThat(exp.getResultNotes()).contains("advice=decrease");
+    }
+
     // -- CARB_FACTOR ----------------------------------------------------------
 
     @Test
