@@ -33,9 +33,6 @@ public class VerificationSummary {
     @Column(name = "consistency_score")
     private Double consistencyScore;
 
-    @Column(name = "suggested_isf")
-    private Double suggestedIsf;
-
     @Column(name = "suggested_carb_ratio")
     private Double suggestedCarbRatio;
 

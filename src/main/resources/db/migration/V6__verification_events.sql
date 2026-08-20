@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS verification_summary (
     n_events             INTEGER          NOT NULL DEFAULT 0,
     mean_error           DOUBLE PRECISION,
     consistency_score    DOUBLE PRECISION,
-    suggested_isf        DOUBLE PRECISION,
     suggested_carb_ratio DOUBLE PRECISION,
     suggestion_ready     BOOLEAN          NOT NULL DEFAULT FALSE,
     last_updated         TIMESTAMPTZ      NOT NULL DEFAULT NOW(),

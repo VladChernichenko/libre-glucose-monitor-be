@@ -216,14 +216,11 @@ public class VerificationService {
 
         // Recompute from scratch each pass; clear any stale suggestion first.
         summary.setSuggestedCarbRatio(null);
-        summary.setSuggestedIsf(null);
 
         // Attribute a *consistent* systematic error to a single knob. Every qualifying event is a
         // meal with a bolus (carbs 20-80 g, insulin > 0), so the 2 h net error cannot be split
         // between the carb-rise coefficient and the model ISF - adjusting both would double-count
-        // the same miss. We therefore correct only the carb ratio (the dominant driver of the
-        // post-meal excursion), scaled *relative* to the mean predicted rise rather than by the
-        // absolute mmol error (a fixed absolute step over/under-corrects small/large meals alike).
+        // the same miss. Only the carb ratio is corrected; there is deliberately no ISF suggestion.
         double meanAbsPredicted = window.stream()
                 .map(VerificationEvent::getPredictedDelta).filter(Objects::nonNull)
                 .mapToDouble(Math::abs).average().orElse(0.0);
@@ -259,7 +256,6 @@ public class VerificationService {
 
         UserSettings cob = userSettingsRepository.findByUserId(userId).orElseThrow();
         if (summary.getSuggestedCarbRatio() != null) cob.setCarbRatio(summary.getSuggestedCarbRatio());
-        if (summary.getSuggestedIsf()       != null) cob.setIsf(summary.getSuggestedIsf());
         userSettingsRepository.save(cob);
 
         // Reset rolling window by marking completed events as stale (re-use skip status)
@@ -273,7 +269,6 @@ public class VerificationService {
         summary.setNEvents(0);
         summary.setSuggestionReady(false);
         summary.setSuggestedCarbRatio(null);
-        summary.setSuggestedIsf(null);
         summary.setLastUpdated(LocalDateTime.now());
         verificationSummaryRepository.save(summary);
     }
@@ -383,7 +378,6 @@ public class VerificationService {
                 .nEvents(s.getNEvents())
                 .meanError(s.getMeanError())
                 .consistencyScore(s.getConsistencyScore())
-                .suggestedIsf(s.getSuggestedIsf())
                 .suggestedCarbRatio(s.getSuggestedCarbRatio())
                 .suggestionReady(Boolean.TRUE.equals(s.getSuggestionReady()))
                 .confidence(confidence)

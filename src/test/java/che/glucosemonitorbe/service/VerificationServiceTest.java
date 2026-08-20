@@ -2,7 +2,9 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.entity.UserSettings;
 import che.glucosemonitorbe.entity.VerificationEvent;
+import che.glucosemonitorbe.entity.VerificationSummary;
 import che.glucosemonitorbe.repository.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -172,5 +174,26 @@ class VerificationServiceTest {
         assertThat(VerificationService.boundedCarbRatioStep(current, Double.NaN)).isEqualTo(current);
         assertThat(VerificationService.boundedCarbRatioStep(current, Double.POSITIVE_INFINITY)).isEqualTo(current);
         assertThat(VerificationService.boundedCarbRatioStep(current, Double.NEGATIVE_INFINITY)).isEqualTo(current);
+    }
+
+    @Test
+    void acceptSuggestionWritesCarbRatioOnlyAndNeverTouchesIsf() {
+        UUID userId = UUID.randomUUID();
+        VerificationSummary summary = VerificationSummary.builder()
+                .userId(userId).suggestedCarbRatio(2.4).build();
+        UserSettings settings = new UserSettings();
+        settings.setCarbRatio(2.0);
+        settings.setIsf(2.2);
+        when(verificationSummaryRepository.findById(userId)).thenReturn(Optional.of(summary));
+        when(userSettingsRepository.findByUserId(userId)).thenReturn(Optional.of(settings));
+        when(verificationEventRepository.findCompletedByUserId(userId)).thenReturn(List.of());
+
+        service.acceptSuggestion(userId);
+
+        assertThat(settings.getCarbRatio()).isEqualTo(2.4);
+        assertThat(settings.getIsf()).isEqualTo(2.2);   // untouched
+        // The dead field must no longer exist on the builder.
+        assertThat(VerificationSummary.class.getDeclaredFields())
+                .noneMatch(f -> f.getName().equals("suggestedIsf"));
     }
 }

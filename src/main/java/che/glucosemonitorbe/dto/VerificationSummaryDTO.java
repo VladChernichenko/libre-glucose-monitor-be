@@ -17,7 +17,6 @@ public class VerificationSummaryDTO {
     private int nEvents;
     private Double meanError;
     private Double consistencyScore;
-    private Double suggestedIsf;
     private Double suggestedCarbRatio;
     private boolean suggestionReady;
     /** LOW | MEDIUM | HIGH */
