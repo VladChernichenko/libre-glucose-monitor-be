@@ -133,8 +133,31 @@ public class UserSettingsService {
     /**
      * Convert entity to DTO.
      */
+    /**
+     * Records the user's time zone (IANA id, plus the raw offset as a fallback) observed on a
+     * dashboard request.
+     *
+     * <p>The nightly digital-twin calibration is a batch job with no request context, but it must
+     * reconcile {@code notes.timestamp} (local wall time) with {@code cgm_readings.date_timestamp}
+     * (true UTC epochs). This is the only place the offset is observable, so it is captured here.
+     * Callers must invoke this only when a value actually changes - the dashboard polls every
+     * 30 s and an unconditional write would evict the settings cache on every poll.</p>
+     */
+    @CacheEvict(value = "userSettings", key = "#userId")
+    @Transactional
+    public void recordClientZone(UUID userId, String timezone, Integer offsetMinutes) {
+        if (timezone == null && offsetMinutes == null) return;
+        userSettingsRepository.findByUserId(userId).ifPresent(settings -> {
+            if (timezone != null)      settings.setTimezone(timezone);
+            if (offsetMinutes != null) settings.setUtcOffsetMinutes(offsetMinutes);
+            userSettingsRepository.save(settings);
+            log.info("Recorded client zone tz={} offset={} min for user {}",
+                    timezone, offsetMinutes, userId);
+        });
+    }
+
     private UserSettingsDTO convertToDTO(UserSettings settings) {
-        return new UserSettingsDTO(
+        UserSettingsDTO dto = new UserSettingsDTO(
             settings.getId(),
             settings.getUserId(),
             settings.getCarbRatio(),
@@ -147,5 +170,8 @@ public class UserSettingsService {
             settings.getIsfDinner(),
             settings.getIsfNight()
         );
+        dto.setTimezone(settings.getTimezone());
+        dto.setUtcOffsetMinutes(settings.getUtcOffsetMinutes());
+        return dto;
     }
 }

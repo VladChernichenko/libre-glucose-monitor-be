@@ -145,10 +145,18 @@ public class UnloggedEventDetectionService {
     public Optional<UnloggedEventFlag> scanUser(UUID userId) {
         if (!featureToggleConfig.isUnloggedEventDetectionEnabled()) return Optional.empty();
 
-        LocalDateTime end = LocalDateTime.now(ZoneOffset.UTC);
+        // Run on the user's own clock. notes.timestamp holds local wall time, while CGM rows hold
+        // true UTC epochs - comparing a local-wall note against a UTC-wall CGM window put every
+        // logged meal `offset` hours outside the window that its own carbs caused, so a logged
+        // event was mislabelled UNLOGGED_* and its CGM data was then excluded from digital-twin
+        // calibration (audit F26). Same clock choice as the calibrator and the live dashboard.
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
+        java.time.ZoneId userZone = resolveUserZone(settings);
+
+        LocalDateTime end = LocalDateTime.now(userZone);
         LocalDateTime start = end.minusMinutes(windowMinutes);
-        long startMs = toEpochMs(start);
-        long endMs = toEpochMs(end);
+        long startMs = toEpochMs(start, userZone);
+        long endMs = toEpochMs(end, userZone);
 
         List<CgmReading> readings = cgmReadingRepository
                 .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, startMs, endMs);
@@ -174,11 +182,10 @@ public class UnloggedEventDetectionService {
         // Raw forward prediction anchored at the window start.
         CgmReading first = readings.get(0);
         if (first.getSgv() == null) return Optional.empty();
-        LocalDateTime anchorTime = toLdt(first.getDateTimestamp());
+        LocalDateTime anchorTime = toLdt(first.getDateTimestamp(), userZone);
         double g0 = first.getSgv() / MGDL_PER_MMOL;
         HovorkaParameters baseParams = paramService.buildRawForUser(userId);
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         // Make the residual activity-aware so an exercise-driven drop from a logged activity is
         // explained (not mistaken for unlogged insulin). Inert when activity logging is off.
         ActivityProvider activity = featureToggleConfig.isActivityLoggingEnabled()
@@ -190,7 +197,7 @@ public class UnloggedEventDetectionService {
         // Align predicted -> actual; residual = actual − predicted [mmol/L].
         TreeMap<Long, Double> predByMs = new TreeMap<>();
         for (PredictionPointDTO pt : predicted) {
-            if (pt.getPredictedGlucose() != null) predByMs.put(toEpochMs(pt.getTimestamp()), pt.getPredictedGlucose());
+            if (pt.getPredictedGlucose() != null) predByMs.put(toEpochMs(pt.getTimestamp(), userZone), pt.getPredictedGlucose());
         }
         List<long[]> tMs = new ArrayList<>();
         List<Double> resid = new ArrayList<>();
@@ -210,7 +217,7 @@ public class UnloggedEventDetectionService {
         Run best = strongestRun(tMs, resid, threshold, persistenceMinutes);
         if (best == null) return Optional.empty();
 
-        return Optional.of(persistFlag(userId, best, sigma, notes));
+        return Optional.of(persistFlag(userId, best, sigma, notes, userZone));
     }
 
     // -- Detection helpers ------------------------------------------------------
@@ -240,10 +247,11 @@ public class UnloggedEventDetectionService {
         return best;
     }
 
-    private UnloggedEventFlag persistFlag(UUID userId, Run run, double sigma, List<Note> notes) {
+    private UnloggedEventFlag persistFlag(UUID userId, Run run, double sigma, List<Note> notes,
+                                          java.time.ZoneId userZone) {
         boolean rise = run.mean() > 0;
-        LocalDateTime wStart = toLdt(run.startMs());
-        LocalDateTime wEnd = toLdt(run.endMs());
+        LocalDateTime wStart = toLdt(run.startMs(), userZone);
+        LocalDateTime wEnd = toLdt(run.endMs(), userZone);
         LocalDateTime matchFrom = wStart.minusMinutes(matchLeadMinutes);
 
         boolean matchingLogged = notes.stream().anyMatch(nt -> {
@@ -378,12 +386,32 @@ public class UnloggedEventDetectionService {
         return (best != null && bestDiff <= tolMs) ? best.getValue() : null;
     }
 
-    private static LocalDateTime toLdt(long epochMs) {
-        return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ZoneOffset.UTC);
+    /**
+     * The clock this user's wall times live on: their IANA zone if known, else the offset they last
+     * reported, else UTC (which reproduces the behaviour from before either was recorded).
+     */
+    private static java.time.ZoneId resolveUserZone(UserSettingsDTO settings) {
+        if (settings == null) return ZoneOffset.UTC;
+        String tz = settings.getTimezone();
+        if (tz != null && !tz.isBlank()) {
+            try {
+                return java.time.ZoneId.of(tz);
+            } catch (java.time.DateTimeException ignored) {
+                // fall through to the offset
+            }
+        }
+        Integer offsetMinutes = settings.getUtcOffsetMinutes();
+        return offsetMinutes != null ? ZoneOffset.ofTotalSeconds(offsetMinutes * 60) : ZoneOffset.UTC;
     }
 
-    private static long toEpochMs(LocalDateTime ldt) {
-        return ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
+    private static LocalDateTime toLdt(long epochMs, java.time.ZoneId zone) {
+        return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), zone);
+    }
+
+    private static long toEpochMs(LocalDateTime ldt, java.time.ZoneId zone) {
+        // atZone, not toInstant(offset): resolves the offset for THIS instant, so a scan spanning
+        // a DST transition converts both sides correctly.
+        return ldt.atZone(zone).toInstant().toEpochMilli();
     }
 
     private static double round2(double v) {

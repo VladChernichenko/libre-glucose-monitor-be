@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
     isf_lunch           DOUBLE PRECISION,                        -- manual ISF override for 11:00-16:00; NULL = use autotuned `isf`
     isf_dinner          DOUBLE PRECISION,                        -- manual ISF override for 16:00-22:00; NULL = use autotuned `isf`
     isf_night           DOUBLE PRECISION,                        -- manual ISF override for 22:00-05:00; NULL = use autotuned `isf`
+    timezone            VARCHAR(64),                             -- IANA zone id (e.g. 'Europe/Berlin'); authoritative, DST-aware
+    utc_offset_minutes  INTEGER,                                 -- minutes EAST of UTC (UTC+4 = 240); fallback when timezone is absent/unknown
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,

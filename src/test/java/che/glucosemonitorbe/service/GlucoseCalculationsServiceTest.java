@@ -3,6 +3,7 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.dto.ClientTimeInfo;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.ActivityProvider;
@@ -94,6 +95,80 @@ class GlucoseCalculationsServiceTest {
         assertEquals("rising",  method.invoke(svc, List.of(), 7.0, rising, 120.0));
         assertEquals("falling", method.invoke(svc, List.of(), 7.0, falling, 120.0));
         assertEquals("stable",  method.invoke(svc, List.of(), 7.0, stable, 120.0));
+    }
+
+
+    // ---
+    // The nightly calibrator runs as a batch with no HTTP request, so the only place the user's UTC
+    // offset is observable is the dashboard call. Persist it there - without writing on every poll.
+    // ---
+
+    private UserSettingsDTO stubDashboardCall(UUID userId, String username, String storedZone, Integer storedOffset) {
+        when(userService.getUserByUsername(username))
+                .thenReturn(UserDto.builder().id(userId).username(username).build());
+        UserSettingsDTO settings = new UserSettingsDTO();
+        settings.setUserId(userId);
+        settings.setCarbRatio(2.0);
+        settings.setIsf(1.0);
+        settings.setCarbHalfLife(45);
+        settings.setMaxCOBDuration(240);
+        settings.setUtcOffsetMinutes(storedOffset);
+        settings.setTimezone(storedZone);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
+        when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenReturn(List.of());
+        when(cobService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+        when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble()))
+                .thenReturn(0.0);
+        when(featureToggleConfig.isNutritionAwarePredictionEnabled()).thenReturn(false);
+        return settings;
+    }
+
+    private static GlucoseCalculationsRequest requestWithOffset(String username, Integer offsetMinutes) {
+        return requestWithZone(username, "Asia/Tbilisi", offsetMinutes);
+    }
+
+    private static GlucoseCalculationsRequest requestWithZone(String username, String zone, Integer offsetMinutes) {
+        ClientTimeInfo t = new ClientTimeInfo();
+        t.setTimestamp("2026-08-20T14:12:00");
+        t.setTimezone(zone);
+        t.setTimezoneOffset(offsetMinutes);
+        return GlucoseCalculationsRequest.builder()
+                .currentGlucose(5.5).userId(username).includePredictionFactors(false)
+                .clientTimeInfo(t).build();
+    }
+
+    @Test
+    void persistsTheClientsUtcOffsetWhenItIsNotYetKnown() {
+        UUID userId = UUID.randomUUID();
+        stubDashboardCall(userId, "alice", null, null);
+
+        service.calculateGlucoseData(requestWithOffset("alice", 240));
+
+        verify(userSettingsService).recordClientZone(userId, "Asia/Tbilisi", 240);
+    }
+
+    @Test
+    void doesNotRewriteTheUtcOffsetOnEveryPollWhenItIsUnchanged() {
+        UUID userId = UUID.randomUUID();
+        stubDashboardCall(userId, "alice", "Asia/Tbilisi", 240);
+
+        service.calculateGlucoseData(requestWithOffset("alice", 240));
+
+        // The dashboard polls every 30 s; an unchanged offset must not cost a write or a cache evict.
+        verify(userSettingsService, never()).recordClientZone(any(), any(), any());
+    }
+
+    @Test
+    void persistsTheNewZoneWhenTheUserTravels() {
+        UUID userId = UUID.randomUUID();
+        stubDashboardCall(userId, "alice", "Asia/Tbilisi", 240);
+
+        service.calculateGlucoseData(requestWithZone("alice", "America/New_York", -300));
+
+        verify(userSettingsService).recordClientZone(userId, "America/New_York", -300);
     }
 
     @Test

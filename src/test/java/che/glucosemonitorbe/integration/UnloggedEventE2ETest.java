@@ -71,6 +71,7 @@ class UnloggedEventE2ETest {
     @Autowired private UnloggedEventFlagRepository flagRepository;
     @Autowired private UnloggedEventDetectionService detectionService;
     @Autowired private DigitalTwinCalibrationService calibrationService;
+    @Autowired private che.glucosemonitorbe.repository.UserSettingsRepository userSettingsRepository;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
 
     private static final long STEP = 5 * 60 * 1000L;
@@ -123,6 +124,50 @@ class UnloggedEventE2ETest {
         Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
 
         assertTrue(flag.isPresent());
+        assertEquals(Category.UNDER_ESTIMATED_FOOD, flag.get().getCategory());
+    }
+
+
+    // -- T2b: the same rise, for a user who is not on UTC ----------------------
+
+    @Test
+    @DisplayName("T2b - a logged carb note still matches the CGM window for a UTC+4 user")
+    void underEstimatedFood_matchesForANonUtcUser() {
+        UUID userId = userId();
+        // The user's device reports Asia/Tbilisi (UTC+4, no DST).
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Tbilisi");
+        che.glucosemonitorbe.entity.UserSettings settings =
+                userSettingsRepository.findByUserId(userId)
+                        .orElseGet(() -> {
+                            che.glucosemonitorbe.entity.UserSettings fresh =
+                                    new che.glucosemonitorbe.entity.UserSettings();
+                            fresh.setUserId(userId);
+                            return fresh;
+                        });
+        settings.setTimezone(zone.getId());
+        settings.setUtcOffsetMinutes(240);
+        userSettingsRepository.save(settings);
+
+        long elevatedStart = seedRiseWindow(userId);
+
+        // notes.timestamp holds LOCAL WALL TIME - what the user's device sent - not UTC.
+        Note n = new Note();
+        n.setUserId(userId);
+        n.setTimestamp(LocalDateTime.ofInstant(Instant.ofEpochMilli(elevatedStart), zone));
+        n.setCarbs(10.0);
+        n.setInsulin(0.0);
+        n.setMeal("snack");
+        n.setType(Note.TYPE_NORMAL);
+        n.setCreatedAt(LocalDateTime.now());
+        n.setUpdatedAt(LocalDateTime.now());
+        noteRepository.save(n);
+
+        Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
+
+        assertTrue(flag.isPresent());
+        // The carbs ARE logged, just under-estimated. Comparing a local-wall note against a
+        // UTC-wall CGM window put it four hours outside and mislabelled it UNLOGGED_FOOD - which
+        // then excluded this window's CGM data from digital-twin calibration.
         assertEquals(Category.UNDER_ESTIMATED_FOOD, flag.get().getCategory());
     }
 

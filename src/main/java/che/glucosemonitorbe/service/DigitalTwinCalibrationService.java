@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -123,9 +124,20 @@ public class DigitalTwinCalibrationService {
     public DigitalTwinCalibrator.Result calibrateUser(UUID userId) {
         if (!featureToggleConfig.isDigitalTwinEnabled()) return null;
 
+        // The user's clock. notes.timestamp holds local wall time; cgm_readings.date_timestamp holds
+        // true UTC epochs. Everything below is reconciled onto the user's LOCAL wall clock, because
+        // the replay drives the same predictor the live dashboard drives and the live path is fed
+        // client local time - which also makes the fitted hour-of-day a local hour, matching the
+        // hour the residual grid is applied at. Unknown offset falls back to UTC (audit F26/F27).
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
+        java.time.ZoneId userZone = resolveUserZone(settings, userId);
+
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime windowStart = now.minusDays(LOOKBACK_DAYS);
-        long cutoffMs = windowStart.toInstant(ZoneOffset.UTC).toEpochMilli();
+        long cutoffMs = Instant.now().minus(java.time.Duration.ofDays(LOOKBACK_DAYS)).toEpochMilli();
+        // Note bounds live on the user's wall clock, or a UTC+N user's most recent N hours of notes
+        // sort after "now" and are silently dropped from the fit.
+        LocalDateTime nowUserWall = LocalDateTime.ofInstant(Instant.now(), userZone);
+        LocalDateTime windowStart = nowUserWall.minusDays(LOOKBACK_DAYS);
 
         // -- Load CGM ----------------------------------------------------------
         List<CgmReading> readings = cgmReadingRepository
@@ -142,14 +154,14 @@ public class DigitalTwinCalibrationService {
         }
         // Down-weight (exclude) windows the user's log doesn't explain, so an unlogged/mis-logged event
         // can't bias the fit - unless doing so would starve the fit of data.
-        cgm = excludeFlaggedWindows(userId, cgm);
+        cgm = excludeFlaggedWindows(userId, cgm, userZone);
 
         // -- Load events (meals / boluses / basal) -------------------------------
-        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, now);
+        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, nowUserWall);
         List<PredictionReplayEngine.Event> events = new ArrayList<>(notes.size());
         for (Note n : notes) {
             if (n.getTimestamp() == null) continue;
-            long epochMs = n.getTimestamp().toInstant(ZoneOffset.UTC).toEpochMilli();
+            long epochMs = PredictionReplayEngine.toEpochMs(n.getTimestamp(), userZone);
             String profile = n.getNutritionProfile();
             events.add(new PredictionReplayEngine.Event(
                     epochMs,
@@ -162,7 +174,6 @@ public class DigitalTwinCalibrationService {
         // -- Build raw predictor + base params + one-time IOB/settings snapshot --
         HovorkaParameters baseParams = paramService.buildRawForUser(userId);
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         HovorkaGlucosePredictionService rawPredictor = new HovorkaGlucosePredictionService(
                 paramService, odeSolver, basalResolver, insulinPrefsService, gutModel,
                 userSettingsService, PredictionResidualProvider.NONE);
@@ -180,9 +191,9 @@ public class DigitalTwinCalibrationService {
 
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
         PredictionReplayEngine train = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity);
+                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userZone);
         PredictionReplayEngine val = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity);
+                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity, userZone);
 
         // -- Fit -----------------------------------------------------------------
         DigitalTwinCalibrator.Result result = new DigitalTwinCalibrator().calibrate(train, val);
@@ -193,6 +204,27 @@ public class DigitalTwinCalibrationService {
                 userId, result.status(),
                 round(result.scales().isfScale()), round(result.scales().agScale()));
         return result;
+    }
+
+    /**
+     * The clock to replay this user on: their IANA zone if known (DST-aware, and a 30-day window
+     * spans a transition twice a year), else the raw offset they last reported, else UTC - which
+     * reproduces the behaviour from before the offset was persisted.
+     */
+    private java.time.ZoneId resolveUserZone(UserSettingsDTO settings, UUID userId) {
+        if (settings == null) return ZoneOffset.UTC;
+        String tz = settings.getTimezone();
+        if (tz != null && !tz.isBlank()) {
+            try {
+                return java.time.ZoneId.of(tz);
+            } catch (java.time.DateTimeException e) {
+                log.warn("User {}: unparseable timezone '{}' - falling back to the stored offset", userId, tz);
+            }
+        }
+        Integer offsetMinutes = settings.getUtcOffsetMinutes();
+        if (offsetMinutes != null) return ZoneOffset.ofTotalSeconds(offsetMinutes * 60);
+        log.debug("User {}: no timezone recorded - replaying on UTC", userId);
+        return ZoneOffset.UTC;
     }
 
     /** Current twin status for a user (for the API / UI). */
@@ -252,7 +284,7 @@ public class DigitalTwinCalibrationService {
      * drop below {@link #MIN_CGM_READINGS} (fitting on that data beats not fitting at all).
      */
     private List<PredictionReplayEngine.Reading> excludeFlaggedWindows(
-            UUID userId, List<PredictionReplayEngine.Reading> cgm) {
+            UUID userId, List<PredictionReplayEngine.Reading> cgm, java.time.ZoneId userZone) {
         if (!featureToggleConfig.isUnloggedEventDetectionEnabled()) return cgm;
         List<UnloggedEventFlag> flags = unloggedEventFlagRepository.findByUserIdAndStateIn(
                 userId, List.of(UnloggedEventFlag.State.OPEN, UnloggedEventFlag.State.CONFIRMED));
@@ -260,8 +292,10 @@ public class DigitalTwinCalibrationService {
 
         long[][] intervals = new long[flags.size()][2];
         for (int i = 0; i < flags.size(); i++) {
-            intervals[i][0] = toEpochMsUtc(flags.get(i).getWindowStart());
-            intervals[i][1] = toEpochMsUtc(flags.get(i).getWindowEnd());
+            // Flag windows are stored in the user's local wall clock (UnloggedEventDetectionService
+            // runs on that clock), so convert with the same zone rather than assuming UTC.
+            intervals[i][0] = PredictionReplayEngine.toEpochMs(flags.get(i).getWindowStart(), userZone);
+            intervals[i][1] = PredictionReplayEngine.toEpochMs(flags.get(i).getWindowEnd(), userZone);
         }
         List<PredictionReplayEngine.Reading> kept = new ArrayList<>(cgm.size());
         for (PredictionReplayEngine.Reading r : cgm) {
@@ -280,10 +314,6 @@ public class DigitalTwinCalibrationService {
         log.info("User {}: excluded {} CGM reading(s) in {} flagged unlogged-event window(s) from calibration",
                 userId, cgm.size() - kept.size(), flags.size());
         return kept;
-    }
-
-    private static long toEpochMsUtc(LocalDateTime ldt) {
-        return ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
     }
 
     // -- Helpers --------------------------------------------------------------

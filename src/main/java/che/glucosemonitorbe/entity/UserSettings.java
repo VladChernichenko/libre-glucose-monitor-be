@@ -54,6 +54,22 @@ public class UserSettings {
     private Double isfDinner;
 
     /** Manual ISF override for 22:00-05:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
+    /**
+     * The user's IANA time-zone id (e.g. {@code Europe/Berlin}), as reported by the client.
+     * Authoritative over {@link #utcOffsetMinutes} because it resolves the offset per instant, and a
+     * 30-day calibration window spans a DST transition twice a year.
+     */
+    @Column(name = "timezone", length = 64)
+    private String timezone;
+
+    /**
+     * The user's UTC offset in minutes EAST of UTC (UTC+4 = 240); null until a dashboard request
+     * reports it. {@code notes.timestamp} stores local wall time while {@code cgm_readings} stores
+     * true UTC epochs, so the nightly calibration needs this to put both on one clock.
+     */
+    @Column(name = "utc_offset_minutes")
+    private Integer utcOffsetMinutes;
+
     @Column(name = "isf_night")
     private Double isfNight;
 
