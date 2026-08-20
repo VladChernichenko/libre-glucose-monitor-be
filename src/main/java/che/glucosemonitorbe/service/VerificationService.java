@@ -34,6 +34,22 @@ public class VerificationService {
     // so the relative scale would explode - suppress the suggestion instead.
     private static final double MIN_PREDICTED_RISE       = 0.5;   // mmol/L
 
+    /**
+     * Largest fraction by which one accepted suggestion may move carbRatio.
+     *
+     * <p>gramsPerUnit = 10 x isf / carbRatio, so this is a bound on how far a single acceptance can
+     * move every subsequent meal bolus. The former clamp of [0.5, 2.0] let one acceptance halve or
+     * double the dose. With the 7-event window and the consistency gate, 25 % still converges in a
+     * handful of acceptances.
+     */
+    public static final double MAX_CR_STEP = 0.25;
+
+    /** carbRatio after one titration step, bounded to +/-{@link #MAX_CR_STEP}. */
+    public static double boundedCarbRatioStep(double currentCarbRatio, double relError) {
+        double scale = Math.max(1.0 - MAX_CR_STEP, Math.min(1.0 + MAX_CR_STEP, 1.0 + relError));
+        return Math.round(currentCarbRatio * scale * 100.0) / 100.0;
+    }
+
     // Qualifying meal range
     private static final double MIN_CARBS = 20.0;
     private static final double MAX_CARBS = 80.0;
@@ -208,8 +224,7 @@ public class VerificationService {
             // meanError > 0 -> actual exceeded prediction -> predicted rise too low -> raise CR;
             // meanError < 0 -> predicted too high -> lower CR. relError carries both signs.
             double relError = meanError / meanAbsPredicted;
-            double scale = Math.max(0.5, Math.min(2.0, 1.0 + relError));
-            summary.setSuggestedCarbRatio(round2(curCR * scale));
+            summary.setSuggestedCarbRatio(boundedCarbRatioStep(curCR, relError));
             ready = window.size() >= WINDOW_SIZE;
         }
         summary.setSuggestionReady(ready && window.size() >= WINDOW_SIZE);

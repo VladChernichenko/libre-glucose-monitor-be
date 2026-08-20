@@ -152,4 +152,16 @@ class VerificationServiceTest {
 
         assertThat(saved.getSkipReason()).isNotIn("hypo_in_window", "rescue_carbs_in_window");
     }
+
+    @Test
+    void suggestedCarbRatioNeverMovesMoreThanOneQuarterPerAcceptance() {
+        double current = 2.0;
+        // relError of +3.0 would previously scale by clamp(4.0, 0.5, 2.0) = 2.0 -> 4.00
+        double scaledUp = VerificationService.boundedCarbRatioStep(current, 3.0);
+        // relError of -3.0 would previously scale by clamp(-2.0, 0.5, 2.0) = 0.5 -> 1.00
+        double scaledDown = VerificationService.boundedCarbRatioStep(current, -3.0);
+
+        assertThat(scaledUp).isEqualTo(2.5);
+        assertThat(scaledDown).isEqualTo(1.5);
+    }
 }
