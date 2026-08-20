@@ -164,4 +164,13 @@ class VerificationServiceTest {
         assertThat(scaledUp).isEqualTo(2.5);
         assertThat(scaledDown).isEqualTo(1.5);
     }
+
+    @Test
+    void suggestedCarbRatioIsUnchangedForNonFiniteRelError() {
+        double current = 2.0;
+
+        assertThat(VerificationService.boundedCarbRatioStep(current, Double.NaN)).isEqualTo(current);
+        assertThat(VerificationService.boundedCarbRatioStep(current, Double.POSITIVE_INFINITY)).isEqualTo(current);
+        assertThat(VerificationService.boundedCarbRatioStep(current, Double.NEGATIVE_INFINITY)).isEqualTo(current);
+    }
 }

@@ -44,8 +44,21 @@ public class VerificationService {
      */
     public static final double MAX_CR_STEP = 0.25;
 
-    /** carbRatio after one titration step, bounded to +/-{@link #MAX_CR_STEP}. */
+    /**
+     * carbRatio after one titration step, bounded to +/-{@link #MAX_CR_STEP}.
+     *
+     * <p>Total for every double input: a non-finite {@code relError} (NaN or +/-Infinity) is
+     * treated as a neutral, no-op step and returns {@code currentCarbRatio} unchanged, rather than
+     * clamping or letting NaN propagate through {@link Math#round} - which silently yields
+     * {@code 0L} ({@code Math.round(NaN) == 0}), and since carbRatio feeds
+     * gramsPerUnit = 10 x isf / carbRatio downstream, a silent {@code 0.0} here becomes a division
+     * by zero at the dosing divisor. A non-finite {@code currentCarbRatio} is likewise returned
+     * unchanged rather than risking the same NaN-through-round collapse.
+     */
     public static double boundedCarbRatioStep(double currentCarbRatio, double relError) {
+        if (!Double.isFinite(relError) || !Double.isFinite(currentCarbRatio)) {
+            return currentCarbRatio;
+        }
         double scale = Math.max(1.0 - MAX_CR_STEP, Math.min(1.0 + MAX_CR_STEP, 1.0 + relError));
         return Math.round(currentCarbRatio * scale * 100.0) / 100.0;
     }
