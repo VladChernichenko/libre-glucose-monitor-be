@@ -85,6 +85,19 @@ public class GlucoseCalculationsService {
         UserSettingsDTO userSettings = inputs.settings();
         List<Note> recentNotes = inputs.notes();
 
+        // Capture the client's UTC offset. The nightly digital-twin calibration is a batch job with
+        // no request context, and without this it cannot tell that notes.timestamp holds local wall
+        // time while cgm_readings holds true UTC epochs - which put every meal userOffset away from
+        // the glucose response it caused (audit F26). Written only when it changes, so the 30 s
+        // dashboard poll stays read-only and does not evict the settings cache.
+        Integer clientUtcOffset = request.getClientTimeInfo() != null
+                ? request.getClientTimeInfo().getTimezoneOffset()
+                : null;
+        if (clientUtcOffset != null && !clientUtcOffset.equals(userSettings.getUtcOffsetMinutes())) {
+            userSettingsService.recordUtcOffset(userUUID, clientUtcOffset);
+            userSettings.setUtcOffsetMinutes(clientUtcOffset);
+        }
+
         // Prospective (un-persisted) what-if events are an OVERLAY: they shape the prediction
         // path/curve only, never the headline COB/IOB. So a hypothetical meal from the Nutrition
         // screen can't silently change the "active carbs/insulin" the user sees as fact.

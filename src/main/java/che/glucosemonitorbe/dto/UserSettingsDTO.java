@@ -16,6 +16,8 @@ public class UserSettingsDTO {
     private UUID userId;
     /** mmol/L rise per 10 g carbs (no insulin); formula uses (COB grams / 10) * carbRatio. */
     private Double carbRatio;
+    /** Minutes EAST of UTC (UTC+4 = 240); null = unknown, treated as UTC by the calibrator. */
+    private Integer utcOffsetMinutes;
     /** Autotuned single ISF (mmol/L per unit), continuously adjusted by VerificationService. */
     private Double isf;
     private Integer carbHalfLife;

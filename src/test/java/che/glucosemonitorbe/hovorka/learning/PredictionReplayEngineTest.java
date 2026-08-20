@@ -8,6 +8,8 @@ import che.glucosemonitorbe.hovorka.HovorkaOdeSolver;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -55,6 +57,64 @@ class PredictionReplayEngineTest {
             assertThat(s.actual()).isFinite();
             assertThat(s.hourOfDay()).isBetween(0, 23);
         }
+    }
+
+    // ---
+    // Timezone alignment: the calibrator replays the SAME predictor the live dashboard calls, and
+    // the live path is fed the client's local wall time. Anchors must therefore be built on the
+    // user's local clock, or the residual grid learns a UTC hour-of-day and the dashboard applies
+    // it at a local hour-of-day - a phase shift equal to the user's UTC offset.
+    // ---
+
+    @Test
+    void hourOfDayFollowsTheUsersLocalClockNotUtc() {
+        List<PredictionReplayEngine.Reading> cgm = syntheticTrace();
+        List<PredictionReplayEngine.Event> events = List.of(
+                new PredictionReplayEngine.Event(T0 + 60 * 60_000L, 40.0, 5.0, false, 10.0, 8.0, 3.0));
+
+        List<AnchorSample> utc = new PredictionReplayEngine(
+                rawPredictor(), params70kg(), new RapidInsulinIobParameters(4.5, 55.0), null,
+                USER, cgm, events, new PredictionReplayEngine.Config(), ZoneOffset.UTC)
+                .replay(TwinScales.neutral());
+
+        List<AnchorSample> plus4 = new PredictionReplayEngine(
+                rawPredictor(), params70kg(), new RapidInsulinIobParameters(4.5, 55.0), null,
+                USER, cgm, events, new PredictionReplayEngine.Config(), ZoneOffset.ofHours(4))
+                .replay(TwinScales.neutral());
+
+        assertThat(utc).isNotEmpty();
+        assertThat(plus4).hasSameSizeAs(utc);
+        for (int i = 0; i < utc.size(); i++) {
+            int expected = (utc.get(i).hourOfDay() + 4) % 24;
+            assertThat(plus4.get(i).hourOfDay())
+                    .as("sample %d: a UTC+4 user's grid bucket must sit 4 hours from the UTC one", i)
+                    .isEqualTo(expected);
+        }
+    }
+
+    @Test
+    void noteWallTimeConvertsToTheInstantItActuallyHappened() {
+        // A note stored as local wall time 12:00 for a UTC+4 user happened at 08:00 UTC.
+        // Treating that wall time as UTC - which the calibrator did - places the meal four hours
+        // after the glucose response it caused, so the fit sees a rise with no carbs and carbs
+        // with no rise.
+        LocalDateTime storedWallTime = LocalDateTime.of(2026, 8, 20, 12, 0);
+
+        long epoch = PredictionReplayEngine.toEpochMs(storedWallTime, ZoneOffset.ofHours(4));
+
+        assertThat(epoch).isEqualTo(
+                LocalDateTime.of(2026, 8, 20, 8, 0).toInstant(ZoneOffset.UTC).toEpochMilli());
+        // and the round trip returns the wall time the user actually saw
+        assertThat(PredictionReplayEngine.toLdt(epoch, ZoneOffset.ofHours(4)))
+                .isEqualTo(storedWallTime);
+    }
+
+    private static List<PredictionReplayEngine.Reading> syntheticTrace() {
+        List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
+        for (int m = 0; m <= 480; m += 5) {
+            cgm.add(new PredictionReplayEngine.Reading(T0 + m * 60_000L, 7.0 + 0.8 * Math.sin(m / 60.0)));
+        }
+        return cgm;
     }
 
     private static HovorkaGlucosePredictionService rawPredictor() {

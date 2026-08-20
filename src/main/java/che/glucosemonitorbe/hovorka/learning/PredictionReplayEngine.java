@@ -74,6 +74,16 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     private final UUID userId;
     private final Config cfg;
     private final che.glucosemonitorbe.hovorka.ActivityProvider activityProvider;
+    /**
+     * The user's UTC offset, defining the clock every replayed timestamp lives on.
+     *
+     * <p>Anchors are built on the user's <b>local wall clock</b>, because the replay drives the same
+     * {@link HovorkaGlucosePredictionService} the live dashboard drives, and the live path is fed the
+     * client's local wall time. Running the replay on UTC instead made the fitted
+     * {@link AnchorSample#hourOfDay()} a UTC hour while {@code DigitalTwinResidualProvider} applies
+     * the grid at a local hour - shifting every learned time-of-day correction by this offset.</p>
+     */
+    private final java.time.ZoneOffset userOffset;
 
     private final long[] cgmT;
     private final double[] cgmG;
@@ -98,7 +108,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                                   RapidInsulinIobParameters rapidIob, UserSettingsDTO settings,
                                   UUID userId, List<Reading> cgm, List<Event> events, Config cfg) {
         this(predicted, baseParams, rapidIob, settings, userId, cgm, events, cfg,
-                che.glucosemonitorbe.hovorka.ActivityProvider.NONE);
+                che.glucosemonitorbe.hovorka.ActivityProvider.NONE, java.time.ZoneOffset.UTC);
     }
 
     /** As above, but with an {@link che.glucosemonitorbe.hovorka.ActivityProvider} so the replayed
@@ -107,6 +117,26 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                                   RapidInsulinIobParameters rapidIob, UserSettingsDTO settings,
                                   UUID userId, List<Reading> cgm, List<Event> events, Config cfg,
                                   che.glucosemonitorbe.hovorka.ActivityProvider activityProvider) {
+        this(predicted, baseParams, rapidIob, settings, userId, cgm, events, cfg,
+                activityProvider, java.time.ZoneOffset.UTC);
+    }
+
+    /** Replay on the user's local clock (see {@link #userOffset}); NONE activity provider. */
+    public PredictionReplayEngine(HovorkaGlucosePredictionService predicted, HovorkaParameters baseParams,
+                                  RapidInsulinIobParameters rapidIob, UserSettingsDTO settings,
+                                  UUID userId, List<Reading> cgm, List<Event> events, Config cfg,
+                                  java.time.ZoneOffset userOffset) {
+        this(predicted, baseParams, rapidIob, settings, userId, cgm, events, cfg,
+                che.glucosemonitorbe.hovorka.ActivityProvider.NONE, userOffset);
+    }
+
+    /** Full form: activity provider and the user's UTC offset. */
+    public PredictionReplayEngine(HovorkaGlucosePredictionService predicted, HovorkaParameters baseParams,
+                                  RapidInsulinIobParameters rapidIob, UserSettingsDTO settings,
+                                  UUID userId, List<Reading> cgm, List<Event> events, Config cfg,
+                                  che.glucosemonitorbe.hovorka.ActivityProvider activityProvider,
+                                  java.time.ZoneOffset userOffset) {
+        this.userOffset = userOffset;
         this.predictor = predicted;
         this.baseParams = baseParams;
         this.rapidIob = rapidIob;
@@ -142,7 +172,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
             List<PredictionPointDTO> curve = predictor.buildPredictionPath(
                     p, rapidIob, settings, a.g0(), a.now(), a.carbs(), a.insulin(), a.longActing(),
                     userId, cfg.horizonMin, activityProvider);
-            long t0 = a.now().toInstant(ZoneOffset.UTC).toEpochMilli();
+            long t0 = toEpochMs(a.now(), userOffset);
             for (PredictionPointDTO pt : curve) {
                 int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
                 if (!isSampleHorizon(h)) continue;
@@ -175,7 +205,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
             long t0 = candidates.get(idx);
             Double g0 = nearest(cgmT, cgmG, t0, cfg.alignToleranceMs);
             if (g0 == null) continue;
-            LocalDateTime now = toLdt(t0);
+            LocalDateTime now = toLdt(t0, userOffset);
 
             List<CarbsEntry> carbs = new ArrayList<>();
             List<InsulinDose> insulin = new ArrayList<>();
@@ -188,16 +218,16 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 boolean inPast   = age >= 0 && age <= 8 * 3600_000L;
                 boolean inFuture = age < 0 && -age <= horizonMs;
                 if (n.longActing()) {
-                    if (age >= 0 && age <= 36 * 3600_000L) longActing.add(makeLongActing(n));
+                    if (age >= 0 && age <= 36 * 3600_000L) longActing.add(makeLongActing(n, userOffset));
                     continue;
                 }
                 if (!inPast && !inFuture) continue;
 
                 if (n.carbs() > 0) {
-                    carbs.add(CarbsEntry.builder().timestamp(toLdt(n.epochMs())).carbs(n.carbs()).build());
+                    carbs.add(CarbsEntry.builder().timestamp(toLdt(n.epochMs(), userOffset)).carbs(n.carbs()).build());
                 }
                 if (n.insulin() > 0) {
-                    insulin.add(InsulinDose.builder().timestamp(toLdt(n.epochMs()))
+                    insulin.add(InsulinDose.builder().timestamp(toLdt(n.epochMs(), userOffset))
                             .units(n.insulin()).type(InsulinDose.InsulinType.BOLUS).build());
                 }
                 if (cfg.fpuEquiv) {
@@ -205,7 +235,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                             / 100.0 * FPU_CARB_EQUIV_G;
                     if (fpu >= FPU_MIN_EQUIV_G) {
                         carbs.add(CarbsEntry.builder()
-                                .timestamp(toLdt(n.epochMs() + FPU_ONSET_MIN * 60_000L)).carbs(fpu).build());
+                                .timestamp(toLdt(n.epochMs() + FPU_ONSET_MIN * 60_000L, userOffset)).carbs(fpu).build());
                     }
                 }
 
@@ -257,16 +287,29 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         return false;
     }
 
-    private static Note makeLongActing(Event n) {
+    private static Note makeLongActing(Event n, java.time.ZoneOffset userOffset) {
         Note note = new Note();
-        note.setTimestamp(toLdt(n.epochMs()));
+        note.setTimestamp(toLdt(n.epochMs(), userOffset));
         note.setInsulin(n.insulin() > 0 ? n.insulin() : 10.0);
         note.setType(Note.TYPE_LONG_ACTING);
         return note;
     }
 
-    private static LocalDateTime toLdt(long epochMs) {
-        return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ZoneOffset.UTC);
+    /** Instant -> the wall-clock time the user saw on their own device. */
+    public static LocalDateTime toLdt(long epochMs, java.time.ZoneOffset userOffset) {
+        return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), userOffset);
+    }
+
+    /**
+     * The user's wall-clock time -> the instant it actually happened.
+     *
+     * <p>{@code notes.timestamp} holds local wall time (the client sends naive local time and the
+     * column round-trips it unchanged), while {@code cgm_readings.date_timestamp} holds a true UTC
+     * epoch. Converting a note's wall time with {@code ZoneOffset.UTC} - which the calibrator did -
+     * placed every meal and bolus {@code userOffset} away from the glucose response it caused.</p>
+     */
+    public static long toEpochMs(LocalDateTime localWallTime, java.time.ZoneOffset userOffset) {
+        return localWallTime.toInstant(userOffset).toEpochMilli();
     }
 
     /** Nearest CGM value to {@code target} within tolerance, or null. Binary search on sorted times. */

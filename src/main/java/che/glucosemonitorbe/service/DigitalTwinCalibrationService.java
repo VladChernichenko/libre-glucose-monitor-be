@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -123,9 +124,23 @@ public class DigitalTwinCalibrationService {
     public DigitalTwinCalibrator.Result calibrateUser(UUID userId) {
         if (!featureToggleConfig.isDigitalTwinEnabled()) return null;
 
+        // The user's clock. notes.timestamp holds local wall time; cgm_readings.date_timestamp holds
+        // true UTC epochs. Everything below is reconciled onto the user's LOCAL wall clock, because
+        // the replay drives the same predictor the live dashboard drives and the live path is fed
+        // client local time - which also makes the fitted hour-of-day a local hour, matching the
+        // hour the residual grid is applied at. Unknown offset falls back to UTC (audit F26/F27).
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
+        Integer offsetMinutes = settings != null ? settings.getUtcOffsetMinutes() : null;
+        ZoneOffset userOffset = offsetMinutes != null
+                ? ZoneOffset.ofTotalSeconds(offsetMinutes * 60)
+                : ZoneOffset.UTC;
+
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime windowStart = now.minusDays(LOOKBACK_DAYS);
-        long cutoffMs = windowStart.toInstant(ZoneOffset.UTC).toEpochMilli();
+        long cutoffMs = Instant.now().minus(java.time.Duration.ofDays(LOOKBACK_DAYS)).toEpochMilli();
+        // Note bounds live on the user's wall clock, or a UTC+N user's most recent N hours of notes
+        // sort after "now" and are silently dropped from the fit.
+        LocalDateTime nowUserWall = LocalDateTime.ofInstant(Instant.now(), userOffset);
+        LocalDateTime windowStart = nowUserWall.minusDays(LOOKBACK_DAYS);
 
         // -- Load CGM ----------------------------------------------------------
         List<CgmReading> readings = cgmReadingRepository
@@ -145,11 +160,11 @@ public class DigitalTwinCalibrationService {
         cgm = excludeFlaggedWindows(userId, cgm);
 
         // -- Load events (meals / boluses / basal) -------------------------------
-        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, now);
+        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, nowUserWall);
         List<PredictionReplayEngine.Event> events = new ArrayList<>(notes.size());
         for (Note n : notes) {
             if (n.getTimestamp() == null) continue;
-            long epochMs = n.getTimestamp().toInstant(ZoneOffset.UTC).toEpochMilli();
+            long epochMs = PredictionReplayEngine.toEpochMs(n.getTimestamp(), userOffset);
             String profile = n.getNutritionProfile();
             events.add(new PredictionReplayEngine.Event(
                     epochMs,
@@ -162,7 +177,6 @@ public class DigitalTwinCalibrationService {
         // -- Build raw predictor + base params + one-time IOB/settings snapshot --
         HovorkaParameters baseParams = paramService.buildRawForUser(userId);
         RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         HovorkaGlucosePredictionService rawPredictor = new HovorkaGlucosePredictionService(
                 paramService, odeSolver, basalResolver, insulinPrefsService, gutModel,
                 userSettingsService, PredictionResidualProvider.NONE);
@@ -180,9 +194,9 @@ public class DigitalTwinCalibrationService {
 
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
         PredictionReplayEngine train = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity);
+                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userOffset);
         PredictionReplayEngine val = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity);
+                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity, userOffset);
 
         // -- Fit -----------------------------------------------------------------
         DigitalTwinCalibrator.Result result = new DigitalTwinCalibrator().calibrate(train, val);
