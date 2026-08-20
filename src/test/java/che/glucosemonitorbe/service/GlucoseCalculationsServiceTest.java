@@ -82,16 +82,41 @@ class GlucoseCalculationsServiceTest {
     void determineTrendUsesAdjustedThresholds() throws Exception {
         // Use a minimal service instance for the private-method reflection test
         GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null, null);
-        Method method = GlucoseCalculationsService.class.getDeclaredMethod("determineTrend", PredictionFactors.class, double.class);
+        Method method = GlucoseCalculationsService.class.getDeclaredMethod(
+                "determineTrend", List.class, double.class, PredictionFactors.class, double.class);
         method.setAccessible(true);
 
         PredictionFactors rising = PredictionFactors.builder().carbContribution(0.35).insulinContribution(0.0).baselineContribution(0.0).trendContribution(0.0).build();
         PredictionFactors falling = PredictionFactors.builder().carbContribution(-0.35).insulinContribution(0.0).baselineContribution(0.0).trendContribution(0.0).build();
         PredictionFactors stable = PredictionFactors.builder().carbContribution(0.1).insulinContribution(-0.1).baselineContribution(0.0).trendContribution(0.0).build();
 
-        assertEquals("rising", method.invoke(svc, rising, 120.0));
-        assertEquals("falling", method.invoke(svc, falling, 120.0));
-        assertEquals("stable", method.invoke(svc, stable, 120.0));
+        // Empty path -> documented fallback to the analytical factors.
+        assertEquals("rising",  method.invoke(svc, List.of(), 7.0, rising, 120.0));
+        assertEquals("falling", method.invoke(svc, List.of(), 7.0, falling, 120.0));
+        assertEquals("stable",  method.invoke(svc, List.of(), 7.0, stable, 120.0));
+    }
+
+    @Test
+    void trendFollowsThePredictionPathNotTheCarbRatioFormula() throws Exception {
+        GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null, null);
+        Method method = GlucoseCalculationsService.class.getDeclaredMethod(
+                "determineTrend", List.class, double.class, PredictionFactors.class, double.class);
+        method.setAccessible(true);
+
+        // 24 five-minute points; the 2h point (index 23) sits 3.0 mmol/L below "now".
+        List<PredictionPointDTO> falling = new ArrayList<>();
+        for (int i = 1; i <= 24; i++) {
+            falling.add(PredictionPointDTO.builder()
+                    .timestamp(LocalDateTime.now().plusMinutes(5L * i))
+                    .predictedGlucose(i < 24 ? 7.0 : 4.0)
+                    .build());
+        }
+        // The factors claim a strong rise; the path falls. The path must win.
+        PredictionFactors risingFactors = PredictionFactors.builder()
+                .carbContribution(5.0).insulinContribution(0.0)
+                .baselineContribution(0.0).trendContribution(0.0).build();
+
+        assertEquals("falling", method.invoke(svc, falling, 7.0, risingFactors, 120.0));
     }
 
     // -- P1: getUserByUsername called twice per request ------------------------
