@@ -893,7 +893,7 @@ git commit -m "feat(hypo): add hypo_events table, entity and repository"
 
 **Interfaces:**
 - Consumes: `HypoEventRepository` (Task 4), `HypoEvent`/`State` (Task 4).
-- Produces: `HypoThresholds.HYPO_MMOL` (3.9), `.RECOVERY_MMOL` (4.5), `.SUPPRESSION_MINUTES` (15); `HypoEventService.onGlucoseReading(UUID userId, double glucoseMmol)` (void).
+- Produces: `HypoThresholds.HYPO_MMOL` (3.9), `.RECOVERY_MMOL` (4.5), `.SUPPRESSION_MINUTES` (15); `HypoEventService(HypoEventRepository, FeatureToggleConfig)`; `HypoEventService.onGlucoseReading(UUID userId, double glucoseMmol)` (void).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -906,7 +906,6 @@ import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.entity.HypoEvent;
 import che.glucosemonitorbe.entity.HypoEvent.State;
 import che.glucosemonitorbe.repository.HypoEventRepository;
-import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -924,17 +923,15 @@ class HypoEventServiceTest {
     private static final UUID USER_ID = UUID.randomUUID();
 
     private HypoEventRepository repository;
-    private NoteRepository noteRepository;
     private FeatureToggleConfig config;
     private HypoEventService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(HypoEventRepository.class);
-        noteRepository = mock(NoteRepository.class);
         config = new FeatureToggleConfig();
         config.setHypoRescueLoggingEnabled(true);
-        service = new HypoEventService(repository, noteRepository, config);
+        service = new HypoEventService(repository, config);
         when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
                 .thenReturn(Optional.empty());
         when(repository.findFirstByUserIdOrderByDetectedAtDesc(USER_ID))
@@ -1127,7 +1124,6 @@ import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.entity.HypoEvent;
 import che.glucosemonitorbe.entity.HypoEvent.State;
 import che.glucosemonitorbe.repository.HypoEventRepository;
-import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.observer.HypoThresholds;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -1152,7 +1148,6 @@ import java.util.UUID;
 public class HypoEventService {
 
     private final HypoEventRepository repository;
-    private final NoteRepository noteRepository;
     private final FeatureToggleConfig featureToggleConfig;
 
     /**
@@ -1227,7 +1222,7 @@ public class HypoEventService {
 }
 ```
 
-`noteRepository` is unused in this task; Task 6 adds `confirm` which needs it. Leaving the field in now keeps the constructor signature stable across both tasks so the test written in Step 1 does not change.
+The service takes only the repository and the feature config. Task 6 adds `NoteRepository` when `confirm` needs it, and updates this task's test constructor call in the same commit — a one-line edit, which is cheaper than carrying a field that does nothing here.
 
 - [ ] **Step 6: Run the test to verify it passes**
 
@@ -1304,11 +1299,13 @@ counts as a hypo."
 **Files:**
 - Create: `src/main/java/che/glucosemonitorbe/dto/HypoEventDTO.java`
 - Create: `src/main/java/che/glucosemonitorbe/dto/ConfirmHypoEventRequest.java`
-- Modify: `src/main/java/che/glucosemonitorbe/service/HypoEventService.java`
+- Modify: `src/main/java/che/glucosemonitorbe/service/HypoEventService.java` (add the `NoteRepository` field)
+- Modify: `src/test/java/che/glucosemonitorbe/service/HypoEventServiceTest.java` (one line: the constructor call)
 - Test: `src/test/java/che/glucosemonitorbe/service/HypoEventServiceConfirmTest.java`
 
 **Interfaces:**
-- Consumes: `HypoEventService` constructor from Task 5 (unchanged), `Note.TYPE_HYPO_TREATMENT` (Task 2).
+- Consumes: `HypoEventService` from Task 5, `Note.TYPE_HYPO_TREATMENT` (Task 2).
+- Widens the constructor to `HypoEventService(HypoEventRepository, NoteRepository, FeatureToggleConfig)` and updates the Task 5 test's single `new HypoEventService(...)` call to match.
 - Produces: `HypoEventDTO` record with `from(HypoEvent)`; `ConfirmHypoEventRequest(Double grams)`; `HypoEventService.list(UUID, State)` returning `List<HypoEventDTO>`; `HypoEventService.confirm(UUID userId, UUID eventId, Double grams)` and `HypoEventService.dismiss(UUID userId, UUID eventId)`, both returning `HypoEventDTO`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1506,7 +1503,9 @@ public record ConfirmHypoEventRequest(Double grams) {}
 
 - [ ] **Step 4: Add list, confirm and dismiss to the service**
 
-Append to `HypoEventService`, adding imports for `che.glucosemonitorbe.dto.HypoEventDTO`, `che.glucosemonitorbe.entity.Note`, `org.springframework.http.HttpStatus`, `org.springframework.web.server.ResponseStatusException`, and `java.util.List`:
+Add the `NoteRepository` field to `HypoEventService` (constructor becomes `(HypoEventRepository, NoteRepository, FeatureToggleConfig)` via `@RequiredArgsConstructor`), and update the single `new HypoEventService(repository, config)` call in `HypoEventServiceTest.setUp` to `new HypoEventService(repository, noteRepository, config)`, adding a `noteRepository` mock field there.
+
+Then append to `HypoEventService`, adding imports for `che.glucosemonitorbe.repository.NoteRepository`, `che.glucosemonitorbe.dto.HypoEventDTO`, `che.glucosemonitorbe.entity.Note`, `org.springframework.http.HttpStatus`, `org.springframework.web.server.ResponseStatusException`, and `java.util.List`:
 
 ```java
     /** Largest single rescue dose accepted [g]. Above this is a typo, not a treatment. */
@@ -1605,6 +1604,7 @@ Expected: PASS, 6 tests.
 git add src/main/java/che/glucosemonitorbe/dto/HypoEventDTO.java \
         src/main/java/che/glucosemonitorbe/dto/ConfirmHypoEventRequest.java \
         src/main/java/che/glucosemonitorbe/service/HypoEventService.java \
+        src/test/java/che/glucosemonitorbe/service/HypoEventServiceTest.java \
         src/test/java/che/glucosemonitorbe/service/HypoEventServiceConfirmTest.java
 git commit -m "feat(hypo): idempotent confirm and dismiss for hypo events
 
@@ -2248,4 +2248,4 @@ git commit -m "docs: record hypo events and the observer CGM fix in the schema"
 
 **Placeholders:** Two tasks intentionally defer to an existing file rather than inlining code — Task 4 Step 4 (repository test annotations) and Task 7 Step 2 (MockMvc setup), because both depend on project-specific Spring test scaffolding that must be copied exactly rather than guessed. Both name the precise file to read and give the full test case bodies. Task 8 Step 1's second test body is likewise specified by intent plus the fixture source, since it depends on `IsfMealWindowProfileServiceTest`'s private helpers.
 
-**Type consistency:** `HypoEvent.State` is used identically in the entity, repository, service, DTO (`.name()`) and controller (`@RequestParam State`). `HypoEventService`'s constructor is `(HypoEventRepository, NoteRepository, FeatureToggleConfig)` in Tasks 5 and 6 alike — Task 5 deliberately introduces the unused `noteRepository` field so the Task 6 test needs no constructor change. `RescueCarbProfile.ABSORPTION_MODE` is the single string `"RESCUE"` used by both Task 2 and Task 3. `GlucosePoint` is declared `public` in Task 1 so the test can name it.
+**Type consistency:** `HypoEvent.State` is used identically in the entity, repository, service, DTO (`.name()`) and controller (`@RequestParam State`). `HypoEventService`'s constructor is `(HypoEventRepository, FeatureToggleConfig)` in Task 5 and widens to `(HypoEventRepository, NoteRepository, FeatureToggleConfig)` in Task 6, which also updates the one call site in `HypoEventServiceTest`. Task 5 carries no field it does not use. `RescueCarbProfile.ABSORPTION_MODE` is the single string `"RESCUE"` used by both Task 2 and Task 3. `GlucosePoint` is declared `public` in Task 1 so the test can name it.
