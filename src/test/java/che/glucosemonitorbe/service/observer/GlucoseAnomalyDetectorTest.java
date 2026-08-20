@@ -6,6 +6,7 @@ import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,7 +16,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -56,7 +56,11 @@ class GlucoseAnomalyDetectorTest {
 
         detector.evaluateUser(USER_ID, "tester");
 
-        verify(alertService).evaluateAll(eq(USER_ID), eq("tester"), anyDouble(), anyDouble(), any());
+        ArgumentCaptor<Double> glucoseCaptor = ArgumentCaptor.forClass(Double.class);
+        verify(alertService).evaluateAll(eq(USER_ID), eq("tester"), glucoseCaptor.capture(), anyDouble(), any());
+        // Latest reading is sgv=108 mg/dL; pins the mg/dL -> mmol/L conversion, not just that
+        // *some* value was passed (a wrong or missing conversion would still satisfy anyDouble()).
+        assertThat(glucoseCaptor.getValue()).isCloseTo(108 / 18.0182, within(1e-6));
         // Notes are still queried once, for the meal-window (minutesSinceLastMeal) lookup -
         // that is intentionally note-based. What must NOT happen is sourcing glucose values
         // from notes, which this scenario (zero glucose-bearing notes) pins.

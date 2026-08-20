@@ -13,7 +13,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.List;
@@ -91,9 +90,14 @@ public class GlucoseAnomalyDetector {
         // 1. Collect recent CGM readings from the shared CGM cache. This used to read
         //    notes.glucose_value, which only ever holds client-supplied values from a logged
         //    note - neither sync scheduler writes it - so the observer never fired on real data.
-        LocalDateTime rocStart = now.minusMinutes(ROC_WINDOW_MINUTES);
-        long startMs = rocStart.toInstant(ZoneOffset.UTC).toEpochMilli();
-        long endMs   = now.toInstant(ZoneOffset.UTC).toEpochMilli();
+        //
+        //    Deliberately zone-free: this window is "the last N minutes of real elapsed time",
+        //    not a wall-clock date range, so it is computed directly off epoch millis. Round-
+        //    tripping through LocalDateTime.now().toInstant(ZoneOffset.UTC) would reinterpret
+        //    JVM-local wall time as if it were UTC, shifting the window by the zone offset on
+        //    any non-UTC deployment (this repo runs on Europe/London) and matching no rows.
+        long endMs   = System.currentTimeMillis();
+        long startMs = endMs - ROC_WINDOW_MINUTES * 60_000L;
 
         List<GlucosePoint> recentReadings = cgmReadingRepository
                 .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, startMs, endMs)
