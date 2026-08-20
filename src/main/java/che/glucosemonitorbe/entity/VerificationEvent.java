@@ -42,7 +42,8 @@ public class VerificationEvent {
     @Column(name = "actual_glucose_2h")
     private Double actualGlucose2h;
 
-    /** (carbs_g × carbRatio) − (insulin_u × isf) at time of note */
+    /** (carbs_g × carbRatio / 10) − (insulin_u × isf) at time of note.
+     *  carbRatio is mmol/L per 10 g, so the /10 converts it to per-gram. */
     @Column(name = "predicted_delta")
     private Double predictedDelta;
 

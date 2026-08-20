@@ -5,7 +5,9 @@ package che.glucosemonitorbe.hovorka;
  *
  * <p>Population constants are from Hovorka et al., "Nonlinear model predictive control of
  * glucose concentration in subjects with type 1 diabetes", Physiol Meas 2004.
- * User-specific values (isf, carbRatio, weight) are derived from experiments and settings.</p>
+ * User-specific values (isf, weight, carb half-life) are derived from experiments and settings.
+ * {@code carbRatio} is deliberately NOT among them: it is a dosing coefficient
+ * (gramsPerUnit = 10 x isf / carbRatio) with no reader anywhere in this package.</p>
  *
  * <h3>ODE system (4 state variables)</h3>
  * <pre>
