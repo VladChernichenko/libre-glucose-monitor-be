@@ -109,11 +109,13 @@ Consequence: the detector needs two glucose-bearing *notes* within a 20-minute w
 
 This is a prerequisite, not adjacent cleanup: a hypo prompt built on the current detector would never fire.
 
-**Change:** swap `NoteRepository` for `CgmReadingRepository` as the glucose source in `evaluateUser`, reading the ROC window from `cgm_readings` (mmol/L conversion from the stored `sgv`, using the existing `MGDL_PER_MMOL` constant rather than a new one). `NoteRepository` is retained for the `minutesSinceLastMeal` lookup, which is legitimately note-based.
+**Change:** swap `NoteRepository` for `CgmReadingRepository` as the glucose source in `evaluateUser`, reading the ROC window from `cgm_readings` via the existing `findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc`. `NoteRepository` is retained for the `minutesSinceLastMeal` lookup, which is legitimately note-based.
 
-`computeRoc` currently takes `List<Note>`. It is retargeted to a minimal `(epochMs, mmol)` pair type so the OLS maths stays independent of the storage entity and its existing tests survive as pure-maths tests.
+`computeRoc` currently takes `List<Note>`. It is retargeted to a minimal `GlucosePoint(long epochMs, double mmol)` record so the OLS maths is independent of the storage entity.
 
-Existing observer tests that construct glucose-bearing `Note` fixtures must be updated to CGM fixtures. This is expected churn from the fix, not incidental breakage.
+**mg/dL conversion.** `cgm_readings.sgv` is mg/dL. `MGDL_PER_MMOL = 18.0182` is currently declared privately in three separate classes (`ReplayMetrics`, `UnloggedEventDetectionService`, `DigitalTwinCalibrationService`). Rather than adding a fourth copy, promote it to one shared constant and repoint the three existing declarations at it. Three one-line changes; removes duplication instead of extending it.
+
+**Test position.** `GlucoseAnomalyDetector` and `computeRoc` have **no existing tests** — the class is entirely uncovered, which is part of why the dormancy went unnoticed. This task therefore adds the first tests for it rather than updating existing fixtures.
 
 ### 5 · Hypo event lifecycle
 
