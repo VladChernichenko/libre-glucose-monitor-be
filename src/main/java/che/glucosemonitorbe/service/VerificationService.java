@@ -346,6 +346,10 @@ public class VerificationService {
     // -- Eligibility -----------------------------------------------------------
 
     private String preCheckEligibility(Note note) {
+        // A rescue carb has no bolus behind it. Verification exists to titrate carbRatio from
+        // bolused meals, so scoring one would feed unbolused carbs into that loop. The
+        // no-insulin check below happens to catch this too, but only incidentally - state it.
+        if (note.isHypoTreatment()) return "hypo_treatment";
         double carbs   = note.getCarbs()   != null ? note.getCarbs()   : 0.0;
         double insulin = note.getInsulin() != null ? note.getInsulin() : 0.0;
         if (carbs < MIN_CARBS || carbs > MAX_CARBS) return "carbs_out_of_range";
