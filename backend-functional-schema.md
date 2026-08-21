@@ -142,7 +142,7 @@ Conventions: UUID PKs via `gen_random_uuid()`; all timestamps `TIMESTAMPTZ` (UTC
 
 **`user_settings`** — the single source of truth for dosing parameters. `carb_ratio` (mmol/L rise per 10 g), `isf` (mmol/L per U), `carb_half_life` (min), `max_cob_duration`, `body_weight_kg`, four optional per-window ISF overrides (`isf_breakfast|lunch|dinner|night`), plus `timezone` (IANA, authoritative) and `utc_offset_minutes` (fallback). CHECK constraints enforce positivity on every rate.
 
-**`notes`** — the intervention log. `carbs`, `insulin`, `meal` label, `glucose_value`, `nutrition_profile` (JSON), `absorption_mode`, `type` (`normal` / `activity` / `hypo_treatment`), `photo_key`, and activity fields (`activity_type`, `intensity`, `duration_min`). Indexed on `(user_id, timestamp)`.
+**`notes`** — the intervention log. `carbs`, `insulin`, `meal` label, `glucose_value`, `nutrition_profile` (JSON), `absorption_mode`, `type` (`normal` / `long_acting` / `activity` / `hypo_treatment`), `photo_key`, and activity fields (`activity_type`, `intensity`, `duration_min`). Indexed on `(user_id, timestamp)`.
 
 **`cgm_readings`** — one shared cache for both sources, discriminated by `data_source ∈ {NIGHTSCOUT, LIBRE_LINK_UP}`. Two partial unique indexes handle dedup: by `(user, source, external_id)` when the upstream supplies an id, else by `(user, source, date_timestamp)`.
 
