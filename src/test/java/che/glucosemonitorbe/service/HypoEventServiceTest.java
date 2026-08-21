@@ -4,6 +4,7 @@ import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.entity.HypoEvent;
 import che.glucosemonitorbe.entity.HypoEvent.State;
 import che.glucosemonitorbe.repository.HypoEventRepository;
+import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,15 +22,17 @@ class HypoEventServiceTest {
     private static final UUID USER_ID = UUID.randomUUID();
 
     private HypoEventRepository repository;
+    private NoteRepository noteRepository;
     private FeatureToggleConfig config;
     private HypoEventService service;
 
     @BeforeEach
     void setUp() {
         repository = mock(HypoEventRepository.class);
+        noteRepository = mock(NoteRepository.class);
         config = new FeatureToggleConfig();
         config.setHypoRescueLoggingEnabled(true);
-        service = new HypoEventService(repository, config);
+        service = new HypoEventService(repository, noteRepository, config);
         when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
                 .thenReturn(Optional.empty());
         when(repository.findFirstByUserIdOrderByDetectedAtDesc(USER_ID))
