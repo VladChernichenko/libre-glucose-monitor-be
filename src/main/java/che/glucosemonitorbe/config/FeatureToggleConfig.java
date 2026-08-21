@@ -43,6 +43,11 @@ public class FeatureToggleConfig {
     // prediction/detector/calibration. Enabled per-environment in application.yml.
     private boolean activityLoggingEnabled = false;
 
+    // Hypo rescue-carb logging: prompt the user to log fast carbs when glucose drops below
+    // 3.9 mmol/L. Off here, enabled per-environment in application.yml, matching the convention
+    // used by digital-twin-enabled and unlogged-event-detection-enabled.
+    private boolean hypoRescueLoggingEnabled = false;
+
     // Phase 2-4 integration gates (all off by default - toggle on per feature-flag)
     private boolean foodPhotoAnalysisEnabled = false;
     private boolean arSpatialEnabled = false;

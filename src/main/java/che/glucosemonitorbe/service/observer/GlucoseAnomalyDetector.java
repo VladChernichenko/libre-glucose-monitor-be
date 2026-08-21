@@ -57,6 +57,7 @@ public class GlucoseAnomalyDetector {
     private final NoteRepository noteRepository;
     private final UserRepository userRepository;
     private final GlucoseAlertService alertService;
+    private final che.glucosemonitorbe.service.HypoEventService hypoEventService;
 
     /**
      * Runs every 5 minutes, aligned with the LibreLinkUp CGM sync cadence.
@@ -124,7 +125,10 @@ public class GlucoseAnomalyDetector {
                 .map(n -> (int) ChronoUnit.MINUTES.between(n.getTimestamp(), now))
                 .orElse(null);
 
-        // 3. Dispatch async evaluation (non-blocking)
+        // 3. Advance the hypo-prompt lifecycle from the same reading the alerts use.
+        hypoEventService.onGlucoseReading(userId, currentGlucose);
+
+        // 4. Dispatch async evaluation (non-blocking)
         alertService.evaluateAll(userId, username, currentGlucose, roc, minutesSinceLastMeal);
     }
 

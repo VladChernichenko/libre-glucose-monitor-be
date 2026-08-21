@@ -25,10 +25,10 @@ public class GlucoseAlertEvaluator {
     // -- Thresholds ------------------------------------------------------------
 
     /** mmol/L - glucose below this triggers hypo alerts. */
-    private static final double HYPO_THRESHOLD       = 3.9;
+    private static final double HYPO_THRESHOLD       = HypoThresholds.HYPO_MMOL;
 
     /** mmol/L - early warning before hard hypo floor. */
-    private static final double HYPO_WARN_THRESHOLD  = 4.5;
+    private static final double HYPO_WARN_THRESHOLD  = HypoThresholds.RECOVERY_MMOL;
 
     /** mmol/L - nadir below this after over-injection. */
     private static final double OVER_INJ_THRESHOLD   = 4.0;

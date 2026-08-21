@@ -4,6 +4,7 @@ import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.UserRepository;
+import che.glucosemonitorbe.service.HypoEventService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -16,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.doubleThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -31,6 +33,7 @@ class GlucoseAnomalyDetectorTest {
     private NoteRepository noteRepo;
     private UserRepository userRepo;
     private GlucoseAlertService alertService;
+    private HypoEventService hypoEventService;
     private GlucoseAnomalyDetector detector;
 
     @BeforeEach
@@ -39,7 +42,8 @@ class GlucoseAnomalyDetectorTest {
         noteRepo = mock(NoteRepository.class);
         userRepo = mock(UserRepository.class);
         alertService = mock(GlucoseAlertService.class);
-        detector = new GlucoseAnomalyDetector(cgmRepo, noteRepo, userRepo, alertService);
+        hypoEventService = mock(HypoEventService.class);
+        detector = new GlucoseAnomalyDetector(cgmRepo, noteRepo, userRepo, alertService, hypoEventService);
         when(noteRepo.findByUserIdAndTimestampBetween(any(), any(), any())).thenReturn(List.of());
     }
 
@@ -65,6 +69,17 @@ class GlucoseAnomalyDetectorTest {
         // that is intentionally note-based. What must NOT happen is sourcing glucose values
         // from notes, which this scenario (zero glucose-bearing notes) pins.
         verify(noteRepo, times(1)).findByUserIdAndTimestampBetween(eq(USER_ID), any(), any());
+    }
+
+    @Test
+    void forwardsTheLatestReadingToTheHypoLifecycle() {
+        long now = System.currentTimeMillis();
+        when(cgmRepo.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(reading(now - 300_000, 90), reading(now, 63)));  // 5.0 -> 3.5
+
+        detector.evaluateUser(USER_ID, "tester");
+
+        verify(hypoEventService).onGlucoseReading(eq(USER_ID), doubleThat(v -> v < 3.6));
     }
 
     @Test
