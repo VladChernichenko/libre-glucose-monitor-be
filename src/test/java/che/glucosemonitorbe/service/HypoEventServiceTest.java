@@ -193,9 +193,22 @@ class HypoEventServiceTest {
         verify(repository, never()).save(any());
     }
 
-    /** The read path sweeps too: it is what runs when the CGM scan has stopped producing readings. */
+    /**
+     * {@code list} is a genuine read and must not age out stale rows itself. It used to, but that
+     * made it an unlocked write racing {@code confirm}/{@code dismiss}'s pessimistic lock: at the
+     * exact {@link HypoThresholds#MAX_OPEN_MINUTES} boundary, a concurrent {@code list} could read
+     * OPEN and later commit EXPIRED (with {@code noteId} cleared) over a {@code confirm} that had
+     * meanwhile locked the row, logged the rescue note and committed CONFIRMED - un-suppressing the
+     * prompt and disarming the idempotency guard, so the client could log a second rescue-carb note
+     * for the same hypo. Safety does not depend on this sweep: {@code confirm}/{@code dismiss} each
+     * re-check staleness under their own lock immediately before writing (see
+     * {@code confirmRefusesAStaleOpenEventRatherThanLoggingPhantomCarbs} below), and the iOS client
+     * applies the same age cutoff itself before ever presenting an OPEN event. See
+     * {@code HypoEventServiceListConcurrencyIntegrationTest} for the real cross-connection race this
+     * replaced.
+     */
     @Test
-    void listAgesOutAStaleOpenEventAndOmitsItFromAnOpenOnlyQuery() {
+    void listDoesNotMutateAStaleOpenEvent() {
         HypoEvent stale = openEvent(LocalDateTime.now()
                 .minusMinutes(HypoThresholds.MAX_OPEN_MINUTES + 5));
         when(repository.findByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
@@ -203,10 +216,12 @@ class HypoEventServiceTest {
 
         List<HypoEventDTO> open = service.list(USER_ID, State.OPEN);
 
-        assertThat(stale.getState()).isEqualTo(State.EXPIRED);
-        assertThat(open)
-                .as("a prompt that is no longer live must never be handed to the client")
-                .isEmpty();
+        assertThat(stale.getState())
+                .as("list must return what the repository handed it, not sweep state itself")
+                .isEqualTo(State.OPEN);
+        assertThat(open).hasSize(1);
+        assertThat(open.get(0).state()).isEqualTo("OPEN");
+        verify(repository, never()).save(any());
     }
 
     @Test

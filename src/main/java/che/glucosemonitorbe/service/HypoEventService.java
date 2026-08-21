@@ -173,22 +173,36 @@ public class HypoEventService {
     private static final double MAX_RESCUE_GRAMS = 100.0;
 
     /**
-     * List the user's events, aging out any stale OPEN row first.
+     * List the user's events. A genuine read: this method does not age out stale rows itself.
      *
-     * <p>Deliberately not {@code readOnly}: the age-out has to happen here as well as on the CGM
-     * scan, because the scan is exactly what stops running in the cases that strand a row OPEN (a
-     * sensor change or an offline phone starves {@code GlucoseAnomalyDetector} of the two readings
-     * it needs). Sweeping on read is what guarantees the client can never be handed a prompt that
-     * is no longer live.
+     * <p>An earlier version swept stale OPEN rows to EXPIRED here, on the reasoning that the CGM
+     * scan is exactly what stops running in the cases that strand a row OPEN (a sensor change or
+     * an offline phone starves {@code GlucoseAnomalyDetector} of the two readings it needs). That
+     * made this an unlocked write path racing {@code confirm}/{@code dismiss}'s pessimistic lock:
+     * at the exact age-out boundary, a concurrent {@code list} could read OPEN, and a concurrent
+     * {@code confirm} could lock, log the rescue note and commit CONFIRMED, only for {@code list}'s
+     * transaction to then commit EXPIRED with {@code noteId} cleared over the top - un-suppressing
+     * the prompt and disarming {@code confirm}'s idempotency guard, so the client could log a
+     * second rescue-carb note for the same hypo. There is no {@code @Version} column to make that
+     * a detectable failure instead of a silent lost update.
+     *
+     * <p>The sweep is not needed here to stay safe: {@code confirm}/{@code dismiss} each re-check
+     * staleness themselves, under the same pessimistic lock, immediately before they would write -
+     * see {@code expireIfStale} inside {@link #confirm} and {@link #dismiss} - so a stale row can
+     * never be confirmed regardless of what this method last returned. And the client
+     * (see {@code AppState.isFresh} / {@code hypoPromptMaxAgeMinutes} in the iOS app) applies the
+     * same {@link HypoThresholds#MAX_OPEN_MINUTES} cutoff itself before ever presenting an OPEN
+     * event fetched from here, so a technically-still-OPEN-but-stale row surfaced by a quiet scan
+     * is filtered out client-side rather than acted on. Dropping the sweep only delays how soon a
+     * stranded row's displayed state catches up to EXPIRED - cosmetic, not a safety gap - and lets
+     * this stay a real {@code readOnly} path, which also allows read-replica routing.
      */
-    @Transactional
+    @Transactional(readOnly = true)
     public List<HypoEventDTO> list(UUID userId, State stateFilter) {
         List<HypoEvent> events = stateFilter == null
                 ? repository.findByUserIdOrderByDetectedAtDesc(userId)
                 : repository.findByUserIdAndStateOrderByDetectedAtDesc(userId, stateFilter);
-        events.forEach(this::expireIfStale);
         return events.stream()
-                .filter(e -> stateFilter == null || e.getState() == stateFilter)
                 .map(HypoEventDTO::from)
                 .toList();
     }
