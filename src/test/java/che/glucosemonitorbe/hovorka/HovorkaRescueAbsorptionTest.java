@@ -63,6 +63,9 @@ class HovorkaRescueAbsorptionTest {
     /** Typical hypo treatment: 3-4 dextrose tablets. */
     private static final double RESCUE_GRAMS = 15.0;
 
+    /** Emission spacing inside the 4 h dense window - used to label golden-curve failures. */
+    private static final int DENSE_EMIT_MIN = 5;
+
     @BeforeEach
     void setUp() {
         DallaManGutModel gutModel  = new DallaManGutModel();
@@ -237,7 +240,133 @@ class HovorkaRescueAbsorptionTest {
                 .as("equal grams of rescue and mixed-meal carbs on one minute must land between the "
                     + "two pure cases, not let one silently win. blend=%.2f allRescue=%.2f "
                     + "allNormal=%.2f mmol/L", blended, bothRescue, bothNormal)
-                .isBetween(bothNormal, bothRescue);
+                // strictly: isBetween is inclusive and would pass if one side silently won outright.
+                .isStrictlyBetween(bothNormal, bothRescue);
+    }
+
+    // ---
+    // 5. Golden curve: the non-rescue path must not drift
+    // ---
+
+    /**
+     * Emitted glucose [mmol/L] every 5 min for {@link #goldenScenario()}, and the matching carb
+     * absorption effect. <b>Before/after baseline, not a snapshot of current output</b>: generated
+     * by running this exact scenario against the source as it stood at commit {@code 4ceae15} -
+     * immediately before {@code 1bd5af7} gave the Hovorka gut model a per-entry tMaxG - via
+     * {@code git checkout 4ceae15 -- src/main/java/.../hovorka/} plus a throwaway print harness,
+     * then restoring the working tree. Per-entry tMaxG must be exactly inert for any meal without
+     * the RESCUE marker, so the current implementation must reproduce these numbers bit-for-bit;
+     * any future edit that shifts an ordinary meal's curve has to change these literals
+     * deliberately, not silently.
+     */
+    private static final double[] GOLDEN_GLUCOSE = {
+             7.4,  7.4,  7.4,  7.3,  7.3,  7.2,  7.1,  7.0,  6.8,  6.7,  6.6,  6.4,
+             6.3,  6.2,  6.1,  6.0,  6.1,  6.2,  6.5,  6.8,  7.1,  7.4,  7.7,  8.0,
+             8.2,  8.5,  8.7,  8.9,  9.1,  9.2,  9.4,  9.6,  9.8,  9.9, 10.1, 10.2,
+            10.4, 10.6, 10.7, 10.9, 11.0, 11.2, 11.3, 11.5, 11.6, 11.8, 12.0, 12.1};
+
+    private static final double[] GOLDEN_CARB_EFFECT = {
+             6.25,  6.22,  6.05,   5.8,  5.54,  5.26,   5.0,  4.75,  4.52,  4.31,  4.13,  3.96,
+             3.81,  3.68,  4.91,  8.05, 10.51,  11.8, 11.96, 11.52, 10.85, 10.11,  9.39,  8.73,
+             8.13,   7.6,  7.15,  6.75,   6.4,  6.11,  5.85,  5.63,  5.43,  5.26,  5.11,  4.98,
+             4.86,  4.75,  4.65,  4.56,  4.48,  4.39,  4.32,  4.24,  4.17,   4.1,  4.04,  3.97};
+
+    @Test
+    @DisplayName("golden curve: an ordinary meal's forecast is unchanged to the last emitted digit")
+    void ordinaryMealCurveMatchesTheGoldenValues() {
+        // The task's central claim is that per-entry tMaxG is exactly neutral for non-rescue meals.
+        // Asserting two non-rescue modes against each other cannot show that - both would drift
+        // together. This pins the actual emitted numbers, exercising a past meal through the
+        // warm-up replay with GI, protein, fat, a bolus and a basal note all in play.
+        List<PredictionPointDTO> curve = goldenScenario();
+
+        assertThat(curve).hasSize(GOLDEN_GLUCOSE.length);
+        for (int i = 0; i < GOLDEN_GLUCOSE.length; i++) {
+            int minute = (i + 1) * DENSE_EMIT_MIN;
+            assertThat(curve.get(i).getPredictedGlucose())
+                    .as("predicted glucose at +%d min", minute)
+                    .isEqualTo(GOLDEN_GLUCOSE[i]);
+            assertThat(curve.get(i).getCarbAbsorptionEffect())
+                    .as("carb absorption effect at +%d min", minute)
+                    .isEqualTo(GOLDEN_CARB_EFFECT[i]);
+        }
+    }
+
+    /**
+     * 60 g mixed meal 30 min ago with GI 55, 25 g protein, 20 g fat; 4 U bolus; basal 8 h ago;
+     * plus a 40 g GI-65 snack 75 min from now. The past meal drives the warm-up replay; the future
+     * snack drives the forward timeline's non-rescue fallback in {@code buildFutureTMaxGTimeline}
+     * and the forward integration loop - neither meal carries the RESCUE marker, so this scenario's
+     * whole job is to pin both gut paths' ordinary-meal behaviour.
+     */
+    private List<PredictionPointDTO> goldenScenario() {
+        CarbsEntry pastMeal = CarbsEntry.builder()
+                .timestamp(NOW.minusMinutes(30)).carbs(60.0).build();
+        pastMeal.setEstimatedGi(55.0);
+        pastMeal.setProtein(25.0);
+        pastMeal.setFat(20.0);
+
+        CarbsEntry futureSnack = CarbsEntry.builder()
+                .timestamp(NOW.plusMinutes(75)).carbs(40.0).build();
+        futureSnack.setEstimatedGi(65.0);
+
+        InsulinDose bolus = new InsulinDose();
+        bolus.setTimestamp(NOW.minusMinutes(25));
+        bolus.setUnits(4.0);
+
+        Note basal = new Note();
+        basal.setTimestamp(NOW.minusHours(8));
+        basal.setInsulin(20.0);
+        basal.setType(Note.TYPE_LONG_ACTING);
+
+        return service.buildPredictionPath(
+                params, 7.4, NOW, List.of(pastMeal, futureSnack), List.of(bolus), List.of(basal),
+                USER_ID, 240);
+    }
+
+    // ---
+    // 6. The rescue rate must not outlive the rescue
+    // ---
+
+    @Test
+    @DisplayName("a rescue does not speed up carbs that were already in the gut before it")
+    void rescueDoesNotDrainAnEarlierMealAtRescueSpeedForever() {
+        // A big dinner 90 min ago is still emptying when a hypo is treated. activeTMaxG is set by
+        // the most recent carb minute and drains ALL residual Qgut, so without an expiry bound the
+        // dinner would finish at rescue speed for the rest of the horizon - over-predicting recovery
+        // at exactly the moment an optimistic curve is most dangerous.
+        CarbsEntry dinner = CarbsEntry.builder()
+                .timestamp(NOW.minusMinutes(90)).carbs(80.0).build();
+        dinner.setEstimatedGi((double) RescueCarbProfile.GI);
+
+        // Compare the late DECAY RATE, not the absolute effect. Absolute Ra confounds the rate
+        // constant with how much is left in the gut, and the two scenarios legitimately differ on
+        // the latter. Ra decays as exp(-kAbs*t), so the ratio across a fixed span isolates kAbs.
+        double rescueDecay = lateDecayRatio(curve(List.of(dinner, rescue(0))));
+        double normalDecay = lateDecayRatio(curve(List.of(dinner, normal(0))));
+
+        assertThat(rescueDecay)
+                .as("three hours out, long past the rescue's %d-min window, the dinner still in the "
+                    + "gut must be draining at the user's own rate. Ra(180)/Ra(120): "
+                    + "withRescue=%.4f withNormal=%.4f (unbounded rescue rate gives ~0.49)",
+                    RescueCarbProfile.MAX_DURATION_MIN, rescueDecay, normalDecay)
+                .isCloseTo(normalDecay, within(0.03));
+    }
+
+    @Test
+    @DisplayName("a rescue whose window closed during the warm-up leaves no fast rate behind")
+    void rescueWindowAlsoExpiresInsideTheWarmUpReplay() {
+        // 60 min old: the whole 45-min window opens and closes inside buildWarmState's
+        // age-descending loop, which needs its own expiry - the forward path's never runs here.
+        double rescueDecay = lateDecayRatio(curveFor(rescue(60)));
+        double normalDecay = lateDecayRatio(curveFor(normal(60)));
+
+        assertThat(rescueDecay)
+                .as("the warm-up replay must retire the rescue rate at %d min just as the forward "
+                    + "timeline does. Ra(180)/Ra(120): rescue=%.4f normal=%.4f "
+                    + "(unbounded rescue rate gives ~0.48)",
+                    RescueCarbProfile.MAX_DURATION_MIN, rescueDecay, normalDecay)
+                .isCloseTo(normalDecay, within(0.03));
     }
 
     // ---
@@ -291,6 +420,14 @@ class HovorkaRescueAbsorptionTest {
                 .mapToDouble(PredictionPointDTO::getCarbAbsorptionEffect)
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no prediction point at +" + minutesFromNow + " min"));
+    }
+
+    /**
+     * Ra(180)/Ra(120) - the tail decay of glucose appearance. Ra falls as exp(-kAbs*t), so this
+     * ratio reflects the absorption rate constant alone, independent of how much is left in the gut.
+     */
+    private double lateDecayRatio(List<PredictionPointDTO> curve) {
+        return carbEffectAt(curve, 180) / carbEffectAt(curve, 120);
     }
 
     private double peakCarbEffect(List<PredictionPointDTO> curve) {
