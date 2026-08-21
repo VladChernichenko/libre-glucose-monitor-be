@@ -3,6 +3,7 @@ package che.glucosemonitorbe.ai;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -119,8 +120,16 @@ public class ContextAggregatorService {
                 .build();
     }
 
+    /**
+     * Note -> COB input for the advisor's context window.
+     *
+     * <p>A {@code hypo_treatment} note carries the rescue marker through
+     * {@link RescueCarbProfile#mark}. Without it the advisor was told a 15 g rescue still had ~11 g
+     * on board half an hour later, while the dashboard's COB - which routes through
+     * {@code NoteToCarbsEntryMapper} - correctly reported it three-quarters absorbed.
+     */
     private CarbsEntry toCarbsEntry(Note note) {
-        return CarbsEntry.builder()
+        CarbsEntry entry = CarbsEntry.builder()
                 .id(note.getId())
                 .timestamp(note.getTimestamp())
                 .carbs(note.getCarbs())
@@ -131,6 +140,7 @@ public class ContextAggregatorService {
                 .originalCarbs(note.getCarbs())
                 .userId(note.getUserId())
                 .build();
+        return note.isHypoTreatment() ? RescueCarbProfile.mark(entry) : entry;
     }
 
     private InsulinDose toInsulinDose(Note note) {

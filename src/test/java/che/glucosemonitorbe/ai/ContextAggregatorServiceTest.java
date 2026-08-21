@@ -1,6 +1,8 @@
 package che.glucosemonitorbe.ai;
 
+import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.CgmReading;
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -28,6 +31,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -182,6 +186,55 @@ class ContextAggregatorServiceTest {
         AnalysisContext ctx = service.buildContext(uid, 12);
 
         assertThat(ctx.getPreBolusTimingContribution()).isGreaterThan(0.0);
+    }
+
+    // ---- rescue-carb marker ----
+
+    /**
+     * The advisor's COB must see a rescue carb as a rescue. This aggregator hand-builds its own
+     * {@code CarbsEntry} rather than routing through {@code NoteToCarbsEntryMapper}, and once did so
+     * without an {@code absorptionMode} at all - so {@code RescueCarbProfile.isRescue(null)} was
+     * false, and the advisor was told a 15 g rescue still had ~11 g on board 30 minutes later while
+     * the dashboard, which does route through the mapper, reported it three-quarters absorbed.
+     */
+    @Test
+    @DisplayName("a hypo_treatment note reaches the COB calculation carrying the rescue marker")
+    void buildContext_marksHypoTreatmentNotesAsRescue() {
+        Note rescue = new Note();
+        rescue.setTimestamp(LocalDateTime.now().minusMinutes(30));
+        rescue.setCarbs(15.0);
+        rescue.setInsulin(0.0);
+        rescue.setType(Note.TYPE_HYPO_TREATMENT);
+
+        Note meal = new Note();
+        meal.setTimestamp(LocalDateTime.now().minusMinutes(30));
+        meal.setCarbs(40.0);
+        meal.setInsulin(0.0);
+
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
+                .thenReturn(List.of(rescue, meal));
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of());
+
+        service.buildContext(userId, 12);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<CarbsEntry>> captor = ArgumentCaptor.forClass(List.class);
+        verify(carbsOnBoardService).calculateTotalCarbsOnBoard(captor.capture(), any(), eq(userId));
+        List<CarbsEntry> entries = captor.getValue();
+
+        assertThat(entries).hasSize(2);
+        CarbsEntry rescueEntry = entries.stream()
+                .filter(e -> e.getCarbs() == 15.0).findFirst().orElseThrow();
+        CarbsEntry mealEntry = entries.stream()
+                .filter(e -> e.getCarbs() == 40.0).findFirst().orElseThrow();
+
+        assertThat(RescueCarbProfile.isRescue(rescueEntry.getAbsorptionMode()))
+                .as("absorptionMode was %s", rescueEntry.getAbsorptionMode())
+                .isTrue();
+        assertThat(RescueCarbProfile.isRescue(mealEntry.getAbsorptionMode()))
+                .as("an ordinary meal must not be marked - otherwise this passes for a mutant "
+                    + "that marks everything")
+                .isFalse();
     }
 
     // ---- helpers ----

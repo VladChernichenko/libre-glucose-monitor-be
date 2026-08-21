@@ -161,14 +161,7 @@ public class DigitalTwinCalibrationService {
         List<PredictionReplayEngine.Event> events = new ArrayList<>(notes.size());
         for (Note n : notes) {
             if (n.getTimestamp() == null) continue;
-            long epochMs = PredictionReplayEngine.toEpochMs(n.getTimestamp(), userZone);
-            String profile = n.getNutritionProfile();
-            events.add(new PredictionReplayEngine.Event(
-                    epochMs,
-                    n.getCarbs()   != null ? n.getCarbs()   : 0.0,
-                    n.getInsulin() != null ? n.getInsulin() : 0.0,
-                    n.isLongActing(),
-                    macro(profile, "protein"), macro(profile, "fat"), macro(profile, "fiber")));
+            events.add(toEvent(n, userZone));
         }
 
         // -- Build raw predictor + base params + one-time IOB/settings snapshot --
@@ -317,6 +310,29 @@ public class DigitalTwinCalibrationService {
     }
 
     // -- Helpers --------------------------------------------------------------
+
+    /**
+     * Flatten a {@link Note} into the replay engine's {@code Event}.
+     *
+     * <p>{@code isHypoTreatment()} must be carried through: the replay engine never sees the Note,
+     * so this is the only chance to tell it a rescue carb absorbs on the rescue curve. Dropped, the
+     * fit models a 15 g dextrose tablet over 240 minutes, meets a sharp real glucose rise it cannot
+     * explain, and pays for the mismatch with {@code agScale}/{@code isfScale} - which then bias
+     * <em>every</em> prediction for that user. That is precisely the titration corruption a rescue
+     * carb is supposed to be immune to.
+     *
+     * <p>Package-private and static so that survival is directly testable, matching {@link #macro}.
+     */
+    static PredictionReplayEngine.Event toEvent(Note n, java.time.ZoneId userZone) {
+        String profile = n.getNutritionProfile();
+        return new PredictionReplayEngine.Event(
+                PredictionReplayEngine.toEpochMs(n.getTimestamp(), userZone),
+                n.getCarbs()   != null ? n.getCarbs()   : 0.0,
+                n.getInsulin() != null ? n.getInsulin() : 0.0,
+                n.isLongActing(),
+                macro(profile, "protein"), macro(profile, "fat"), macro(profile, "fiber"),
+                n.isHypoTreatment());
+    }
 
     /** Extract a numeric macro (protein/fat/fiber) from a nutrition_profile JSON blob; 0 if absent. */
     static double macro(String json, String key) {

@@ -110,6 +110,80 @@ class PredictionReplayEngineTest {
                 .isEqualTo(storedWallTime);
     }
 
+    // ---
+    // Rescue-carb marker. `Event` is the ONLY thing the replay engine ever sees - it never gets
+    // the Note - so if the rescue flag does not travel on it, the nightly twin fit models a 15 g
+    // dextrose tablet on the user's 240-minute mixed-meal curve, meets a sharp real rise it cannot
+    // explain, and absorbs the mismatch into agScale/isfScale, which then bias every prediction
+    // for that user. The spec's promise that a rescue "cannot corrupt the parameter-titration
+    // loops" is exactly this path.
+    // ---
+
+    @Test
+    void aRescueEventAbsorbsFasterThanTheSameCarbsLoggedAsAMeal() {
+        // A short window with a single anchor at t0, and the carbs landing 15 min into its horizon
+        // so the 30-minute sample lands while both curves are still delivering.
+        List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
+        for (int m = 0; m <= 120; m += 5) {
+            cgm.add(new PredictionReplayEngine.Reading(T0 + m * 60_000L, 4.0));
+        }
+        long ingestedAt = T0 + 15 * 60_000L;
+
+        List<AnchorSample> asMeal = replayWith(cgm,
+                new PredictionReplayEngine.Event(ingestedAt, 15.0, 0.0, false, 0, 0, 0, false));
+        List<AnchorSample> asRescue = replayWith(cgm,
+                new PredictionReplayEngine.Event(ingestedAt, 15.0, 0.0, false, 0, 0, 0, true));
+
+        assertThat(asMeal).isNotEmpty();
+        assertThat(asRescue).hasSameSizeAs(asMeal);
+
+        double mealAt30   = predictedAt(asMeal, 30);
+        double rescueAt30 = predictedAt(asRescue, 30);
+        assertThat(rescueAt30)
+                .as("15 g on the rescue curve (tMaxG ~8.9 min) must have delivered more glucose "
+                    + "15 min after ingestion than the same 15 g on the user's own curve "
+                    + "(tMaxG ~26.8 min). Equal values mean Event.rescue() never reached the gut "
+                    + "model and the twin is fitting a rescue as a mixed meal.")
+                .isGreaterThan(mealAt30);
+    }
+
+    /** The flag must discriminate, not merely perturb: two unflagged replays are bit-identical. */
+    @Test
+    void twoUnflaggedReplaysAreIdenticalSoTheRescueDifferenceIsTheFlag() {
+        List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
+        for (int m = 0; m <= 120; m += 5) {
+            cgm.add(new PredictionReplayEngine.Reading(T0 + m * 60_000L, 4.0));
+        }
+        long ingestedAt = T0 + 15 * 60_000L;
+
+        List<AnchorSample> a = replayWith(cgm,
+                new PredictionReplayEngine.Event(ingestedAt, 15.0, 0.0, false, 0, 0, 0, false));
+        // The 7-arg convenience constructor must mean "not a rescue", not "unspecified".
+        List<AnchorSample> b = replayWith(cgm,
+                new PredictionReplayEngine.Event(ingestedAt, 15.0, 0.0, false, 0, 0, 0));
+
+        assertThat(a).hasSameSizeAs(b);
+        for (int i = 0; i < a.size(); i++) {
+            assertThat(b.get(i).predicted()).isEqualTo(a.get(i).predicted());
+        }
+    }
+
+    private static List<AnchorSample> replayWith(
+            List<PredictionReplayEngine.Reading> cgm, PredictionReplayEngine.Event event) {
+        return new PredictionReplayEngine(
+                rawPredictor(), params70kg(), new RapidInsulinIobParameters(4.5, 55.0), null,
+                USER, cgm, List.of(event), new PredictionReplayEngine.Config(), ZoneOffset.UTC)
+                .replay(TwinScales.neutral());
+    }
+
+    private static double predictedAt(List<AnchorSample> samples, int horizonMin) {
+        return samples.stream()
+                .filter(s -> s.horizonMin() == horizonMin)
+                .mapToDouble(AnchorSample::predicted)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no sample at horizon " + horizonMin));
+    }
+
     @Test
     void wallTimeConversionFollowsDstWithinTheCalibrationWindow() {
         // LOOKBACK_DAYS = 30, so every fit twice a year spans a DST transition. A stored fixed

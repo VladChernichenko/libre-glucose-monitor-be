@@ -42,10 +42,7 @@ public class NoteToCarbsEntryMapper {
         // neither the feature flag nor a stored nutrition profile can slow it back down to a
         // mixed-meal curve - the physiology is the same regardless of either.
         if (note.isHypoTreatment()) {
-            entry.setAbsorptionMode(RescueCarbProfile.ABSORPTION_MODE);
-            entry.setEstimatedGi((double) RescueCarbProfile.GI);
-            entry.setAbsorptionSpeedClass("FAST");
-            return entry;
+            return RescueCarbProfile.mark(entry);
         }
         if (!featureToggleConfig.isNutritionAwarePredictionEnabled()) {
             entry.setAbsorptionMode("DEFAULT_DECAY");
