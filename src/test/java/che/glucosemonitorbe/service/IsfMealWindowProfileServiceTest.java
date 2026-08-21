@@ -22,11 +22,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -334,6 +338,126 @@ class IsfMealWindowProfileServiceTest {
 
         IsfMealWindowSnapshot saved = captureSavedSnapshot(MealWindow.BREAKFAST);
         assertThat(saved.getRawSampleCount()).isZero();
+    }
+
+    // -- Wall-time -> UTC-epoch reconciliation ---------------------------------
+
+    /**
+     * {@code notes.timestamp} holds the client's naive local wall time;
+     * {@code cgm_readings.date_timestamp} holds true UTC epoch-millis. Every conversion between
+     * them has to go through the user's zone. Reading a wall time as UTC instead shifts the CGM
+     * probe by the zone offset, which lands the ISF estimate on the wrong pair of readings.
+     *
+     * <p>Every test here pins a zone explicitly rather than relying on the machine's - a suite run
+     * on a UTC box cannot catch a UTC assumption by accident.
+     */
+    @Nested
+    @DisplayName("Timezone reconciliation against cgm_readings.date_timestamp")
+    class TimezoneReconciliation {
+
+        /** UTC+2 in July, and unambiguously not UTC. */
+        private final ZoneId berlin = ZoneId.of("Europe/Berlin");
+        /** JVM default for the loadCgmReadings test: UTC+9, no DST, so the shift is a clean 9 h. */
+        private final TimeZone tokyo = TimeZone.getTimeZone("Asia/Tokyo");
+
+        private UserSettingsDTO berlinSettings() {
+            UserSettingsDTO s = userSettings(2.0, 2.5, 45, 240);
+            s.setTimezone("Europe/Berlin");
+            return s;
+        }
+
+        /** A CGM reading at the true instant that {@code wall} names on {@code zone}. */
+        private CgmReading cgmAt(LocalDateTime wall, ZoneId zone, double mmol) {
+            return CgmReading.builder()
+                    .id(UUID.randomUUID())
+                    .userId(userId)
+                    .dataSource(CgmReading.DataSource.NIGHTSCOUT)
+                    .sgv((int) Math.round(mmol * 18.0182))
+                    .dateTimestamp(wall.atZone(zone).toInstant().toEpochMilli())
+                    .lastUpdated(LocalDateTime.now())
+                    .build();
+        }
+
+        // -- Site 2: nearestCgmMmol -------------------------------------------
+
+        @Test
+        @DisplayName("nearestCgmMmol matches a bolus wall time against the UTC epoch it names on "
+                + "the user's zone, not the same digits read as UTC")
+        void nearestCgmMmol_usesUserZoneNotUtc() {
+            // 12:00 in Berlin is 10:00 UTC. Read as UTC the target lands 2 h late - far outside the
+            // 15-minute lookup window - so the old conversion found nothing at all.
+            LocalDateTime bolusWall = LocalDateTime.of(2026, 7, 15, 12, 0);
+            List<CgmReading> readings = List.of(cgmAt(bolusWall, berlin, 8.0));
+
+            assertThat(service.nearestCgmMmol(readings, bolusWall, berlin))
+                    .isNotNull()
+                    .isCloseTo(8.0, offset(0.02));
+
+            // The old behaviour, spelled out: same call on UTC misses the reading entirely.
+            assertThat(service.nearestCgmMmol(readings, bolusWall, ZoneOffset.UTC)).isNull();
+        }
+
+        @Test
+        @DisplayName("A UTC+2 user's 7 correction boluses still yield ISF 2.5 - the CGM pair is "
+                + "matched on their clock, not shifted 2 h off it")
+        void recompute_forNonUtcUser_matchesCgmAndReportsIsf() {
+            // Same fixture as sevenCorrectionBoluses_thresholdMet, but the user lives in Berlin and
+            // the CGM epochs are the true instants of those Berlin wall times. Under the old
+            // conversion every probe landed 2 h away, every lookup returned null, and the bucket
+            // came back empty - i.e. this user's ISF suggestion silently disappeared.
+            when(userSettingsService.getUserSettings(userId)).thenReturn(berlinSettings());
+
+            LocalDateTime anchor = LocalDateTime.now(berlin).minusDays(1)
+                    .withHour(7).withMinute(30).withSecond(0).withNano(0);
+            List<Note> notes = new ArrayList<>();
+            List<CgmReading> cgm = new ArrayList<>();
+            for (int day = 0; day < 7; day++) {
+                LocalDateTime t = anchor.minusDays(day);
+                notes.add(bolus(t, 2.0));
+                cgm.add(cgmAt(t, berlin, 9.0));
+                cgm.add(cgmAt(t.plusMinutes((long) (RAPID.diaHours() * 60)), berlin, 4.0));
+            }
+            stub(notes, cgm);
+
+            service.recomputeForUser(userId);
+
+            IsfMealWindowSnapshot saved = captureSavedSnapshot(MealWindow.BREAKFAST);
+            assertThat(saved.getRawSampleCount()).isEqualTo(7);
+            assertThat(saved.getIsfMmolPerU()).isNotNull().isCloseTo(2.5, offset(0.02));
+        }
+
+        // -- Site 1: loadCgmReadings ------------------------------------------
+
+        @Test
+        @DisplayName("The CGM history lower bound is HISTORY_DAYS before the real instant, whatever "
+                + "zone the JVM happens to run in")
+        void loadCgmReadings_lowerBoundIsIndependentOfTheJvmZone() {
+            // The old conversion read LocalDateTime.now() - JVM wall time - as if it were UTC, so on
+            // a UTC+9 JVM the lower bound sat 9 h in the future relative to the window it names, and
+            // the oldest ~9 h of the 14-day history was dropped from every user's ISF fit.
+            TimeZone original = TimeZone.getDefault();
+            long expected;
+            try {
+                TimeZone.setDefault(tokyo);
+                when(userSettingsService.getUserSettings(userId)).thenReturn(berlinSettings());
+                stub(List.of(), List.of());
+                expected = Instant.now().minus(Duration.ofDays(IsfMealWindowProfileService.HISTORY_DAYS))
+                        .toEpochMilli();
+
+                service.recomputeForUser(userId);
+            } finally {
+                TimeZone.setDefault(original);
+            }
+
+            ArgumentCaptor<Long> since = ArgumentCaptor.forClass(Long.class);
+            org.mockito.Mockito.verify(cgmReadingRepository)
+                    .findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
+                            eq(userId), since.capture());
+
+            // Generous on clock drift between the two now() calls, but nowhere near the 9 h the JVM
+            // zone used to leak in.
+            assertThat(since.getValue()).isCloseTo(expected, org.assertj.core.data.Offset.offset(60_000L));
+        }
     }
 
     // -- sgvToMmol conversion --------------------------------------------------

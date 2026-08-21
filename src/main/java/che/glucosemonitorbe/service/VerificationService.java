@@ -1,6 +1,8 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CgmReading;
+import che.glucosemonitorbe.domain.GlucoseConversion;
+import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.VerificationEventDTO;
 import che.glucosemonitorbe.dto.VerificationSummaryDTO;
 import che.glucosemonitorbe.entity.Note;
@@ -14,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -161,8 +165,17 @@ public class VerificationService {
             return;
         }
 
+        // The user's clock, resolved once. note.timestamp holds the client's local wall time while
+        // cgm_readings.date_timestamp holds true UTC epochs, so every wall time below has to cross
+        // into epochs through userZone - reading them as UTC put the baseline and +2 h probes an
+        // offset away from the meal, and the resulting error titrates the user's carb ratio.
+        UserSettings cob = userSettingsRepository.findByUserId(event.getUserId()).orElse(null);
+        ZoneId userZone = cob == null
+                ? ZoneOffset.UTC
+                : UserZones.resolve(cob.getTimezone(), cob.getUtcOffsetMinutes());
+
         // Full eligibility check (time-sensitive checks)
-        String skipReason = fullEligibilityCheck(note, event.getUserId());
+        String skipReason = fullEligibilityCheck(note, event.getUserId(), userZone);
         if (skipReason != null) {
             event.setStatus(VerificationEvent.Status.SKIPPED);
             event.setSkipReason(skipReason);
@@ -172,8 +185,8 @@ public class VerificationService {
         }
 
         // Get CGM baseline (closest reading to note timestamp)
-        Long baselineTs = toEpochMs(note.getTimestamp());
-        Long twoHourTs  = toEpochMs(note.getTimestamp().plusHours(2));
+        Long baselineTs = toEpochMs(note.getTimestamp(), userZone);
+        Long twoHourTs  = toEpochMs(note.getTimestamp().plusHours(2), userZone);
 
         Double baseline = findClosestCgm(event.getUserId(), baselineTs);
         Double twoHour  = findClosestCgm(event.getUserId(), twoHourTs);
@@ -187,7 +200,6 @@ public class VerificationService {
         }
 
         // Compute predicted vs actual
-        UserSettings cob = userSettingsRepository.findByUserId(event.getUserId()).orElse(null);
         double carbRatio = cob != null && cob.getCarbRatio() != null ? cob.getCarbRatio() : DEFAULT_CARB_RATIO;
         double isf       = cob != null && cob.getIsf()       != null ? cob.getIsf()       : 1.0;
 
@@ -363,7 +375,7 @@ public class VerificationService {
         return null;
     }
 
-    private String fullEligibilityCheck(Note note, UUID userId) {
+    private String fullEligibilityCheck(Note note, UUID userId, ZoneId userZone) {
         String pre = preCheckEligibility(note);
         if (pre != null) return pre;
         // Stacking check: any other insulin notes in the 3 hours prior?
@@ -379,10 +391,10 @@ public class VerificationService {
         LocalDateTime windowEnd = note.getTimestamp().plusHours(EVALUATION_WINDOW_HOURS);
         List<CgmReading> windowReadings = cgmReadingRepository
                 .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                        userId, toEpochMs(note.getTimestamp()), toEpochMs(windowEnd));
+                        userId, toEpochMs(note.getTimestamp(), userZone), toEpochMs(windowEnd, userZone));
         boolean hypo = windowReadings.stream()
                 .filter(r -> r.getSgv() != null)
-                .anyMatch(r -> (r.getSgv() / 18.0) < HYPO_THRESHOLD_MMOL);
+                .anyMatch(r -> GlucoseConversion.mgdlToMmol(r.getSgv()) < HYPO_THRESHOLD_MMOL);
         if (hypo) return "hypo_in_window";
 
         // A carbs-only note in the window is a rescue treatment, not part of the meal.
@@ -430,12 +442,19 @@ public class VerificationService {
             }
         }
         if (closest == null || closest.getSgv() == null) return null;
-        // sgv is mg/dL - convert to mmol/L
-        return round2(closest.getSgv() / 18.0);
+        // sgv is mg/dL - convert to mmol/L through the one shared factor (18.0182, not 18.0)
+        return round2(GlucoseConversion.mgdlToMmol(closest.getSgv()));
     }
 
-    private Long toEpochMs(LocalDateTime ldt) {
-        return ldt.toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+    /**
+     * A wall time off {@code notes.timestamp} as the UTC epoch {@code cgm_readings.date_timestamp}
+     * is keyed on.
+     *
+     * @param userZone the clock {@code ldt} is on. Not {@code ZoneOffset.UTC}: a naive local wall
+     *                 time read as UTC lands a whole zone offset away from the instant it names.
+     */
+    private Long toEpochMs(LocalDateTime ldt, ZoneId userZone) {
+        return UserZones.toEpochMs(ldt, userZone);
     }
 
     // -- DTOs ------------------------------------------------------------------
