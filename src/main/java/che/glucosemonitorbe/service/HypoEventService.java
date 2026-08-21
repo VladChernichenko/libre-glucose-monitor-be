@@ -174,9 +174,18 @@ public class HypoEventService {
         return HypoEventDTO.from(repository.save(event));
     }
 
-    /** 404 rather than 403 for another user's event - do not disclose that it exists. */
+    /**
+     * 404 rather than 403 for another user's event - do not disclose that it exists.
+     *
+     * <p>Uses {@link HypoEventRepository#findByIdForUpdate} rather than plain {@code findById}:
+     * this method backs both {@code confirm} and {@code dismiss}, and both are reached over HTTP
+     * from a phone during a hypo, where a double-tap or client retry is expected, not exceptional.
+     * The pessimistic write lock (held for the rest of the caller's already-{@code @Transactional}
+     * method) makes a second concurrent caller block until the first commits, then re-read the now
+     * -resolved state and take the idempotent early-return path instead of writing a second note.
+     */
     private HypoEvent requireOwnEvent(UUID userId, UUID eventId) {
-        HypoEvent event = repository.findById(eventId)
+        HypoEvent event = repository.findByIdForUpdate(eventId)
                 .filter(e -> e.getUserId().equals(userId))
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "404 Hypo event not found"));

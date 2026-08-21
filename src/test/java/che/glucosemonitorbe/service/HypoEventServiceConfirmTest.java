@@ -48,7 +48,7 @@ class HypoEventServiceConfirmTest {
 
     @Test
     void confirmCreatesAHypoTreatmentNoteAndLinksIt() {
-        when(repository.findById(EVENT_ID)).thenReturn(Optional.of(openEvent()));
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(openEvent()));
 
         HypoEventDTO dto = service.confirm(USER_ID, EVENT_ID, 15.0);
 
@@ -70,7 +70,7 @@ class HypoEventServiceConfirmTest {
         HypoEvent alreadyConfirmed = openEvent();
         alreadyConfirmed.setState(State.CONFIRMED);
         alreadyConfirmed.setNoteId(NOTE_ID);
-        when(repository.findById(EVENT_ID)).thenReturn(Optional.of(alreadyConfirmed));
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(alreadyConfirmed));
 
         HypoEventDTO dto = service.confirm(USER_ID, EVENT_ID, 15.0);
 
@@ -83,7 +83,7 @@ class HypoEventServiceConfirmTest {
     void confirmOnADismissedEventIsRejected() {
         HypoEvent dismissed = openEvent();
         dismissed.setState(State.DISMISSED);
-        when(repository.findById(EVENT_ID)).thenReturn(Optional.of(dismissed));
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(dismissed));
 
         assertThatThrownBy(() -> service.confirm(USER_ID, EVENT_ID, 15.0))
                 .isInstanceOf(ResponseStatusException.class)
@@ -94,7 +94,7 @@ class HypoEventServiceConfirmTest {
     void anotherUsersEventIsNotFound() {
         HypoEvent someoneElses = openEvent();
         someoneElses.setUserId(UUID.randomUUID());
-        when(repository.findById(EVENT_ID)).thenReturn(Optional.of(someoneElses));
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(someoneElses));
 
         assertThatThrownBy(() -> service.confirm(USER_ID, EVENT_ID, 15.0))
                 .isInstanceOf(ResponseStatusException.class)
@@ -103,7 +103,7 @@ class HypoEventServiceConfirmTest {
 
     @Test
     void gramsOutsideTheAllowedRangeIsRejected() {
-        when(repository.findById(EVENT_ID)).thenReturn(Optional.of(openEvent()));
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(openEvent()));
 
         assertThatThrownBy(() -> service.confirm(USER_ID, EVENT_ID, 0.0))
                 .isInstanceOf(ResponseStatusException.class)
@@ -118,12 +118,39 @@ class HypoEventServiceConfirmTest {
 
     @Test
     void dismissResolvesWithoutCreatingANote() {
-        when(repository.findById(EVENT_ID)).thenReturn(Optional.of(openEvent()));
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(openEvent()));
 
         HypoEventDTO dto = service.dismiss(USER_ID, EVENT_ID);
 
         verify(noteRepository, never()).save(any());
         assertThat(dto.state()).isEqualTo("DISMISSED");
+    }
+
+    /**
+     * The in-memory idempotency check above only guards a single thread. Two requests racing
+     * on the same event both read via plain {@code findById} would both see OPEN and both write
+     * a note; pinning the locking finder here protects against a future refactor silently
+     * dropping it and reintroducing that race. See
+     * {@code HypoEventServiceConcurrencyIntegrationTest} for the real cross-connection race.
+     */
+    @Test
+    void confirmTakesAPessimisticWriteLockRatherThanAPlainRead() {
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(openEvent()));
+
+        service.confirm(USER_ID, EVENT_ID, 15.0);
+
+        verify(repository).findByIdForUpdate(EVENT_ID);
+        verify(repository, never()).findById(any());
+    }
+
+    @Test
+    void dismissTakesAPessimisticWriteLockRatherThanAPlainRead() {
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(openEvent()));
+
+        service.dismiss(USER_ID, EVENT_ID);
+
+        verify(repository).findByIdForUpdate(EVENT_ID);
+        verify(repository, never()).findById(any());
     }
 
     private HypoEvent openEvent() {
