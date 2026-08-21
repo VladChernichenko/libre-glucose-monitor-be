@@ -78,12 +78,47 @@ class HypoEventRepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("Most recent event is returned regardless of state")
-    void mostRecentEventIsReturnedRegardlessOfState() {
-        repository.save(HypoEvent.builder()
-                .userId(userId).triggerGlucoseMmol(3.4).state(State.DISMISSED).build());
+    @DisplayName("Among multiple open events, returns the most recently detected one, not the oldest")
+    void returnsTheNewestOpenEventWhenMultipleExist() throws InterruptedException {
+        HypoEvent older = repository.saveAndFlush(HypoEvent.builder()
+                .userId(userId).triggerGlucoseMmol(3.2).state(State.OPEN).build());
+        // Deliberate gap so `detectedAt` (@CreationTimestamp) genuinely differs between the two
+        // rows in the database, and the older row is also the earlier physical insert - so a
+        // query missing ORDER BY would tend to surface it first instead of the newer one.
+        Thread.sleep(20);
+        HypoEvent newer = repository.saveAndFlush(HypoEvent.builder()
+                .userId(userId).triggerGlucoseMmol(3.7).state(State.OPEN).build());
 
-        assertThat(repository.findFirstByUserIdOrderByDetectedAtDesc(userId)).isPresent();
+        assertThat(newer.getDetectedAt()).isAfter(older.getDetectedAt());
+
+        Optional<HypoEvent> open =
+                repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(userId, State.OPEN);
+
+        assertThat(open).isPresent();
+        assertThat(open.get().getId()).isEqualTo(newer.getId());
+        assertThat(open.get().getTriggerGlucoseMmol()).isEqualTo(3.7);
+    }
+
+    @Test
+    @DisplayName("Most recent event is returned regardless of state, not just the first-inserted row")
+    void mostRecentEventIsReturnedRegardlessOfState() throws InterruptedException {
+        // States deliberately chosen so alphabetical order ('CONFIRMED' < 'DISMISSED') is the
+        // OPPOSITE of chronological order below - if the query ever loses its ORDER BY and an
+        // incidental index-driven ordering on (user_id, state) leaks through, this setup
+        // surfaces it as a wrong-row failure instead of silently agreeing with it.
+        HypoEvent older = repository.saveAndFlush(HypoEvent.builder()
+                .userId(userId).triggerGlucoseMmol(3.2).state(State.CONFIRMED).build());
+        Thread.sleep(20);
+        HypoEvent newer = repository.saveAndFlush(HypoEvent.builder()
+                .userId(userId).triggerGlucoseMmol(3.9).state(State.DISMISSED).build());
+
+        assertThat(newer.getDetectedAt()).isAfter(older.getDetectedAt());
+
+        Optional<HypoEvent> mostRecent = repository.findFirstByUserIdOrderByDetectedAtDesc(userId);
+
+        assertThat(mostRecent).isPresent();
+        assertThat(mostRecent.get().getId()).isEqualTo(newer.getId());
+        assertThat(mostRecent.get().getState()).isEqualTo(State.DISMISSED);
     }
 
     // -- helpers ------------------------------------------------------------------
