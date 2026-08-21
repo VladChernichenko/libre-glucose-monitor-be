@@ -141,7 +141,10 @@ public class GlucoseAnomalyDetector {
         try {
             hypoEventService.onGlucoseReading(userId, currentGlucose);
         } catch (Exception e) {
-            log.warn("Hypo event lifecycle failed for user {}: {}", userId, e.getMessage());
+            // Stack trace, not just getMessage(): this swallows the only signal that the prompt
+            // did not fire, and a constraint violation, a connection blip and a logic bug are
+            // indistinguishable from the message alone.
+            log.warn("Hypo event lifecycle failed for user {}", userId, e);
         }
     }
 

@@ -27,8 +27,17 @@ public class GlucoseAlertEvaluator {
     /** mmol/L - glucose below this triggers hypo alerts. */
     private static final double HYPO_THRESHOLD       = HypoThresholds.HYPO_MMOL;
 
-    /** mmol/L - early warning before hard hypo floor. */
-    private static final double HYPO_WARN_THRESHOLD  = HypoThresholds.RECOVERY_MMOL;
+    /**
+     * mmol/L - early warning before the hard hypo floor: the level a falling curve is projected
+     * against so the user is told "you could reach this in ~N min".
+     *
+     * <p>Deliberately its own literal, <b>not</b> {@code HypoThresholds.RECOVERY_MMOL}. The two
+     * happen to share the value 4.5 today but answer unrelated clinical questions - this one is
+     * "when should we warn on the way down", the other is "how far back up must glucose come
+     * before an open hypo prompt is considered closed". Aliasing them meant retuning either one
+     * silently moved the other.
+     */
+    private static final double HYPO_WARN_THRESHOLD  = 4.5;
 
     /** mmol/L - nadir below this after over-injection. */
     private static final double OVER_INJ_THRESHOLD   = 4.0;
