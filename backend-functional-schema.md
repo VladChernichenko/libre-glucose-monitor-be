@@ -1,7 +1,7 @@
 # Backend functional schema
 
 - Source: `glucose-monitor-be` — Spring Boot 3.5.5 / Java 21, package `che.glucosemonitorbe`
-- Persistence: PostgreSQL + Flyway `V1`–`V10`; optional MongoDB (Open Food Facts cache)
+- Persistence: PostgreSQL + Flyway `V1`–`V11`; optional MongoDB (Open Food Facts cache)
 - Build: Gradle; 366 main classes, 105 test classes; JaCoCo 80 % line-coverage gate on the physiology + dosing classes
 - Auth: stateless JWT (HS512), BCrypt passwords, per-IP auth rate limiting
 
@@ -142,13 +142,15 @@ Conventions: UUID PKs via `gen_random_uuid()`; all timestamps `TIMESTAMPTZ` (UTC
 
 **`user_settings`** — the single source of truth for dosing parameters. `carb_ratio` (mmol/L rise per 10 g), `isf` (mmol/L per U), `carb_half_life` (min), `max_cob_duration`, `body_weight_kg`, four optional per-window ISF overrides (`isf_breakfast|lunch|dinner|night`), plus `timezone` (IANA, authoritative) and `utc_offset_minutes` (fallback). CHECK constraints enforce positivity on every rate.
 
-**`notes`** — the intervention log. `carbs`, `insulin`, `meal` label, `glucose_value`, `nutrition_profile` (JSON), `absorption_mode`, `type` (`normal` / `activity`), `photo_key`, and activity fields (`activity_type`, `intensity`, `duration_min`). Indexed on `(user_id, timestamp)`.
+**`notes`** — the intervention log. `carbs`, `insulin`, `meal` label, `glucose_value`, `nutrition_profile` (JSON), `absorption_mode`, `type` (`normal` / `activity` / `hypo_treatment`), `photo_key`, and activity fields (`activity_type`, `intensity`, `duration_min`). Indexed on `(user_id, timestamp)`.
 
 **`cgm_readings`** — one shared cache for both sources, discriminated by `data_source ∈ {NIGHTSCOUT, LIBRE_LINK_UP}`. Two partial unique indexes handle dedup: by `(user, source, external_id)` when the upstream supplies an id, else by `(user, source, date_timestamp)`.
 
 **`user_digital_twin`** — one row per user: `isf_scale`, `ag_scale`, `tmax_g_scale` and `egp_scale` (the last two reserved), a 24-value comma-separated `residual_grid`, a 4-value `uncertainty_sd_grid`, the `applied` gate flag, and fit diagnostics (`mae_baseline`, `mae_calibrated`, `improvement_pct`, `train_samples`, `val_samples`, `confidence`, `status`, `fitted_at`).
 
 **`user_data_source_config`** — per-user Nightscout/Libre credentials, encrypted at rest (AES-256-GCM, `enc:v1:` prefix, `EncryptedStringConverter`). A partial unique index enforces at most one active config per `(user, source)`.
+
+**`hypo_events`** — one row per detected sub-3.9 mmol/L window, mirroring `unlogged_event_flags`' detect → prompt → resolve shape on purpose. Lifecycle `OPEN → CONFIRMED | DISMISSED | EXPIRED` (state machine owned by `HypoEventService`, see §11). `note_id` links to the `hypo_treatment` note created on confirm, `ON DELETE SET NULL` — deleting the note must not erase the record that a hypo occurred and was prompted.
 
 ---
 
@@ -183,6 +185,7 @@ Population constants (Hovorka 2004): `k12 = k21 = 0.066 /min`, `F01 = 0.0097 mmo
 | Signal | How it enters the model |
 |---|---|
 | Carbs | Dalla Man gut chain → appearance rate `Ra(t)`; GI scales `k_abs/k_gri/k_max/k_min` by `clamp(GI/100, 0.3, 1.5)` |
+| Rescue carb | A `hypo_treatment` entry overrides `tMaxG` to `HovorkaParameterService.rescueTMaxG()` (`RescueCarbProfile.HALF_LIFE_MIN / 1.68` ≈ 8.9 min, vs. the user's mixed-meal tMaxG ≈ 26.8 min for a 45-min half-life) and carries GI 100. Carb-weighted per minute against any other carbs absorbing concurrently, in both the warm-up replay and the forward timeline, so a rescue logged alongside an in-flight meal doesn't inherit the meal's slower rate. The rate reverts to `p.tMaxG()` once `RescueCarbProfile.MAX_DURATION_MIN` (45 min) has elapsed. |
 | Rapid insulin | OpenAPS exponential IOB **activity rate** → `insulinEffect = ISF × 2·VG × rate`. Deliberately bypasses the S1→S2→I_plasma chain to preserve exact IOB pharmacokinetics. |
 | Long-acting | `BasalInsulinResolver` (28 h DIA, wane from 20 h) → `x3` suppression of EGP over a 36 h lookback |
 | Protein/fat | Drive `ProtFatGut` → GLP-1 `Inc ∈ [0,1]` → ileal brake `Φ = 1/(1+Inc)`, halving gastric emptying at most |
@@ -378,6 +381,7 @@ Deriving `gramsPerUnit` from ISF and CR (rather than storing it) means it inheri
 | `hovorka-model-enabled` | true | false | ODE forecast vs OpenAPS exponential fallback |
 | `digital-twin-enabled` | true | false | Apply twin scales + residual/σ on the live path |
 | `unlogged-event-detection-enabled` | true | false | Residual scan + scheduler |
+| `hypo-rescue-logging-enabled` | true | false | Hypo prompt detection + the `/api/hypo-events` endpoints |
 | `activity-logging-enabled` | true | false | Consume activity notes as `a(t)` |
 | `nutrition-aware-prediction-enabled` | true | false | Nutrition profile drives absorption/gut params |
 | `glucose-calculations-enabled` | true | false | Gate the dashboard calc API |
@@ -415,6 +419,7 @@ Migration percentages (`*-migration-percent`, all at 100) exist for staged clien
 - **Reserved twin parameters.** `tmax_g_scale` and `egp_scale` are persisted but not wired into the live ODE (the residual layer covers the drift they'd model).
 - **Activity is partly modelled.** Intensity maps to `a(t)`; activity *type* is stored for analytics only, and the per-user activity gain is specced but never fitted (always 1.0).
 - **Absorption is slowed through more than one channel.** GI scaling, `DallaManGutModel.caloricScale`, the GLP-1 ileal brake and `MacroNutrientGastricModel`'s `tMaxG` all damp fat/protein meals — documented in the code as a known compounding.
+- **A rescue carb still absorbs slower than COB reports it.** `DallaManGutModel.caloricScale` clamps its gastric-emptying correction at 1.5×, so the rescue's ≈8.9-min tMaxG only gets a 1.5× speed-up instead of the ≈3× its half-life implies — at 45 minutes a rescue is roughly 46 % absorbed in the ODE while `CarbsOnBoardService` reports it 100 % cleared. The clamp brings the resulting headline-versus-chart divergence for a hypo recovery down from roughly 3× to roughly 2× — reduced, not eliminated. Closing it fully needs a rescue-specific emptying bound rather than relaxing the shared clamp, since raising the clamp would change every meal's curve, not just rescue carbs'.
 - **Two prediction pipelines coexist.** `/api/glucose-calculations` can fall back to the OpenAPS exponential path; `/api/predict` is always Hovorka. Their parameters were audited (`docs/superpowers/specs/2026-08-18-parameter-audit-findings.md`) but they remain separate code paths.
 - **`ContextAggregatorService` loads a user's entire CGM history** and filters in memory rather than pushing the window into the query.
 - **Root-level clutter** — `cgm_readings_*.csv`, `fix_*.sql`, `cors-*.html`, `README.m` sit in the repo root against the project's own file-organisation rules.
