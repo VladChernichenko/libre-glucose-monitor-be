@@ -108,6 +108,7 @@ All endpoints require a JWT bearer token except `/api/auth/**`, `/api/features/*
 | GET | `/api/digital-twin`; POST `/recalibrate` | Twin status; force a re-fit |
 | GET | `/api/isf/meal-windows` · `/suggestion`; POST `/recompute` · `/suggestion/accept` · `/suggestion/dismiss` | Observational per-window ISF + morning suggestion banner |
 | GET | `/api/unlogged-events`; POST `/{id}/confirm` · `/{id}/dismiss` | Unexplained-glucose flags |
+| GET | `/api/hypo-events`; POST `/{id}/confirm` · `/{id}/dismiss` | Hypo prompts and fast-carb rescue logging |
 | GET/POST | `/api/experiments/**` (`/available`, `/check-background`, `/{id}/reading`, `/complete`, `/abandon`) | ISF/CR/basal determination protocols |
 | GET | `/api/experiments/verification/summary` · `/events`; POST `/accept-suggestion` | Real-meal accuracy loop |
 
@@ -133,6 +134,7 @@ All endpoints require a JWT bearer token except `/api/auth/**`, `/api/features/*
 | `V8__user_digital_twin` | `user_digital_twin` |
 | `V9__unlogged_event_flags` | `unlogged_event_flags` |
 | `V10__isf_meal_window_suggestions` | `isf_meal_window_suggestions` |
+| `V11__hypo_events` | `hypo_events` |
 
 Conventions: UUID PKs via `gen_random_uuid()`; all timestamps `TIMESTAMPTZ` (UTC); every user-scoped table `FK users(id) ON DELETE CASCADE`; `CREATE … IF NOT EXISTS` throughout; `ddl-auto: validate` so Hibernate never writes DDL.
 
@@ -309,11 +311,12 @@ Every run is recorded in `ai_analysis_trace` with a SHA-256 context hash, model 
 
 ## 11. Alerting (observer)
 
-`GlucoseAnomalyDetector` runs on the CGM sync cadence (5 min, `app.observer.interval-ms`). Rate of change is a least-squares slope over the last ~3 readings (~15 min).
+`GlucoseAnomalyDetector` runs on the CGM sync cadence (5 min, `app.observer.interval-ms`) and reads glucose from `cgm_readings` — previously it read `notes.glucose_value`, which only ever holds client-supplied values from a logged note and which neither sync scheduler writes, so the observer never fired on real data; that is fixed. Rate of change is a least-squares slope over the last ~3 readings (~15 min).
 
 | Scenario | Trigger |
 |---|---|
 | Predicted hypo | path point < 3.9 mmol/L within 60 min |
+| Hypo prompt | latest CGM < 3.9 mmol/L; opens a hypo_events row, expires at ≥ 4.5, suppressed 15 min after resolution |
 | Rapid drop | ROC < −0.07 mmol/L/min for ≥ 2 consecutive readings |
 | Unlogged meal | ROC > +0.10, COB = 0, no note in 45 min |
 | Predicted hyper | path > 12 mmol/L within 2 h and IOB < 0.5 U |
@@ -407,7 +410,7 @@ Migration percentages (`*-migration-percent`, all at 100) exist for staged clien
 
 ## 17. Known gaps and sharp edges
 
-- **Push notifications are a stub.** `GlucoseAlertService.deliverAlert` only logs; APNs is Phase 2. Alert cooldown state is in-memory and resets on restart.
+- **Push notifications are a stub.** `GlucoseAlertService.deliverAlert` only logs; APNs is Phase 2 — every alert, including the hypo prompt, is foreground-only until that lands. Alert cooldown state is in-memory and resets on restart.
 - **Per-instance state.** LibreLinkUp sessions, alert cooldowns and the auth rate limiter are all in-memory — correct for one instance, not for a horizontally-scaled deployment. The token blacklist is the one that was already moved to the DB.
 - **Reserved twin parameters.** `tmax_g_scale` and `egp_scale` are persisted but not wired into the live ODE (the residual layer covers the drift they'd model).
 - **Activity is partly modelled.** Intensity maps to `a(t)`; activity *type* is stored for analytics only, and the per-user activity gain is specced but never fitted (always 1.0).
