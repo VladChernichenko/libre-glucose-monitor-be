@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS hypo_events (
     note_id               UUID,
     detected_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     resolved_at           TIMESTAMPTZ,
+    recovered_at          TIMESTAMPTZ,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_hypo_events_user  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_hypo_events_note  FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE SET NULL,
@@ -75,6 +76,8 @@ CREATE INDEX IF NOT EXISTS idx_hypo_events_user_state ON hypo_events(user_id, st
 ```
 
 `note_id` uses `ON DELETE SET NULL` rather than `CASCADE`: deleting the rescue note should not erase the record that a hypo occurred and was prompted.
+
+`recovered_at` records the first at-or-above-`HYPO_RECOVERY_THRESHOLD` reading seen *after* this event was resolved. It exists to end the re-prompt suppression window — see §5.
 
 The table deliberately mirrors `unlogged_event_flags` so the detect → prompt → confirm/dismiss lifecycle reads identically in both places.
 
@@ -122,13 +125,19 @@ This is a prerequisite, not adjacent cleanup: a hypo prompt built on the current
 With the detector reading real CGM, add to the same 5-minute pass:
 
 - Latest reading **< `HYPO_THRESHOLD` (3.9 mmol/L)** → open a `hypo_events` row, unless one is already `OPEN` for that user, and unless suppressed (below).
-- Latest reading **≥ `HYPO_RECOVERY_THRESHOLD` (4.5 mmol/L)** → any still-`OPEN` event transitions to `EXPIRED`.
+- Latest reading **≥ `HYPO_RECOVERY_THRESHOLD` (4.5 mmol/L)** → any still-`OPEN` event transitions to `EXPIRED`, and the user's most recent `CONFIRMED`/`DISMISSED` event is stamped `recovered_at`.
 
 The hysteresis gap (3.9 open, 4.5 close) prevents a reading hovering at the threshold from flapping the prompt on and off.
 
-**Re-prompt suppression.** A `CONFIRMED` or `DISMISSED` event suppresses new events for that user for **15 minutes**. Without this, resolving an event leaves no `OPEN` row, so the very next 5-minute pass would re-open while the user is still low — a prompt loop every 5 minutes.
+**Age-out.** An `OPEN` event older than **`MAX_OPEN_MINUTES` (60)** transitions to `EXPIRED`. Recovery is the only other way an `OPEN` event closes, and the detector needs two CGM readings inside a 20-minute window to produce a recovery reading at all — so a sensor change, an offline phone or the feature flag being switched off would otherwise strand the row `OPEN` indefinitely, and the client would show that stale prompt on next launch with a trigger glucose from hours ago. Confirming it then writes a `hypo_treatment` note at *now*, injecting phantom fast carbs into COB, Hovorka and the twin fit.
 
-Fifteen minutes is chosen to match the clinical "rule of 15": treat with 15 g, recheck after 15 minutes, re-treat if still low. So after the suppression window, a user still below 3.9 **is** re-prompted, which is the correct clinical behaviour rather than a nag.
+The age-out runs on the CGM scan, on `GET /api/hypo-events` (the read path is what still runs when the scan has stopped producing readings) and on `confirm`/`dismiss` (a client may act on a cached event). One hour is twelve CGM cycles and four "rule of 15" recheck cycles: a hypo a patient would still meaningfully want to log is minutes-to-an-hour old. The client applies the same bound to `detectedAt` as defence in depth.
+
+**Re-prompt suppression.** A `CONFIRMED` or `DISMISSED` event suppresses new events for that user for **15 minutes**, *unless the user has since recovered*.
+
+Fifteen minutes matches the clinical "rule of 15": treat with 15 g, recheck after 15 minutes, re-treat if still low. So a user who is *still low* after the window **is** re-prompted, which is correct clinical behaviour rather than a nag. Without the window, resolving an event leaves no `OPEN` row and the very next 5-minute pass would re-open while the user is still low — a prompt loop every 5 minutes.
+
+**A recovery reading ends the window early.** Suppression exists to stop the prompt looping *within one episode*; a reading at or above `HYPO_RECOVERY_THRESHOLD` ends the episode, so it ends the window the episode owns. Without this, dismiss at 3.8 → recover to 4.6 → crash to 3.2 twelve minutes later produced **no prompt at all**, contradicting §8's requirement that a new hypo after recovery opens a fresh one. The recovery is persisted as `hypo_events.recovered_at` on the resolved row, because the recovery reading and the relapse arrive on different 5-minute scans and therefore different transactions. Both purposes are served: while the user has not come back up, nothing stamps `recovered_at` and the quiet period stands.
 
 **Threshold sourcing:** `HYPO_THRESHOLD = 3.9` is currently private to `GlucoseAlertEvaluator`. It is *promoted* to a shared constant and referenced by both the evaluator and the new detector path. It must not be copied — that is the dual-computation failure mode this design exists to avoid.
 
@@ -154,9 +163,12 @@ Gated by a new feature flag `app.features.hypo-rescue-logging-enabled` — Java 
 |---|---|---|
 | Verification titration | Excluded | `preCheckEligibility` returns `"hypo_treatment"` |
 | Observational ISF | Excluded | Rescue notes filtered from the nearby-carb sum and the expected-rise subtraction |
-| COB / Hovorka path | **Included** | Uses `RescueCarbProfile` |
-| Digital-twin replay | **Included** | Real input; no change needed |
-| Unlogged-event detector | **Included** | Explains its own recovery; no change needed |
+| COB / Hovorka path | **Included** | Uses `RescueCarbProfile`, via `NoteToCarbsEntryMapper` |
+| Digital-twin replay | **Included** | `PredictionReplayEngine.Event` carries a `rescue` flag |
+| Unlogged-event detector | **Included** | Marks the rescue entry it builds |
+| AI context aggregator | **Included** | Marks the rescue entry it builds |
+
+**"No change needed" was wrong.** The last three rows originally read *"Real input; no change needed"*. In fact four separate code paths build a `CarbsEntry`, and only `NoteToCarbsEntryMapper` consulted the note type — the other three hand-built the entry with no `absorptionMode`, so `RescueCarbProfile.isRescue(null)` was false and every rescue reverted to the user's mixed-meal curve. In the twin fit that is a titration corruption, not a cosmetic one: the model replayed a 15 g rescue over 240 minutes, could not explain the sharp real rise, and absorbed the error into `agScale`/`isfScale`, which then apply to *every* prediction for that user. `RescueCarbProfile.mark(CarbsEntry)` is now the single writer of the marker and each of the four paths has a test asserting the marker survives it.
 
 Two notes on the exclusions:
 
@@ -170,8 +182,10 @@ Two notes on the exclusions:
 
 - Quick-pick row: **10 / 15 / 20 g**, plus a custom-entry path.
 - Trigger glucose rendered via the existing `GlucoseUnit.fromMmol(_:displayUnit:)`. The backend stays mmol/L end to end; mg/dL is display-only and reuses the converter that already exists — no second conversion constant.
-- Dismiss is available but does not permanently silence: a *new* hypo event after recovery opens a fresh prompt.
+- Dismiss is available but does not permanently silence: a *new* hypo event after recovery opens a fresh prompt. §5's 15-minute suppression does not stand in the way of this, because a recovery reading ends the window — the two sections are consistent, not in tension.
 - Confirm posts to the API, then inserts the note optimistically into local state.
+- **A failed confirm is recoverable.** The submit controls are disabled for the duration of one in-flight request — which is what closes the double-tap race against the idempotent server endpoint — and re-enabled if it fails, so a transient network error leaves the prompt usable rather than permanently inert. "Not now" is disabled while a confirm is in flight, so a dismiss cannot win the race and take the sheet away with the carbs unlogged.
+- **The client re-checks freshness.** An event whose `detectedAt` is older than `MAX_OPEN_MINUTES` is not shown, as defence in depth behind §5's server-side age-out. An event with an unparseable or absent `detectedAt` *is* shown: the server has already swept it, and dropping a prompt we cannot date is worse than showing one.
 
 ## Data flow
 

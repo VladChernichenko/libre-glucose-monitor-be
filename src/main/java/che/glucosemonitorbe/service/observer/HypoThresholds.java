@@ -23,11 +23,32 @@ public final class HypoThresholds {
     public static final double RECOVERY_MMOL = 4.5;
 
     /**
-     * How long after resolving one hypo event before another may open [min].
+     * How long after resolving one hypo event before another may open [min], <em>while the user
+     * has not recovered</em>.
      *
      * <p>Matches the clinical "rule of 15" - treat with 15 g, recheck after 15 minutes, re-treat if
      * still low. Without it, resolving an event leaves no OPEN row and the next 5-minute scan would
      * immediately re-open while the user is still low.
+     *
+     * <p>A reading at or above {@link #RECOVERY_MMOL} ends the episode and therefore ends the
+     * suppression window early: suppression exists to stop re-prompting <em>within one episode</em>,
+     * not to blind the detector to a fresh crash after a genuine recovery.
      */
     public static final int SUPPRESSION_MINUTES = 15;
+
+    /**
+     * How long a prompt may stay OPEN before it ages out to EXPIRED [min].
+     *
+     * <p>An OPEN event is only closed by a recovery reading, so a sensor change, an offline phone
+     * or the feature flag being toggled off would otherwise leave the row OPEN forever - and the
+     * client would show that stale prompt on the next launch, possibly the next morning. Confirming
+     * it then creates a {@code hypo_treatment} note at <em>now</em>, injecting phantom fast carbs
+     * into COB, Hovorka and the twin fit for a hypo that ended hours ago.
+     *
+     * <p>One hour is twelve CGM cycles and four "rule of 15" recheck cycles. A hypo a patient would
+     * still meaningfully want to log is minutes-to-an-hour old; past that the episode has either
+     * resolved unobserved or the data feed is broken, and in both cases silence beats a prompt
+     * whose trigger glucose no longer describes the patient.
+     */
+    public static final int MAX_OPEN_MINUTES = 60;
 }

@@ -64,6 +64,16 @@ public class HypoEvent {
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
 
+    /**
+     * First reading at or above the recovery threshold seen after this event was resolved.
+     *
+     * <p>Stamped by the detector, not by the user. Its only job is to end the re-prompt suppression
+     * window: suppression stops the prompt looping <em>within one episode</em>, and a recovery ends
+     * the episode, so a fresh crash minutes later is a new hypo that must prompt again.
+     */
+    @Column(name = "recovered_at")
+    private LocalDateTime recoveredAt;
+
     @Column(name = "updated_at", nullable = false)
     @Builder.Default
     private LocalDateTime updatedAt = LocalDateTime.now();
