@@ -1,6 +1,9 @@
 package che.glucosemonitorbe.service.observer;
 
+import che.glucosemonitorbe.domain.CgmReading;
+import che.glucosemonitorbe.domain.GlucoseConversion;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,10 +23,10 @@ import java.util.UUID;
  * on every CGM sync cycle (every 5 minutes).
  *
  * <h3>Rate-of-change calculation</h3>
- * Uses the last 3 CGM readings (≈15 min span) to compute a least-squares
- * slope in mmol/L per minute. Three points are the minimum for noise
- * rejection; LibreLinkUp delivers a new value every 5 min, so the window
- * is always fresh.
+ * Uses CGM readings from the last {@value #ROC_WINDOW_MINUTES} minutes (read from
+ * {@code cgm_readings}) to compute a least-squares slope in mmol/L per minute. Three points
+ * are the minimum for noise rejection; LibreLinkUp delivers a new value every 5 min, so the
+ * window is always fresh.
  *
  * <h3>Scenarios detected</h3>
  * <ul>
@@ -50,9 +53,11 @@ public class GlucoseAnomalyDetector {
     /** Lookback window for "did the user log a meal note?" check (minutes). */
     private static final int UNLOGGED_MEAL_WINDOW_MINUTES = 45;
 
+    private final CgmReadingRepository cgmReadingRepository;
     private final NoteRepository noteRepository;
     private final UserRepository userRepository;
     private final GlucoseAlertService alertService;
+    private final che.glucosemonitorbe.service.HypoEventService hypoEventService;
 
     /**
      * Runs every 5 minutes, aligned with the LibreLinkUp CGM sync cadence.
@@ -77,17 +82,30 @@ public class GlucoseAnomalyDetector {
 
     // -- Per-user evaluation ---------------------------------------------------
 
-    private void evaluateUser(UUID userId, String username) {
+    /** A CGM sample reduced to what the rate-of-change maths needs. */
+    public record GlucosePoint(long epochMs, double mmol) {}
+
+    void evaluateUser(UUID userId, String username) {
         LocalDateTime now = LocalDateTime.now();
 
-        // 1. Collect recent CGM readings from notes (glucose-only entries)
-        //    Notes are the unified source of truth until a dedicated CGM table is added.
-        LocalDateTime rocStart = now.minusMinutes(ROC_WINDOW_MINUTES);
-        List<Note> recentReadings = noteRepository
-                .findByUserIdAndTimestampBetween(userId, rocStart, now)
+        // 1. Collect recent CGM readings from the shared CGM cache. This used to read
+        //    notes.glucose_value, which only ever holds client-supplied values from a logged
+        //    note - neither sync scheduler writes it - so the observer never fired on real data.
+        //
+        //    Deliberately zone-free: this window is "the last N minutes of real elapsed time",
+        //    not a wall-clock date range, so it is computed directly off epoch millis. Round-
+        //    tripping through LocalDateTime.now().toInstant(ZoneOffset.UTC) would reinterpret
+        //    JVM-local wall time as if it were UTC, shifting the window by the zone offset on
+        //    any non-UTC deployment (this repo runs on Europe/London) and matching no rows.
+        long endMs   = System.currentTimeMillis();
+        long startMs = endMs - ROC_WINDOW_MINUTES * 60_000L;
+
+        List<GlucosePoint> recentReadings = cgmReadingRepository
+                .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, startMs, endMs)
                 .stream()
-                .filter(n -> n.getGlucoseLevel() != null && n.getGlucoseLevel() > 0)
-                .sorted(Comparator.comparing(Note::getTimestamp))
+                .filter(r -> r.getDateTimestamp() != null && r.getSgv() != null && r.getSgv() > 0)
+                .map(r -> new GlucosePoint(r.getDateTimestamp(),
+                                           GlucoseConversion.mgdlToMmol(r.getSgv())))
                 .toList();
 
         if (recentReadings.size() < MIN_READINGS_FOR_ROC) {
@@ -95,10 +113,10 @@ public class GlucoseAnomalyDetector {
             return;
         }
 
-        double currentGlucose = recentReadings.get(recentReadings.size() - 1).getGlucoseLevel();
+        double currentGlucose = recentReadings.get(recentReadings.size() - 1).mmol();
         double roc = computeRoc(recentReadings);
 
-        // 2. Find minutes since the last carb note
+        // 2. Find minutes since the last carb note. Still note-based - correctly so.
         LocalDateTime mealWindow = now.minusMinutes(UNLOGGED_MEAL_WINDOW_MINUTES);
         List<Note> recentNotes = noteRepository.findByUserIdAndTimestampBetween(userId, mealWindow, now);
         Integer minutesSinceLastMeal = recentNotes.stream()
@@ -107,8 +125,27 @@ public class GlucoseAnomalyDetector {
                 .map(n -> (int) ChronoUnit.MINUTES.between(n.getTimestamp(), now))
                 .orElse(null);
 
-        // 3. Dispatch async evaluation (non-blocking)
+        // 3. Dispatch async evaluation (non-blocking). This MUST run, and be handed off, before
+        //    the hypo lifecycle below. evaluateAll is @Async, so once called it is no longer
+        //    coupled to anything that happens later in this method. If the ordering were
+        //    reversed, a failure in the (synchronous, @Transactional, DB-touching) hypo call
+        //    would propagate out of evaluateUser and be swallowed by scan()'s per-user catch
+        //    before evaluateAll ever ran - silently dropping the existing predicted-hypo /
+        //    rapid-drop alerts for exactly the user whose glucose is low enough to need them.
         alertService.evaluateAll(userId, username, currentGlucose, roc, minutesSinceLastMeal);
+
+        // 4. Advance the hypo-prompt lifecycle from the same reading the alerts use. Guarded
+        //    independently so a fault here (constraint violation, connection blip, a bug in the
+        //    new lifecycle code) degrades to "no prompt this cycle" and never takes the alert
+        //    dispatch above - or other users' scans - down with it.
+        try {
+            hypoEventService.onGlucoseReading(userId, currentGlucose);
+        } catch (Exception e) {
+            // Stack trace, not just getMessage(): this swallows the only signal that the prompt
+            // did not fire, and a constraint violation, a connection blip and a logic bug are
+            // indistinguishable from the message alone.
+            log.warn("Hypo event lifecycle failed for user {}", userId, e);
+        }
     }
 
     // -- Rate-of-change computation --------------------------------------------
@@ -117,20 +154,19 @@ public class GlucoseAnomalyDetector {
      * Ordinary least-squares slope over the provided readings.
      * Returns mmol/L per minute; negative = falling.
      *
-     * <p>OLS is more robust than simple first-last delta because a single
+     * <p>OLS is more robust than a simple first-last delta because a single
      * sensor glitch in the middle does not dominate the result.
      */
-    static double computeRoc(List<Note> readings) {
+    static double computeRoc(List<GlucosePoint> readings) {
         if (readings.size() < 2) return 0.0;
 
-        // Use minutes-since-first-reading as x, glucose as y
-        LocalDateTime t0 = readings.get(0).getTimestamp();
+        long t0 = readings.get(0).epochMs();
         double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
         int n = readings.size();
 
-        for (Note r : readings) {
-            double x = ChronoUnit.MINUTES.between(t0, r.getTimestamp());
-            double y = r.getGlucoseLevel();
+        for (GlucosePoint r : readings) {
+            double x = (r.epochMs() - t0) / 60_000.0;   // minutes since first reading
+            double y = r.mmol();
             sumX  += x;
             sumY  += y;
             sumXY += x * y;

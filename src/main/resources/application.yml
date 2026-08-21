@@ -155,6 +155,8 @@ app:
     digital-twin-enabled: ${APP_FEATURES_DIGITAL_TWIN_ENABLED:true}
     # Unlogged-event detector: periodic scan flagging glucose moves the logged inputs don't explain.
     unlogged-event-detection-enabled: ${APP_FEATURES_UNLOGGED_EVENT_DETECTION_ENABLED:true}
+    # Hypo rescue-carb logging: prompt to log fast carbs when glucose drops below 3.9 mmol/L.
+    hypo-rescue-logging-enabled: ${APP_FEATURES_HYPO_RESCUE_LOGGING_ENABLED:true}
     # Activity logging: logged activity notes feed the model's activity signal a(t).
     activity-logging-enabled: ${APP_FEATURES_ACTIVITY_LOGGING_ENABLED:true}
     food-photo-analysis-enabled: false

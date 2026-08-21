@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.hovorka;
 
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Experiment;
 import che.glucosemonitorbe.entity.ExperimentReading;
@@ -67,6 +68,18 @@ public class HovorkaParameterService {
      * Public so {@link MacroNutrientGastricModel} and predict services can reuse it.
      */
     public static final double HALF_LIFE_TO_TMAX_G = 1.68;
+
+    /**
+     * Gut time constant for a fast-acting rescue carb [min].
+     *
+     * <p>Derived from {@link RescueCarbProfile#HALF_LIFE_MIN} through the same
+     * {@link #HALF_LIFE_TO_TMAX_G} conversion the per-user value uses, so the ODE and the COB curve
+     * are driven by one definition of how fast a rescue absorbs. A rescue must not inherit the
+     * user's mixed-meal tMaxG: pure glucose is roughly three times faster.</p>
+     */
+    public static double rescueTMaxG() {
+        return RescueCarbProfile.HALF_LIFE_MIN / HALF_LIFE_TO_TMAX_G;
+    }
 
     private final UserSettingsService        userSettingsService;
     private final ExperimentRepository      experimentRepository;

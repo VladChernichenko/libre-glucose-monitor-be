@@ -4,6 +4,7 @@ import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
@@ -59,7 +60,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class UnloggedEventDetectionService {
 
-    private static final double MGDL_PER_MMOL = 18.0182;
+    private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
     private static final String SEED_EMAIL_PATTERN = "azt1d-subject-%@dataset.local";
     private static final int WARMUP_LOOKBACK_HOURS = 8;
 
@@ -111,6 +112,24 @@ public class UnloggedEventDetectionService {
 
     /** Aggregate outcome of a scan pass. */
     public record ScanSummary(int scanned, int flagged, int skipped, int failed) {}
+
+    /**
+     * Note -> the warm-up / forward-prediction carb input for the residual scan.
+     *
+     * <p>A {@code hypo_treatment} note carries the rescue marker through
+     * {@link RescueCarbProfile#mark}. Left unmarked, the raw forward prediction absorbs a 15 g
+     * dextrose tablet on the user's 240-minute mixed-meal curve, under-predicts the recovery rise,
+     * and produces a large positive residual - flagging a <em>logged</em> hypo recovery as unlogged
+     * food. That flag then feeds back into the digital-twin fit as a down-weighted window.
+     *
+     * <p>Package-private and static so the marker's survival on this path is directly testable;
+     * the scan has no other seam that exposes the entries it builds.
+     */
+    static CarbsEntry toCarbsEntry(Note n) {
+        CarbsEntry entry = CarbsEntry.builder()
+                .timestamp(n.getTimestamp()).carbs(n.getCarbs()).build();
+        return n.isHypoTreatment() ? RescueCarbProfile.mark(entry) : entry;
+    }
 
     // -- Scan -----------------------------------------------------------------
 
@@ -171,7 +190,7 @@ public class UnloggedEventDetectionService {
         for (Note n : notes) {
             if (n.isLongActing()) { longActing.add(n); continue; }
             if (n.getCarbs() != null && n.getCarbs() > 0) {
-                carbs.add(CarbsEntry.builder().timestamp(n.getTimestamp()).carbs(n.getCarbs()).build());
+                carbs.add(toCarbsEntry(n));
             }
             if (n.getInsulin() != null && n.getInsulin() > 0) {
                 insulin.add(InsulinDose.builder().timestamp(n.getTimestamp())

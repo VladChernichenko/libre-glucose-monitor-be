@@ -212,6 +212,10 @@ public class IsfMealWindowProfileService {
         double carbsGrams = 0.0;
         List<che.glucosemonitorbe.domain.CarbsEntry> carbEntries = new ArrayList<>();
         for (Note n : allNotes) {
+            // A rescue carb is a hypo treatment, not part of this bolus's nutrient envelope.
+            // Counting it would push carbsGrams past CARB_THRESHOLD_GRAMS - reclassifying a
+            // correction bolus as meal-attached - and subtract a meal rise that never happened.
+            if (n.isHypoTreatment()) continue;
             if (n.getCarbs() == null || n.getCarbs() <= 0) continue;
             if (n.getTimestamp() == null) continue;
             if (n.getTimestamp().isBefore(carbWindowStart)) continue;

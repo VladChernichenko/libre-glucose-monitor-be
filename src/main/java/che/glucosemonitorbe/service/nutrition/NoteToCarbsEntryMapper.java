@@ -2,6 +2,7 @@ package che.glucosemonitorbe.service.nutrition;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.entity.Note;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +38,12 @@ public class NoteToCarbsEntryMapper {
             .userId(note.getUserId())
             .build();
         entry.setAbsorptionMode(note.getAbsorptionMode() != null ? note.getAbsorptionMode() : "DEFAULT_DECAY");
+        // A rescue carb has one fixed profile. Return before the nutrition-aware branch so that
+        // neither the feature flag nor a stored nutrition profile can slow it back down to a
+        // mixed-meal curve - the physiology is the same regardless of either.
+        if (note.isHypoTreatment()) {
+            return RescueCarbProfile.mark(entry);
+        }
         if (!featureToggleConfig.isNutritionAwarePredictionEnabled()) {
             entry.setAbsorptionMode("DEFAULT_DECAY");
             return entry;

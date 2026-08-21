@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,6 +39,12 @@ public class CarbsOnBoardService {
             return 0.0;
         }
 
+        // A rescue carb bypasses the user's meal-absorption settings entirely - it is pure
+        // glucose, not a meal, and does not absorb at their mixed-meal rate.
+        if (RescueCarbProfile.isRescue(entry.getAbsorptionMode())) {
+            return rescueRemaining(entry.getCarbs(), minutesSinceEntry);
+        }
+
         // Pattern-matched duration overrides user default (e.g. 8h for Double Wave pizza meals).
         int patternDuration = entry.getSuggestedDurationHours() != null
                 ? (int) (entry.getSuggestedDurationHours() * 60) : 0;
@@ -73,6 +80,26 @@ public class CarbsOnBoardService {
     private double calculateDefaultRemaining(double carbs, long minutesSinceEntry, int halfLife) {
         double halfLives = (double) minutesSinceEntry / halfLife;
         return Math.max(0.0, carbs * Math.pow(0.5, halfLives));
+    }
+
+    /**
+     * Remaining rescue carbs: a 15-minute exponential decay, linearly tapered to exactly zero
+     * across the final {@link RescueCarbProfile#TAPER_MIN} minutes so COB does not step.
+     * Mirrors the taper on the standard curve, scaled to the shorter rescue window.
+     */
+    private double rescueRemaining(double carbs, long minutesSinceEntry) {
+        if (minutesSinceEntry > RescueCarbProfile.MAX_DURATION_MIN) {
+            return 0.0;
+        }
+        double halfLives = (double) minutesSinceEntry / RescueCarbProfile.HALF_LIFE_MIN;
+        double raw = carbs * Math.pow(0.5, halfLives);
+
+        int taperStart = RescueCarbProfile.MAX_DURATION_MIN - RescueCarbProfile.TAPER_MIN;
+        if (minutesSinceEntry >= taperStart) {
+            double progress = (double) (minutesSinceEntry - taperStart) / RescueCarbProfile.TAPER_MIN;
+            raw *= Math.max(0.0, 1.0 - progress);
+        }
+        return raw;
     }
 
     private double calculateEnhancedRemaining(CarbsEntry entry, long minutesSinceEntry, int halfLife, int maxDuration) {

@@ -2,6 +2,7 @@ package che.glucosemonitorbe.hovorka.learning;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -43,9 +44,28 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     /** CGM reading in the replay window. */
     public record Reading(long epochMs, double mmol) {}
 
-    /** A logged event (meal and/or bolus, or a long-acting basal note). */
+    /**
+     * A logged event (meal and/or bolus, or a long-acting basal note).
+     *
+     * <p>{@code rescue} marks a fast-acting hypo treatment. It has to travel with the event: the
+     * replay engine only ever sees this flattened form, never the {@code Note} it came from, so
+     * without it a 15 g dextrose tablet was replayed on the user's 240-minute mixed-meal curve. The
+     * fit then met a sharp real glucose rise it could not explain and absorbed the error into
+     * {@code agScale}/{@code isfScale} - parameters that go on to shape <em>every</em> prediction
+     * for that user.
+     */
     public record Event(long epochMs, double carbs, double insulin, boolean longActing,
-                        double protein, double fat, double fiber) {}
+                        double protein, double fat, double fiber, boolean rescue) {
+
+        /**
+         * Non-rescue event. For sources with no notion of a hypo treatment - the HUPA-UCM and
+         * AZT1D public datasets - where "not a rescue" is a fact about the data, not a default.
+         */
+        public Event(long epochMs, double carbs, double insulin, boolean longActing,
+                     double protein, double fat, double fiber) {
+            this(epochMs, carbs, insulin, longActing, protein, fat, fiber, false);
+        }
+    }
 
     /** Replay configuration. */
     public static final class Config {
@@ -224,7 +244,14 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 if (!inPast && !inFuture) continue;
 
                 if (n.carbs() > 0) {
-                    carbs.add(CarbsEntry.builder().timestamp(toLdt(n.epochMs(), userZone)).carbs(n.carbs()).build());
+                    CarbsEntry entry = CarbsEntry.builder()
+                            .timestamp(toLdt(n.epochMs(), userZone)).carbs(n.carbs()).build();
+                    // The marker is what makes the gut model use the rescue tMaxG rather than the
+                    // user's own. Only the FPU-equivalent entry below stays unmarked: that is a
+                    // slow protein/fat tail, the opposite of a rescue, and a rescue carries no
+                    // protein or fat anyway.
+                    if (n.rescue()) RescueCarbProfile.mark(entry);
+                    carbs.add(entry);
                 }
                 if (n.insulin() > 0) {
                     insulin.add(InsulinDose.builder().timestamp(toLdt(n.epochMs(), userZone))
