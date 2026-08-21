@@ -69,7 +69,9 @@ class HypoEventServiceTest {
         when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
                 .thenReturn(Optional.of(open));
 
-        service.onGlucoseReading(USER_ID, 4.6);
+        // Exactly the recovery boundary: contract is ">= RECOVERY_MMOL", so 4.5 itself must
+        // expire. A mutant weakening ">=" to ">" would still pass at 4.6; this pins it.
+        service.onGlucoseReading(USER_ID, 4.5);
 
         assertThat(open.getState()).isEqualTo(State.EXPIRED);
         assertThat(open.getResolvedAt()).isNotNull();

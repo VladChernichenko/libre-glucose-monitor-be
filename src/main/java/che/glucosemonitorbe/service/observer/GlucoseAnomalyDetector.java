@@ -125,11 +125,24 @@ public class GlucoseAnomalyDetector {
                 .map(n -> (int) ChronoUnit.MINUTES.between(n.getTimestamp(), now))
                 .orElse(null);
 
-        // 3. Advance the hypo-prompt lifecycle from the same reading the alerts use.
-        hypoEventService.onGlucoseReading(userId, currentGlucose);
-
-        // 4. Dispatch async evaluation (non-blocking)
+        // 3. Dispatch async evaluation (non-blocking). This MUST run, and be handed off, before
+        //    the hypo lifecycle below. evaluateAll is @Async, so once called it is no longer
+        //    coupled to anything that happens later in this method. If the ordering were
+        //    reversed, a failure in the (synchronous, @Transactional, DB-touching) hypo call
+        //    would propagate out of evaluateUser and be swallowed by scan()'s per-user catch
+        //    before evaluateAll ever ran - silently dropping the existing predicted-hypo /
+        //    rapid-drop alerts for exactly the user whose glucose is low enough to need them.
         alertService.evaluateAll(userId, username, currentGlucose, roc, minutesSinceLastMeal);
+
+        // 4. Advance the hypo-prompt lifecycle from the same reading the alerts use. Guarded
+        //    independently so a fault here (constraint violation, connection blip, a bug in the
+        //    new lifecycle code) degrades to "no prompt this cycle" and never takes the alert
+        //    dispatch above - or other users' scans - down with it.
+        try {
+            hypoEventService.onGlucoseReading(userId, currentGlucose);
+        } catch (Exception e) {
+            log.warn("Hypo event lifecycle failed for user {}: {}", userId, e.getMessage());
+        }
     }
 
     // -- Rate-of-change computation --------------------------------------------

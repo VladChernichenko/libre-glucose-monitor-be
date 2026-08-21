@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -80,6 +81,25 @@ class GlucoseAnomalyDetectorTest {
         detector.evaluateUser(USER_ID, "tester");
 
         verify(hypoEventService).onGlucoseReading(eq(USER_ID), doubleThat(v -> v < 3.6));
+    }
+
+    /**
+     * A fault in the new hypo lifecycle must not take the existing alert dispatch down with it -
+     * that dispatch has to fire for exactly the low-glucose users a hypo-path bug would otherwise
+     * silently drop. Pins both halves: evaluateAll still runs, and the exception does not escape
+     * evaluateUser (which would otherwise be swallowed one level up by scan()'s per-user catch,
+     * but only after skipping evaluateAll for this cycle).
+     */
+    @Test
+    void isolatesAFailureInTheHypoLifecycleFromTheExistingAlertDispatch() {
+        long now = System.currentTimeMillis();
+        when(cgmRepo.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER_ID), any(), any()))
+                .thenReturn(List.of(reading(now - 300_000, 90), reading(now, 63)));  // 5.0 -> 3.5
+        doThrow(new RuntimeException("db blip")).when(hypoEventService).onGlucoseReading(any(), anyDouble());
+
+        assertThatCode(() -> detector.evaluateUser(USER_ID, "tester")).doesNotThrowAnyException();
+
+        verify(alertService).evaluateAll(eq(USER_ID), eq("tester"), anyDouble(), anyDouble(), any());
     }
 
     @Test
