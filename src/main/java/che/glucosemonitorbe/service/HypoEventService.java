@@ -47,11 +47,15 @@ public class HypoEventService {
             return;
         }
 
-        Optional<HypoEvent> open =
-                repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(userId, State.OPEN);
+        // Deliberately an id-only projection, not the entity - see lockIfStillOpen for why
+        // loading the full entity here would defeat the locked re-read immediately below.
+        Optional<UUID> openId = repository
+                .findIdsByUserIdAndStateOrderByDetectedAtDesc(userId, State.OPEN)
+                .stream().findFirst();
 
         if (glucoseMmol >= HypoThresholds.RECOVERY_MMOL) {
-            open.ifPresent(e -> expire(e, "glucose recovered"));
+            openId.ifPresent(id -> lockIfStillOpen(id)
+                    .ifPresent(locked -> expire(locked, "glucose recovered")));
             markRecovered(userId);
             return;
         }
@@ -62,9 +66,18 @@ public class HypoEventService {
         }
 
         // An OPEN event that has aged past its useful life is not a live prompt any more, and
-        // holding it open would also block a genuinely current one from opening below.
-        if (open.isPresent() && !expireIfStale(open.get())) {
-            return;   // already prompting
+        // holding it open would also block a genuinely current one from opening below. Re-read
+        // under lock (see lockIfStillOpen) before deciding: the `openId` lookup above is a plain
+        // unlocked SELECT, so acting on its result directly would repeat the exact lost-update
+        // this re-read closes.
+        if (openId.isPresent()) {
+            Optional<HypoEvent> locked = lockIfStillOpen(openId.get());
+            if (locked.isPresent() && !expireIfStale(locked.get())) {
+                return;   // still open and fresh - already prompting
+            }
+            // Either it was stale and has just been expired above, or a concurrent
+            // confirm()/dismiss() already resolved it since the unlocked lookup - either way it
+            // must not block a new event from opening below.
         }
         if (isSuppressed(userId)) {
             return;
@@ -78,6 +91,45 @@ public class HypoEventService {
         event.setUpdatedAt(LocalDateTime.now());
         repository.save(event);
         log.info("Hypo event opened for user={} at {} mmol/L", userId, glucoseMmol);
+    }
+
+    /**
+     * Re-reads {@code eventId} under the same {@link HypoEventRepository#findByIdForUpdate}
+     * pessimistic write lock that {@link #confirm} and {@link #dismiss} take, filtered to still
+     * being {@link State#OPEN}.
+     *
+     * <p>{@link #onGlucoseReading}'s own lookup of the user's open event is a plain, unlocked,
+     * id-only query - deliberately so, since it runs for every user on every 5-minute scan and
+     * the common case (no open event) should not pay for a row lock it doesn't need. Id-only
+     * matters, not just unlocked: if that lookup instead returned the full entity, the entity
+     * would be planted in this transaction's persistence context under {@code eventId}, and
+     * Hibernate does not refresh an already-managed entity's field values from a later query by
+     * default - so this method's re-read would hand back that same stale Java object even though
+     * the {@code SELECT ... FOR UPDATE} it issues correctly took the Postgres lock and blocked
+     * behind a concurrent writer. Selecting only the id upstream ensures the entity is never
+     * cached before this call, so the row this method loads is the first (and therefore genuinely
+     * fresh) hydration of it in the transaction.
+     *
+     * <p>Without that unlocked lookup and this locked re-read, {@link HypoEvent} has no
+     * {@code @Version} column, so writing a stale in-memory copy back would silently clobber a
+     * concurrent {@code confirm()}/{@code dismiss()}'s resolution with a full-row {@code UPDATE}
+     * - the exact lost-update shape the write-sweep removed from {@code list()} in a previous fix,
+     * reached here through the CGM scanner instead. Re-reading here, immediately before either
+     * write path in {@code onGlucoseReading} would act, closes that gap the same way
+     * {@code confirm}/{@code dismiss} close it against each other: this call blocks behind a
+     * concurrent {@code confirm}/{@code dismiss} transaction on the same row (if one is in
+     * flight) and then observes its committed result. An empty {@link Optional} means the event
+     * is no longer {@code OPEN} - either genuinely resolved by the user in the interim, or
+     * (defensively) raced away entirely - and callers must not write anything in that case.
+     *
+     * <p>The lock is scoped to exactly one row, and only taken when the unlocked lookup found a
+     * candidate to act on, so it adds no contention for the overwhelming majority of scans where
+     * the user has no open event, and even when it does, it can only ever contend with a
+     * {@code confirm}/{@code dismiss} call for that same user's same event - never across users,
+     * and never for the breadth of a whole scan cycle.
+     */
+    private Optional<HypoEvent> lockIfStillOpen(UUID eventId) {
+        return repository.findByIdForUpdate(eventId).filter(e -> e.getState() == State.OPEN);
     }
 
     private void expire(HypoEvent event, String reason) {

@@ -38,11 +38,25 @@ class HypoEventServiceTest {
         config = new FeatureToggleConfig();
         config.setHypoRescueLoggingEnabled(true);
         service = new HypoEventService(repository, noteRepository, config);
-        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
-                .thenReturn(Optional.empty());
+        // onGlucoseReading looks up the user's open event as an id-only projection (see
+        // HypoEventRepository#findIdsByUserIdAndStateOrderByDetectedAtDesc) and only re-fetches
+        // the entity, under findByIdForUpdate, when it needs to act on one - see stubOpenEvent.
+        when(repository.findIdsByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
+                .thenReturn(List.of());
         when(repository.findFirstByUserIdOrderByDetectedAtDesc(USER_ID))
                 .thenReturn(Optional.empty());
         when(repository.save(any(HypoEvent.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    /**
+     * Stubs the two-step lookup {@code onGlucoseReading} now does for the user's open event: an
+     * id-only projection, then a locked re-fetch of that id - mirroring
+     * {@link HypoEventService#lockIfStillOpen}.
+     */
+    private void stubOpenEvent(HypoEvent open) {
+        when(repository.findIdsByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
+                .thenReturn(List.of(open.getId()));
+        when(repository.findByIdForUpdate(open.getId())).thenReturn(Optional.of(open));
     }
 
     @Test
@@ -63,8 +77,7 @@ class HypoEventServiceTest {
 
     @Test
     void doesNotOpenASecondEventWhileOneIsOpen() {
-        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
-                .thenReturn(Optional.of(openEvent(LocalDateTime.now().minusMinutes(5))));
+        stubOpenEvent(openEvent(LocalDateTime.now().minusMinutes(5)));
 
         service.onGlucoseReading(USER_ID, 3.2);
 
@@ -74,8 +87,7 @@ class HypoEventServiceTest {
     @Test
     void expiresAnOpenEventOnceGlucoseRecovers() {
         HypoEvent open = openEvent(LocalDateTime.now().minusMinutes(10));
-        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
-                .thenReturn(Optional.of(open));
+        stubOpenEvent(open);
 
         // Exactly the recovery boundary: contract is ">= RECOVERY_MMOL", so 4.5 itself must
         // expire. A mutant weakening ">=" to ">" would still pass at 4.6; this pins it.
@@ -90,8 +102,7 @@ class HypoEventServiceTest {
     @Test
     void doesNotExpireInsideTheHysteresisBand() {
         HypoEvent open = openEvent(LocalDateTime.now().minusMinutes(10));
-        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
-                .thenReturn(Optional.of(open));
+        stubOpenEvent(open);
 
         service.onGlucoseReading(USER_ID, 4.2);
 
@@ -163,8 +174,7 @@ class HypoEventServiceTest {
     void agesOutAnOpenEventOlderThanTheMaximumAndOpensAFreshOne() {
         HypoEvent stale = openEvent(LocalDateTime.now()
                 .minusMinutes(HypoThresholds.MAX_OPEN_MINUTES + 1));
-        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
-                .thenReturn(Optional.of(stale));
+        stubOpenEvent(stale);
 
         service.onGlucoseReading(USER_ID, 3.2);
 
@@ -184,8 +194,7 @@ class HypoEventServiceTest {
     void doesNotAgeOutAnOpenEventJustInsideTheMaximum() {
         HypoEvent recent = openEvent(LocalDateTime.now()
                 .minusMinutes(HypoThresholds.MAX_OPEN_MINUTES - 1));
-        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.OPEN))
-                .thenReturn(Optional.of(recent));
+        stubOpenEvent(recent);
 
         service.onGlucoseReading(USER_ID, 3.2);
 

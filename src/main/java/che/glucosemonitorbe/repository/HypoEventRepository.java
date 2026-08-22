@@ -27,6 +27,24 @@ public interface HypoEventRepository extends JpaRepository<HypoEvent, UUID> {
     Optional<HypoEvent> findFirstByUserIdOrderByDetectedAtDesc(UUID userId);
 
     /**
+     * Just the id of the user's current OPEN event, if any - deliberately not the entity itself.
+     *
+     * <p>{@code HypoEventService#onGlucoseReading} only needs the id from this lookup, to pass to
+     * {@link #findByIdForUpdate} immediately before either write path acts. Loading the full
+     * entity here (as {@link #findFirstByUserIdAndStateOrderByDetectedAtDesc} does) would plant it
+     * in the persistence context under that id; Hibernate does not refresh an already-managed
+     * entity's field values from a later query by default, so the subsequent
+     * {@code findByIdForUpdate} call - despite correctly taking the Postgres row lock and blocking
+     * behind a concurrent writer - would hand back that same pre-existing, now-stale Java object
+     * instead of one reflecting what the lock was just waited for. Selecting only the id ensures
+     * the entity is never cached before the locked re-read, so that re-read is genuinely fresh.
+     */
+    @Query("SELECT e.id FROM HypoEvent e WHERE e.userId = :userId AND e.state = :state "
+            + "ORDER BY e.detectedAt DESC")
+    List<UUID> findIdsByUserIdAndStateOrderByDetectedAtDesc(
+            @Param("userId") UUID userId, @Param("state") State state);
+
+    /**
      * Same lookup as {@link #findById(Object)} but takes a Postgres row-level write lock for the
      * remainder of the caller's transaction. Required by {@code confirm}/{@code dismiss}: without
      * it, two concurrent requests both read OPEN, both pass the idempotency check, and both write
