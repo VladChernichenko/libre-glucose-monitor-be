@@ -54,13 +54,15 @@ class NightScoutIntegrationIntegrationTest {
     @Test
     void getGlucoseEntriesShouldParseNightscoutPayload() throws Exception {
         UUID userId = UUID.randomUUID();
-        // example.com resolves publicly; private/local hosts are rejected by NightscoutUrlValidator.
+        // A literal public IP (RFC 2544 range): NightscoutUrlValidator accepts it, and the JVM
+        // parses it numerically, so the fetch path is exercised without a DNS lookup. The request
+        // itself never leaves the JVM - MockRestServiceServer intercepts it.
         NightscoutCredentials creds = new NightscoutCredentials(
-                "https://example.com", "my-secret", "my-token");
+                NightscoutUrlValidatorTest.PUBLIC_URL, "my-secret", "my-token");
         when(userDataSourceConfigService.getNightscoutCredentials(userId))
                 .thenReturn(Optional.of(creds));
 
-        server.expect(once(), requestTo("https://example.com/api/v2/entries.json?count=1"))
+        server.expect(once(), requestTo(NightscoutUrlValidatorTest.PUBLIC_URL + "/api/v2/entries.json?count=1"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("Authorization", "Bearer my-token"))
                 .andExpect(header("api-secret", sha1("my-secret")))

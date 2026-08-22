@@ -3,6 +3,7 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.IsfMealWindowSnapshot;
 import che.glucosemonitorbe.domain.MealWindow;
+import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.IsfMealWindowDTO;
 import che.glucosemonitorbe.dto.IsfMealWindowProfileResponse;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
 
@@ -110,14 +112,23 @@ public class IsfMealWindowProfileService {
      */
     @Transactional
     public IsfMealWindowProfileResponse recomputeForUser(UUID userId) {
-        LocalDateTime now = LocalDateTime.now();
+        RapidInsulinIobParameters rapid = userInsulinPreferencesService.getRapidIobParameters(userId);
+        UserSettingsDTO userSettings = userSettingsService.getUserSettings(userId);
+
+        // Run on the user's own clock. notes.timestamp holds the client's local wall time, while
+        // cgm_readings.date_timestamp holds true UTC epochs - every wall time below has to cross
+        // into epochs through userZone. Anchoring "now" on the JVM's zone instead would also drop
+        // a UTC+N user's most recent N hours of boluses, which sort after a JVM-wall "now".
+        ZoneId userZone = userSettings == null
+                ? ZoneOffset.UTC
+                : UserZones.resolve(userSettings.getTimezone(), userSettings.getUtcOffsetMinutes());
+
+        LocalDateTime now = LocalDateTime.now(userZone);
         LocalDateTime since = now.minusDays(HISTORY_DAYS);
 
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, since, now);
-        List<CgmReading> cgmReadings = loadCgmReadings(userId, since);
+        List<CgmReading> cgmReadings = loadCgmReadings(userId, since, userZone);
 
-        RapidInsulinIobParameters rapid = userInsulinPreferencesService.getRapidIobParameters(userId);
-        UserSettingsDTO userSettings = userSettingsService.getUserSettings(userId);
         double carbRatio = (userSettings != null && userSettings.getCarbRatio() != null && userSettings.getCarbRatio() > 0)
                 ? userSettings.getCarbRatio()
                 : DEFAULT_CARB_RATIO;
@@ -128,7 +139,7 @@ public class IsfMealWindowProfileService {
             if (bolus.isLongActing()) continue;
             if (bolus.getTimestamp() == null) continue;
 
-            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, carbRatio);
+            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, carbRatio, userZone);
             if (est != null) {
                 estimates.add(est);
             }
@@ -168,8 +179,13 @@ public class IsfMealWindowProfileService {
     // Internals
     // ---
 
-    private List<CgmReading> loadCgmReadings(UUID userId, LocalDateTime since) {
-        long sinceEpochMs = since.toInstant(ZoneOffset.UTC).toEpochMilli();
+    /**
+     * @param since lower bound of the history window on the user's wall clock (see
+     *              {@link #recomputeForUser}); crosses into the UTC epochs that
+     *              {@code cgm_readings.date_timestamp} stores via {@code userZone}.
+     */
+    private List<CgmReading> loadCgmReadings(UUID userId, LocalDateTime since, ZoneId userZone) {
+        long sinceEpochMs = UserZones.toEpochMs(since, userZone);
         return cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
                 userId, sinceEpochMs);
     }
@@ -184,13 +200,14 @@ public class IsfMealWindowProfileService {
             List<CgmReading> cgmReadings,
             RapidInsulinIobParameters rapid,
             UserSettingsDTO userSettings,
-            double carbRatio) {
+            double carbRatio,
+            ZoneId userZone) {
 
         LocalDateTime t0 = bolus.getTimestamp();
         LocalDateTime tEnd = t0.plusMinutes((long) (rapid.diaHours() * 60));
 
-        Double preCgm = nearestCgmMmol(cgmReadings, t0);
-        Double postCgm = nearestCgmMmol(cgmReadings, tEnd);
+        Double preCgm = nearestCgmMmol(cgmReadings, t0, userZone);
+        Double postCgm = nearestCgmMmol(cgmReadings, tEnd, userZone);
         if (preCgm == null || postCgm == null) {
             return null;
         }
@@ -249,10 +266,16 @@ public class IsfMealWindowProfileService {
      * minutes. Returns {@code null} if none found in range. mmol/L conversion: backend stores
      * {@code sgv} as mg/dL × 1 (or as mmol/L × 10 depending on source) - this helper assumes
      * mg/dL, the dominant Nightscout convention. LibreLinkUp readings already arrive normalised.
+     *
+     * @param target   a bolus time (or bolus + DIA) on the user's wall clock, since it derives from
+     *                 {@code notes.timestamp}
+     * @param userZone the clock {@code target} is on - {@code cgm_readings.date_timestamp} is a true
+     *                 UTC epoch, so reading {@code target} as UTC would shift the match by the
+     *                 user's offset and pick a reading up to an hour away from the bolus
      */
-    Double nearestCgmMmol(List<CgmReading> readings, LocalDateTime target) {
+    Double nearestCgmMmol(List<CgmReading> readings, LocalDateTime target, ZoneId userZone) {
         if (readings == null || readings.isEmpty() || target == null) return null;
-        long targetEpochMs = target.toInstant(ZoneOffset.UTC).toEpochMilli();
+        long targetEpochMs = UserZones.toEpochMs(target, userZone);
         long bestDelta = Long.MAX_VALUE;
         CgmReading best = null;
         for (CgmReading r : readings) {

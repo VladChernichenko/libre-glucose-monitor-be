@@ -23,6 +23,20 @@ import static org.mockito.Mockito.*;
 @SuppressWarnings("null")
 class UserDataSourceConfigServiceTest {
 
+    /**
+     * Nightscout URLs pass through {@link che.glucosemonitorbe.nightscout.NightscoutUrlValidator},
+     * the SSRF guard, which resolves the host and rejects private/loopback/link-local targets. A
+     * literal IP is parsed numerically by the JVM, so the guard runs its full path with no DNS
+     * lookup and this test behaves the same online, in CI, and offline. 198.18.0.7 is in the RFC
+     * 2544 benchmarking range: outside every blocked range, and non-routable on the public
+     * internet. See NightscoutUrlValidatorTest for the guard's own contract, including that this
+     * literal is accepted.
+     *
+     * <p>The previous value, {@code ns.example.com}, is a subdomain that does not exist, so it
+     * failed to resolve in every environment.
+     */
+    private static final String NIGHTSCOUT_URL = "https://198.18.0.7";
+
     @Mock
     private UserDataSourceConfigRepository repository;
 
@@ -41,13 +55,13 @@ class UserDataSourceConfigServiceTest {
 
         DataSourceConfigRequestDto request = DataSourceConfigRequestDto.builder()
                 .dataSource(UserDataSourceConfig.DataSourceType.NIGHTSCOUT)
-                .nightscoutUrl("https://ns.example.com")
+                .nightscoutUrl(NIGHTSCOUT_URL)
                 .nightscoutApiSecret("sec")
                 .nightscoutApiToken("tok")
                 .isActive(true)
                 .build();
 
-        UserDataSourceConfig saved = new UserDataSourceConfig(user, "https://ns.example.com", "sec", "tok");
+        UserDataSourceConfig saved = new UserDataSourceConfig(user, NIGHTSCOUT_URL, "sec", "tok");
         saved.setId(UUID.randomUUID());
         when(repository.save(any(UserDataSourceConfig.class))).thenReturn(saved);
 
@@ -55,14 +69,14 @@ class UserDataSourceConfigServiceTest {
 
         assertNotNull(result);
         assertEquals(UserDataSourceConfig.DataSourceType.NIGHTSCOUT, result.getDataSource());
-        assertEquals("https://ns.example.com", result.getNightscoutUrl());
+        assertEquals(NIGHTSCOUT_URL, result.getNightscoutUrl());
     }
 
     @Test
     void getAllConfigsReturnsMappedDtos() {
         UUID userId = UUID.randomUUID();
         User user = user(userId);
-        UserDataSourceConfig config = new UserDataSourceConfig(user, "https://ns.example.com", "sec", "tok");
+        UserDataSourceConfig config = new UserDataSourceConfig(user, NIGHTSCOUT_URL, "sec", "tok");
         config.setId(UUID.randomUUID());
         when(repository.findByUserIdOrderByCreatedAtDesc(userId)).thenReturn(List.of(config));
 
@@ -93,7 +107,7 @@ class UserDataSourceConfigServiceTest {
     void deactivateAndDeleteConfigCallsRepository() {
         UUID userId = UUID.randomUUID();
         UUID configId = UUID.randomUUID();
-        UserDataSourceConfig config = new UserDataSourceConfig(user(userId), "https://ns.example.com", "sec", "tok");
+        UserDataSourceConfig config = new UserDataSourceConfig(user(userId), NIGHTSCOUT_URL, "sec", "tok");
         config.setId(configId);
         when(repository.findById(configId)).thenReturn(Optional.of(config));
 
@@ -142,13 +156,13 @@ class UserDataSourceConfigServiceTest {
 
         DataSourceConfigRequestDto request = DataSourceConfigRequestDto.builder()
                 .dataSource(UserDataSourceConfig.DataSourceType.NIGHTSCOUT)
-                .nightscoutUrl("https://ns.example.com")
+                .nightscoutUrl(NIGHTSCOUT_URL)
                 .nightscoutApiSecret("super-secret")
                 .nightscoutApiToken("tok")
                 .isActive(true)
                 .build();
 
-        UserDataSourceConfig saved = new UserDataSourceConfig(user, "https://ns.example.com", "super-secret", "tok");
+        UserDataSourceConfig saved = new UserDataSourceConfig(user, NIGHTSCOUT_URL, "super-secret", "tok");
         saved.setId(UUID.randomUUID());
         when(repository.save(any(UserDataSourceConfig.class))).thenReturn(saved);
 

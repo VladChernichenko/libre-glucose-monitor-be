@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Collections;
 import java.util.List;
@@ -66,6 +67,15 @@ class VerificationServiceTest {
         CgmReading reading = new CgmReading();
         reading.setUserId(USER_ID);
         reading.setDateTimestamp(time.toInstant(ZoneOffset.UTC).toEpochMilli());
+        reading.setSgv(sgvMgDl);
+        return reading;
+    }
+
+    /** A reading at the true UTC instant that {@code wall} names on {@code zone}. */
+    private CgmReading readingAtInstant(LocalDateTime wall, ZoneId zone, int sgvMgDl) {
+        CgmReading reading = new CgmReading();
+        reading.setUserId(USER_ID);
+        reading.setDateTimestamp(wall.atZone(zone).toInstant().toEpochMilli());
         reading.setSgv(sgvMgDl);
         return reading;
     }
@@ -168,6 +178,82 @@ class VerificationServiceTest {
         VerificationEvent saved = evaluateAndCapture();
 
         assertThat(saved.getSkipReason()).isNotIn("hypo_in_window", "rescue_carbs_in_window");
+    }
+
+    // -- Wall-time -> UTC-epoch reconciliation ---------------------------------
+
+    /**
+     * A CGM stub that behaves like the indexed query it stands in for: it honours the epoch bounds
+     * it is handed. The plain {@code givenCgmReadings} stub returns its list whatever window is
+     * asked for, which cannot tell a correctly-placed window from one an offset away.
+     */
+    private void givenCgmReadingsWindowed(List<CgmReading> all) {
+        when(cgmReadingRepository.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                eq(USER_ID), any(), any()))
+                .thenAnswer(inv -> {
+                    long from = inv.getArgument(1);
+                    long to = inv.getArgument(2);
+                    return all.stream()
+                            .filter(r -> r.getDateTimestamp() >= from && r.getDateTimestamp() <= to)
+                            .toList();
+                });
+    }
+
+    @Test
+    @DisplayName("A UTC+9 user's meal is scored against the CGM readings at the instants their wall "
+            + "clock names, not the same digits read as UTC")
+    void evaluate_probesCgmOnTheUsersZone() {
+        // note.timestamp holds naive local wall time; cgm_readings.date_timestamp holds true UTC
+        // epochs. MEAL_TIME 12:00 in Tokyo is 03:00 UTC. Read as UTC the baseline and +2 h probes
+        // land 9 h late, the +/-20 min windows come back empty, and the meal is dropped as
+        // cgm_data_unavailable - so this user could never titrate a carb ratio at all.
+        ZoneId tokyo = ZoneId.of("Asia/Tokyo");
+        UserSettings settings = new UserSettings();
+        settings.setCarbRatio(2.0);
+        settings.setIsf(1.0);
+        settings.setTimezone("Asia/Tokyo");
+
+        givenNoPriorInsulin();
+        givenNotesInWindow(List.of());
+        givenCgmReadingsWindowed(List.of(
+                readingAtInstant(MEAL_TIME, tokyo, 108),                 // 6.0 mmol/L baseline
+                readingAtInstant(MEAL_TIME.plusHours(2), tokyo, 180)));  // 10.0 mmol/L at +2 h
+        when(userSettingsRepository.findByUserId(USER_ID)).thenReturn(Optional.of(settings));
+        when(verificationEventRepository.findCompletedByUserId(USER_ID)).thenReturn(List.of());
+        when(verificationSummaryRepository.findById(USER_ID)).thenReturn(Optional.empty());
+
+        VerificationEvent saved = evaluateAndCapture();
+
+        assertThat(saved.getStatus()).isEqualTo(VerificationEvent.Status.COMPLETED);
+        assertThat(saved.getSkipReason()).isNull();
+        // 108 and 180 mg/dL through the shared 18.0182 factor - not the local 18.0, which would
+        // round these to a suspiciously exact 6.0 and 10.0.
+        assertThat(saved.getBaselineGlucose()).isEqualTo(5.99);
+        assertThat(saved.getActualGlucose2h()).isEqualTo(9.99);
+        assertThat(saved.getActualDelta()).isEqualTo(4.0);
+    }
+
+    @Test
+    @DisplayName("A UTC+9 user's hypo inside the window is seen - the hypo scan probes the same "
+            + "instants the meal actually spans")
+    void hypoScan_probesCgmOnTheUsersZone() {
+        // The H1 gate exists to stop a rescue-driven recovery from titrating the carb ratio UP.
+        // Probing the wrong 2 h of CGM misses the low and lets exactly that through.
+        ZoneId tokyo = ZoneId.of("Asia/Tokyo");
+        UserSettings settings = new UserSettings();
+        settings.setCarbRatio(2.0);
+        settings.setTimezone("Asia/Tokyo");
+
+        givenNoPriorInsulin();
+        givenNotesInWindow(List.of());
+        // 63 mg/dL = 3.5 mmol/L, below the 3.9 threshold, 90 min into the meal window.
+        givenCgmReadingsWindowed(List.of(readingAtInstant(MEAL_TIME.plusMinutes(90), tokyo, 63)));
+        when(userSettingsRepository.findByUserId(USER_ID)).thenReturn(Optional.of(settings));
+
+        VerificationEvent saved = evaluateAndCapture();
+
+        assertThat(saved.getStatus()).isEqualTo(VerificationEvent.Status.SKIPPED);
+        assertThat(saved.getSkipReason()).isEqualTo("hypo_in_window");
     }
 
     @Test

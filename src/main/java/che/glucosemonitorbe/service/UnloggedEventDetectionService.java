@@ -6,6 +6,7 @@ import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.domain.User;
+import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UnloggedEventFlagDTO;
@@ -37,7 +38,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -405,32 +405,18 @@ public class UnloggedEventDetectionService {
         return (best != null && bestDiff <= tolMs) ? best.getValue() : null;
     }
 
-    /**
-     * The clock this user's wall times live on: their IANA zone if known, else the offset they last
-     * reported, else UTC (which reproduces the behaviour from before either was recorded).
-     */
+    /** @see UserZones#resolve(String, Integer) */
     private static java.time.ZoneId resolveUserZone(UserSettingsDTO settings) {
         if (settings == null) return ZoneOffset.UTC;
-        String tz = settings.getTimezone();
-        if (tz != null && !tz.isBlank()) {
-            try {
-                return java.time.ZoneId.of(tz);
-            } catch (java.time.DateTimeException ignored) {
-                // fall through to the offset
-            }
-        }
-        Integer offsetMinutes = settings.getUtcOffsetMinutes();
-        return offsetMinutes != null ? ZoneOffset.ofTotalSeconds(offsetMinutes * 60) : ZoneOffset.UTC;
+        return UserZones.resolve(settings.getTimezone(), settings.getUtcOffsetMinutes());
     }
 
     private static LocalDateTime toLdt(long epochMs, java.time.ZoneId zone) {
-        return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), zone);
+        return UserZones.toWallTime(epochMs, zone);
     }
 
     private static long toEpochMs(LocalDateTime ldt, java.time.ZoneId zone) {
-        // atZone, not toInstant(offset): resolves the offset for THIS instant, so a scan spanning
-        // a DST transition converts both sides correctly.
-        return ldt.atZone(zone).toInstant().toEpochMilli();
+        return UserZones.toEpochMs(ldt, zone);
     }
 
     private static double round2(double v) {

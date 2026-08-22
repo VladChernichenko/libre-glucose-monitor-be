@@ -38,6 +38,15 @@ class NightscoutCgmIntegrationTest {
                     .withUsername("test")
                     .withPassword("test");
 
+    /**
+     * A literal public IPv4 (RFC 2544 benchmarking range 198.18.0.0/15). The save path runs the
+     * NightscoutUrlValidator SSRF guard, which resolves the host; an IP literal is parsed
+     * numerically, so no DNS lookup happens and the test passes offline. It is also non-routable,
+     * so nothing here can reach a real third-party server. The former value,
+     * {@code https://nightscout.example.com}, is a subdomain that does not exist and never resolved.
+     */
+    private static final String SAFE_NIGHTSCOUT_URL = "https://198.18.0.7";
+
     @Autowired
     private TestRestTemplate rest;
 
@@ -90,7 +99,7 @@ class NightscoutCgmIntegrationTest {
 
         DataSourceConfigRequestDto config = DataSourceConfigRequestDto.builder()
                 .dataSource(UserDataSourceConfig.DataSourceType.NIGHTSCOUT)
-                .nightscoutUrl("https://nightscout.example.com")
+                .nightscoutUrl(SAFE_NIGHTSCOUT_URL)
                 .nightscoutApiSecret("mysecret")
                 .nightscoutApiToken("mytoken")
                 .isActive(true)

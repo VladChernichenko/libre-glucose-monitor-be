@@ -3,6 +3,7 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.User;
+import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
@@ -207,17 +208,14 @@ public class DigitalTwinCalibrationService {
     private java.time.ZoneId resolveUserZone(UserSettingsDTO settings, UUID userId) {
         if (settings == null) return ZoneOffset.UTC;
         String tz = settings.getTimezone();
-        if (tz != null && !tz.isBlank()) {
-            try {
-                return java.time.ZoneId.of(tz);
-            } catch (java.time.DateTimeException e) {
-                log.warn("User {}: unparseable timezone '{}' - falling back to the stored offset", userId, tz);
-            }
-        }
         Integer offsetMinutes = settings.getUtcOffsetMinutes();
-        if (offsetMinutes != null) return ZoneOffset.ofTotalSeconds(offsetMinutes * 60);
-        log.debug("User {}: no timezone recorded - replaying on UTC", userId);
-        return ZoneOffset.UTC;
+        // Diagnostics only - the resolution rule itself lives in UserZones.
+        if (tz != null && !tz.isBlank() && UserZones.parseIana(tz) == null) {
+            log.warn("User {}: unparseable timezone '{}' - falling back to the stored offset", userId, tz);
+        } else if ((tz == null || tz.isBlank()) && offsetMinutes == null) {
+            log.debug("User {}: no timezone recorded - replaying on UTC", userId);
+        }
+        return UserZones.resolve(tz, offsetMinutes);
     }
 
     /** Current twin status for a user (for the API / UI). */
