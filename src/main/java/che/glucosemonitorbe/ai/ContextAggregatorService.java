@@ -42,7 +42,15 @@ public class ContextAggregatorService {
     private final InsulinCalculatorService insulinCalculatorService;
 
     public AnalysisContext buildContext(UUID userId, int windowHours) {
-        LocalDateTime end = LocalDateTime.now();
+        return buildContext(userId, windowHours, LocalDateTime.now());
+    }
+
+    /**
+     * Package-private overload taking an explicit "now" so tests can exercise meal-window-dependent
+     * behavior (e.g. {@link UserSettingsDTO#getEffectiveIsf}) at a chosen instant instead of the
+     * real wall clock. The public overload always passes {@link LocalDateTime#now()}.
+     */
+    AnalysisContext buildContext(UUID userId, int windowHours, LocalDateTime end) {
         LocalDateTime start = end.minusHours(windowHours);
         long startTsMs = start.toInstant(ZoneOffset.UTC).toEpochMilli();
         long endTsMs = end.toInstant(ZoneOffset.UTC).toEpochMilli();
@@ -87,7 +95,10 @@ public class ContextAggregatorService {
         double activeIob = insulinCalculatorService.calculateTotalActiveInsulin(
                 insulinDoses, end, rapidIob.diaHours(), rapidIob.peakMinutes());
         double carbRatio = cob.getCarbRatio() != null ? cob.getCarbRatio() : DEFAULT_CARB_RATIO;
-        double isf = cob.getIsf() != null ? cob.getIsf() : DEFAULT_ISF;
+        // Window-aware ISF, matching InsulinCalculatorService's correction leg: no path here may
+        // silently substitute the base ISF where a meal-window value exists (see C2 fix notes).
+        Double effectiveIsf = cob.getEffectiveIsf(end);
+        double isf = effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
         double correctionUnits = latest > CORRECTION_TARGET_MMOl
                 ? Math.max(0.0, (latest - CORRECTION_TARGET_MMOl) / isf - activeIob)
                 : 0.0;

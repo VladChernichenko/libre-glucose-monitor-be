@@ -25,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -188,6 +189,51 @@ class ContextAggregatorServiceTest {
         assertThat(ctx.getPreBolusTimingContribution()).isGreaterThan(0.0);
     }
 
+    // ---- C2: correction estimate must track the meal-window ISF ----
+
+    /**
+     * {@code SafetyAndScoringService} renders {@code estimatedCorrectionUnits} to the patient as a
+     * "Correction guidance estimate". Before this fix that field read {@code settings.getIsf()} - the
+     * single autotuned base value - even though {@code InsulinCalculatorService}'s correction leg had
+     * already been made meal-window-aware. That let this card show a different, contradicting unit
+     * figure than the actual dosing calculator for the same glucose/IOB at the same moment.
+     *
+     * <p>Same glucose (11.5 mmol/L) and IOB (0u), two different times of day with different manual
+     * ISF overrides, must produce two different suggested unit figures - proving the estimate is
+     * resolved per window rather than pinned to the base ISF.
+     */
+    @Test
+    @DisplayName("C2: estimated correction units use the meal-window ISF, not the base ISF")
+    void buildContext_correctionUnitsTrackMealWindowIsf() {
+        UserSettingsDTO settings = new UserSettingsDTO();
+        settings.setCarbRatio(2.0);
+        settings.setIsf(2.5);          // base/autotuned ISF - must NOT be used when a window override exists
+        settings.setIsfBreakfast(2.0); // 05:00-10:59
+        settings.setIsfDinner(4.0);    // 16:00-21:59
+        when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
+
+        LocalDateTime breakfastNow = LocalDateTime.of(2026, 8, 23, 8, 0);
+        LocalDateTime dinnerNow = LocalDateTime.of(2026, 8, 23, 19, 0);
+
+        CgmReading breakfastReading = chartRowAt(11.5, breakfastNow.minusMinutes(1));
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(breakfastReading));
+        AnalysisContext breakfastCtx = service.buildContext(userId, 12, breakfastNow);
+
+        CgmReading dinnerReading = chartRowAt(11.5, dinnerNow.minusMinutes(1));
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(dinnerReading));
+        AnalysisContext dinnerCtx = service.buildContext(userId, 12, dinnerNow);
+
+        // (11.5 - 6.5) / 2.0 - 0 = 2.5u at the breakfast-window ISF
+        assertThat(breakfastCtx.getEstimatedCorrectionUnits()).isCloseTo(2.5, within(0.01));
+        // (11.5 - 6.5) / 4.0 - 0 = 1.25u at the dinner-window ISF
+        assertThat(dinnerCtx.getEstimatedCorrectionUnits()).isCloseTo(1.25, within(0.01));
+        assertThat(breakfastCtx.getEstimatedCorrectionUnits())
+                .as("same glucose and IOB must still yield different guidance across meal windows")
+                .isNotEqualTo(dinnerCtx.getEstimatedCorrectionUnits());
+    }
+
     // ---- rescue-carb marker ----
 
     /**
@@ -245,5 +291,9 @@ class ContextAggregatorServiceTest {
         row.setDateTimestamp(tsMs);
         row.setUserId(userId);
         return row;
+    }
+
+    private CgmReading chartRowAt(double mmol, LocalDateTime timestamp) {
+        return chartRow((int) Math.round(mmol * 18.0), timestamp.toInstant(ZoneOffset.UTC).toEpochMilli());
     }
 }
