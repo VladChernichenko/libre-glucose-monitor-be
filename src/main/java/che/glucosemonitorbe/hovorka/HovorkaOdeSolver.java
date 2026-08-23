@@ -168,12 +168,19 @@ public class HovorkaOdeSolver {
      * breakdown. The insulin activity rate driving plasma insulin is recovered from the effect by
      * {@link #impliedActivityRate}, which is exact for a caller whose doses all share one ISF.
      *
-     * <p><b>Not a production entry point.</b> This is the one overload that still divides the
-     * insulin effect by the parameter ISF, so a forecast whose doses carry different meal-window
-     * ISFs would silently get the ISF-weighted blend this class was changed to remove. Deprecated
-     * to put a compile-time signal in front of that mistake, not because it is going away: it is
-     * correct, and required, for aggregate-effect callers with a single ISF. Prediction code must
-     * use the 8-argument overload and pass the summed activity rate explicitly.
+     * <p><b>Not a production entry point.</b> This overload divides the insulin effect by the
+     * parameter ISF via {@link #impliedActivityRate} - but it is not the only one that does: the
+     * 4-arg and 5-arg {@link #step} overloads and the 4-arg and 6-arg {@link #derivatives}
+     * overloads all recover the activity rate the same way, so a forecast whose doses carry
+     * different meal-window ISFs would silently get the ISF-weighted blend this class was changed
+     * to remove through any of those five entry points, not just this one. Only this overload
+     * carries {@code @Deprecated} today, as a compile-time signal in front of the mistake most
+     * likely to be reached for by mistake - not because the underlying single-ISF behavior is
+     * unique to it, and not because this overload is going away: the division is correct, and
+     * required, for aggregate-effect callers with a single ISF. None of the five single-ISF
+     * entry points is reached by production code today - {@link HovorkaGlucosePredictionService}
+     * calls the 8-argument {@link #step} and {@link #derivatives} overloads exclusively. Prediction
+     * code must use the 8-argument overload and pass the summed activity rate explicitly.
      *
      * <p>Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
      * D (mealMmol) is the saturation reference for k_empt - it must be the stomach
@@ -282,7 +289,10 @@ public class HovorkaOdeSolver {
      * explicit-rate overload instead.
      *
      * <p>Kept deliberately: for an aggregate-effect caller the division genuinely is the correct
-     * inverse, so this is a shim, not a leftover. It is the only place the ISF quotient survives.</p>
+     * inverse, so this is a shim, not a leftover. This is the only method that computes the ISF
+     * quotient, but it is not reached from only one place: the 4-arg and 5-arg {@link #step}
+     * overloads, the deprecated 7-arg {@link #step} overload, and the 4-arg and 6-arg
+     * {@link #derivatives} overloads all call it.</p>
      */
     private static double impliedActivityRate(HovorkaParameters p, double insulinEffect) {
         double denom = p.isf() * p.effectiveInsulinVolume();
