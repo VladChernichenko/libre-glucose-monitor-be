@@ -29,9 +29,14 @@ import static org.mockito.Mockito.mock;
  * the summed activity rate directly and the ISF cancels out of the solver.
  *
  * <p>The last two tests are golden-curve characterization fixtures: their expected values were
- * generated from the implementation itself (captured before this change and re-verified byte for
- * byte after it), not derived from an independent model. They exist to pin the emitted curve
- * against unintended movement, not to prove it is physiologically right.</p>
+ * generated from the implementation itself (captured before this change and re-verified after
+ * it), not derived from an independent model. This is not an IEEE-exact match of the pre-change
+ * output: production {@code p.isf()} is {@code settings.isf * isfScale} for digital-twin users
+ * ({@link HovorkaParameterService}), so the ISF factors never cancelled exactly even in exact
+ * arithmetic. The re-verification is empirical-plus-bounded-error - the emitted curve moved by
+ * at most roughly 5e-3 mmol/L, well under the 0.1 mmol/L emission quantum these fixtures assert
+ * against - not literally byte-identical. They exist to pin the emitted curve against unintended
+ * movement, not to prove it is physiologically right.</p>
  */
 class HovorkaInsulinActivityBridgeTest {
 
