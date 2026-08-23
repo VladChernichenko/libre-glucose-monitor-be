@@ -128,8 +128,8 @@ public class HovorkaOdeSolver {
 
     /**
      * Advance the state by exactly one minute using the classical RK4 method.
-     * Delegates to the aggregate-effect 7-arg overload with mealGI=state.activeGI(),
-     * protFatKcal=0, activityRate=0.
+     * Test/aggregate-effect convenience: mealGI=state.activeGI(), protFatKcal=0, activityRate=0,
+     * and the insulin activity rate recovered from the effect by {@link #impliedActivityRate}.
      *
      * @param state         current 8-variable state + tracking fields
      * @param p             Hovorka parameters
@@ -142,14 +142,16 @@ public class HovorkaOdeSolver {
             HovorkaParameters p,
             double carbMmolNow,
             double insulinEffect) {
-        return step(state, p, carbMmolNow, state.activeGI(), 0.0, insulinEffect, 0.0);
+        return step(state, p, carbMmolNow, state.activeGI(), 0.0,
+                insulinEffect, impliedActivityRate(p, insulinEffect), 0.0);
     }
 
     /**
      * Advance the state by one minute, with an optional insulin-independent activity glucose-uptake
      * rate {@code activityUptakeRate} [per min] (contraction-mediated clearance during exercise);
      * 0 = no activity, which reproduces the un-modulated model exactly.
-     * Delegates to the aggregate-effect 7-arg overload with mealGI=state.activeGI(), protFatKcal=0.
+     * Test/aggregate-effect convenience: mealGI=state.activeGI(), protFatKcal=0, and the insulin
+     * activity rate recovered from the effect by {@link #impliedActivityRate}.
      */
     public HovorkaState step(
             HovorkaState state,
@@ -157,13 +159,21 @@ public class HovorkaOdeSolver {
             double carbMmolNow,
             double insulinEffect,
             double activityUptakeRate) {
-        return step(state, p, carbMmolNow, state.activeGI(), 0.0, insulinEffect, activityUptakeRate);
+        return step(state, p, carbMmolNow, state.activeGI(), 0.0,
+                insulinEffect, impliedActivityRate(p, insulinEffect), activityUptakeRate);
     }
 
     /**
      * Advance state by 1 minute from a single aggregate insulin effect, with no per-dose
      * breakdown. The insulin activity rate driving plasma insulin is recovered from the effect by
      * {@link #impliedActivityRate}, which is exact for a caller whose doses all share one ISF.
+     *
+     * <p><b>Not a production entry point.</b> This is the one overload that still divides the
+     * insulin effect by the parameter ISF, so a forecast whose doses carry different meal-window
+     * ISFs would silently get the ISF-weighted blend this class was changed to remove. Deprecated
+     * to put a compile-time signal in front of that mistake, not because it is going away: it is
+     * correct, and required, for aggregate-effect callers with a single ISF. Prediction code must
+     * use the 8-argument overload and pass the summed activity rate explicitly.
      *
      * <p>Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
      * D (mealMmol) is the saturation reference for k_empt - it must be the stomach
@@ -176,6 +186,7 @@ public class HovorkaOdeSolver {
      * @param insulinEffect  glucose removal from bolus insulin [mmol/min]
      * @param activityRate   insulin-independent muscle uptake rate [/min]
      */
+    @Deprecated
     public HovorkaState step(
             HovorkaState state,
             HovorkaParameters p,

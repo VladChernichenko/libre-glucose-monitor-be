@@ -4,6 +4,7 @@ import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -54,6 +56,7 @@ class HovorkaInsulinActivityBridgeTest {
      * performs that division, so it stands in for the pre-change code path.
      */
     @Test
+    @SuppressWarnings("deprecation")   // the 7-arg overload IS the pre-change path under test
     @DisplayName("explicit rate reproduces the old ISF division when all doses share one ISF")
     void explicitRateReproducesTheOldDivisionWhenAllDosesShareOneIsf() {
         HovorkaParameters p = params(1.5);
@@ -115,6 +118,7 @@ class HovorkaInsulinActivityBridgeTest {
      * rate on one side and through the aggregate-effect division on the other.
      */
     @Test
+    @SuppressWarnings("deprecation")   // the 7-arg overload IS the pre-change path under test
     @DisplayName("a 300-minute bolus decay is bit-identical through either overload at one ISF")
     void longRunSingleIsfIntegrationIsBitIdentical() {
         HovorkaParameters p = params(2.0);
@@ -133,6 +137,104 @@ class HovorkaInsulinActivityBridgeTest {
             viaDivision = solver.step(viaDivision, p, 0.0, 70, 0.0, effect, 0.0);
             assertThat(viaRate.q1()).isEqualTo(viaDivision.q1());
             assertThat(viaRate.glucoseMmolL(p)).isEqualTo(viaDivision.glucoseMmolL(p));
+        }
+    }
+
+    // -- The one production line this task changed --------------------------------
+
+    /**
+     * Covers {@code insulinActivityRate += iobActivityRate} in
+     * {@link HovorkaGlucosePredictionService}'s per-minute loop, which no emitted-curve assertion
+     * can see: the bridge is worth ~1e-3 mmol/L against a 0.1 mmol/L emission quantum, so the
+     * golden fixtures below still pass if that accumulator is dropped or ISF-weighted.
+     *
+     * <p>Two doses in different meal windows (ISF 0.5 and 1.5, fallback 2.0). The solver is
+     * subclassed to record what actually crosses the seam and what x3 the ODE reached, so the
+     * assertions are on raw state, not on the rounded curve.</p>
+     */
+    @Test
+    @DisplayName("the service drives x3 from the unweighted rate sum across two window ISFs")
+    void serviceDrivesX3FromTheUnweightedRateSum() {
+        LocalDateTime now = LocalDateTime.of(2026, 6, 1, 11, 5);   // LUNCH window
+        long minsAgoA = 25, minsAgoB = 5;
+        double unitsA = 2.0, unitsB = 1.0;
+        InsulinDose doseBreakfast = InsulinDose.builder()          // given 10:40 -> isfBreakfast
+                .timestamp(now.minusMinutes(minsAgoA)).units(unitsA).build();
+        InsulinDose doseLunch = InsulinDose.builder()              // given 11:00 -> isfLunch
+                .timestamp(now.minusMinutes(minsAgoB)).units(unitsB).build();
+
+        UserSettingsDTO settings = new UserSettingsDTO();
+        settings.setIsf(2.0);            // fallback: used by neither dose
+        settings.setIsfBreakfast(0.5);
+        settings.setIsfLunch(1.5);
+
+        RecordingSolver recorder = new RecordingSolver();
+        int horizon = 60;
+        rawPredictor(recorder).buildPredictionPath(
+                params(2.0), IOB, settings, 8.0, now, List.of(),
+                List.of(doseBreakfast, doseLunch), List.of(), USER, horizon, ActivityProvider.NONE);
+
+        assertThat(recorder.calls).hasSize(horizon);
+
+        double x3Reference = 0.0;
+        boolean everDifferedFromTheBlend = false;
+        for (int min = 1; min <= horizon; min++) {
+            double rateA = activityRate(unitsA, minsAgoA, min);
+            double rateB = activityRate(unitsB, minsAgoB, min);
+            double expectedRate = rateA + rateB;                   // unweighted - the fix
+            RecordingSolver.Call call = recorder.calls.get(min - 1);
+
+            assertThat(call.insulinActivityRate())
+                    .as("insulin activity rate passed to the bridge at +%d min must be the plain "
+                        + "sum of both doses' rates, with neither window ISF in it", min)
+                    .isEqualTo(expectedRate);
+
+            // x3 decouples from the rest of the system (dx3 depends only on x3 and the driver),
+            // so a scalar RK4 on the same driver is the exact expected trajectory.
+            x3Reference = rk4X3(x3Reference,
+                    HovorkaOdeSolver.KB3 * (expectedRate * HovorkaOdeSolver.V_I_SCALE));
+            assertThat(call.x3After())
+                    .as("x3 reached by the ODE at +%d min", min)
+                    .isCloseTo(x3Reference, offset(Math.max(1e-18, x3Reference * 1e-9)));
+
+            // The mutation this guards against: the ISF-weighted blend the bridge used to get.
+            double blend = (0.5 * rateA + 1.5 * rateB) / 2.0;
+            if (Math.abs(blend - expectedRate) > expectedRate * 1e-6) {
+                everDifferedFromTheBlend = true;
+            }
+        }
+        assertThat(everDifferedFromTheBlend)
+                .as("the fixture must actually separate the rate sum from the ISF blend")
+                .isTrue();
+    }
+
+    /** IOB activity rate of one dose over the step that ends at {@code min}, as the service computes it. */
+    private static double activityRate(double units, long minsAgo, int min) {
+        double before = InsulinCalculatorService.iobOpenApsExponential(
+                units, minsAgo + (min - 1), 4.5, 55.0);
+        double after = InsulinCalculatorService.iobOpenApsExponential(
+                units, minsAgo + min, 4.5, 55.0);
+        return Math.max(0.0, before - after);
+    }
+
+    /** Real solver that records what the service passed it and what x3 came back. */
+    private static final class RecordingSolver extends HovorkaOdeSolver {
+        record Call(double insulinEffect, double insulinActivityRate, double x3After) {}
+
+        private final List<Call> calls = new ArrayList<>();
+
+        RecordingSolver() {
+            super(new DallaManGutModel());
+        }
+
+        @Override
+        public HovorkaState step(HovorkaState state, HovorkaParameters p, double carbMmolNow,
+                                 int mealGI, double protFatKcalNow, double insulinEffect,
+                                 double insulinActivityRate, double activityRate) {
+            HovorkaState next = super.step(state, p, carbMmolNow, mealGI, protFatKcalNow,
+                    insulinEffect, insulinActivityRate, activityRate);
+            calls.add(new Call(insulinEffect, insulinActivityRate, next.x3()));
+            return next;
         }
     }
 
@@ -253,8 +355,11 @@ class HovorkaInsulinActivityBridgeTest {
     }
 
     private static HovorkaGlucosePredictionService rawPredictor() {
+        return rawPredictor(new HovorkaOdeSolver(new DallaManGutModel()));
+    }
+
+    private static HovorkaGlucosePredictionService rawPredictor(HovorkaOdeSolver odeSolver) {
         DallaManGutModel gut = new DallaManGutModel();
-        HovorkaOdeSolver odeSolver = new HovorkaOdeSolver(gut);
         BasalInsulinResolver basal = new BasalInsulinResolver();
         return new HovorkaGlucosePredictionService(
                 mock(HovorkaParameterService.class), odeSolver, basal,
