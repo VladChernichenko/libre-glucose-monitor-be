@@ -253,19 +253,20 @@ public class InsulinCalculatorService {
      * carbRatio are mutually inconsistent, and silently substituting 3.0 would hide that
      * while still producing a wrong dose.
      */
-    private double resolveGramsPerUnit(UserSettingsDTO settings) {
-        Double isf = settings.getIsf();
+    private double resolveGramsPerUnit(UserSettingsDTO settings, LocalDateTime at) {
+        Double isf = settings.getEffectiveIsf(at);
         Double carbRatio = settings.getCarbRatio();
         if (isf == null || carbRatio == null
                 || !Double.isFinite(isf) || !Double.isFinite(carbRatio)
                 || isf <= 0 || carbRatio <= 0) {
             throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID,
-                    "isf=" + isf + " carbRatio=" + carbRatio);
+                    "isf=" + isf + " carbRatio=" + carbRatio + " at=" + at);
         }
         double gramsPerUnit = 10.0 * isf / carbRatio;
         if (gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
             throw new DosingRefusedException(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
-                    "derived gramsPerUnit=" + gramsPerUnit + " from isf=" + isf + " carbRatio=" + carbRatio);
+                    "derived gramsPerUnit=" + gramsPerUnit + " from isf=" + isf
+                            + " carbRatio=" + carbRatio + " at=" + at);
         }
         return gramsPerUnit;
     }
@@ -280,8 +281,16 @@ public class InsulinCalculatorService {
 
     public InsulinCalculationResponse calculateRecommendedInsulin(InsulinCalculationRequest request) {
         UserSettingsDTO settings = requireSettings(request.getUserId());
-        double gramsPerUnit = resolveGramsPerUnit(settings);
-        double isf = settings.getIsf();
+
+        // Meal windows are wall-clock boundaries, so the client's clock decides which one a dose
+        // falls in. A server in another zone would price an 18:00 dinner bolus as lunch. Mirrors
+        // how GlucoseCalculationsService already treats ClientTimeInfo as authoritative.
+        LocalDateTime doseTime = request.getClientTimeInfo() != null
+                ? request.getClientTimeInfo().toLocalDateTime()
+                : LocalDateTime.now();
+
+        double gramsPerUnit = resolveGramsPerUnit(settings, doseTime);
+        double isf = settings.getEffectiveIsf(doseTime);
 
         if (request.getCarbs() == null || request.getCurrentGlucose() == null
                 || request.getTargetGlucose() == null) {
