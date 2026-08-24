@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make every insulin dose the app recommends use the insulin-sensitivity factor in force at that dose's own time of day, instead of a single base value.
+**Goal:** Make every dose figure the backend computes — recommended, or merely displayed as guidance — use the insulin-sensitivity factor in force at that figure's own time of day, instead of a single base value.
+
+> **Corrected after execution.** This plan was written believing the app recommends doses to the user. It does not: `/api/insulin/calculate` has no callers, the web frontend's `calculateRecommendedInsulin` had none either and has since been deleted, and iOS has no bolus calculator. See the spec's *Reachability* section. The one genuinely live path — the AI correction-guidance card — was missed by this plan entirely and was fixed in the post-review wave (Task 4 below). Task-level claims about what "the app would have recommended" are false and are marked where they appear.
 
 **Architecture:** Two independent changes. `InsulinCalculatorService` swaps `settings.getIsf()` for the existing `settings.getEffectiveIsf(t)`, resolved on the client's clock. Separately, the ODE's x3 bridge stops dividing a per-dose-ISF sum by a single ISF — the caller passes the summed insulin activity rate directly, so the ISF cancels out of the solver.
 
@@ -17,7 +19,8 @@
 - Meal windows: BREAKFAST 05:00–10:59, LUNCH 11:00–15:59, DINNER 16:00–21:59, NIGHT 22:00–04:59.
 - `gramsPerUnit = 10.0 × isf / carbRatio`; the 3–30 g/U envelope is a refusal boundary, not a clamp. Unchanged.
 - **Bit-identity bar (Task 2):** any forecast whose active doses all share one ISF must emit a byte-identical curve. This includes forecasts with activity notes.
-- Backend suite must end at **1129 tests, 0 failures**, and `./gradlew jacocoTestCoverageVerification` must pass. Both are green at the branch point.
+  *(Achieved, but narrower than stated: shim callers are exact by construction; the production path is empirical plus a bounded error of roughly 5e-3 mmol/L, because `p.isf()` is `settings.isf × isfScale` for digital-twin users and so never cancelled exactly. Well under the 0.1 mmol/L emission quantum.)*
+- Backend suite must end at **1129 tests, 0 failures**, and `./gradlew jacocoTestCoverageVerification` must pass. Both are green at the branch point. *(Shipped at 1142 / 0.)*
 - Run tests with `./gradlew test --tests '<pattern>'`. Do not run the full suite except where a step says to.
 - Read a file before editing it. Never save working files to the repo root; never commit scratch files. Do not push.
 
@@ -25,7 +28,9 @@
 
 ### Task 1: Dosing resolves ISF by meal window
 
-This is the defect. On 21 Aug the app would have recommended 16 u for an 80 g dinner where the user's own `isf_dinner` implies 10.7 u — into a meal that ended at 3.8 mmol/L.
+This is the defect in the dose calculator. ~~On 21 Aug the app would have recommended 16 u for an 80 g dinner where the user's own `isf_dinner` implies 10.7 u — into a meal that ended at 3.8 mmol/L.~~
+
+**Correction:** no surface would have shown either figure — this endpoint has no clients. 16 u versus 10.7 u is arithmetic over the user's stored settings, not a number the app can display. The task is still worth doing: a plausible-looking dose function that is quietly wrong is a trap for whoever wires up a dose surface later, and the error always over-doses whenever a window override exceeds the base.
 
 **Files:**
 - Modify: `src/main/java/che/glucosemonitorbe/service/InsulinCalculatorService.java` (`resolveGramsPerUnit` ~line 256, `calculateRecommendedInsulin` ~line 281)
@@ -460,6 +465,8 @@ If any pre-existing Hovorka test fails, **stop and report**. Those tests encode 
 
 The bar is that a forecast whose doses share one ISF emits a byte-identical curve, **including with an activity note** — the 21 Aug case had a walking note, so the activity branch is not a corner case here.
 
+*(As executed: exact for shim callers, empirical plus ~5e-3 mmol/L for the production path — see Global Constraints. Also note the ±1 % `V_I_SCALE` discrimination check specified below is **inert**: it moves 0 of 108 emitted points, because the x3 bridge sits ~30–50× under the emission quantum. The implementer substituted a pinned `x3` literal that does fail at +1 %.)*
+
 Add to `HovorkaInsulinActivityBridgeTest` a test that builds one representative forecast through `HovorkaGlucosePredictionService.buildPredictionPath` — a single bolus, no window overrides, one activity note — and asserts the emitted `predictedGlucose` series against expected values pinned as literals in the test.
 
 Generate those literals from the current code and **say so explicitly in your report**: that is legitimate for a characterization test, but it must be stated, not implied. Follow the fixture-construction style of the existing tests in `src/test/java/che/glucosemonitorbe/hovorka/`.
@@ -493,7 +500,7 @@ committed golden-curve fixture including the activity branch."
 - [ ] **Step 1: Run the whole backend suite**
 
 Run: `./gradlew test`
-Expected: **1129 tests + the tests added by Tasks 1 and 2, 0 failures.**
+Expected: **1129 tests + the tests added by Tasks 1 and 2, 0 failures.** *(Actual: 1142 / 0.)*
 
 Note the branch point is genuinely green — the three DNS-dependent Nightscout failures were fixed in `3daeb72`. Any failure here is yours.
 
@@ -518,6 +525,38 @@ git commit -m "test(dosing): cover the remaining ISF-window branches"
 
 ---
 
+### Task 4: The AI correction-guidance card — added after the whole-branch review
+
+**This task was not in the plan as written.** The whole-branch review found it, and it is the only path on this branch that a user can actually reach. Recorded here so the plan matches what shipped.
+
+**Files:**
+- Modify: `src/main/java/che/glucosemonitorbe/service/ai/ContextAggregatorService.java` (the correction-estimate ISF read)
+- Test: `ContextAggregatorService`'s test class — `buildContext_correctionUnitsTrackMealWindowIsf`
+
+**The defect.** `ContextAggregatorService` computed `(latestGlucose − 6.5) / isf − activeIob` on the **base** ISF, and `SafetyAndScoringService` renders that to the patient at priority `high` as "Correction guidance estimate is ~Xu". Same formula and same 6.5 target as `InsulinCalculatorService`'s correction leg — so once Task 1 landed, the two disagreed for the same patient at the same moment: 5.1 u from the calculator, 7.6 u from the card.
+
+Unlike the calculator, this card is reachable, via `POST /api/ai-insights/retrospective`.
+
+**The fix.** Resolve with `getEffectiveIsf(end)`, where `end` is the instant the analysis window closes — the same "now" already used for `activeCob`, `activeIob` and `predicted2h`, and reported as the context's `windowEnd`. That matches `InsulinCalculatorService`, which resolves at the dose time rather than at the CGM reading's own timestamp, so the two converge on identical semantics rather than merely both being window-aware.
+
+`SafetyAndScoringService` is deliberately untouched: it renders whatever the aggregator produces. Fixing the source rather than the renderer keeps one definition of the correction dose.
+
+**Test.** Same glucose and IOB at two times of day in different windows must yield two different `estimatedCorrectionUnits`. Mutation-checked: reverting to `getIsf()` fails exactly that test and no other.
+
+Shipped as commit `9b6ccd4`.
+
+---
+
+## What this plan got wrong
+
+Worth recording, because two of the three were caught only by an implementer refusing to transcribe blindly:
+
+1. **The premise.** The plan was written believing the app recommends doses. It does not — see the header note. The one live path was missed entirely and is now Task 4.
+2. **Task 2 named the wrong overloads.** It said the 4-arg and 5-arg `step()` overloads carry ~20 call sites and should host the shim. It is the **7-arg** overload, ~23 sites, and following the instruction literally would not have compiled. The implementer relocated the shim to the 7-arg `step` and 6-arg `derivatives`, preserving the intent.
+3. **Task 2's discrimination check was inert.** Perturbing `V_I_SCALE` by 1 % moves 0 of 108 emitted points (0 at ×2, 2 at ×10) because the x3 bridge is ~30–50× below the emission quantum. Had it been followed literally, the plan would have "proved" discrimination with a check that could never fail. A pinned `x3` literal was substituted.
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
@@ -529,9 +568,10 @@ git commit -m "test(dosing): cover the remaining ISF-window branches"
 | §1 Refusal path unchanged | Task 1, Step 1 (`refusesWhenNeitherWindowNorBaseIsfIsSet`), Step 3 |
 | §1 3–30 g/U envelope unchanged | Task 1, Step 3 — retained verbatim |
 | §2 Remove ISF from the x3 bridge | Task 2, Steps 4–6 |
-| §2 Bit-identity, including activity | Task 2, Steps 6 and 8 |
-| §3 Experiments left alone | No task — spec explicitly defers this to sub-project 3 |
-| Testing section | Tasks 1–2; gates in Task 3 |
+| §2 Bit-identity, including activity | Task 2, Steps 6 and 8 — achieved with the bounded-error caveat noted above |
+| §3 AI correction-guidance card | **Task 4** — absent from this plan as written; added after the whole-branch review |
+| §4 Experiments left alone | No task — spec explicitly defers this to sub-project 3 |
+| Testing section | Tasks 1–2 and 4; gates in Task 3 |
 | No schema change | Global Constraints; no task touches `db/migration` |
 
 **Placeholder scan:** Clean. The two fixture signatures the plan depends on were verified against the source rather than hedged: `HovorkaState.steadyState(double, HovorkaParameters)` (used by `HovorkaOdeSolverTest:59`) and `DosingRefusedException.getReason()`. `UserSettingsDTO` has the 6-arg `(id, userId, carbRatio, isf, carbHalfLife, maxCOBDuration)` constructor the tests use. The one thing not inlined is Task 2 Step 8's golden literals, which cannot be written in advance by construction — they are generated from the current implementation, and the step requires that to be stated openly in the report.
