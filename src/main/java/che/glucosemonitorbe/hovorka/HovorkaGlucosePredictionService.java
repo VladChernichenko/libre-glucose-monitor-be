@@ -365,13 +365,21 @@ public class HovorkaGlucosePredictionService {
             // dose's entire activity curve if the dose was given in that window, even once
             // most of its activity plays out after the window ends (e.g. a dinner-time
             // correction bolus peaking after 22:00 still uses isfDinner).
+            //
+            // insulinActivityRate: the same sum without the ISF weighting [units/min]. It drives
+            // plasma insulin in the solver's x3 bridge, which is a pharmacokinetic quantity: how
+            // fast insulin is acting, not how much glucose that action removes. The solver used to
+            // recover it as insulinEffect / (isf x V), which is exact only while every dose carries
+            // the same ISF - no longer true now each dose is priced at its own meal window's ISF.
             double insulinEffect = 0.0;
+            double insulinActivityRate = 0.0;
             for (DoseActivity dose : doseActivities) {
                 // IOB activity rate: how many units/min this dose is "working" during the
                 // step that advances state from t=now+(min-1) to t=now+min, i.e. the IOB
                 // decay during [min-1, min] - NOT [min, min+1].
                 double iobActivityRate = iobActivityRate(dose.iobTimeline(), min - 1);
-                insulinEffect += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
+                insulinEffect       += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
+                insulinActivityRate += iobActivityRate;
             }
 
             // Future carbs delivered to gut D1 at this minute [mmol]
@@ -402,10 +410,19 @@ public class HovorkaGlucosePredictionService {
             if (hasActivity) {
                 double aInst = activityProvider.intensityAt(currentTime.plusMinutes(min));
                 double aSens = activity.stepSensitivity(aInst);
-                double insulinEffectMod = insulinEffect * activity.insulinSensitivityFactor(aSens);
-                state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow, insulinEffectMod, activity.uptakeRate(aInst));
+                double sensFactor = activity.insulinSensitivityFactor(aSens);
+                double insulinEffectMod = insulinEffect * sensFactor;
+                // Scaled by the same factor as the effect, so this change stays purely algebraic
+                // and the activity branch keeps emitting the curve it emitted before. Whether
+                // exercise should amplify plasma insulin at all (it amplifies insulin ACTION, not
+                // plasma concentration) is a real physiological question, deliberately left alone
+                // here: changing it would be a behaviour change hidden inside a refactor.
+                double insulinActivityRateMod = insulinActivityRate * sensFactor;
+                state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow,
+                        insulinEffectMod, insulinActivityRateMod, activity.uptakeRate(aInst));
             } else {
-                state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow, insulinEffect, 0.0);
+                state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow,
+                        insulinEffect, insulinActivityRate, 0.0);
             }
 
             // Advance the sensor model every minute, not only at emission points.

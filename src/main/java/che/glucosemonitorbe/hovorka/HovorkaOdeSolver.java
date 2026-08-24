@@ -128,8 +128,8 @@ public class HovorkaOdeSolver {
 
     /**
      * Advance the state by exactly one minute using the classical RK4 method.
-     * Delegates to the master 7-arg overload with mealGI=state.activeGI(), protFatKcal=0,
-     * activityRate=0.
+     * Test/aggregate-effect convenience: mealGI=state.activeGI(), protFatKcal=0, activityRate=0,
+     * and the insulin activity rate recovered from the effect by {@link #impliedActivityRate}.
      *
      * @param state         current 8-variable state + tracking fields
      * @param p             Hovorka parameters
@@ -142,14 +142,16 @@ public class HovorkaOdeSolver {
             HovorkaParameters p,
             double carbMmolNow,
             double insulinEffect) {
-        return step(state, p, carbMmolNow, state.activeGI(), 0.0, insulinEffect, 0.0);
+        return step(state, p, carbMmolNow, state.activeGI(), 0.0,
+                insulinEffect, impliedActivityRate(p, insulinEffect), 0.0);
     }
 
     /**
      * Advance the state by one minute, with an optional insulin-independent activity glucose-uptake
      * rate {@code activityUptakeRate} [per min] (contraction-mediated clearance during exercise);
      * 0 = no activity, which reproduces the un-modulated model exactly.
-     * Delegates to the master 7-arg overload with mealGI=state.activeGI(), protFatKcal=0.
+     * Test/aggregate-effect convenience: mealGI=state.activeGI(), protFatKcal=0, and the insulin
+     * activity rate recovered from the effect by {@link #impliedActivityRate}.
      */
     public HovorkaState step(
             HovorkaState state,
@@ -157,11 +159,28 @@ public class HovorkaOdeSolver {
             double carbMmolNow,
             double insulinEffect,
             double activityUptakeRate) {
-        return step(state, p, carbMmolNow, state.activeGI(), 0.0, insulinEffect, activityUptakeRate);
+        return step(state, p, carbMmolNow, state.activeGI(), 0.0,
+                insulinEffect, impliedActivityRate(p, insulinEffect), activityUptakeRate);
     }
 
     /**
-     * Master step: advance state by 1 minute with full new inputs.
+     * Advance state by 1 minute from a single aggregate insulin effect, with no per-dose
+     * breakdown. The insulin activity rate driving plasma insulin is recovered from the effect by
+     * {@link #impliedActivityRate}, which is exact for a caller whose doses all share one ISF.
+     *
+     * <p><b>Not a production entry point.</b> This overload divides the insulin effect by the
+     * parameter ISF via {@link #impliedActivityRate} - but it is not the only one that does: the
+     * 4-arg and 5-arg {@link #step} overloads and the 4-arg and 6-arg {@link #derivatives}
+     * overloads all recover the activity rate the same way, so a forecast whose doses carry
+     * different meal-window ISFs would silently get the ISF-weighted blend this class was changed
+     * to remove through any of those five entry points, not just this one. Only this overload
+     * carries {@code @Deprecated} today, as a compile-time signal in front of the mistake most
+     * likely to be reached for by mistake - not because the underlying single-ISF behavior is
+     * unique to it, and not because this overload is going away: the division is correct, and
+     * required, for aggregate-effect callers with a single ISF. None of the five single-ISF
+     * entry points is reached by production code today - {@link HovorkaGlucosePredictionService}
+     * calls the 8-argument {@link #step} and {@link #derivatives} overloads exclusively. Prediction
+     * code must use the 8-argument overload and pass the summed activity rate explicitly.
      *
      * <p>Carbs are an impulse input: add to Qsto1 and refresh the Dalla Man D reference.
      * D (mealMmol) is the saturation reference for k_empt - it must be the stomach
@@ -174,6 +193,7 @@ public class HovorkaOdeSolver {
      * @param insulinEffect  glucose removal from bolus insulin [mmol/min]
      * @param activityRate   insulin-independent muscle uptake rate [/min]
      */
+    @Deprecated
     public HovorkaState step(
             HovorkaState state,
             HovorkaParameters p,
@@ -181,6 +201,30 @@ public class HovorkaOdeSolver {
             int    mealGI,
             double protFatKcalNow,
             double insulinEffect,
+            double activityRate) {
+        return step(state, p, carbMmolNow, mealGI, protFatKcalNow,
+                insulinEffect, impliedActivityRate(p, insulinEffect), activityRate);
+    }
+
+    /**
+     * Master step: advance state by 1 minute with the insulin activity rate supplied explicitly.
+     *
+     * <p>{@code insulinEffect} and {@code insulinActivityRate} are two views of the same insulin
+     * action and must come from the same source: the effect is the glucose removed from Q1
+     * [mmol/min], the rate is the insulin being consumed to remove it [units/min]. The caller sums
+     * both across active doses, so a forecast whose doses carry different meal-window ISFs still
+     * drives plasma insulin from an unweighted rate sum. See {@link #derivatives}.</p>
+     *
+     * @param insulinActivityRate summed IOB activity rate across active doses [units/min]
+     */
+    public HovorkaState step(
+            HovorkaState state,
+            HovorkaParameters p,
+            double carbMmolNow,
+            int    mealGI,
+            double protFatKcalNow,
+            double insulinEffect,
+            double insulinActivityRate,
             double activityRate) {
 
         HovorkaState s0 = state;
@@ -206,10 +250,10 @@ public class HovorkaOdeSolver {
         final int gi = activeGI;
         double mealMmol = s0.mealMmol();
         double[] y  = toArray(s0);
-        double[] k1 = derivatives(y, p, mealMmol, gi, insulinEffect, activityRate);
-        double[] k2 = derivatives(add(y, scale(k1, 0.5)), p, mealMmol, gi, insulinEffect, activityRate);
-        double[] k3 = derivatives(add(y, scale(k2, 0.5)), p, mealMmol, gi, insulinEffect, activityRate);
-        double[] k4 = derivatives(add(y, k3),             p, mealMmol, gi, insulinEffect, activityRate);
+        double[] k1 = derivatives(y, p, mealMmol, gi, insulinEffect, insulinActivityRate, activityRate);
+        double[] k2 = derivatives(add(y, scale(k1, 0.5)), p, mealMmol, gi, insulinEffect, insulinActivityRate, activityRate);
+        double[] k3 = derivatives(add(y, scale(k2, 0.5)), p, mealMmol, gi, insulinEffect, insulinActivityRate, activityRate);
+        double[] k4 = derivatives(add(y, k3),             p, mealMmol, gi, insulinEffect, insulinActivityRate, activityRate);
 
         double[] yn = new double[8];
         for (int i = 0; i < 8; i++) {
@@ -234,12 +278,31 @@ public class HovorkaOdeSolver {
                          double mealMmol, double insulinEffect) {
         // Expand legacy 6-element arrays (pre-Task-4 callers) to 8 elements.
         double[] y8 = y.length >= 8 ? y : java.util.Arrays.copyOf(y, 8);
-        return derivatives(y8, p, mealMmol, 70, insulinEffect, 0.0);
+        return derivatives(y8, p, mealMmol, 70, insulinEffect,
+                impliedActivityRate(p, insulinEffect), 0.0);
+    }
+
+    /**
+     * Convenience overload for callers that supply a single aggregate insulin effect with no
+     * per-dose breakdown. The activity rate is recovered by inverting the effect through the
+     * parameter ISF, which is exact for a single-ISF caller. The production path uses the
+     * explicit-rate overload instead.
+     *
+     * <p>Kept deliberately: for an aggregate-effect caller the division genuinely is the correct
+     * inverse, so this is a shim, not a leftover. This is the only method that computes the ISF
+     * quotient, but it is not reached from only one place: the 4-arg and 5-arg {@link #step}
+     * overloads, the deprecated 7-arg {@link #step} overload, and the 4-arg and 6-arg
+     * {@link #derivatives} overloads all call it.</p>
+     */
+    private static double impliedActivityRate(HovorkaParameters p, double insulinEffect) {
+        double denom = p.isf() * p.effectiveInsulinVolume();
+        return denom > 0 ? insulinEffect / denom : 0.0;
     }
 
     /**
      * Compute the 8 ODE derivatives, with an insulin-independent activity glucose-uptake rate
      * {@code activityUptakeRate} [per min] applied as an extra first-order clearance on Q1.
+     * The insulin activity rate is recovered from the effect via {@link #impliedActivityRate}.
      *
      * <p>y[6]=x3 (EGP insulin-suppression state variable; driven by plasma insulin).
      * y[7]=protFatGut (protein+fat gut load compartment; drives GLP-1 incretin (Inc)).</p>
@@ -247,6 +310,23 @@ public class HovorkaOdeSolver {
     double[] derivatives(double[] y, HovorkaParameters p,
                          double mealMmol, int gi,
                          double insulinEffect, double activityUptakeRate) {
+        return derivatives(y, p, mealMmol, gi, insulinEffect,
+                impliedActivityRate(p, insulinEffect), activityUptakeRate);
+    }
+
+    /**
+     * Compute the 8 ODE derivatives with the insulin activity rate supplied explicitly.
+     *
+     * <p>y[6]=x3 (EGP insulin-suppression state variable; driven by plasma insulin).
+     * y[7]=protFatGut (protein+fat gut load compartment; drives GLP-1 incretin (Inc)).</p>
+     *
+     * @param insulinEffect       glucose removal rate from bolus insulin [mmol/min]
+     * @param insulinActivityRate summed IOB activity rate driving that removal [units/min]
+     */
+    double[] derivatives(double[] y, HovorkaParameters p,
+                         double mealMmol, int gi,
+                         double insulinEffect, double insulinActivityRate,
+                         double activityUptakeRate) {
 
         double q1    = Math.max(0.0, y[0]);
         double q2    = Math.max(0.0, y[1]);
@@ -294,12 +374,15 @@ public class HovorkaOdeSolver {
         // -> Ra peak shifts right without changing total absorbed glucose.
         double ra    = gutModel.ra(qgut, kAbsEff);
 
-        // Approximate plasma insulin I(t) from the insulin effect rate via an empirical bridge.
+        // Approximate plasma insulin I(t) from the insulin activity rate via an empirical bridge.
         // Full S1->S2->I PK model is deferred; this preserves the IOB pharmacokinetics already
         // computed by the OpenAPS curve while avoiding a separate compartment integration.
-        double plasmInsulin = (p.isf() * p.effectiveInsulinVolume() > 0)
-                ? insulinEffect / (p.isf() * p.effectiveInsulinVolume()) * V_I_SCALE
-                : 0.0;
+        //
+        // Plasma insulin is driven by how fast insulin is acting, not by how much glucose that
+        // action removes. The caller supplies the summed IOB activity rate directly: the effect is
+        // Sum(dose.isf x V x rate), so dividing it by any single ISF was exact only while every
+        // dose shared one - which per-meal-window ISF no longer guarantees.
+        double plasmInsulin = insulinActivityRate * V_I_SCALE;
 
         // x3: delayed insulin action on EGP suppression (Hovorka 2004)
         double dx3 = -KA3 * x3 + KB3 * plasmInsulin;
