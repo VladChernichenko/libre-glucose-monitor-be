@@ -150,7 +150,8 @@ the plan finished while any row fails. Each is checkable by reading, not by judg
       field reads "unknown" without saying what would settle it.
 - [ ] Every `needs user input` entry is named in the summary section, not just buried in the body.
 - [ ] Every finding with status `open` carries a GitHub issue number (Task 11), or the report
-      states why issues could not be created.
+      states why it does not — issues disabled, `gh` failed, or the user declined that issue at
+      the Step 6 gate.
 - [ ] The pinning tests from Task 10 are green, and each names the finding it pins.
 - [ ] The summary states the baseline commit the audit ran against.
 - [ ] The fragment directory is gone and the report exists at
@@ -1198,7 +1199,7 @@ to move, that is a finding about testability, not a licence to refactor.
   each fragment as you go — you need their contents for Steps 2–6 anyway, and concatenating
   blind is how a malformed entry survives to the final report.
 
-  Do not delete the fragment directory yet; Step 7 removes it in the same commit that adds the
+  Do not delete the fragment directory yet; Step 8 removes it in the same commit that adds the
   assembled report, so the rename is legible in one diff.
 
 - [ ] **Step 2: Cross-check the report against the spec's target list**
@@ -1276,24 +1277,56 @@ to move, that is a finding about testability, not a licence to refactor.
   duplications* (Tasks 6, 7) — they need different remedies and a reader must not confuse them.
   This is what a human reviewer reads first.
 
-- [ ] **Step 6: Open a tracked issue per open finding**
+- [ ] **Step 6: Draft the issue manifest — then STOP and get approval**
 
   This is the step that decides whether the audit matters in a month. The 2026-08-18 parameter
   audit ended with a table naming Plans 2–6 over roughly twenty findings (F1–F21); thirteen days
   later none of those five plans existed. A findings document with no owner is the failure mode
-  this audit is itself investigating, one level up. So the findings leave the repo.
+  this audit is itself investigating, one level up. So the findings leave the repo — but they
+  leave it onto a public tracker, which is why this step ends in a hard stop.
 
-  First print what you are about to create, and read it:
+  First check the tracker is usable at all:
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  gh repo view --json hasIssuesEnabled -q .hasIssuesEnabled
+  gh repo view --json nameWithOwner,hasIssuesEnabled
   ```
 
-  If that returns `false`, skip to the fallback at the end of this step.
+  If `hasIssuesEnabled` is `false`, skip both this step and Step 7 and go straight to the
+  fallback at the end of Step 7.
 
-  Then, for **each finding whose status is `open`** (not `not-a-bug`, not a "traced, no
-  divergence" note), create one issue:
+  Otherwise build the **manifest**: for each finding whose status is `open` (not `not-a-bug`, not
+  a "traced, no divergence" note) one row giving the issue title
+  (`dual-computation: <finding name>`), the label, and a one-line body summary. Include the
+  tracking index issue as its own row, and note whether the `dual-computation-audit` label
+  already exists. Then present the whole manifest in the conversation — the repo it will post to,
+  the exact count, and every title.
+
+  <HARD-GATE>
+  **Do not run `gh issue create` or `gh label create` until the user has replied approving this
+  manifest.** Creating issues is outward-facing and public: it notifies watchers, it is visible
+  to anyone who can see the repository, and closing an issue does not undo having opened it.
+  Present the manifest and wait. This gate stands even under a standing instruction to work
+  autonomously without confirmation — the user asked for it specifically, on this step, because
+  the action leaves the machine.
+  </HARD-GATE>
+
+  Handle the reply as given: approval of the whole manifest, approval of a named subset (create
+  only those, and record the rest in the Step 7 fallback section), or a decline (skip Step 7
+  entirely and use the fallback for everything). Do not re-ask, and do not widen the approval —
+  an approved subset is not a licence for the rest.
+
+- [ ] **Step 7: Create the approved issues, and link them back into the report**
+
+  Only the issues the user approved in Step 6. Create the label first if the manifest said it was
+  missing:
+
+  ```bash
+  gh label create dual-computation-audit \
+    --description "Findings from the 2026-08-08 dual-computation audit"
+  ```
+
+  Then, per approved finding:
 
   ```bash
   gh issue create \
@@ -1302,25 +1335,24 @@ to move, that is a finding about testability, not a licence to refactor.
     --body "<the finding entry verbatim, plus: audited at 8b5d8c3; see docs/superpowers/specs/2026-08-08-dual-computation-findings.md>"
   ```
 
-  Create the label once first if it does not exist
-  (`gh label create dual-computation-audit --description "Findings from the 2026-08-08 dual-computation audit"`).
-  Then open one tracking issue titled `dual-computation audit: findings index`, listing every
+  Then open the tracking issue titled `dual-computation audit: findings index`, listing every
   issue number with its finding name, its reachability, and whether Task 10 pinned it.
 
   Finally, **write each issue number back into the report** next to its finding
   (`**Tracked:** #NNN`). The report and the tracker must point at each other; a one-way link
   rots the same way a bare document does.
 
-  Judgment on volume: `needs user input` findings get an issue too — they are exactly the ones
-  that need a human. Latent findings get an issue, labelled as latent in the body. Do not open
-  issues for `not-a-bug` entries or clean traces.
+  Judgment on volume, applied when you build the manifest in Step 6: `needs user input` findings
+  get an issue too — they are exactly the ones that need a human. Latent findings get an issue,
+  labelled as latent in the body. `not-a-bug` entries and clean traces get none.
 
-  **Fallback** if issues are disabled or `gh` fails: add a `## Tracking` section to the report
-  stating that no issues could be created, why, and listing every open finding as an explicit
-  unowned backlog. Then say so prominently in Step 8 — an untracked audit is a materially
-  weaker outcome and the user should hear it, not discover it later.
+  **Fallback** — used if issues are disabled, if `gh` fails, or for anything the user did not
+  approve: add a `## Tracking` section to the report naming which findings are tracked (with
+  numbers) and which are not, and why. List every untracked open finding as an explicit unowned
+  backlog. Then say so prominently in Step 9 — a partially or wholly untracked audit is a
+  materially weaker outcome and the user should hear it, not discover it later.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
@@ -1330,7 +1362,7 @@ to move, that is a finding about testability, not a licence to refactor.
   git commit -m "docs: compile dual-computation audit findings report"
   ```
 
-- [ ] **Step 8: Walk the Definition of done, then report back**
+- [ ] **Step 9: Walk the Definition of done, then report back**
 
   Go to the `## Definition of done` section at the top of this plan and check every row against
   what actually exists — the assembled report, the issue list, the pinning tests, the deleted
@@ -1362,9 +1394,9 @@ to move, that is a finding about testability, not a licence to refactor.
 | "Tech Stack: Java 17" | Java 21 | `build.gradle:16` sets `JavaLanguageVersion.of(21)`; the original header was wrong when written. |
 | finding template | added a `Reachability` line | Nothing in the original template forced a finding to state where it surfaces, which is exactly the claim that rotted. |
 | — | **fragment-per-task instead of one shared findings file** | Nine tasks committed the same markdown file while three advertised themselves as parallel-safe, with "re-read it immediately before editing" as the only mitigation — which is not concurrency control. Under `subagent-driven-development`, which this plan's own header recommends, they would have conflicted or silently clobbered each other. Each task now owns one fragment; Task 11 concatenates back to the original path. |
-| — | **added a Definition of done** | The plan had no completion criterion, so "done" was a judgment call by whoever stopped. Task 11 Step 8 now walks a checkable list. |
+| — | **added a Definition of done** | The plan had no completion criterion, so "done" was a judgment call by whoever stopped. Task 11 Step 9 now walks a checkable list. |
 | *(none)* | **Task 10 — pinning tests** | Tasks 5, 6 and 7 each surface a duplication that agrees today with nothing enforcing it. A markdown finding does not stop the drift; this plan exists *because* a markdown finding rotted for 22 days. Test-only, no `src/main` changes. |
-| — | **Task 11 opens a tracked issue per open finding** | The 2026-08-18 parameter audit ended with a table naming Plans 2–6 across ~20 findings; thirteen days later none of the five existed. Handing findings back as a conversation summary has a 0-for-5 record in this repo, so the findings now leave the docs tree and the report records their issue numbers. |
+| — | **Task 11 opens a tracked issue per open finding, behind a confirmation gate** | The 2026-08-18 parameter audit ended with a table naming Plans 2–6 across ~20 findings; thirteen days later none of the five existed. Handing findings back as a conversation summary has a 0-for-5 record in this repo, so the findings now leave the docs tree and the report records their issue numbers. Issue creation is outward-facing and public, so Step 6 drafts a manifest and stops for explicit approval before Step 7 creates anything — a gate that stands even under a standing autonomy instruction. |
 | — | added the reference map to Global Constraints | Advisory only: a quantity checklist so target selection stops depending on the spec's file list, which had already missed three live targets. Explicitly barred from being numeric ground truth — the document is LLM-generated (truncated `k_empt` LaTeX, uniform citation dates, a podcast in the bibliography, a "validation" section that validates nothing), and four of its constants conflict with the code in ways where the code is at least as likely to be right. |
 | — | added a "duplications that currently agree" status convention | Tasks 6 and 7 both surface paths that compute the same number today with nothing enforcing it. Without a distinct status they read as either false alarms or live bugs, and they are neither. |
 
