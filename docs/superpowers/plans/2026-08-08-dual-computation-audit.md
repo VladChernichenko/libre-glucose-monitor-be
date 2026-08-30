@@ -23,9 +23,10 @@ IOB/COB.
 
 **Architecture:** No new production code paths. One task corrects an already-committed finding
 that the intervening merges made false; eight tracing tasks read specific methods/call sites and
-append entries to a shared findings-report markdown file; one task adds a real JUnit test
-reproducing the observed chart-jump scenario. A final task compiles and cross-checks the report
-against the design spec's target list.
+each write their own findings fragment; two test tasks add a real JUnit test reproducing the
+observed chart-jump scenario and a set of pinning tests that bind the duplicated constants
+together. A final task assembles the fragments into one report, cross-checks it, opens a tracked
+issue per open finding, and gates on the Definition of done.
 
 **Tech Stack:** Java 21, Spring Boot 3.5, JUnit 5, Mockito, AssertJ (existing test stack — no new
 dependencies).
@@ -41,21 +42,36 @@ dependencies).
 - Pattern only: a quantity computed by >1 independent path. Do not report unrelated bug classes
   (stale caches, unit conversion, timezone handling) even if noticed in passing — note them in
   the report's "Observed but out of scope" section instead.
-- No production code changes in this plan. The one test task (Task 9) adds a test only; if it
-  fails, that failure IS the finding — do not fix the underlying code as part of this plan.
-  Tasks 6 and 7 will surface duplicated derivations whose obvious remedy is a refactor: **do not
-  refactor.** Write the finding and move on; extracting a shared helper changes ODE behaviour
-  risk-for-risk and belongs in its own test-first plan.
+- **No production code changes in this plan. Test-only additions are permitted, and only in
+  Tasks 9 and 10.** Task 9 adds a continuity test; if it fails, that failure IS the finding — do
+  not fix the underlying code. Task 10 adds pinning tests that bind duplicated constants to each
+  other so a future edit fails the build instead of drifting silently. Neither may touch
+  `src/main`. Tasks 6 and 7 will surface duplicated derivations whose obvious remedy is a
+  refactor: **do not refactor.** Write the finding, let Task 10 pin it, and move on; extracting a
+  shared helper changes ODE behaviour risk-for-risk and belongs in its own test-first plan.
 - Handling uncertainty (spec §4): if you find a genuine divergence but can't tell from the code,
   comments, or git history whether it's a bug or an intentional simplification, do not guess
   either way. Stop that task, write the divergence up as `Status: needs user input` in the report
   (quantity + both paths + why intentionality is unclear), and move on to the next task rather
-  than blocking on it — the user resolves these when reviewing the compiled report in Task 10.
-- The findings report already exists at
-  `docs/superpowers/specs/2026-08-08-dual-computation-findings.md` with exactly one entry, and
-  that entry is **wrong as of `8b5d8c3`** — Task 1 corrects it. Tasks 2–9 append to it. Every
-  task that touches it must re-read it immediately before editing, and must `git add` + commit
-  just that file (plus its own test file where applicable) — never batch commits across tasks.
+  than blocking on it — the user resolves these when reviewing the compiled report in Task 11.
+- **One fragment per task — never a shared file.** Each tracing task writes its findings to its
+  own file under `docs/superpowers/specs/2026-08-08-dual-computation-findings/`, named in that
+  task's **Files** block. No two tasks ever write the same path, which is what makes the
+  "can run in parallel" claims true rather than aspirational, and what lets
+  `superpowers:subagent-driven-development` dispatch these concurrently without conflicts.
+  Commit only your own fragment (plus your own test file where applicable) — never batch commits
+  across tasks, and never edit another task's fragment.
+
+  **Ordering:** Task 1 runs first and alone — it creates the directory everyone else writes into.
+  Tasks 2–8 may then run concurrently. Task 9 is independent and may join them. Task 10 needs the
+  findings from Tasks 5, 6 and 7, so it runs after those. Task 11 runs last, alone.
+
+  The single report at `docs/superpowers/specs/2026-08-08-dual-computation-findings.md` already
+  exists with exactly one entry, and that entry is **wrong as of `8b5d8c3`** — Task 1 converts it
+  into fragment `01-isf-fallback.md` and corrects it there. Task 11 concatenates every fragment
+  back into that same path and deletes the fragment directory, so the report ends up exactly
+  where the design spec and every existing reference expect it. Between Task 1 and Task 11 the
+  report file does not exist; that is intentional, not a mistake to "fix" mid-run.
 - **Line numbers in this plan are valid at `8b5d8c3`.** Each task's first step re-greps rather
   than trusting them. If a grep disagrees with a number here, trust the grep and say so in the
   finding.
@@ -88,14 +104,14 @@ dependencies).
   The `Reachability` line is new in this re-baseline. It exists because the original Task 1
   finding claimed a user-visible impact that a later merge removed, and nothing in the entry
   format forced that claim to be checked. Every finding from here on states reachability
-  explicitly, and Task 10 cross-checks it.
+  explicitly, and Task 11 cross-checks it.
 - **Reference map (advisory, not ground truth).** A synthesis document —
   *"Интегративная математическая модель глюкозо-инсулинового гомеостаза"*, 22 pp., supplied by
   the user 2026-08-30 — describes the Hovorka + Dalla Man + Palumbo architecture this codebase
   implements. Use it for **one purpose only: enumerating the quantities a complete model has**,
   so target selection stops depending on the spec's 2026-08-08 §3 list (which has already missed
-  three live targets). Everything this plan needs from it is transcribed below and in Task 10
-  Step 2 — the plan is self-contained and you do not need the PDF to execute it.
+  three live targets). Everything this plan needs from it is transcribed below and in Task 11
+  Step 3 — the plan is self-contained and you do not need the PDF to execute it.
 
   **Do not treat its numbers as authoritative, and do not open a code-vs-literature conformance
   review — that is a different audit.** The document is LLM-generated: its `k_empt` equation is
@@ -122,14 +138,36 @@ dependencies).
 
 ---
 
+## Definition of done
+
+The audit is complete when every line below is true. Task 11 gates on this list; do not report
+the plan finished while any row fails. Each is checkable by reading, not by judgment.
+
+- [ ] Every target in the design spec's §3 scope list has an entry in the report — a finding, a
+      "traced, no divergence found" note, or an explicit `## Not yet traced:` line.
+- [ ] Every row of the Task 11 quantity sweep has a verdict line.
+- [ ] Every finding carries all fields of the report template, `Reachability` included, and no
+      field reads "unknown" without saying what would settle it.
+- [ ] Every `needs user input` entry is named in the summary section, not just buried in the body.
+- [ ] Every finding with status `open` carries a GitHub issue number (Task 11), or the report
+      states why issues could not be created.
+- [ ] The pinning tests from Task 10 are green, and each names the finding it pins.
+- [ ] The summary states the baseline commit the audit ran against.
+- [ ] The fragment directory is gone and the report exists at
+      `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`.
+
+---
+
 ### Task 1: Correct the stale ISF-fallback finding
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/01-isf-fallback.md`
 
 **Interfaces:**
 - Consumes: nothing (first task).
-- Produces: a corrected first finding. Tasks 2–9 append after it.
+- Produces: `01-isf-fallback.md`, the first fragment, and the fragment directory itself.
+  Tasks 2–10 each write their own sibling fragment; Task 11 concatenates them. **Task 1 must
+  land before any other task starts** — it creates the directory they all write into.
 
 The committed finding says the ISF fallback divergence reaches the user through the
 `predictionTrend` field, and that this field "was NOT touched by the `30b76bd` fix". Both claims
@@ -188,9 +226,21 @@ finding.
   (a type declaration and a comment) and no render site — i.e. the field is typed but unused.
   That makes the divergence **latent**, not user-visible. Record whatever you actually find.
 
-- [ ] **Step 3: Replace the finding with the corrected version**
+- [ ] **Step 3: Migrate the report into a fragment and correct it there**
 
-  Open `docs/superpowers/specs/2026-08-08-dual-computation-findings.md` and replace the whole
+  Create the fragment directory and move the existing report into it, so every later task has an
+  isolated file to write and Task 11 has something to concatenate:
+
+  ```bash
+  cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
+  mkdir -p docs/superpowers/specs/2026-08-08-dual-computation-findings
+  git mv docs/superpowers/specs/2026-08-08-dual-computation-findings.md \
+         docs/superpowers/specs/2026-08-08-dual-computation-findings/01-isf-fallback.md
+  ```
+
+  Then edit `01-isf-fallback.md`: drop the `# Dual-Computation Divergence Audit — Findings`
+  header (Task 11 writes the report header when it concatenates — a fragment holds entries only,
+  no document title), and replace the whole
   `## Finding: ISF Fallback Divergence (affects predictionTrend)` section with:
 
   ```markdown
@@ -234,7 +284,9 @@ finding.
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add -A docs/superpowers/specs/2026-08-08-dual-computation-findings.md \
+             docs/superpowers/specs/2026-08-08-dual-computation-findings/
+  git status --short   # expect exactly one rename + modification, nothing else
   git commit -m "docs: correct the ISF fallback finding - divergence is now latent, not in predictionTrend"
   ```
 
@@ -243,7 +295,7 @@ finding.
 ### Task 2: Trace the shipped `factors` block and the dead analytical predictor
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/02-factors-block.md`
 
 **Interfaces:**
 - Consumes: Task 1's corrected finding (read it first — this task extends its Reachability
@@ -308,7 +360,7 @@ every request, disagrees with the Hovorka path by construction, and is still ser
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings/02-factors-block.md
   git commit -m "docs: trace the shipped factors block vs the Hovorka path (dual-computation audit)"
   ```
 
@@ -317,7 +369,7 @@ every request, disagrees with the Hovorka path by construction, and is still ser
 ### Task 3: Trace `confidence` and re-verify the COB/IOB single-source claim
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/03-confidence-cob-iob.md`
 
 **Interfaces:**
 - Consumes: nothing new.
@@ -375,7 +427,7 @@ half of this task has grown since the original plan: two services that did not c
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings/03-confidence-cob-iob.md
   git commit -m "docs: trace confidence + re-verify COB/IOB single source (dual-computation audit)"
   ```
 
@@ -384,10 +436,11 @@ half of this task has grown since the original plan: two services that did not c
 ### Task 4: Trace `ExperimentService` / `VerificationService` for independent prediction logic
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/04-experiment-verification.md`
 
 **Interfaces:**
-- Consumes: nothing new (independent of Tasks 1–3; can run in parallel with them).
+- Consumes: nothing new. Independent of Tasks 2–5 and safe to run alongside them, but **after
+  Task 1**, which creates the fragment directory this task writes into.
 - Produces: findings (or "traced, no divergence" notes) appended to the report.
 
 `VerificationService.evaluateEvent` computes `actualDelta = twoHour - baseline` (:212) from
@@ -427,7 +480,7 @@ glucose/COB/IOB/ISF value independently rather than reading it from `GlucoseCalc
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings/04-experiment-verification.md
   git commit -m "docs: trace ExperimentService/VerificationService for independent prediction logic (dual-computation audit)"
   ```
 
@@ -436,7 +489,7 @@ glucose/COB/IOB/ISF value independently rather than reading it from `GlucoseCalc
 ### Task 5: Trace `ContextAggregatorService` — a second live 2-hour prediction
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/05-context-aggregator.md`
 
 **Interfaces:**
 - Consumes: Task 1's corrected finding and Task 2's `factors` analysis if they have run (this
@@ -573,7 +626,7 @@ severities and different remedies.
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings/05-context-aggregator.md
   git commit -m "docs: trace ContextAggregatorService's independent 2h prediction (dual-computation audit)"
   ```
 
@@ -582,10 +635,11 @@ severities and different remedies.
 ### Task 6: Trace `BasalInsulinResolver` — EGP suppression computed two ways
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/06-basal-egp.md`
 
 **Interfaces:**
-- Consumes: nothing new (independent of Tasks 1–5; can run in parallel with them).
+- Consumes: nothing new. Independent of Tasks 2–5 and safe to run alongside them, but **after
+  Task 1**, which creates the fragment directory this task writes into.
 - Produces: one or two entries appended to the report.
 
 `BasalInsulinResolver` is named in the design spec's §3 scope list and the original plan had no
@@ -692,7 +746,7 @@ resetting the other's state to zero.
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings/06-basal-egp.md
   git commit -m "docs: trace BasalInsulinResolver vs the ODE's dynamic x3 (dual-computation audit)"
   ```
 
@@ -701,10 +755,11 @@ resetting the other's state to zero.
 ### Task 7: Trace `DallaManGutModel` — effective gut rates derived in three places
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/07-gut-rates.md`
 
 **Interfaces:**
-- Consumes: nothing new (independent of Tasks 1–6; can run in parallel with them).
+- Consumes: nothing new. Independent of Tasks 2–6 and safe to run alongside them, but **after
+  Task 1**, which creates the fragment directory this task writes into.
 - Produces: one entry appended to the report.
 
 `DallaManGutModel` is the second design-spec §3 target the original plan had no task for. The
@@ -792,7 +847,7 @@ to derivatives()" with nothing testing that claim.
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings/07-gut-rates.md
   git commit -m "docs: trace the three DallaManGutModel rate derivations (dual-computation audit)"
   ```
 
@@ -801,7 +856,7 @@ to derivatives()" with nothing testing that claim.
 ### Task 8: Trace plasma insulin `I(t)` — two PK lineages joined by a scale factor
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/08-plasma-insulin.md`
 
 **Interfaces:**
 - Consumes: nothing new (independent of Tasks 1–7). Task 6 Step 5 covers the same missing
@@ -883,7 +938,7 @@ pattern in its purest form.
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings/08-plasma-insulin.md
   git commit -m "docs: trace the V_I_SCALE bridge between OpenAPS IOB and Hovorka insulin action (dual-computation audit)"
   ```
 
@@ -893,7 +948,7 @@ pattern in its purest form.
 
 **Files:**
 - Modify: `src/test/java/che/glucosemonitorbe/hovorka/HovorkaGlucosePredictionServiceTest.java`
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/09-warmup-continuity.md`
 
 **Interfaces:**
 - Consumes: the existing `service` / `params` / `USER_ID` (:52) / `NOW` (:53) fields from this
@@ -998,22 +1053,155 @@ kink — no longer carries any weight. Treat both outcomes as genuinely open.
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
   git add src/test/java/che/glucosemonitorbe/hovorka/HovorkaGlucosePredictionServiceTest.java \
-          docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+          docs/superpowers/specs/2026-08-08-dual-computation-findings/09-warmup-continuity.md
   git commit -m "test: add Hovorka warm-up continuity check under active IOB/COB (dual-computation audit)"
   ```
 
 ---
 
-### Task 10: Compile and cross-check the final report
+### Task 10: Pin the duplications so they fail instead of drifting
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md`
+- Create: `src/test/java/che/glucosemonitorbe/hovorka/DuplicatedConstantPinningTest.java`
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings/10-pinning-tests.md`
 
 **Interfaces:**
-- Consumes: all entries from Tasks 1–9 (must run last, after all others are committed).
+- Consumes: the findings from Tasks 6 and 7 (which duplications exist) and Task 5 Step 4 (the
+  duplicated constants in `ContextAggregatorService`). **Must run after those three.**
+- Produces: a passing test class that fails the build if any pinned duplication drifts, plus a
+  fragment recording what is pinned and what could not be.
+
+Tasks 5, 6 and 7 each surface a *duplication that currently agrees*: two declarations of one
+number, nothing enforcing that they stay equal. A markdown finding does not prevent the drift —
+this plan exists because a markdown finding rotted unnoticed for 22 days. A test does. This task
+converts the agreeing-but-unenforced findings into assertions, which is the only part of this
+audit that keeps working after everyone stops reading the report.
+
+Test-only: nothing in `src/main` may change. If pinning something would require production code
+to move, that is a finding about testability, not a licence to refactor.
+
+- [ ] **Step 1: Pin `PEAK_X3_BASAL` to the constants it is derived from**
+
+  `BasalInsulinResolver`'s javadoc derives `PEAK_X3_BASAL` as `1 − F01/EGP0`. Bind them:
+
+  ```java
+  @Test
+  @DisplayName("PEAK_X3_BASAL stays consistent with 1 - F01_PER_KG/EGP0_PER_KG")
+  void peakX3Basal_matchesItsDerivation() {
+      double derived = 1.0 - HovorkaParameters.F01_PER_KG / HovorkaParameters.EGP0_PER_KG;
+      // The declared constant is the derivation rounded to 2 dp (0.3975 -> 0.40). The tolerance
+      // pins the RELATIONSHIP, not the literal: move F01 or EGP0 and this fails, which is the
+      // point. Do not widen it to make a future edit pass - re-derive the constant instead.
+      assertThat(BasalInsulinResolver.PEAK_X3_BASAL)
+              .as("PEAK_X3_BASAL (%s) is documented as 1 - F01/EGP0 = %s; one of the three moved",
+                      BasalInsulinResolver.PEAK_X3_BASAL, derived)
+              .isCloseTo(derived, within(0.005));
+  }
+  ```
+
+  Run it and confirm it passes at `8b5d8c3` (`0.40` vs `0.3975`, gap `0.0025`). If it fails, the
+  drift has already happened — that is a finding for Task 6, not a tolerance to widen.
+
+- [ ] **Step 2: Pin the constants duplicated between `GlucoseCalculationsService` and `ContextAggregatorService`**
+
+  Both classes privately declare `DEFAULT_CARB_RATIO = 2.0`, `DEFAULT_ISF = 1.0` and
+  `PRE_BOLUS_MAX_TIMING_EFFECT = 1.2`. Read them by reflection — the codebase already reflects on
+  privates in `GlucoseCalculationsServiceTest` — and assert each pair is equal. One assertion per
+  constant, each naming both declaration sites in its `.as(...)` message so a failure says where
+  to look.
+
+- [ ] **Step 3: Pin the duplicated `calculatePreBolusTimingContribution` bodies**
+
+  The two copies (`GlucoseCalculationsService:455`, `ContextAggregatorService:189`) are private and
+  byte-identical apart from comments. Pin behaviour, not text: invoke both by reflection over a
+  range that crosses every branch — `null`, 0, 5, 9.9, 10, 20, 25, 25.1, 45, 100 minutes — and
+  assert equal outputs. This is the strongest pin in the task: it survives either copy being
+  rewritten, and only fails when they stop agreeing.
+
+- [ ] **Step 4: Attempt the gut-rate pin, and record honestly if it cannot be done**
+
+  Task 7's finding is that `HovorkaOdeSolver.derivatives:348-364` and the warm-up replay at
+  `HovorkaGlucosePredictionService:586-598` derive the same four rates from separately-written
+  expressions, and that `HovorkaOdeSolver:349` uses a bare `1.68` where every other site uses
+  `HovorkaParameterService.HALF_LIFE_TO_TMAX_G`.
+
+  The strong pin is behavioural: feed identical inputs to both derivations and assert the four
+  rates match. Establish whether that is reachable — the replay block is inline inside a long
+  private method, and **the no-refactor rule stands even here**. If it is not reachable without
+  moving production code, do not force it. Fall back to:
+
+  ```java
+  @Test
+  @DisplayName("HALF_LIFE_TO_TMAX_G is the single source for the 2-compartment factor")
+  void halfLifeToTMaxG_pinnedAtItsPublishedValue() {
+      // HovorkaOdeSolver:349 hardcodes 1.68 instead of reading this constant (audit finding,
+      // Task 7). Until that literal is unified, this test makes a change to the named constant
+      // fail loudly rather than silently desynchronising the ODE from the replay.
+      assertThat(HovorkaParameterService.HALF_LIFE_TO_TMAX_G).isEqualTo(1.68);
+  }
+  ```
+
+  Say plainly in the fragment which of the two you achieved. A weak pin honestly labelled is
+  useful; a weak pin described as a strong one is how the last finding rotted.
+
+- [ ] **Step 5: Run the full suite**
+
+  ```bash
+  cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
+  export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
+  ./gradlew test --tests "che.glucosemonitorbe.hovorka.DuplicatedConstantPinningTest" -q
+  ./gradlew test -q
+  ```
+
+  Every pinning test must be **green** at `8b5d8c3` — these pin the status quo, they do not
+  report bugs. A red pinning test means either the finding it encodes is wrong or the drift
+  already happened; resolve that before committing, and say which it was.
+
+- [ ] **Step 6: Write the fragment and commit**
+
+  In `10-pinning-tests.md`, one line per pin: which finding it binds, which test method, and
+  whether the pin is strong (behavioural) or weak (value-only). List anything Tasks 5–7 found
+  that you could **not** pin, with the reason — that list is what the next audit starts from.
+
+  ```bash
+  cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
+  git add src/test/java/che/glucosemonitorbe/hovorka/DuplicatedConstantPinningTest.java \
+          docs/superpowers/specs/2026-08-08-dual-computation-findings/10-pinning-tests.md
+  git commit -m "test: pin the duplicated constants surfaced by the dual-computation audit"
+  ```
+
+---
+
+### Task 11: Compile and cross-check the final report
+
+**Files:**
+- Create: `docs/superpowers/specs/2026-08-08-dual-computation-findings.md` (from the fragments)
+- Delete: `docs/superpowers/specs/2026-08-08-dual-computation-findings/` (the whole directory)
+
+**Interfaces:**
+- Consumes: all fragments from Tasks 1–10 (must run last, after all others are committed).
 - Produces: the finished findings report, plus a short summary message to relay to the user.
 
-- [ ] **Step 1: Cross-check the report against the spec's target list**
+- [ ] **Step 1: Assemble the report from the fragments**
+
+  ```bash
+  cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
+  ls docs/superpowers/specs/2026-08-08-dual-computation-findings/
+  ```
+
+  Expect ten fragments, `01-` through `10-`. **A missing fragment means its task did not run** —
+  stop and say which, rather than compiling a report that silently omits a target.
+
+  Write `docs/superpowers/specs/2026-08-08-dual-computation-findings.md` as: the
+  `# Dual-Computation Divergence Audit — Findings` header, the summary section from Step 5
+  (leave a placeholder now, fill it there), then every fragment's body in numeric order. Read
+  each fragment as you go — you need their contents for Steps 2–6 anyway, and concatenating
+  blind is how a malformed entry survives to the final report.
+
+  Do not delete the fragment directory yet; Step 7 removes it in the same commit that adds the
+  assembled report, so the rename is legible in one diff.
+
+- [ ] **Step 2: Cross-check the report against the spec's target list**
 
   Open the report and `docs/superpowers/specs/2026-08-08-dual-computation-audit-design.md` §3
   ("Scope", lines 44–64) side by side. Confirm each in-scope target now has a corresponding entry:
@@ -1039,10 +1227,10 @@ kink — no longer carries any weight. Treat both outcomes as genuinely open.
   consequential in this report — say so in the addendum rather than burying them under a
   target the spec never named.
 
-- [ ] **Step 2: Second cross-check — by quantity, not by class**
+- [ ] **Step 3: Second cross-check — by quantity, not by class**
 
   The spec's list is a list of *files*, and that is how it missed three live targets. This step
-  re-checks the same report against the *quantities* a complete glucose-insulin model contains,
+  re-checks the assembled report against the *quantities* a complete glucose-insulin model contains,
   taken from the reference map (see Global Constraints). For each row, answer: **how many places
   in the codebase compute this, and does anything enforce agreement?** One line per row in the
   report, under `## Quantity sweep (2026-08-30)`.
@@ -1072,14 +1260,14 @@ kink — no longer carries any weight. Treat both outcomes as genuinely open.
   tracing work here. This step exists to make the report's coverage claim honest, and to hand the
   next audit a starting list instead of a file inventory.
 
-- [ ] **Step 3: Verify every `Reachability` line**
+- [ ] **Step 4: Verify every `Reachability` line**
 
   For each finding with `Reachability` other than "latent", re-run the grep that established it.
   This step exists because the original Task 1 finding shipped a reachability claim that a later
   merge silently falsified, and nobody noticed for 22 days. If a reachability claim no longer
   holds, correct it now rather than filing it.
 
-- [ ] **Step 4: Add a summary section at the top**
+- [ ] **Step 5: Add a summary section at the top**
 
   Prepend, after the `# Dual-Computation Divergence Audit — Findings` header: the baseline commit
   the audit was run against (`git rev-parse --short HEAD`), total findings count, how many are
@@ -1088,21 +1276,72 @@ kink — no longer carries any weight. Treat both outcomes as genuinely open.
   duplications* (Tasks 6, 7) — they need different remedies and a reader must not confuse them.
   This is what a human reviewer reads first.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Open a tracked issue per open finding**
+
+  This is the step that decides whether the audit matters in a month. The 2026-08-18 parameter
+  audit ended with a table naming Plans 2–6 over roughly twenty findings (F1–F21); thirteen days
+  later none of those five plans existed. A findings document with no owner is the failure mode
+  this audit is itself investigating, one level up. So the findings leave the repo.
+
+  First print what you are about to create, and read it:
 
   ```bash
   cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
-  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
-  git commit -m "docs: compile dual-computation audit findings summary"
+  gh repo view --json hasIssuesEnabled -q .hasIssuesEnabled
   ```
 
-- [ ] **Step 6: Report back to the user**
+  If that returns `false`, skip to the fallback at the end of this step.
 
-  Summarize the report in the conversation (not a new file) — how many open findings, what they
-  are, which are latent versus live, and which (if any) look worth the test-first fix treatment
-  next, per the design spec's §5 handoff. Flag any `needs user input` entries explicitly; those
-  block the handoff decision. If Tasks 6 or 7 produced a duplicated-and-untested finding, name
-  the pinning test that would close it — that is the cheapest available follow-up.
+  Then, for **each finding whose status is `open`** (not `not-a-bug`, not a "traced, no
+  divergence" note), create one issue:
+
+  ```bash
+  gh issue create \
+    --title "dual-computation: <finding name>" \
+    --label "dual-computation-audit" \
+    --body "<the finding entry verbatim, plus: audited at 8b5d8c3; see docs/superpowers/specs/2026-08-08-dual-computation-findings.md>"
+  ```
+
+  Create the label once first if it does not exist
+  (`gh label create dual-computation-audit --description "Findings from the 2026-08-08 dual-computation audit"`).
+  Then open one tracking issue titled `dual-computation audit: findings index`, listing every
+  issue number with its finding name, its reachability, and whether Task 10 pinned it.
+
+  Finally, **write each issue number back into the report** next to its finding
+  (`**Tracked:** #NNN`). The report and the tracker must point at each other; a one-way link
+  rots the same way a bare document does.
+
+  Judgment on volume: `needs user input` findings get an issue too — they are exactly the ones
+  that need a human. Latent findings get an issue, labelled as latent in the body. Do not open
+  issues for `not-a-bug` entries or clean traces.
+
+  **Fallback** if issues are disabled or `gh` fails: add a `## Tracking` section to the report
+  stating that no issues could be created, why, and listing every open finding as an explicit
+  unowned backlog. Then say so prominently in Step 8 — an untracked audit is a materially
+  weaker outcome and the user should hear it, not discover it later.
+
+- [ ] **Step 7: Commit**
+
+  ```bash
+  cd /Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be
+  git rm -r --quiet docs/superpowers/specs/2026-08-08-dual-computation-findings/
+  git add docs/superpowers/specs/2026-08-08-dual-computation-findings.md
+  git status --short   # expect: 10 deletions + 1 added/modified report, nothing else
+  git commit -m "docs: compile dual-computation audit findings report"
+  ```
+
+- [ ] **Step 8: Walk the Definition of done, then report back**
+
+  Go to the `## Definition of done` section at the top of this plan and check every row against
+  what actually exists — the assembled report, the issue list, the pinning tests, the deleted
+  fragment directory. **Do not report the audit complete while any row fails.** If a row cannot
+  be satisfied, say which and why; a named gap is a result, a silent one is how this plan's own
+  Task 1 finding survived being wrong for 22 days.
+
+  Then summarize in the conversation (not a new file): how many open findings, what they are,
+  which are live versus latent, the tracking issue number, and which findings Task 10 could not
+  pin. Flag any `needs user input` entries explicitly — those block the handoff decision in the
+  design spec's §5. If issues could not be created, lead with that rather than burying it.
 
 ---
 
@@ -1122,6 +1361,10 @@ kink — no longer carries any weight. Treat both outcomes as genuinely open.
 | Task 6 — compile report | Task 10, added a by-quantity sweep, reachability re-verification, a spec-coverage table and a scope addendum | Direct response to how Task 1 went stale unnoticed. |
 | "Tech Stack: Java 17" | Java 21 | `build.gradle:16` sets `JavaLanguageVersion.of(21)`; the original header was wrong when written. |
 | finding template | added a `Reachability` line | Nothing in the original template forced a finding to state where it surfaces, which is exactly the claim that rotted. |
+| — | **fragment-per-task instead of one shared findings file** | Nine tasks committed the same markdown file while three advertised themselves as parallel-safe, with "re-read it immediately before editing" as the only mitigation — which is not concurrency control. Under `subagent-driven-development`, which this plan's own header recommends, they would have conflicted or silently clobbered each other. Each task now owns one fragment; Task 11 concatenates back to the original path. |
+| — | **added a Definition of done** | The plan had no completion criterion, so "done" was a judgment call by whoever stopped. Task 11 Step 8 now walks a checkable list. |
+| *(none)* | **Task 10 — pinning tests** | Tasks 5, 6 and 7 each surface a duplication that agrees today with nothing enforcing it. A markdown finding does not stop the drift; this plan exists *because* a markdown finding rotted for 22 days. Test-only, no `src/main` changes. |
+| — | **Task 11 opens a tracked issue per open finding** | The 2026-08-18 parameter audit ended with a table naming Plans 2–6 across ~20 findings; thirteen days later none of the five existed. Handing findings back as a conversation summary has a 0-for-5 record in this repo, so the findings now leave the docs tree and the report records their issue numbers. |
 | — | added the reference map to Global Constraints | Advisory only: a quantity checklist so target selection stops depending on the spec's file list, which had already missed three live targets. Explicitly barred from being numeric ground truth — the document is LLM-generated (truncated `k_empt` LaTeX, uniform citation dates, a podcast in the bibliography, a "validation" section that validates nothing), and four of its constants conflict with the code in ways where the code is at least as likely to be right. |
 | — | added a "duplications that currently agree" status convention | Tasks 6 and 7 both surface paths that compute the same number today with nothing enforcing it. Without a distinct status they read as either false alarms or live bugs, and they are neither. |
 
