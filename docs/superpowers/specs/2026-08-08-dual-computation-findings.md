@@ -5,6 +5,8 @@
 
 ## Summary
 
+**Tracking:** all open findings are filed under the `dual-computation-audit` label; index issue **#32**.
+
 Eleven tasks. **Ten open findings, one retraction, four targets traced clean.** Full suite after
 the two test tasks: 1147 tests, 0 failures, 4 skipped.
 
@@ -125,6 +127,9 @@ twice. Removing them is a small, safe cleanup outside this plan's no-production-
 
 ## Finding: Four implementations of "predicted glucose over the horizon"
 
+**Tracked:** #26 (feature-flag half) and #28 (`factors`-block half).
+
+
 **Quantity:** the predicted glucose delta from now to the horizon, and the path of points the
 chart renders.
 
@@ -190,6 +195,9 @@ and that one call, nothing else. It is a self-contained heuristic over entry cou
 current glucose reading. Single source of truth; nothing to reconcile.
 
 ## Finding: ISF titration computes COB from nutrition-stripped entries
+
+**Tracked:** #24
+
 
 **Quantity:** carbs-on-board for a given note at a given time.
 
@@ -264,6 +272,9 @@ lossy builder instead of the shared mapper.
 
 ## Finding: verification scores the model against a formula that is not the model
 
+**Tracked:** #23
+
+
 **Quantity:** the predicted 2-hour glucose delta used to measure prediction error.
 
 **Paths:**
@@ -317,6 +328,9 @@ like a straightforward fix in the same shape as C2 (`9b6ccd4`) and is worth sepa
 
 ## Finding A: the AI advisor ships its own 2-hour prediction
 
+**Tracked:** #22
+
+
 **Quantity:** predicted glucose 2 hours ahead, and the correction dose implied by it.
 
 **Paths:**
@@ -355,6 +369,9 @@ carbs alone; the ODE's carb rise is set by `aG` and `tMaxG` and is unrelated to 
 
 ## Finding B: a second, lossy note→`CarbsEntry` converter
 
+**Tracked:** #25
+
+
 `ai/ContextAggregatorService.java:142` (`toCarbsEntry`) builds entries with `id`, `timestamp`,
 `carbs`, `insulin`, `mealType`, `comment`, `glucoseValue`, `originalCarbs`, `userId` and the
 rescue marker — but **no** `estimatedGi`, `glycemicLoad`, `fiber`, `protein`, `fat`,
@@ -376,6 +393,9 @@ adopting the mapper, which is why the nutrition fields are still missing.
 **Confidence:** confirmed-by-reading. **Status:** open.
 
 ## Finding C: duplicated constants and a duplicated method body
+
+**Tracked:** not filed separately — folded into #22 (same service, same fix).
+
 
 Declared privately in **both** `ContextAggregatorService` and `GlucoseCalculationsService`:
 `DEFAULT_CARB_RATIO = 2.0` (:31 / :38), `DEFAULT_ISF = 1.0` (:32 / :39),
@@ -417,6 +437,9 @@ carries a typo (`MMOl`).
 
 ## Finding: EGP suppression is modelled twice and stitched by re-parameterisation
 
+**Tracked:** #27
+
+
 **Quantity:** the fraction by which hepatic glucose production is suppressed at time `t`, and the
 resulting net EGP.
 
@@ -452,6 +475,9 @@ deliberate, or an artefact of stitching the two models? A one-line answer from w
 `49bcb7b` settles it; the code cannot.
 
 ## Finding: `PEAK_X3_BASAL` duplicates a derivable quantity, unpinned
+
+**Tracked:** #29
+
 
 `BasalInsulinResolver:34-35` documents `PEAK_X3_BASAL` as derived: `x3 = 1 − F01/EGP0 =
 1 − 0.0097/0.0161 ≈ 0.40`. Recomputed: `0.39751552795…`, so the declared `0.40` is that value
@@ -489,6 +515,9 @@ reaches the same absent compartment from the insulin side.
 ---
 
 ## Finding: the effective gut rates are derived in three places, bound by none
+
+**Tracked:** #30
+
 
 **Quantity:** the effective gastric/intestinal rate constants at a step — `kGriEff`, `kMaxEff`,
 `kMinEff`, `kAbsEff` — and the `Ra` computed from them.
@@ -547,6 +576,9 @@ belongs in its own test-first plan, not in an audit.
 ---
 
 ## Finding: plasma insulin is bridged from a foreign PK model by one empirical constant
+
+**Tracked:** #31
+
 
 **Quantity:** plasma insulin concentration `I(t)`, which drives `x₁`, `x₂` and `x₃`.
 
