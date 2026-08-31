@@ -55,6 +55,21 @@ an hour and let EGP drift back toward `EGP0`. Tracked as #27 (symptom), #31 (roo
 promoted from latent) and #33 (the blocker on any fix). No finding in this report now requires
 user input.
 
+**Confirmed by ablation.** Replacing `HovorkaOdeSolver:392` with `egp = p.egp0()` — the mechanism
+deleted — and re-running `BacktestHarnessTest` over 21,274 anchors changes exactly one digit:
+MEAL MARD 53.6% → 53.5%. FASTING (2.35 / 2.83 / −0.86) and CORRECTION (2.68 / 3.11 / −0.84) are
+bit-identical, as are in-band %, Clarke A+B % and the harness's second variant block.
+
+**And Gap 1 was never validated.** Task 7 is unchecked in `.superpowers/sdd/progress.md` where
+Tasks 1–6 each carry a completion line; the plan's backtest step was conditional on
+`/Users/vlad/harness-local/cgm.csv`, which does not exist (the data is
+`cgm_readings_202606102003.csv`). The plan's stated goal — CORRECTION@4h bias improving from
+−1.14 toward 0 — is unmet: it is −0.84 both with `x₃` live and ablated. Separately, `49bcb7b`'s
+commit message claims "x3 warm-initialised from basal suppression fraction" while the diff it
+shipped sets `withX3(0.0)`; the message is not a reliable description of what landed. `62dd077`
+is exonerated — the bridge reduced to `iobActivityRate × 12.0` at `49bcb7b` too, so the mechanism
+was inert from birth rather than broken later.
+
 ### Retracted
 
 `01-isf-fallback.md` — the ISF Fallback Divergence does not exist and never did.
