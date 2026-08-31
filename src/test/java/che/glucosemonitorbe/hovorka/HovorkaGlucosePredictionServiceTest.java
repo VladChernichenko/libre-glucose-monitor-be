@@ -134,6 +134,48 @@ class HovorkaGlucosePredictionServiceTest {
                 firstPoint, g0).isCloseTo(g0, within(0.15));
     }
 
+    @Test
+    @DisplayName("Active correction bolus + recent meal: first forward point must not kink relative to the following points' trend")
+    void activeDoseAndMeal_firstEmittedPoint_noKinkAtWarmupBoundary() {
+        double g0 = 6.4;
+
+        InsulinDose correction = InsulinDose.builder()
+                .timestamp(NOW.minusMinutes(82))
+                .units(5.0)
+                .build();
+        CarbsEntry lunch = CarbsEntry.builder()
+                .timestamp(NOW.minusMinutes(34))
+                .carbs(10.0)
+                .build();
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                params, g0, NOW,
+                List.of(lunch), List.of(correction), List.of(),
+                USER_ID, 240);
+
+        assertThat(curve).hasSizeGreaterThanOrEqualTo(3);
+
+        double p0 = curve.get(0).getPredictedGlucose(); // minute 5
+        double p1 = curve.get(1).getPredictedGlucose(); // minute 10
+        double p2 = curve.get(2).getPredictedGlucose(); // minute 15
+
+        double stepIntoP0 = p0 - g0;
+        double stepP0toP1 = p1 - p0;
+        double stepP1toP2 = p2 - p1;
+        double localTrend = (stepP0toP1 + stepP1toP2) / 2.0;
+
+        // The step from the anchor into the first emitted point should be roughly consistent
+        // with the trend the curve is already following one and two steps later - not an
+        // outlier kink. 0.3 mmol/L in one 5-min step is already a generous allowance (the
+        // screenshot's visible jump was roughly 0.6-0.8 mmol/L in a single step).
+        assertThat(stepIntoP0 - localTrend)
+                .as("Step from currentGlucose (%.2f) into the first point (%.2f) is %.2f, but the "
+                        + "curve's own local trend one/two steps later is %.2f - a large gap here "
+                        + "is the discontinuity seen in the screenshot (correction bolus + meal "
+                        + "both active), not present in the idle case", g0, p0, stepIntoP0, localTrend)
+                .isCloseTo(0.0, within(0.3));
+    }
+
     // ---
     // Regression: meal logged at exactly "now" (minsAgo=0) must not be dropped
     // ---
