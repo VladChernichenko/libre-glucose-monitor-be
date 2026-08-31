@@ -40,11 +40,20 @@ latent). Treat "expected at `8b5d8c3`" text in the plan as a hypothesis, never a
 | 07 — four gut rates derived in three places; `1.68` hardcoded at `HovorkaOdeSolver:349` | weakly — strong form needs a refactor this plan forbids |
 | 08 — `V_I_SCALE` bridges an OpenAPS IOB curve into Hovorka insulin action | no — nothing to bind it to |
 
-### Needs user input — blocks the handoff
+### Resolved after filing — the x₃ / insulin-scale cluster
 
-| Finding | Question |
-|---|---|
-| **06 — EGP double-suppression** | After the seam writes the already-suppressed `egpNow` into `egp0` and resets `x₃` to 0, a bolus drives `x₃` up and suppresses it again. Deliberate, or an artefact of stitching two models? The code comment concedes a *fasting*-case limitation and is silent on this. |
+Finding 06's open question was filed as `needs user input`. Investigating it on 2026-08-31
+dissolved the question: the mechanism is numerically inert. Driven through the real
+`HovorkaOdeSolver.derivatives()`, a 5 u bolus produces a peak `plasmInsulin` of 0.4640 mU/L
+(physiology: 40–100), a peak bolus-driven `x₃` of 0.00019573 against a basal 0.40, and withholds
+0.001784 mmol/L across 4.5 h — roughly 56× below the 0.1 mmol/L chart quantum.
+
+The seam at `HovorkaGlucosePredictionService:299-306` is therefore best read not as a modelling
+choice but as a **workaround for a scale mismatch**: `x₃_ss = S_IE × I` means `PEAK_X3_BASAL =
+0.40` needs `I ≈ 800 mU/L`, so seeding it and letting the ODE run would decay it to ~0.005 within
+an hour and let EGP drift back toward `EGP0`. Tracked as #27 (symptom), #31 (root cause,
+promoted from latent) and #33 (the blocker on any fix). No finding in this report now requires
+user input.
 
 ### Retracted
 
@@ -437,7 +446,7 @@ carries a typo (`MMOl`).
 
 ## Finding: EGP suppression is modelled twice and stitched by re-parameterisation
 
-**Tracked:** #27
+**Tracked:** #27 — reframed 2026-08-31; see also #31 and #33.
 
 
 **Quantity:** the fraction by which hepatic glucose production is suppressed at time `t`, and the
@@ -577,7 +586,7 @@ belongs in its own test-first plan, not in an audit.
 
 ## Finding: plasma insulin is bridged from a foreign PK model by one empirical constant
 
-**Tracked:** #31
+**Tracked:** #31 — promoted to root cause 2026-08-31; see #27 and #33.
 
 
 **Quantity:** plasma insulin concentration `I(t)`, which drives `x₁`, `x₂` and `x₃`.
