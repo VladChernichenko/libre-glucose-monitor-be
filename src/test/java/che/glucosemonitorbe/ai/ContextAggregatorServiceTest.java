@@ -9,7 +9,13 @@ import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
+import che.glucosemonitorbe.dto.InsulinCalculationRequest;
+import che.glucosemonitorbe.dto.InsulinCalculationResponse;
+import che.glucosemonitorbe.exception.DosingRefusalReason;
+import che.glucosemonitorbe.exception.DosingRefusedException;
 import che.glucosemonitorbe.service.CarbsOnBoardService;
+import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -45,6 +51,7 @@ class ContextAggregatorServiceTest {
     @Mock UserInsulinPreferencesService insulinPreferencesService;
     @Mock CarbsOnBoardService carbsOnBoardService;
     @Mock InsulinCalculatorService insulinCalculatorService;
+    @Mock GlucoseCalculationsService calculationsService;
 
     @InjectMocks ContextAggregatorService service;
 
@@ -68,6 +75,24 @@ class ContextAggregatorServiceTest {
         when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any())).thenReturn(List.of());
         when(carbsOnBoardService.calculateTotalCarbsOnBoard(any(), any(), eq(userId))).thenReturn(0.0);
         when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble())).thenReturn(0.0);
+        // Default: the dose calculator's own behaviour is covered by InsulinCalculatorServiceTest
+        // and InsulinCalculatorServiceIsfWindowTest; here it only has to return something.
+        when(insulinCalculatorService.calculateRecommendedInsulin(any()))
+                .thenReturn(InsulinCalculationResponse.builder().recommendedInsulin(0.0).build());
+        // Default: canonical COB/IOB inputs. Individual tests override with their own entries.
+        when(calculationsService.activeCobIobInputs(eq(userId), any()))
+                .thenReturn(new GlucoseCalculationsService.ActiveCobIobInputs(
+                        List.of(), List.of(), List.of(), defaultUserSettings, defaultRapidIob));
+        when(carbsOnBoardService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class)))
+                .thenReturn(0.0);
+        // Default: the canonical prediction path is exercised in its own tests; here it only has
+        // to return something well-formed so unrelated assertions are not testing an NPE.
+        when(calculationsService.calculateGlucoseData(any()))
+                .thenReturn(GlucoseCalculationsResponse.builder()
+                        .twoHourPrediction(6.0)
+                        .activeCarbsOnBoard(0.0)
+                        .activeInsulinOnBoard(0.0)
+                        .build());
     }
 
     @Test
@@ -100,33 +125,7 @@ class ContextAggregatorServiceTest {
         assertThat(ctx.getGlucoseValues()).isEmpty();
     }
 
-    @Test
-    @DisplayName("2h prediction clamped to [1, 25] with activeCOB contribution")
-    void buildContext_2hPredictionClamped() {
-        long now = System.currentTimeMillis();
-        CgmReading r = chartRow(450, now - 1000); // 25 mmol/L
-        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of(r));
-        when(carbsOnBoardService.calculateTotalCarbsOnBoard(any(), any(), eq(userId))).thenReturn(200.0); // huge COB
 
-        AnalysisContext ctx = service.buildContext(userId, 12);
-
-        assertThat(ctx.getPredictedGlucose2h()).isLessThanOrEqualTo(25.0);
-        assertThat(ctx.getPredictedGlucose2h()).isGreaterThanOrEqualTo(1.0);
-    }
-
-    @Test
-    @DisplayName("correction units are positive when latest glucose exceeds 6.5 and IOB is zero")
-    void buildContext_correctionUnitsCalculatedWhenHyper() {
-        long now = System.currentTimeMillis();
-        CgmReading r = chartRow((int)(11.5 * 18), now - 1000);
-        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of(r));
-        when(insulinCalculatorService.calculateTotalActiveInsulin(any(), any(), anyDouble(), anyDouble())).thenReturn(0.0);
-
-        AnalysisContext ctx = service.buildContext(userId, 12);
-
-        // (11.5 - 6.5) / 2.5 - 0 = 2.0
-        assertThat(ctx.getEstimatedCorrectionUnits()).isGreaterThan(0.0);
-    }
 
     @Test
     @DisplayName("pre-bolus pause computed when bolus note precedes meal note within 90 min")
@@ -203,36 +202,134 @@ class ContextAggregatorServiceTest {
      * resolved per window rather than pinned to the base ISF.
      */
     @Test
-    @DisplayName("C2: estimated correction units use the meal-window ISF, not the base ISF")
-    void buildContext_correctionUnitsTrackMealWindowIsf() {
-        UserSettingsDTO settings = new UserSettingsDTO();
-        settings.setCarbRatio(2.0);
-        settings.setIsf(2.5);          // base/autotuned ISF - must NOT be used when a window override exists
-        settings.setIsfBreakfast(2.0); // 05:00-10:59
-        settings.setIsfDinner(4.0);    // 16:00-21:59
-        when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
+    @DisplayName("#22: with no CGM readings there is no forecast to report, but COB/IOB still resolve")
+    void buildContext_noReadings_reportsNoForecastRatherThanOne() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 23, 12, 0);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of());
+        when(carbsOnBoardService.calculateTotalCarbsOnBoard(any(), any(), any(UserSettingsDTO.class)))
+                .thenReturn(18.0);
 
-        LocalDateTime breakfastNow = LocalDateTime.of(2026, 8, 23, 8, 0);
-        LocalDateTime dinnerNow = LocalDateTime.of(2026, 8, 23, 19, 0);
+        AnalysisContext ctx = service.buildContext(userId, 12, now);
 
-        CgmReading breakfastReading = chartRowAt(11.5, breakfastNow.minusMinutes(1));
-        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
-                .thenReturn(List.of(breakfastReading));
-        AnalysisContext breakfastCtx = service.buildContext(userId, 12, breakfastNow);
-
-        CgmReading dinnerReading = chartRowAt(11.5, dinnerNow.minusMinutes(1));
-        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
-                .thenReturn(List.of(dinnerReading));
-        AnalysisContext dinnerCtx = service.buildContext(userId, 12, dinnerNow);
-
-        // (11.5 - 6.5) / 2.0 - 0 = 2.5u at the breakfast-window ISF
-        assertThat(breakfastCtx.getEstimatedCorrectionUnits()).isCloseTo(2.5, within(0.01));
-        // (11.5 - 6.5) / 4.0 - 0 = 1.25u at the dinner-window ISF
-        assertThat(dinnerCtx.getEstimatedCorrectionUnits()).isCloseTo(1.25, within(0.01));
-        assertThat(breakfastCtx.getEstimatedCorrectionUnits())
-                .as("same glucose and IOB must still yield different guidance across meal windows")
-                .isNotEqualTo(dinnerCtx.getEstimatedCorrectionUnits());
+        // latest defaults to 0.0 with no readings; forecasting from it would put a fabricated
+        // number in front of the patient and into the LLM prompt.
+        assertThat(ctx.getPredictedGlucose2h())
+                .as("no reading means no forecast, not a forecast from 0.0 mmol/L").isNull();
+        assertThat(ctx.getEstimatedCorrectionUnits())
+                .as("no reading means no correction guidance").isNull();
+        assertThat(ctx.getActiveCob())
+                .as("COB does not depend on a CGM reading and must still be reported").isEqualTo(18.0);
     }
+
+    @Test
+    @DisplayName("#22: the correction estimate comes from the canonical dose calculator")
+    void buildContext_correctionDelegatesToInsulinCalculator() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 23, 12, 0);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(chartRowAt(11.5, now.minusMinutes(1))));
+        // Local formula would give (11.5 - 6.5) / 2.5 = 2.0u. The canonical calculator says 1.75.
+        when(insulinCalculatorService.calculateRecommendedInsulin(any()))
+                .thenReturn(InsulinCalculationResponse.builder().recommendedInsulin(1.75).build());
+
+        AnalysisContext ctx = service.buildContext(userId, 12, now);
+
+        assertThat(ctx.getEstimatedCorrectionUnits())
+                .as("the dose shown at priority high must be the canonical calculator's, not a local formula")
+                .isEqualTo(1.75);
+    }
+
+    @Test
+    @DisplayName("#22: a dosing refusal yields no correction guidance rather than failing the analysis")
+    void buildContext_dosingRefusalSuppressesGuidance() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 23, 12, 0);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(chartRowAt(22.0, now.minusMinutes(1))));
+        when(insulinCalculatorService.calculateRecommendedInsulin(any()))
+                .thenThrow(new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS, "too big"));
+
+        AnalysisContext ctx = service.buildContext(userId, 12, now);
+
+        assertThat(ctx.getEstimatedCorrectionUnits())
+                .as("a refused dose must not be rendered, and must not break the whole analysis")
+                .isNull();
+        assertThat(ctx.getLatestGlucose()).isEqualTo(22.0);
+    }
+
+    @Test
+    @DisplayName("#22: the dose request is pinned to the analysis instant so the meal-window ISF resolves there")
+    void buildContext_doseRequestCarriesAnalysisInstant() {
+        LocalDateTime dinner = LocalDateTime.of(2026, 8, 23, 19, 0);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(chartRowAt(11.5, dinner.minusMinutes(1))));
+        when(insulinCalculatorService.calculateRecommendedInsulin(any()))
+                .thenReturn(InsulinCalculationResponse.builder().recommendedInsulin(1.0).build());
+        ArgumentCaptor<InsulinCalculationRequest> captor =
+                ArgumentCaptor.forClass(InsulinCalculationRequest.class);
+
+        service.buildContext(userId, 12, dinner);
+
+        verify(insulinCalculatorService).calculateRecommendedInsulin(captor.capture());
+        InsulinCalculationRequest req = captor.getValue();
+        assertThat(req.getClientTimeInfo()).as("without this the ISF window resolves at server 'now'").isNotNull();
+        assertThat(req.getClientTimeInfo().toLocalDateTime()).isEqualTo(dinner);
+        assertThat(req.getCarbs()).as("correction-only estimate carries no meal").isEqualTo(0.0);
+        assertThat(req.getCurrentGlucose()).isEqualTo(11.5);
+    }
+
+    @Test
+    @DisplayName("#25: COB comes from the canonical nutrition-aware entries, not a local converter")
+    void buildContext_cobUsesCanonicalEntries() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 23, 12, 0);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(chartRowAt(8.0, now.minusMinutes(1))));
+
+        // A meal the shared mapper would enrich with a GI-aware absorption curve. The local
+        // converter drops those fields, so the two builders disagree for exactly this note.
+        CarbsEntry enriched = CarbsEntry.builder()
+                .timestamp(now.minusHours(1)).carbs(60.0).userId(userId).build();
+        enriched.setAbsorptionMode("GI_GL_ENHANCED");
+        GlucoseCalculationsService.ActiveCobIobInputs inputs =
+                new GlucoseCalculationsService.ActiveCobIobInputs(
+                        List.of(), List.of(enriched), List.of(), defaultUserSettings, defaultRapidIob);
+        when(calculationsService.activeCobIobInputs(eq(userId), any())).thenReturn(inputs);
+        when(carbsOnBoardService.calculateTotalCarbsOnBoard(eq(List.of(enriched)), any(), any(UserSettingsDTO.class)))
+                .thenReturn(42.0);
+
+        AnalysisContext ctx = service.buildContext(userId, 12, now);
+
+        assertThat(ctx.getActiveCob())
+                .as("activeCob must be computed from the canonical entries the dashboard uses")
+                .isEqualTo(42.0);
+    }
+
+    @Test
+    @DisplayName("#22: the 2h prediction comes from the canonical prediction service, not a local formula")
+    void buildContext_predictionDelegatesToCalculationsService() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 23, 12, 0);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(chartRowAt(11.5, now.minusMinutes(1))));
+        // The canonical path says 9.9. The old local formula would say 11.5 (latest, with zero
+        // COB/IOB), so this can only pass if the value is actually read from the delegate.
+        when(calculationsService.calculateGlucoseData(any()))
+                .thenReturn(GlucoseCalculationsResponse.builder()
+                        .twoHourPrediction(9.9)
+                        .activeCarbsOnBoard(0.0)
+                        .activeInsulinOnBoard(0.0)
+                        .build());
+
+        AnalysisContext ctx = service.buildContext(userId, 12, now);
+
+        assertThat(ctx.getPredictedGlucose2h())
+                .as("predictedGlucose2h must be the canonical twoHourPrediction, not a second model")
+                .isEqualTo(9.9);
+    }
+
+    // C2 (9b6ccd4) required that this path never substitute the base ISF where a meal-window
+    // value exists. Since #22 the dose is computed by InsulinCalculatorService, so C2 is now
+    // guarded in two halves: this class pins the request to the analysis instant
+    // (buildContext_doseRequestCarriesAnalysisInstant above), and the calculator resolves the
+    // window ISF at that instant (InsulinCalculatorServiceIsfWindowTest). Asserting the ISF
+    // arithmetic here would now only assert a mock.
 
     // ---- rescue-carb marker ----
 
@@ -243,45 +340,9 @@ class ContextAggregatorServiceTest {
      * false, and the advisor was told a 15 g rescue still had ~11 g on board 30 minutes later while
      * the dashboard, which does route through the mapper, reported it three-quarters absorbed.
      */
-    @Test
-    @DisplayName("a hypo_treatment note reaches the COB calculation carrying the rescue marker")
-    void buildContext_marksHypoTreatmentNotesAsRescue() {
-        Note rescue = new Note();
-        rescue.setTimestamp(LocalDateTime.now().minusMinutes(30));
-        rescue.setCarbs(15.0);
-        rescue.setInsulin(0.0);
-        rescue.setType(Note.TYPE_HYPO_TREATMENT);
-
-        Note meal = new Note();
-        meal.setTimestamp(LocalDateTime.now().minusMinutes(30));
-        meal.setCarbs(40.0);
-        meal.setInsulin(0.0);
-
-        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
-                .thenReturn(List.of(rescue, meal));
-        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId)).thenReturn(List.of());
-
-        service.buildContext(userId, 12);
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<CarbsEntry>> captor = ArgumentCaptor.forClass(List.class);
-        verify(carbsOnBoardService).calculateTotalCarbsOnBoard(captor.capture(), any(), eq(userId));
-        List<CarbsEntry> entries = captor.getValue();
-
-        assertThat(entries).hasSize(2);
-        CarbsEntry rescueEntry = entries.stream()
-                .filter(e -> e.getCarbs() == 15.0).findFirst().orElseThrow();
-        CarbsEntry mealEntry = entries.stream()
-                .filter(e -> e.getCarbs() == 40.0).findFirst().orElseThrow();
-
-        assertThat(RescueCarbProfile.isRescue(rescueEntry.getAbsorptionMode()))
-                .as("absorptionMode was %s", rescueEntry.getAbsorptionMode())
-                .isTrue();
-        assertThat(RescueCarbProfile.isRescue(mealEntry.getAbsorptionMode()))
-                .as("an ordinary meal must not be marked - otherwise this passes for a mutant "
-                    + "that marks everything")
-                .isFalse();
-    }
+    // Rescue-carb marking moved to the shared NoteToCarbsEntryMapper when this service stopped
+    // building its own CarbsEntry (#25). Its coverage lives in NoteToCarbsEntryMapperRescueTest,
+    // which asserts the marker on hypo_treatment notes and DEFAULT_DECAY on ordinary ones.
 
     // ---- helpers ----
 

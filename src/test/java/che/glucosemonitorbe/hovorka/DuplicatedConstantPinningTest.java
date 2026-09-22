@@ -55,8 +55,11 @@ class DuplicatedConstantPinningTest {
     @Test
     @DisplayName("Constants declared privately in both GlucoseCalculationsService and ContextAggregatorService agree")
     void duplicatedConstants_agreeAcrossServices() throws Exception {
-        assertConstantsAgree("DEFAULT_CARB_RATIO");
-        assertConstantsAgree("DEFAULT_ISF");
+        // DEFAULT_CARB_RATIO and DEFAULT_ISF were pinned here until #22 deleted them from
+        // ContextAggregatorService: once the prediction and the correction dose were delegated to
+        // the canonical services, neither constant had a reader left. This pin caught their
+        // removal (NoSuchFieldException) and was narrowed rather than deleted - one duplication
+        // survives, and it is still unenforced anywhere else.
         assertConstantsAgree("PRE_BOLUS_MAX_TIMING_EFFECT");
     }
 

@@ -10,11 +10,18 @@ import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.dto.ClientTimeInfo;
+import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
+import che.glucosemonitorbe.dto.InsulinCalculationRequest;
+import che.glucosemonitorbe.exception.DosingRefusedException;
+import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.service.CarbsOnBoardService;
+import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -26,13 +33,13 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ContextAggregatorService {
     /** mmol/L glucose rise per 10 g carbs when no insulin is acting. */
-    private static final double DEFAULT_CARB_RATIO = 2.0;
-    private static final double DEFAULT_ISF = 1.0;
     private static final double CORRECTION_TARGET_MMOl = 6.5;
     private static final long PRE_BOLUS_WINDOW_MINUTES = 90L;
     private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
+    private static final int TWO_HOURS_MINUTES = 120;
 
     private final CgmReadingRepository chartDataRepository;
     private final NoteRepository noteRepository;
@@ -40,6 +47,7 @@ public class ContextAggregatorService {
     private final UserInsulinPreferencesService insulinPreferencesService;
     private final CarbsOnBoardService carbsOnBoardService;
     private final InsulinCalculatorService insulinCalculatorService;
+    private final GlucoseCalculationsService calculationsService;
 
     public AnalysisContext buildContext(UUID userId, int windowHours) {
         return buildContext(userId, windowHours, LocalDateTime.now());
@@ -77,35 +85,41 @@ public class ContextAggregatorService {
         UserInsulinPreferencesDTO insulin = insulinPreferencesService.getPreferences(userId);
         RapidInsulinIobParameters rapidIob = insulinPreferencesService.getRapidIobParameters(userId);
 
-        List<CarbsEntry> carbsEntries = notes.stream()
-                .filter(n -> n.getCarbs() != null && n.getCarbs() > 0)
-                .map(this::toCarbsEntry)
-                .toList();
-        List<InsulinDose> insulinDoses = notes.stream()
-                .filter(n -> n.getInsulin() != null && n.getInsulin() > 0)
-                .map(this::toInsulinDose)
-                .toList();
+        // #25: COB/IOB inputs come from the one builder the dashboard uses, so a nutrition-profiled
+        // meal decays the same way for the advisor as it does on the chart. The local converter this
+        // replaced dropped GI, macros, absorptionSpeedClass and suggestedDurationHours - exactly the
+        // fields CarbsOnBoardService.calculateRemainingCarbs reads.
+        GlucoseCalculationsService.ActiveCobIobInputs inputs =
+                calculationsService.activeCobIobInputs(userId, end);
 
         double min = glucoseValues.stream().mapToDouble(v -> v).min().orElse(0.0);
         double max = glucoseValues.stream().mapToDouble(v -> v).max().orElse(0.0);
         double avg = glucoseValues.stream().mapToDouble(v -> v).average().orElse(0.0);
         double latest = glucoseValues.isEmpty() ? 0.0 : glucoseValues.get(glucoseValues.size() - 1);
         double first = glucoseValues.isEmpty() ? latest : glucoseValues.get(0);
-        double activeCob = carbsOnBoardService.calculateTotalCarbsOnBoard(carbsEntries, end, userId);
+        double activeCob = carbsOnBoardService.calculateTotalCarbsOnBoard(inputs.carbsEntries(), end, cob);
         double activeIob = insulinCalculatorService.calculateTotalActiveInsulin(
-                insulinDoses, end, rapidIob.diaHours(), rapidIob.peakMinutes());
-        double carbRatio = cob.getCarbRatio() != null ? cob.getCarbRatio() : DEFAULT_CARB_RATIO;
-        // Window-aware ISF, matching InsulinCalculatorService's correction leg: no path here may
-        // silently substitute the base ISF where a meal-window value exists (see C2 fix notes).
-        Double effectiveIsf = cob.getEffectiveIsf(end);
-        double isf = effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
-        double correctionUnits = latest > CORRECTION_TARGET_MMOl
-                ? Math.max(0.0, (latest - CORRECTION_TARGET_MMOl) / isf - activeIob)
-                : 0.0;
+                inputs.insulinEntries(), end, rapidIob.diaHours(), rapidIob.peakMinutes());
+        Double correctionUnits = glucoseValues.isEmpty() ? null
+                : estimateCorrectionUnits(userId, latest, activeIob, end);
         PauseStats pauseStats = computePauseStats(notes);
         double preBolusTimingContribution = calculatePreBolusTimingContribution(pauseStats.avgPauseMinutes);
-        double predicted2h = Math.clamp(
-                latest + (activeCob / 10.0) * carbRatio - activeIob * isf + preBolusTimingContribution, 1.0, 25.0);
+        // #22: the 2 h forecast is the canonical prediction path's, not a second model. Computing
+        // it here from carbRatio/isf reproduced the defect 30b76bd fixed on the dashboard - and on
+        // a more visible path, since SafetyAndScoringService renders it and LlmGatewayService feeds
+        // it to the model as ground truth.
+        //
+        // With no readings in the window `latest` is 0.0, and forecasting from it would put a
+        // fabricated number in front of the patient and into the LLM prompt. Report nothing
+        // instead; COB and IOB do not depend on a reading and are still reported.
+        Double predicted2h = glucoseValues.isEmpty() ? null
+                : calculationsService.calculateGlucoseData(
+                        GlucoseCalculationsRequest.builder()
+                                .userId(userId.toString())
+                                .currentGlucose(latest)
+                                .predictionHorizonMinutes(TWO_HOURS_MINUTES)
+                                .build())
+                    .getTwoHourPrediction();
 
         return AnalysisContext.builder()
                 .userId(userId)
@@ -123,47 +137,46 @@ public class ContextAggregatorService {
                 .deltaGlucose(latest - first)
                 .activeCob(round1(activeCob))
                 .activeIob(round2(activeIob))
-                .predictedGlucose2h(round1(predicted2h))
-                .estimatedCorrectionUnits(round2(correctionUnits))
+                .predictedGlucose2h(predicted2h != null ? round1(predicted2h) : null)
+                .estimatedCorrectionUnits(correctionUnits != null ? round2(correctionUnits) : null)
                 .avgPreBolusPauseMinutes(pauseStats.avgPauseMinutes)
                 .latestPreBolusPauseMinutes(pauseStats.latestPauseMinutes)
                 .preBolusTimingContribution(round2(preBolusTimingContribution))
                 .build();
     }
 
-    /**
-     * Note -> COB input for the advisor's context window.
-     *
-     * <p>A {@code hypo_treatment} note carries the rescue marker through
-     * {@link RescueCarbProfile#mark}. Without it the advisor was told a 15 g rescue still had ~11 g
-     * on board half an hour later, while the dashboard's COB - which routes through
-     * {@code NoteToCarbsEntryMapper} - correctly reported it three-quarters absorbed.
-     */
-    private CarbsEntry toCarbsEntry(Note note) {
-        CarbsEntry entry = CarbsEntry.builder()
-                .id(note.getId())
-                .timestamp(note.getTimestamp())
-                .carbs(note.getCarbs())
-                .insulin(note.getInsulin() != null ? note.getInsulin() : 0.0)
-                .mealType(note.getMeal())
-                .comment(note.getComment())
-                .glucoseValue(note.getGlucoseLevel())
-                .originalCarbs(note.getCarbs())
-                .userId(note.getUserId())
-                .build();
-        return note.isHypoTreatment() ? RescueCarbProfile.mark(entry) : entry;
-    }
 
-    private InsulinDose toInsulinDose(Note note) {
-        return InsulinDose.builder()
-                .id(note.getId())
-                .timestamp(note.getTimestamp())
-                .units(note.getInsulin())
-                .type("Correction".equalsIgnoreCase(note.getMeal()) ? InsulinDose.InsulinType.CORRECTION : InsulinDose.InsulinType.BOLUS)
-                .note(note.getComment())
-                .mealType(note.getMeal())
-                .userId(note.getUserId())
-                .build();
+
+    /**
+     * Correction-dose estimate from the one calculator that owns dosing, rather than a second
+     * formula here (#22). Delegating also inherits the calculator's hypo refusal and max-bolus
+     * ceiling, neither of which this service applied when it did the arithmetic itself - the
+     * estimate is rendered to the patient at priority {@code high} by
+     * {@link SafetyAndScoringService}, so an unbounded number was the riskiest output on this path.
+     *
+     * <p>A {@link DosingRefusedException} means "no safe number to show", not "the analysis
+     * failed": it is swallowed and the caller renders no correction guidance at all.
+     *
+     * @return the estimate, or {@code null} when dosing was refused
+     */
+    private Double estimateCorrectionUnits(UUID userId, double latest, double activeIob, LocalDateTime at) {
+        try {
+            return insulinCalculatorService.calculateRecommendedInsulin(
+                    InsulinCalculationRequest.builder()
+                            .userId(userId.toString())
+                            .carbs(0.0)                       // correction-only: no meal component
+                            .currentGlucose(latest)
+                            .targetGlucose(CORRECTION_TARGET_MMOl)
+                            .activeInsulin(activeIob)
+                            // Pin the meal window to the analysis instant; without this the ISF
+                            // resolves at server "now" (see InsulinCalculatorServiceIsfWindowTest).
+                            .clientTimeInfo(ClientTimeInfo.builder().timestamp(at.toString()).build())
+                            .build())
+                    .getRecommendedInsulin();
+        } catch (DosingRefusedException e) {
+            log.debug("correction estimate refused for user={} reason={}", userId, e.getReason());
+            return null;
+        }
     }
 
     private PauseStats computePauseStats(List<Note> sortedNotes) {
