@@ -164,3 +164,6 @@ temp/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# claude-flow / ruflo tool state
+.claude-flow/
