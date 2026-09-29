@@ -200,9 +200,11 @@ activity-aware via `NotesActivityProvider`, user-zone clock, nearest-point align
 
 ### 2.2 `OnsetLocator`
 
-From the run's first point, walk backwards over smoothed residuals to the last point with
-|residual| < 0.5σ. That point's time is `onset_at`. Bounded to `onset-max-backtrack-minutes` (60) before
-the run start; if no such point exists within the bound (or the window start is reached), onset = the
+Start at the run's first point whose smoothed |residual| reaches the detection threshold, and walk
+backwards to the last point with |residual| < 0.5σ, i.e. the last moment the model still explained reality.
+That point's time is `onset_at`. The walk stops early where an opposite-sign move ends: a drop directly
+after a rise has its onset at its own first point, never inside the rise. It is also bounded to
+`onset-max-backtrack-minutes` (60). If no near-zero point exists within those bounds, onset = the
 earliest point examined.
 
 ### 2.3 `FeatureExtractor`
@@ -218,9 +220,16 @@ model uses for this user (`HovorkaParameters`-derived, mmol/L per U). **Signific
 
 ### 2.4 Merge and persist
 
-A run overlapping an `OPEN` event of the same direction updates it (today's dedupe); otherwise a new
-event is created. A run already claimed as a linked child (4.1/4.3) is not re-created. Every create or
-update writes a history row (`DETECTED` / `UPDATED`).
+A run that overlaps an `OPEN` top-level event in the same direction updates it; otherwise a new event is
+created. A run that overlaps a `CONFIRMED`/`DISMISSED` event in the same direction is skipped, so an
+answered move never reappears as a fresh marker. A run already claimed as a linked child (4.1/4.3)
+updates that child.
+
+An update refreshes geometry (onset = earliest, window widened), residual, σ-multiple, confidence and
+suppression. It keeps the existing category and phase **unless** the new classification comes from a
+logged-context rule (R1, R2, F1, F3): something the user logged afterwards is the one thing that should
+change the engine's mind. History: `DETECTED` on create, and `UPDATED` only when the category or phase
+changes. Geometry refreshes every 10 minutes would otherwise flood the audit trail.
 
 ### 2.5 Errors
 
