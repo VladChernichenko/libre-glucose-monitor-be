@@ -104,10 +104,12 @@ app:
       vision-model: ${OLLAMA_VISION_MODEL:llava:latest}
       api-key: ${OLLAMA_API_KEY:}
       num-ctx: ${OLLAMA_NUM_CTX:8192}
+    # OpenAI-compatible chat API ("qwen" is historical: switched from DashScope to OpenAI in 8616583).
+    # For DashScope set QWEN_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1 and QWEN_MODEL=qwen-plus.
     qwen:
       enabled: ${QWEN_ENABLED:true}
       url: ${QWEN_URL:https://api.openai.com/v1}
-      model: ${QWEN_MODEL:qwen-plus}
+      model: ${QWEN_MODEL:gpt-4o-mini}
       vision-model: ${QWEN_VISION_MODEL:gpt-4o-mini}
       api-key: ${QWEN_API_KEY:}
     yolo:
