@@ -49,11 +49,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-        "app.features.backend-mode-enabled=true",
         "app.features.glucose-calculations-enabled=true",
-        "app.features.glucose-calculations-migration-percent=100",
-        "app.features.carbs-on-board-enabled=true",
-        "app.features.insulin-calculator-enabled=true",
         "app.features.nutrition-aware-prediction-enabled=true"
 })
 @SuppressWarnings({"resource", "null"})

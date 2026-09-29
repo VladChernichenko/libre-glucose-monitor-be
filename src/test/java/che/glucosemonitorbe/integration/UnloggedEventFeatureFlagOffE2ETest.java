@@ -36,7 +36,6 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-    "app.features.backend-mode-enabled=true",
     "app.features.unlogged-event-detection-enabled=false"
 })
 @SuppressWarnings({"resource", "null"})

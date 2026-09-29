@@ -42,7 +42,6 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
-                        .requestMatchers("/api/features/**").permitAll()
                         .requestMatchers("/api/version/**").permitAll()  // Allow version checks
                         // Only liveness/readiness + info are public (for orchestrator probes);
                         // metrics, caches, loggers, env, etc. require authentication.

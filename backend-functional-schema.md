@@ -50,7 +50,7 @@ Controller
 
 ## 2. Complete API surface
 
-All endpoints require a JWT bearer token except `/api/auth/**`, `/api/features/**`, `/api/version/**`, `/actuator/health/**`, `/actuator/info`, `/error`, `/health`.
+All endpoints require a JWT bearer token except `/api/auth/**`, `/api/version/**`, `/actuator/health/**`, `/actuator/info`, `/error`, `/health`.
 
 ### Identity & platform
 
@@ -64,7 +64,6 @@ All endpoints require a JWT bearer token except `/api/auth/**`, `/api/features/*
 | GET | `/api/users/me` | Current user profile |
 | GET | `/api/version/` · `/compatibility-matrix` · `/health` | Version + client-compatibility metadata |
 | POST | `/api/version/check-compatibility` | Validate a client version against the matrix |
-| GET | `/api/features/status` · `/check/{feature}`; POST `/toggle/{feature}` | Feature-flag inspection/toggle |
 | GET | `/api/circuit-breaker/stats` · `/stats/{svc}` · `/health`; POST `/reset/{svc}` · `/reset-all` | External-call resilience state |
 | GET | `/api/test/health` · `/status` | Liveness helpers |
 
@@ -85,8 +84,6 @@ All endpoints require a JWT bearer token except `/api/auth/**`, `/api/features/*
 | GET · POST | `/api/glucose-calculations/` | Dashboard: headline COB/IOB + 2 h/4 h/8 h forecast + full prediction path |
 | GET | `/api/glucose-calculations/status` | Module status |
 | POST | `/api/predict` | Meal what-if: pre-bolus timing optimiser, always Hovorka |
-| POST | `/api/cob/calculate` · `/status` · `/timeline` | Carbs-on-board decay |
-| POST | `/api/insulin/calculate` · `/active-insulin`; GET `/status` | Bolus recommendation + IOB curve |
 | GET | `/api/insulin-catalog` | Rapid / long-acting insulin PK catalogue |
 
 ### CGM data sources
@@ -338,7 +335,7 @@ Dosing is the one path that refuses rather than degrades. `InsulinCalculatorServ
 | `SETTINGS_INVALID` | Missing/non-finite/non-positive ISF or carb ratio — never substituted with a default |
 | `INSULIN_PARAMS_INCONSISTENT` | Derived `gramsPerUnit = 10·ISF/CR` outside 3–30 g/U (a refusal boundary, not a clamp) |
 | `GLUCOSE_BELOW_SAFE_THRESHOLD` | Current glucose < 3.9 mmol/L (ADA/ATTD Level 1) — treat the low, don't bolus |
-| `GLUCOSE_IMPLAUSIBLE_UNIT` | Value outside physiological mmol/L range (likely mg/dL) — enforced at `InsulinCalculatorController` before the service is called |
+| `GLUCOSE_IMPLAUSIBLE_UNIT` | Value outside physiological mmol/L range (likely mg/dL) — defined but not currently enforced |
 | `DOSE_EXCEEDS_MAX_BOLUS` | Final dose > 0.3 U/kg, checked **after** meal + correction − IOB, i.e. on the number a patient would act on |
 
 `DosingRefusedException` carries a patient-facing message and a separate internal `detail` that is logged but never returned. Prediction glucose is clamped to [1, 25] mmol/L everywhere.
@@ -385,14 +382,7 @@ Deriving `gramsPerUnit` from ISF and CR (rather than storing it) means it inheri
 | `activity-logging-enabled` | true | false | Consume activity notes as `a(t)` |
 | `nutrition-aware-prediction-enabled` | true | false | Nutrition profile drives absorption/gut params |
 | `glucose-calculations-enabled` | true | false | Gate the dashboard calc API |
-| `insulin-calculator-enabled` | true | false | Gate the IOB/bolus API |
-| `carbs-on-board-enabled` | true | false | Gate the COB API |
 | `experiments-enabled` | — | true | Gate experiment protocols |
-| `food-photo-analysis-enabled` | false | false | YOLO/photo meal pipeline |
-| `ar-spatial-enabled` | false | false | AR nutrition path |
-| `backend-mode-enabled` | true | false | Global frontend↔backend switch |
-
-Migration percentages (`*-migration-percent`, all at 100) exist for staged client rollout.
 
 ---
 

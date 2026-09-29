@@ -49,7 +49,6 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-    "app.features.backend-mode-enabled=true",
     "app.features.unlogged-event-detection-enabled=true",
     "app.features.digital-twin-enabled=true",   // for the calibration-exclusion test
     "app.features.activity-logging-enabled=true",// for the activity-aware detection test

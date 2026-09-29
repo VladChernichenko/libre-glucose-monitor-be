@@ -3,9 +3,13 @@ package che.glucosemonitorbe.integration;
 import che.glucosemonitorbe.domain.MealWindow;
 import che.glucosemonitorbe.dto.AuthRequest;
 import che.glucosemonitorbe.dto.AuthResponse;
+import che.glucosemonitorbe.dto.ClientTimeInfo;
+import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.RegisterRequest;
 import che.glucosemonitorbe.integration.MealEpisode.HistoryNote;
 import che.glucosemonitorbe.integration.MealEpisode.Nutrition;
+import che.glucosemonitorbe.repository.UserRepository;
+import che.glucosemonitorbe.service.InsulinCalculatorService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -51,12 +55,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-        "app.features.backend-mode-enabled=true",
         "app.features.glucose-calculations-enabled=true",
-        "app.features.glucose-calculations-migration-percent=100",
-        "app.features.carbs-on-board-enabled=true",
-        "app.features.insulin-calculator-enabled=true",
-        "app.features.insulin-calculator-migration-percent=100",
         "app.features.nutrition-aware-prediction-enabled=true",
         "app.features.hovorka-model-enabled=true"
 })
@@ -72,6 +71,9 @@ class MealEpisodeE2ETest {
                     .withPassword("test");
 
     @Autowired private TestRestTemplate rest;
+    @Autowired private InsulinCalculatorService insulinCalculatorService;
+    @Autowired private UserRepository userRepository;
+    private String username;
     private final ObjectMapper mapper = new ObjectMapper();
 
     // =========================================================================
@@ -119,7 +121,7 @@ class MealEpisodeE2ETest {
                 // Bolus and pre-bolus pause (15 = injected 15 min before eating,
                 // 0 = at the meal, -10 = 10 min after starting to eat). Either the real dose:
                 .bolus(6.0, 15)
-                // ...or let the app's calculator (/api/insulin/calculate) pick it for target BG:
+                // ...or let the backend dose calculator pick it for target BG:
                 // .bolusFromCalculator(6.0, 15)
 
                 // What the CGM really showed at t0+2h / t0+4h (null = print only, no assert).
@@ -191,7 +193,7 @@ class MealEpisodeE2ETest {
         // Bolus (with pre-bolus pause) + meal.
         LocalDateTime bolusAt = t0.minusMinutes(ep.preBolusMinutes);
         if (ep.calculatorTargetGlucose != null) {
-            ep.bolusUnits = recommendedDose(ep, startIob, bolusAt, auth);
+            ep.bolusUnits = recommendedDose(ep, startIob, bolusAt);
             report.append(String.format("dose    : calculator %.2f U for %.0f g, BG %.1f -> target %.1f, IOB %.2f U%n",
                     ep.bolusUnits, ep.mealCarbs, ep.startGlucose, ep.calculatorTargetGlucose, startIob));
         }
@@ -318,6 +320,7 @@ class MealEpisodeE2ETest {
         reg.setFullName("Episode User");
         reg.setPassword("testpass123");
         rest.postForEntity("/api/auth/register", jsonEntity(reg, new HttpHeaders()), String.class);
+        username = reg.getUsername();
 
         AuthRequest login = new AuthRequest();
         login.setUsername(reg.getUsername());
@@ -377,21 +380,22 @@ class MealEpisodeE2ETest {
         }
     }
 
-    /** POST /api/insulin/calculate exactly as the app does at the moment of dosing. */
-    private double recommendedDose(MealEpisode ep, double activeInsulin, LocalDateTime at, HttpHeaders auth)
-            throws Exception {
-        Map<String, Object> body = new HashMap<>();
-        body.put("carbs", ep.mealCarbs);
-        body.put("currentGlucose", ep.startGlucose);
-        body.put("targetGlucose", ep.calculatorTargetGlucose);
-        body.put("activeInsulin", activeInsulin);
-        body.put("clientTimeInfo", clientTimeInfo(at));
-        ResponseEntity<String> resp = rest.exchange("/api/insulin/calculate", HttpMethod.POST,
-                jsonEntity(body, auth), String.class);
-        assertEquals(HttpStatus.OK, resp.getStatusCode(), "dose calculator refused/failed: " + resp.getBody());
-        JsonNode root = mapper.readTree(resp.getBody());
-        assertTrue(root.path("backendMode").asBoolean(), "insulin calculator not in backend mode: " + resp.getBody());
-        return root.path("data").path("recommendedInsulin").asDouble();
+    /** Backend dose calculator (InsulinCalculatorService) for this user at the moment of dosing. */
+    private double recommendedDose(MealEpisode ep, double activeInsulin, LocalDateTime at) {
+        InsulinCalculationRequest request = InsulinCalculationRequest.builder()
+                .carbs(ep.mealCarbs)
+                .currentGlucose(ep.startGlucose)
+                .targetGlucose(ep.calculatorTargetGlucose)
+                .activeInsulin(activeInsulin)
+                .userId(userRepository.findByUsername(username).orElseThrow().getId().toString())
+                .clientTimeInfo(ClientTimeInfo.builder()
+                        .timestamp(at.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
+                        .timezone("UTC")
+                        .locale("en-US")
+                        .timezoneOffset(0)
+                        .build())
+                .build();
+        return insulinCalculatorService.calculateRecommendedInsulin(request).getRecommendedInsulin();
     }
 
     private static Map<String, Object> clientTimeInfo(LocalDateTime at) {

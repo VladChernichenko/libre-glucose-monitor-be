@@ -32,7 +32,7 @@ final class MealEpisode {
     Nutrition mealNutrition;
     double bolusUnits;
     int preBolusMinutes;
-    /** Non-null = dose comes from /api/insulin/calculate with this target BG (mmol/L). */
+    /** Non-null = dose comes from the backend dose calculator with this target BG (mmol/L). */
     Double calculatorTargetGlucose;
     /** Split bolus: second injection {@code secondBolusMinutesAfterMeal} after t0 (0 = none). */
     double secondBolusUnits;

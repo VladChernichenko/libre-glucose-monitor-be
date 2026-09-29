@@ -141,12 +141,7 @@ app:
     interval-ms: ${OBSERVER_INTERVAL_MS:300000}   # 5 minutes default
   features:
     # Enable backend calculations with timezone support
-    backend-mode-enabled: true
-    insulin-calculator-enabled: true
-    carbs-on-board-enabled: true
-    glucose-data-enabled: false
     glucose-calculations-enabled: true
-    user-configuration-enabled: false
     nutrition-aware-prediction-enabled: ${APP_FEATURES_NUTRITION_AWARE_PREDICTION_ENABLED:true}
     # Hovorka 2-compartment ODE model - off by default, enable per-env for validation
     hovorka-model-enabled: ${APP_FEATURES_HOVORKA_MODEL_ENABLED:true}
@@ -159,16 +154,6 @@ app:
     hypo-rescue-logging-enabled: ${APP_FEATURES_HYPO_RESCUE_LOGGING_ENABLED:true}
     # Activity logging: logged activity notes feed the model's activity signal a(t).
     activity-logging-enabled: ${APP_FEATURES_ACTIVITY_LOGGING_ENABLED:true}
-    food-photo-analysis-enabled: false
-    ar-spatial-enabled: false
-    cgm-service-external: false
-    async-meal-pipeline: false
-
-    # Migration percentages (0-100) - 100 means all users use backend
-    insulin-calculator-migration-percent: 100
-    carbs-on-board-migration-percent: 100
-    glucose-data-migration-percent: 100
-    glucose-calculations-migration-percent: 100
 
   # Background Nightscout -> DB sync (stored chart data), every 5 minutes per user with active config
   glucose-sync:

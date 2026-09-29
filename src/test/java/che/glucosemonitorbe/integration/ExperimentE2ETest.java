@@ -32,9 +32,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-    "app.features.experiments-enabled=true",
-    "app.features.backend-mode-enabled=true",
-    "app.features.carbs-on-board-enabled=true"
+    "app.features.experiments-enabled=true"
 })
 @SuppressWarnings({"resource", "null"})
 class ExperimentE2ETest {

@@ -65,7 +65,7 @@ Backend for the Libre Glucose Monitor application - a Spring Boot REST API that 
 
 ### Key Architectural Patterns
 
-**Feature Toggles** - Each major feature (`insulin-calculator`, `carbs-on-board`, `glucose-calculations`, etc.) has a global on/off switch and a percentage-based migration rollout. User assignment is deterministic (username hash), so the same user always gets the same experience. When a feature is toggled off for a user, the frontend falls back to its own local logic.
+**Feature Toggles** - `app.features.*` flags (`FeatureToggleConfig`) switch backend capabilities on or off per environment (Hovorka model, digital twin, unlogged-event detection, hypo rescue logging, activity logging, experiments). `glucose-calculations-enabled` gates the dashboard calculation endpoint.
 
 **Custom Circuit Breaker** - A hand-rolled three-state circuit breaker (CLOSED -> OPEN -> HALF_OPEN) wraps all external calls (Nightscout, LibreLinkUp, Spoonacular, AI). Defaults: 5 failures to open, 60 s recovery timeout. Stats and manual reset are exposed via `/api/circuit-breaker`.
 
@@ -197,22 +197,6 @@ All endpoints require `Authorization: Bearer <access_token>` unless marked **pub
 | POST | `/api/glucose-calculations/` | Same via `GlucoseCalculationsRequest` body |
 | GET | `/api/glucose-calculations/status` | Feature flag status |
 
-### Insulin Calculator - `/api/insulin`
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/insulin/calculate` | Insulin dose recommendation -> `InsulinCalculationResponse` |
-| GET | `/api/insulin/status` | Feature flag status |
-| POST | `/api/insulin/active-insulin` | Active insulin stub |
-
-### Carbs-on-Board - `/api/cob`
-
-| Method | Path |
-|---|---|
-| POST | `/api/cob/calculate` |
-| POST | `/api/cob/status` |
-| POST | `/api/cob/timeline` |
-
 ### COB Settings - `/api/cob-settings`
 
 | Method | Path |
@@ -278,14 +262,6 @@ All endpoints require `Authorization: Bearer <access_token>` unless marked **pub
 | POST | `/api/ai-insights/retrospective` | Synchronous AI analysis. Body: `{ windowHours }` -> `AiAnalysisResponse` |
 | POST | `/api/ai-insights/retrospective/stream` | Streaming NDJSON. Emits `{type:"token", token:"..."}` per chunk, then `{type:"done", promptTokens, completionTokens}`. Supports `followUpQuestion`, `conversationTurns`, `model`, `numCtx` override. |
 
-### Feature Toggles - `/api/features` (public)
-
-| Method | Path |
-|---|---|
-| GET | `/api/features/status` |
-| POST | `/api/features/toggle/{feature}` |
-| GET | `/api/features/check/{feature}` |
-
 ### Version - `/api/version` (public)
 
 | Method | Path |
@@ -325,7 +301,7 @@ Stateless JWT authentication using HMAC-SHA512.
 **Token blacklist:** In-memory `ConcurrentHashMap`, cleaned hourly. Not distributed - the blacklist is lost on server restart. Plan accordingly for multi-instance deployments.
 
 **Public endpoints** (no JWT required):
-- `/api/auth/**`, `/api/public/**`, `/api/features/**`, `/api/version/**`
+- `/api/auth/**`, `/api/public/**`, `/api/version/**`
 - `/actuator/**`, `/error`, `/health`
 
 ---

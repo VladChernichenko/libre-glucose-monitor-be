@@ -34,14 +34,13 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Kept separate from {@link PredictionE2ETest} because {@code @TestPropertySource} on a
  * {@code @Nested} inner class does not override the parent {@link SpringBootTest} context
- * (parent enables all flags at 100%).
+ * (parent enables the flag).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-        "app.features.backend-mode-enabled=false",
         "app.features.glucose-calculations-enabled=false"
 })
 @SuppressWarnings({"resource", "null"})

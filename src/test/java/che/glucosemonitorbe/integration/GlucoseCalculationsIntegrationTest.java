@@ -262,7 +262,6 @@ class GlucoseCalculationsIntegrationTest {
         assertNotNull(rb);
         assertTrue(rb.containsKey("featureEnabled"), "Must have featureEnabled");
         assertTrue(rb.containsKey("backendMode"), "Must have backendMode");
-        assertTrue(rb.containsKey("migrationPercent"), "Must have migrationPercent");
     }
 
     // -- unauthenticated access blocked ----------------------------------------

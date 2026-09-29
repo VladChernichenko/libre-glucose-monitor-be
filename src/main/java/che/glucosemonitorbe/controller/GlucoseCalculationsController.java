@@ -44,16 +44,6 @@ public class GlucoseCalculationsController {
             ));
         }
         
-        // Check if this user should be migrated
-        if (userId != null && !featureToggleService.shouldMigrate("glucose-calculations", userId)) {
-            return ResponseEntity.ok(Map.of(
-                "message", "User not in migration group - using frontend logic",
-                "featureEnabled", true,
-                "backendMode", false,
-                "migrationPercent", featureToggleService.getMigrationPercent("glucose-calculations")
-            ));
-        }
-        
         try {
             GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
                     .currentGlucose(currentGlucose)
@@ -103,16 +93,6 @@ public class GlucoseCalculationsController {
             ));
         }
         
-        // Check if this user should be migrated
-        if (userId != null && !featureToggleService.shouldMigrate("glucose-calculations", userId)) {
-            return ResponseEntity.ok(Map.of(
-                "message", "User not in migration group - using frontend logic",
-                "featureEnabled", true,
-                "backendMode", false,
-                "migrationPercent", featureToggleService.getMigrationPercent("glucose-calculations")
-            ));
-        }
-        
         try {
             GlucoseCalculationsResponse response = glucoseCalculationsService.calculateGlucoseData(request);
 
@@ -141,10 +121,10 @@ public class GlucoseCalculationsController {
      */
     @GetMapping("/status")
     public ResponseEntity<?> getFeatureStatus() {
+        boolean enabled = featureToggleService.shouldUseBackend("glucose-calculations");
         return ResponseEntity.ok(Map.of(
-            "featureEnabled", featureToggleService.shouldUseBackend("glucose-calculations"),
-            "migrationPercent", featureToggleService.getMigrationPercent("glucose-calculations"),
-            "backendMode", featureToggleService.isBackendModeEnabled(),
+            "featureEnabled", enabled,
+            "backendMode", enabled,
             "message", "Glucose calculations feature status"
         ));
     }
