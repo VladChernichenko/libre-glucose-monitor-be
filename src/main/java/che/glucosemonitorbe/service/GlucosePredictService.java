@@ -9,6 +9,7 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
+import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
 import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
@@ -72,16 +73,8 @@ public class GlucosePredictService {
     private static final double  LOW_SIDE_WEIGHT      = 2.0;
 
     // -- Protein gluconeogenesis (PGN) slow-glucose modelling ------------------
-    /** Onset for protein gluconeogenesis: protein GNG peaks at 3-4h, onset at 2h. */
-    private static final int    PGN_ONSET_MIN   = 120;
-    /**
-     * Grams of slow-carb-equivalent glucose per gram of protein (Warsaw Protocol adapted):
-     * 4 kcal/g ÷ 100 kcal/FPU × 10 g carb/FPU = 0.40 g/g.
-     * Fat contribution removed — fat's gastric delay is already in MacroNutrientGastricModel.
-     */
-    private static final double PGN_CARB_FACTOR = 0.40;
-    /** Minimum PGN-equiv carbs [g] to emit a secondary entry (≈ 0.2 FPU threshold). */
-    private static final double FPU_MIN_EQUIV_G  = 2.0;
+    // Constants live in ProteinGluconeogenesis, shared with the dashboard path.
+    private static final int    PGN_ONSET_MIN   = ProteinGluconeogenesis.ONSET_MIN;
 
     /** Units of disagreement tolerated between the request dose and the logged note. */
     private static final double DOSE_MATCH_TOLERANCE_U = 0.05;
@@ -375,17 +368,17 @@ public class GlucosePredictService {
         // via BETA_FAT = 2.20 in computeTMaxG(); adding fat kcal here caused +1.1 mmol/L
         // meal-tail overshoot in the backtest (Variant B).
         double glucFrac = req.getGluconeogenicFraction() != null
-                ? req.getGluconeogenicFraction() : 0.50;
+                ? req.getGluconeogenicFraction() : ProteinGluconeogenesis.GLUCOGENIC_FRACTION;
         int    pgnOnset = req.getFpuOnsetMin() != null
                 ? req.getFpuOnsetMin() : PGN_ONSET_MIN;
 
-        double pgnEquivCarbs = proteinG * glucFrac * PGN_CARB_FACTOR;
-        if (pgnEquivCarbs >= FPU_MIN_EQUIV_G) {
+        double pgnEquivCarbs = ProteinGluconeogenesis.equivalentCarbs(proteinG, glucFrac);
+        if (pgnEquivCarbs >= ProteinGluconeogenesis.MIN_EQUIV_G) {
             entries.add(CarbsEntry.builder()
                     .id(UUID.randomUUID())
                     .timestamp(mealTime.plusMinutes(pgnOnset))
                     .carbs(pgnEquivCarbs)
-                    .mealType("fpu-equiv")
+                    .mealType(ProteinGluconeogenesis.MEAL_TYPE)
                     .userId(userId)
                     .build());
         }

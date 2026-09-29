@@ -93,12 +93,20 @@ public final class MacroNutrientGastricModel {
         double tHalfModulated = tHalfBase * (betaWeighted / BETA_CARBS);
 
         // Step 4 - fiber viscosity
-        double fiberFactor = Math.exp(FIBER_VISCOSITY_K * Math.max(0.0, fiberG));
-        double tHalfFinal  = tHalfModulated * fiberFactor;
+        double tHalfFinal  = tHalfModulated * fiberViscosityFactor(fiberG);
 
         // Step 5 - clamp and convert
         tHalfFinal = Math.max(T_HALF_MIN_CLAMP, Math.min(T_HALF_MAX_CLAMP, tHalfFinal));
         return tHalfFinal / halfLifeToTMaxG;
+    }
+
+    /**
+     * Fiber viscosity multiplier on the gut time constant: {@code exp(K × fiber g)}, 1.0 for no
+     * fiber. Shape only - it slows absorption, never removes carbs. Shared with the dashboard's
+     * Hovorka path so both prediction screens treat the same fiber the same way.
+     */
+    public static double fiberViscosityFactor(double fiberG) {
+        return Math.exp(FIBER_VISCOSITY_K * Math.max(0.0, fiberG));
     }
 
     /**

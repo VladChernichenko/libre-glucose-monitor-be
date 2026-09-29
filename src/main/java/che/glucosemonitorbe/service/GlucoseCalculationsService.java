@@ -6,6 +6,7 @@ import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
+import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
@@ -277,17 +278,17 @@ public class GlucoseCalculationsService {
         if (featureToggleConfig.isHovorkaModelEnabled() && hovorkaService != null) {
             // Long-acting notes - load from a 36h window so Lantus taken yesterday is included
             List<Note> longActingNotes = getLongActingNotes(userUUID, currentTime);
+            List<Note> recentNotes = getRecentNotes(userUUID, currentTime);
             int pathMinutes = resolvePathDurationMinutes(carbsEntries);
             log.debug("Using Hovorka ODE model for user={} pathMinutes={}", userUUID, pathMinutes);
             // Account for logged activity (inert when the feature is off or no activity is logged).
             che.glucosemonitorbe.hovorka.ActivityProvider activity =
                     featureToggleConfig.isActivityLoggingEnabled()
-                            ? che.glucosemonitorbe.hovorka.NotesActivityProvider.fromNotes(
-                                    getRecentNotes(userUUID, currentTime))
+                            ? che.glucosemonitorbe.hovorka.NotesActivityProvider.fromNotes(recentNotes)
                             : che.glucosemonitorbe.hovorka.ActivityProvider.NONE;
             return hovorkaService.buildPredictionPath(
                     currentGlucose, currentTime,
-                    carbsEntries, insulinEntries,
+                    modelMealEntries(carbsEntries, recentNotes), insulinEntries,
                     longActingNotes, userUUID, pathMinutes, activity);
         }
 
@@ -568,6 +569,35 @@ public class GlucoseCalculationsService {
      */
     private CarbsEntry convertNoteToCarbsEntry(Note note) {
         return noteToCarbsEntryMapper.toCarbsEntry(note);
+    }
+
+    /**
+     * Everything the Hovorka model needs from the meals, beyond the carbs the COB counts:
+     * <ul>
+     *   <li>carb-free notes that still act on digestion - a salad or eggs eaten first (fiber
+     *       slows the carbs that follow, protein/fat drive the GLP-1 ileal brake);</li>
+     *   <li>the delayed protein glucose ({@link ProteinGluconeogenesis}) 1.5-3 h after a meal.</li>
+     * </ul>
+     * Model-only: the headline COB keeps reading the plain {@code carbsEntries}.
+     */
+    private List<CarbsEntry> modelMealEntries(List<CarbsEntry> carbsEntries, List<Note> recentNotes) {
+        List<CarbsEntry> entries = new ArrayList<>(carbsEntries);
+        for (Note note : recentNotes) {
+            boolean carbFree = note.getCarbs() == null || note.getCarbs() <= 0;
+            if (!carbFree || note.isLongActing()
+                    || note.getNutritionProfile() == null || note.getNutritionProfile().isBlank()) continue;
+            CarbsEntry entry = convertNoteToCarbsEntry(note);
+            if (entry != null && hasMacros(entry)) entries.add(entry);
+        }
+        return ProteinGluconeogenesis.withDelayedProteinGlucose(entries);
+    }
+
+    private static boolean hasMacros(CarbsEntry entry) {
+        return positive(entry.getFiber()) || positive(entry.getProtein()) || positive(entry.getFat());
+    }
+
+    private static boolean positive(Double v) {
+        return v != null && v > 0;
     }
 
     private NutritionSummary summarizeNutrition(List<CarbsEntry> carbsEntries) {

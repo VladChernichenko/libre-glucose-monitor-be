@@ -79,6 +79,13 @@ public class HovorkaGlucosePredictionService {
     private static final int NO_ACTIVE_RESCUE_MIN = Integer.MAX_VALUE;
 
     /**
+     * A course eaten up to this many minutes before a carb meal counts as its first course: its
+     * fiber is added to the meal's own when slowing that meal's absorption ("vegetables first",
+     * Shukla et al.). The protocols eat the vegetables 10-15 min before the carbs.
+     */
+    static final int FIRST_COURSE_WINDOW_MIN = 30;
+
+    /**
      * Minutes over which the learned residual bias phases in from zero at the anchor.
      *
      * <p>{@link che.glucosemonitorbe.hovorka.learning.ResidualBiasModel} is fitted from
@@ -505,8 +512,11 @@ public class HovorkaGlucosePredictionService {
         Map<Integer, Double> giWeightByAge   = new HashMap<>();
         Map<Integer, Double> tMaxGWeightedByAge = new HashMap<>();
         Map<Integer, Double> protFatByAge    = new HashMap<>();
-        // Ages at which a rescue carb was ingested - the only ages whose tMaxG is worth blending.
+        // Ages at which a rescue carb was ingested - they also expire after the rescue window.
         Set<Integer> rescueAges = new HashSet<>();
+        // Ages whose tMaxG differs from the user's own (rescue or fiber) - the only ones worth blending.
+        Set<Integer> customTMaxGAges = new HashSet<>();
+        Map<CarbsEntry, Double> fiberByMeal = effectiveFiberByMeal(pastCarbs);
         int oldestAge = 0;
         for (CarbsEntry entry : pastCarbs) {
             if (entry.getTimestamp() == null) continue;
@@ -531,9 +541,13 @@ public class HovorkaGlucosePredictionService {
             giWeightByAge.merge(ageMin, carbs, Double::sum);
             // Carb-weighted tMaxG over the same weights, so a rescue swallowed alongside a normal
             // snack blends rather than one of the two silently winning the minute.
-            tMaxGWeightedByAge.merge(ageMin, carbs * tMaxGOf(entry, p), Double::sum);
+            double entryTMaxG = tMaxGOf(entry, p, fiberByMeal);
+            tMaxGWeightedByAge.merge(ageMin, carbs * entryTMaxG, Double::sum);
             if (RescueCarbProfile.isRescue(entry.getAbsorptionMode())) {
                 rescueAges.add(ageMin);
+            }
+            if (entryTMaxG != p.tMaxG()) {
+                customTMaxGAges.add(ageMin);
             }
             oldestAge = Math.max(oldestAge, ageMin);
         }
@@ -542,11 +556,11 @@ public class HovorkaGlucosePredictionService {
             return new WarmUp(ss, p.tMaxG(), NO_ACTIVE_RESCUE_MIN);
         }
 
-        // Blend only where a rescue actually contributed. Where every entry carries the user's own
-        // tMaxG the blend is p.tMaxG() by definition, but the divide can land a unit in the last
-        // place away from it - and that would perturb every ordinary meal's curve for no reason.
+        // Blend only where a rescue or fiber actually changed the rate. Where every entry carries the
+        // user's own tMaxG the blend is p.tMaxG() by definition, but the divide can land a unit in the
+        // last place away from it - and that would perturb every ordinary meal's curve for no reason.
         Map<Integer, Double> tMaxGByAge = new HashMap<>();
-        rescueAges.forEach(age ->
+        customTMaxGAges.forEach(age ->
                 tMaxGByAge.put(age, tMaxGWeightedByAge.get(age) / giWeightByAge.get(age)));
 
         double qsto1 = 0.0, qsto2 = 0.0, qgut = 0.0, dRef = 0.0;
@@ -788,8 +802,9 @@ public class HovorkaGlucosePredictionService {
      * so a rescue carb contributes the fast rescue tMaxG and a hypo treatment absorbs at its own
      * rate rather than the user's mixed-meal rate.
      *
-     * <p>A minute with no rescue carb maps to {@code p.tMaxG()} verbatim rather than to a
-     * carb-weighted average of identical values. The average <em>is</em> {@code p.tMaxG()}
+     * <p>Fiber (the meal's own and a first course's) slows a meal the same way - see
+     * {@link #tMaxGOf}. A minute with neither a rescue carb nor fiber maps to {@code p.tMaxG()}
+     * verbatim rather than to a carb-weighted average of identical values. The average <em>is</em> {@code p.tMaxG()}
      * mathematically, but the divide can land a unit in the last place away from it, and that would
      * perturb every ordinary meal's curve for no reason.</p>
      */
@@ -798,6 +813,8 @@ public class HovorkaGlucosePredictionService {
         Map<Integer, Double> tMaxGWeightedSum = new HashMap<>();
         Map<Integer, Double> carbWeightMap    = new HashMap<>();
         Set<Integer> rescueMinutes            = new HashSet<>();
+        Set<Integer> customTMaxGMinutes       = new HashSet<>();
+        Map<CarbsEntry, Double> fiberByMeal   = effectiveFiberByMeal(carbsEntries);
 
         for (CarbsEntry entry : carbsEntries) {
             if (entry.getTimestamp() == null) continue;
@@ -807,16 +824,20 @@ public class HovorkaGlucosePredictionService {
             int futureMin = Math.max(1, (int) Math.abs(minsAgo));
             double carbs = entry.getCarbs() != null ? entry.getCarbs() : 0.0;
             if (carbs <= 0.0) continue;
-            tMaxGWeightedSum.merge(futureMin, carbs * tMaxGOf(entry, p), Double::sum);
+            double entryTMaxG = tMaxGOf(entry, p, fiberByMeal);
+            tMaxGWeightedSum.merge(futureMin, carbs * entryTMaxG, Double::sum);
             carbWeightMap.merge(futureMin, carbs, Double::sum);
             if (RescueCarbProfile.isRescue(entry.getAbsorptionMode())) {
                 rescueMinutes.add(futureMin);
+            }
+            if (entryTMaxG != p.tMaxG()) {
+                customTMaxGMinutes.add(futureMin);
             }
         }
 
         Map<Integer, Double> timeline = new HashMap<>();
         carbWeightMap.forEach((min, totalCarbs) -> timeline.put(min,
-                rescueMinutes.contains(min)
+                customTMaxGMinutes.contains(min)
                         ? tMaxGWeightedSum.get(min) / totalCarbs
                         : p.tMaxG()));
         return new FutureTMaxG(timeline, rescueMinutes);
@@ -880,14 +901,44 @@ public class HovorkaGlucosePredictionService {
 
     /**
      * A meal's gut time constant [min]: the fast rescue value for a hypo treatment, otherwise the
-     * user's own tMaxG. Shared by the warm-up replay and the future timeline for the same reason as
-     * {@link #giOf} - a rescue logged one minute ago and one logged one minute ahead must absorb
-     * identically.
+     * user's own tMaxG slowed by the meal's fiber (its own plus any first course's - see
+     * {@link #effectiveFiberByMeal}) through the same viscosity factor {@code /api/predict} uses.
+     * Shared by the warm-up replay and the future timeline for the same reason as {@link #giOf} -
+     * a meal logged one minute ago and one logged one minute ahead must absorb identically.
+     * No fiber returns {@code p.tMaxG()} exactly, so fiber-free curves are unchanged.
      */
-    private double tMaxGOf(CarbsEntry entry, HovorkaParameters p) {
-        return RescueCarbProfile.isRescue(entry.getAbsorptionMode())
-                ? HovorkaParameterService.rescueTMaxG()
-                : p.tMaxG();
+    private double tMaxGOf(CarbsEntry entry, HovorkaParameters p, Map<CarbsEntry, Double> fiberByMeal) {
+        if (RescueCarbProfile.isRescue(entry.getAbsorptionMode())) {
+            return HovorkaParameterService.rescueTMaxG();
+        }
+        double fiber = fiberByMeal.getOrDefault(entry, 0.0);
+        return fiber > 0 ? p.tMaxG() * MacroNutrientGastricModel.fiberViscosityFactor(fiber) : p.tMaxG();
+    }
+
+    /**
+     * Fiber [g] slowing each carb meal: its own plus that of every other entry eaten in the
+     * {@link #FIRST_COURSE_WINDOW_MIN} minutes before it (a salad before the pasta). Keyed by
+     * identity - entries are not value objects. Rescue carbs keep their own fixed profile.
+     */
+    private static Map<CarbsEntry, Double> effectiveFiberByMeal(List<CarbsEntry> entries) {
+        Map<CarbsEntry, Double> fiberByMeal = new IdentityHashMap<>();
+        for (CarbsEntry meal : entries) {
+            if (meal.getTimestamp() == null || meal.getCarbs() == null || meal.getCarbs() <= 0) continue;
+            double fiber = fiberOf(meal);
+            for (CarbsEntry course : entries) {
+                if (course == meal || course.getTimestamp() == null) continue;
+                long minutesBefore = Duration.between(course.getTimestamp(), meal.getTimestamp()).toMinutes();
+                if (minutesBefore > 0 && minutesBefore <= FIRST_COURSE_WINDOW_MIN) {
+                    fiber += fiberOf(course);
+                }
+            }
+            if (fiber > 0) fiberByMeal.put(meal, fiber);
+        }
+        return fiberByMeal;
+    }
+
+    private static double fiberOf(CarbsEntry entry) {
+        return entry.getFiber() != null ? Math.max(0.0, entry.getFiber()) : 0.0;
     }
 
     /**
