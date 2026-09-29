@@ -130,7 +130,7 @@ exactly one row in the same transaction.
 | `durationMin` | min | Run duration |
 | `meanResidual`, `peakResidual` | mmol/L | Over the run |
 | `residualSlope` | mmol/L/min | Least-squares slope of residual over the run |
-| `actualSlope`, `predictedSlope` | mmol/L/min | Over the first 30 min after onset |
+| `actualSlope`, `predictedSlope` | mmol/L/min | Least-squares slope over the first 30 min after onset. R3 uses `actualSlope`, not `residualSlope`: a step jump then plateau has a near-zero residual slope and must not read as a gradual dawn rise. |
 | `glucoseAtOnset` | mmol/L | |
 | `iobAtOnset` | U | Rapid IOB from `activeCobIobInputs` semantics |
 | `expectedDrop60` | mmol/L | See 2.3 |
@@ -226,9 +226,9 @@ ODE failure skips the user for that pass. Provisional events whose user answered
 
 | # | Condition | Category | Phase | Base conf. |
 |---|---|---|---|---|
-| R1 | Carbs logged in match window | `UNDER_ESTIMATED_FOOD` | FINAL | 0.8 |
+| R1 | Carbs logged in match window, or `cobAtOnset ≥ 5 g` (an earlier meal still absorbing) | `UNDER_ESTIMATED_FOOD` | FINAL | 0.8 |
 | R2 | `activityLogged` | `ANAEROBIC_ACTIVITY` | FINAL | 0.8 |
-| R3 | `onsetHour ∈ [3, 8)` ∧ `residualSlope < 0.03` ∧ COB ≈ 0 ∧ ¬significant IOB | `DAWN_PHENOMENON` | FINAL | 0.6 |
+| R3 | `onsetHour ∈ [3, 8)` ∧ `0 < actualSlope ≤ 0.03` ∧ COB ≈ 0 ∧ ¬significant IOB | `DAWN_PHENOMENON` | FINAL | 0.6 |
 | R4 | COB ≈ 0 ∧ significant IOB | `STRESS` (displayed "Resistance?") | PROVISIONAL, `resolves_at = onset + DIA` | 0.5 |
 | R5 | COB ≈ 0 (IOB insufficient) | `UNLOGGED_FOOD` | FINAL* | 0.6 |
 
@@ -236,7 +236,7 @@ ODE failure skips the user for that pass. Provisional events whose user answered
 
 | # | Condition | Category | Phase | Base conf. |
 |---|---|---|---|---|
-| F1 | Insulin logged in match window | `UNDER_ESTIMATED_INSULIN` | FINAL | 0.8 |
+| F1 | Rapid insulin logged in match window, or significant IOB (an earlier bolus still acting) | `UNDER_ESTIMATED_INSULIN` | FINAL | 0.8 |
 | F2 | Run claimed as a linked child by the resolver | (parent's) | – | – |
 | F3 | `activityLogged` | `AEROBIC_ACTIVITY` | FINAL | 0.8 |
 | F4 | otherwise | `UNLOGGED_INSULIN` (displayed "Unexplained drop") | PROVISIONAL, `resolves_at = onset + 120 min` | 0.5 |
@@ -336,6 +336,8 @@ event id → 404.
 windowStart, windowEnd, resolvesAt, confidence, suppressed, linkedEventId, meanResidualMmol,
 sigmaMultiple, promptOptions[]`.
 
+All `LocalDateTime` fields serialise with `@JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")` (the note-DTO convention the iOS decoder parses; `LocalDateTime.now()` otherwise emits nanoseconds it rejects).
+
 `displayLabel` and `promptOptions` are server-generated (so wording and choices change without an app
 release). `promptOptions` is an ordered list of categories valid for the event's direction:
 
@@ -361,7 +363,7 @@ injection sites".
   `ABSORPTION_DELAY`, `LIPODYSTROPHY` = purple.
 - Label pills (server `displayLabel`) in the `chartOverlay`, on a row below the carb-chip row;
   provisional pills are dashed. Pills within 32 px merge into a count pill ("2 events").
-- Linked children: band only, no pill, dotted connector to the parent. Suppressed: faint band, no pill.
+- Linked children: band only, no pill, dotted connector to the parent. A child carries its parent's category (e.g. `ABSORPTION_DELAY`) with its own `direction = FALL`; children are never prompted or relabelled, so the mismatch is harmless. Suppressed: faint band, no pill.
   Dismissed: not drawn.
 - Tapping a band or pill opens `GlycemicEventDetailSheet`: label, history timeline, plain-language key
   features, and the same answer buttons.
