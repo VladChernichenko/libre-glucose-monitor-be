@@ -19,6 +19,7 @@ import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,7 @@ public class ContextAggregatorService {
     private final CarbsOnBoardService carbsOnBoardService;
     private final InsulinCalculatorService insulinCalculatorService;
     private final GlucoseCalculationsService calculationsService;
+    private final UserService userService;
 
     public AnalysisContext buildContext(UUID userId, int windowHours) {
         return buildContext(userId, windowHours, LocalDateTime.now());
@@ -115,7 +117,8 @@ public class ContextAggregatorService {
         Double predicted2h = glucoseValues.isEmpty() ? null
                 : calculationsService.calculateGlucoseData(
                         GlucoseCalculationsRequest.builder()
-                                .userId(userId.toString())
+                                // calculateGlucoseData resolves this field by username, not UUID.
+                                .userId(userService.getUserById(userId).getUsername())
                                 .currentGlucose(latest)
                                 .predictionHorizonMinutes(TWO_HOURS_MINUTES)
                                 .build())

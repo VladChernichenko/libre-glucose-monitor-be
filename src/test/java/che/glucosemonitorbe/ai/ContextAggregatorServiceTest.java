@@ -3,12 +3,14 @@ package che.glucosemonitorbe.ai;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.RescueCarbProfile;
+import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserInsulinPreferencesDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.InsulinCalculationResponse;
@@ -18,6 +20,7 @@ import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
+import che.glucosemonitorbe.service.UserService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +55,7 @@ class ContextAggregatorServiceTest {
     @Mock CarbsOnBoardService carbsOnBoardService;
     @Mock InsulinCalculatorService insulinCalculatorService;
     @Mock GlucoseCalculationsService calculationsService;
+    @Mock UserService userService;
 
     @InjectMocks ContextAggregatorService service;
 
@@ -69,6 +73,7 @@ class ContextAggregatorServiceTest {
         defaultInsulinPrefs = new UserInsulinPreferencesDTO();
         defaultRapidIob = new RapidInsulinIobParameters(4.0, 75);
 
+        when(userService.getUserById(userId)).thenReturn(User.builder().id(userId).username("patient").build());
         when(userSettingsService.getUserSettings(userId)).thenReturn(defaultUserSettings);
         when(insulinPreferencesService.getPreferences(userId)).thenReturn(defaultInsulinPrefs);
         when(insulinPreferencesService.getRapidIobParameters(userId)).thenReturn(defaultRapidIob);
@@ -322,6 +327,23 @@ class ContextAggregatorServiceTest {
         assertThat(ctx.getPredictedGlucose2h())
                 .as("predictedGlucose2h must be the canonical twoHourPrediction, not a second model")
                 .isEqualTo(9.9);
+    }
+
+    @Test
+    @DisplayName("#22 regression: the prediction request identifies the user by username, not UUID")
+    void buildContext_predictionRequestUsesUsername() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 30, 0, 45);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(chartRowAt(7.0, now.minusMinutes(1))));
+        ArgumentCaptor<GlucoseCalculationsRequest> request =
+                ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
+
+        service.buildContext(userId, 12, now);
+
+        verify(calculationsService).calculateGlucoseData(request.capture());
+        // calculateGlucoseData resolves request.userId with getUserByUsername. Passing the UUID
+        // made it throw "User not found" whenever the window held a reading, which blanked AI Insights.
+        assertThat(request.getValue().getUserId()).isEqualTo("patient");
     }
 
     // C2 (9b6ccd4) required that this path never substitute the base ISF where a meal-window

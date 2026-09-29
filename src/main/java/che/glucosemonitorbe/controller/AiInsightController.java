@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +35,7 @@ import java.util.UUID;
 @Tag(name = "AI Insights", description = "LLM-powered glucose pattern analysis and retrospective insights")
 @RestController
 @RequestMapping("/api/ai-insights")
+@Slf4j
 @RequiredArgsConstructor
 public class AiInsightController {
 
@@ -95,6 +97,7 @@ public class AiInsightController {
                             "remainingContextTokens", remaining == null ? 0 : remaining
                     ));
                 } catch (Exception e) {
+                    log.error("AI retrospective stream failed for userId={}", userId, e);
                     writeEvent(writer, Map.of("type", "error", "message", "AI stream failed"));
                 }
             }
