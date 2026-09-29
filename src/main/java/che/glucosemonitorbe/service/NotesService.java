@@ -16,6 +16,7 @@ import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @Transactional
 @RequiredArgsConstructor
@@ -120,6 +122,9 @@ public class NotesService {
         }
         
         Note savedNote = noteRepository.save(note);
+        log.info("Note created: id={} userId={} type={} timestamp={} carbs={} insulin={}",
+                savedNote.getId(), userId, savedNote.getType(), savedNote.getTimestamp(),
+                savedNote.getCarbs(), savedNote.getInsulin());
 
         // Fire over-injection check asynchronously - does not block the response.
         // Condition: note has insulin AND we have a current glucose reading to anchor the prediction.
