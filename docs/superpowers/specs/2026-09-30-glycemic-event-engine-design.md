@@ -78,20 +78,30 @@ labels back into prediction accuracy is a later spec (beyond the existing calibr
 
 ## 1. Data model
 
-### 1.1 Migration `V12__glycemic_events.sql`
+### 1.1 Migrations
 
-- `ALTER TABLE unlogged_event_flags RENAME TO glycemic_events;` Indexes and constraints are renamed to
-  match. Existing rows are kept.
-- Replace `chk_unlogged_category` with a check over the ten categories above.
+The repo rule (`glucose-monitor-be/CLAUDE.md`) forbids `ALTER TABLE` in a new migration: the file that owns
+a table is edited in place, and a new `V{n}` file is only for a brand-new table. So:
+
+- `V9__unlogged_event_flags.sql` is renamed to **`V9__glycemic_events.sql`** and edited in place to create
+  `glycemic_events` directly in its final shape (constraints/indexes named `*_glycemic_*`, category check
+  over the ten categories, and the columns below).
+- **`V12__glycemic_event_history.sql`** creates the new `glycemic_event_history` table (1.2).
+- **Existing databases need a one-time manual reset** because V9's checksum and description change. Flags are
+  regenerable detector output, so they are dropped, not migrated. Only the last scan window can be
+  re-detected, and any old user confirmations are lost:
+  `DROP TABLE IF EXISTS unlogged_event_flags CASCADE; DELETE FROM flyway_schema_history WHERE version = '9';`
+  then boot once with `SPRING_FLYWAY_OUT_OF_ORDER=true`. Run by the user on dev pg14 and on any deployed DB;
+  never by automation.
 - Add columns:
 
 | Column | Type | Notes |
 |---|---|---|
-| `onset_at` | `TIMESTAMPTZ NULL` | Inflection point; marker position. Backfilled to `window_start` for old rows. |
-| `phase` | `VARCHAR(12) NOT NULL DEFAULT 'FINAL'` | `PROVISIONAL` \| `FINAL`. Old rows are `FINAL`. |
+| `onset_at` | `TIMESTAMPTZ NOT NULL` | Inflection point; marker position. |
+| `phase` | `VARCHAR(12) NOT NULL DEFAULT 'FINAL'` | `PROVISIONAL` \| `FINAL`. |
 | `resolves_at` | `TIMESTAMPTZ NULL` | End of the tail watch; non-null only while provisional. |
 | `linked_event_id` | `UUID NULL` | Self-FK, `ON DELETE SET NULL`. Child → parent. |
-| `detector_category` | `VARCHAR(28) NOT NULL` | What the engine concluded. Backfilled from `category`. Never overwritten by the user. |
+| `detector_category` | `VARCHAR(28) NOT NULL` | What the engine concluded. Never overwritten by the user. |
 | `user_label` | `VARCHAR(28) NULL` | Category chosen by the user, when it differs from the detector's. |
 | `confidence` | `DOUBLE PRECISION NULL` | 0–1, for the effective category. |
 | `suppressed` | `BOOLEAN NOT NULL DEFAULT FALSE` | Learner says "not a real event": store, draw faintly, never prompt. |
@@ -417,7 +427,7 @@ New Swift files are added to the app target in `project.pbxproj` (not the widget
   down-weighted in calibration.
 - API: 422 wrong direction / missing category on provisional / backfill mismatch / range > 31 d; 409
   resolved; 404 foreign event; one history row per change.
-- Migration: pre-existing `unlogged_event_flags` rows readable as `FINAL` events after V12.
+- Schema: a clean DB migrates through V12; every category, phase and state value round-trips through the check constraints.
 
 ### 7.3 Offline validation (data-gated, report-only)
 
