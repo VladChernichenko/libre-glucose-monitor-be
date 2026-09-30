@@ -4,7 +4,7 @@ import che.glucosemonitorbe.dto.ConfirmGlycemicEventRequest;
 import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
 import che.glucosemonitorbe.service.FeatureToggleService;
-import che.glucosemonitorbe.service.GlycemicEventScanService;
+import che.glucosemonitorbe.service.GlycemicEventService;
 import che.glucosemonitorbe.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -30,7 +30,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class GlycemicEventController {
 
-    private final GlycemicEventScanService detectionService;
+    private final GlycemicEventService eventService;
     private final FeatureToggleService featureToggleService;
     private final UserService userService;
 
@@ -39,7 +39,7 @@ public class GlycemicEventController {
     public ResponseEntity<List<GlycemicEventDTO>> list(Authentication auth,
                                                            @RequestParam(required = false) State state) {
         requireFeature();
-        return ResponseEntity.ok(detectionService.list(userId(auth), state));
+        return ResponseEntity.ok(eventService.list(userId(auth), state));
     }
 
     @Operation(summary = "Confirm a flag; optionally backfill the actual carbs/insulin as a real note")
@@ -49,14 +49,14 @@ public class GlycemicEventController {
         requireFeature();
         Double carbs = body != null ? body.carbs() : null;
         Double insulin = body != null ? body.insulin() : null;
-        return ResponseEntity.ok(detectionService.confirm(userId(auth), id, carbs, insulin));
+        return ResponseEntity.ok(eventService.confirm(userId(auth), id, carbs, insulin));
     }
 
     @Operation(summary = "Dismiss a flag (the move was real model error, not an unlogged event)")
     @PostMapping("/{id}/dismiss")
     public ResponseEntity<GlycemicEventDTO> dismiss(Authentication auth, @PathVariable UUID id) {
         requireFeature();
-        return ResponseEntity.ok(detectionService.dismiss(userId(auth), id));
+        return ResponseEntity.ok(eventService.dismiss(userId(auth), id));
     }
 
     // -- helpers ---------------------------------------------------------------

@@ -9,7 +9,6 @@ import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
-import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.entity.GlycemicEvent;
@@ -33,10 +32,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -53,7 +50,7 @@ import java.util.UUID;
  * physiological model residual (see {@code specs/glycemic-event-detector.md}). Runs the raw Hovorka
  * prediction over a recent CGM window, finds a sustained same-sign residual that exceeds an adaptive
  * (robust-σ) threshold, classifies it, and persists an {@link GlycemicEvent} (deduped against any
- * open flag). Also serves the list / confirm / dismiss operations.
+ * open flag). User operations (list / confirm / dismiss) live in {@link GlycemicEventService}.
  */
 @Slf4j
 @Service
@@ -94,11 +91,6 @@ public class GlycemicEventScanService {
     /** How far before the run a matching logged event may sit and still count as "logged" [min]. */
     @Value("${app.glycemic-events.match-lead-minutes:45}")
     private int matchLeadMinutes;
-    /** Plausibility caps for a confirm-backfill amount. */
-    @Value("${app.glycemic-events.backfill-max-carbs:300}")
-    private double maxBackfillCarbs;
-    @Value("${app.glycemic-events.backfill-max-insulin:50}")
-    private double maxBackfillInsulin;
 
     /** Raw predictor (no twin overlay, no residual correction) - the calibration-consistent baseline. */
     private HovorkaGlucosePredictionService rawPredictor;
@@ -305,74 +297,6 @@ public class GlycemicEventScanService {
 
     private static boolean overlaps(GlycemicEvent f, LocalDateTime start, LocalDateTime end) {
         return !f.getWindowStart().isAfter(end) && !start.isAfter(f.getWindowEnd());
-    }
-
-    // -- List / confirm / dismiss -----------------------------------------------
-
-    @Transactional(readOnly = true)
-    public List<GlycemicEventDTO> list(UUID userId, State stateFilter) {
-        List<GlycemicEvent> flags = stateFilter == null
-                ? flagRepository.findByUserIdOrderByDetectedAtDesc(userId)
-                : flagRepository.findByUserIdAndStateOrderByDetectedAtDesc(userId, stateFilter);
-        return flags.stream().map(GlycemicEventDTO::from).toList();
-    }
-
-    /**
-     * Confirm a flag. When a corrected carbs/insulin amount is supplied it is backfilled as a real
-     * note (validated); otherwise the flag is simply marked confirmed.
-     */
-    @Transactional
-    public GlycemicEventDTO confirm(UUID userId, UUID flagId, Double carbs, Double insulin) {
-        GlycemicEvent flag = requireOpenFlag(userId, flagId);
-        boolean backfill = (carbs != null && carbs > 0) || (insulin != null && insulin > 0);
-        if (backfill) {
-            double c = validateAmount(carbs, maxBackfillCarbs, "carbs");
-            double u = validateAmount(insulin, maxBackfillInsulin, "insulin");
-            Note note = new Note();
-            note.setUserId(userId);
-            note.setTimestamp(flag.getWindowStart());
-            note.setCarbs(c);
-            note.setInsulin(u);
-            note.setMeal("Unlogged (backfilled)");
-            note.setType(Note.TYPE_NORMAL);
-            note.setCreatedAt(LocalDateTime.now());
-            note.setUpdatedAt(LocalDateTime.now());
-            noteRepository.save(note);
-        }
-        flag.setState(State.CONFIRMED);
-        flag.setResolvedAt(LocalDateTime.now());
-        flag.setUpdatedAt(LocalDateTime.now());
-        return GlycemicEventDTO.from(flagRepository.save(flag));
-    }
-
-    @Transactional
-    public GlycemicEventDTO dismiss(UUID userId, UUID flagId) {
-        GlycemicEvent flag = requireOpenFlag(userId, flagId);
-        flag.setState(State.DISMISSED);
-        flag.setResolvedAt(LocalDateTime.now());
-        flag.setUpdatedAt(LocalDateTime.now());
-        return GlycemicEventDTO.from(flagRepository.save(flag));
-    }
-
-    private GlycemicEvent requireOpenFlag(UUID userId, UUID flagId) {
-        GlycemicEvent flag = flagRepository.findById(flagId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag not found"));
-        if (!flag.getUserId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag not found"); // don't leak existence
-        }
-        if (flag.getState() != State.OPEN) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Flag already resolved");
-        }
-        return flag;
-    }
-
-    private double validateAmount(Double v, double max, String name) {
-        double x = v == null ? 0.0 : v;
-        if (x < 0 || x > max) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Invalid backfill " + name + ": " + v);
-        }
-        return x;
     }
 
     // -- Math / time helpers -----------------------------------------------------
