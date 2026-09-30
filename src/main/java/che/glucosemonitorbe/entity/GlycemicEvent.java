@@ -19,8 +19,8 @@ import java.util.UUID;
 @AllArgsConstructor
 @Builder
 @Entity
-@Table(name = "unlogged_event_flags")
-public class UnloggedEventFlag {
+@Table(name = "glycemic_events")
+public class GlycemicEvent {
 
     /** What the residual most likely indicates. */
     public enum Category {

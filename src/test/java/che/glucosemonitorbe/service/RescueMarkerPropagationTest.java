@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Four separate code paths turn a note into a {@link CarbsEntry}: the shared
  * {@code NoteToCarbsEntryMapper} (covered by {@code NoteToCarbsEntryMapperRescueTest}), the
- * digital-twin replay feeder, the unlogged-event residual scan and the AI context aggregator
+ * digital-twin replay feeder, the glycemic-event residual scan and the AI context aggregator
  * (covered in {@code ContextAggregatorServiceTest}). Three of them once hand-built the entry with no
  * {@code absorptionMode} at all, so {@code RescueCarbProfile.isRescue(null)} was false and the
  * rescue silently reverted to the user's 240-minute mixed-meal curve.
@@ -61,7 +61,7 @@ class RescueMarkerPropagationTest {
                 .isFalse();
     }
 
-    // -- Path 2: unlogged-event residual scan ----------------------------------
+    // -- Path 2: glycemic-event residual scan ----------------------------------
 
     /**
      * Left unmarked here, the raw forward prediction under-predicts the rescue rise, the residual
@@ -69,8 +69,8 @@ class RescueMarkerPropagationTest {
      * That flag then feeds back into the twin fit as a down-weighted CGM window.
      */
     @Test
-    void unloggedEventScanEntryCarriesTheRescueMarker() {
-        CarbsEntry entry = UnloggedEventDetectionService.toCarbsEntry(hypoTreatmentNote(15.0));
+    void glycemicEventScanEntryCarriesTheRescueMarker() {
+        CarbsEntry entry = GlycemicEventScanService.toCarbsEntry(hypoTreatmentNote(15.0));
 
         assertThat(RescueCarbProfile.isRescue(entry.getAbsorptionMode()))
                 .as("absorptionMode was %s", entry.getAbsorptionMode())
@@ -80,8 +80,8 @@ class RescueMarkerPropagationTest {
     }
 
     @Test
-    void unloggedEventScanEntryLeavesAnOrdinaryMealUnmarked() {
-        CarbsEntry entry = UnloggedEventDetectionService.toCarbsEntry(ordinaryMealNote(15.0));
+    void glycemicEventScanEntryLeavesAnOrdinaryMealUnmarked() {
+        CarbsEntry entry = GlycemicEventScanService.toCarbsEntry(ordinaryMealNote(15.0));
 
         assertThat(RescueCarbProfile.isRescue(entry.getAbsorptionMode())).isFalse();
     }

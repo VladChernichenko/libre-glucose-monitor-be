@@ -3,16 +3,16 @@ package che.glucosemonitorbe.integration;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.entity.UnloggedEventFlag;
-import che.glucosemonitorbe.entity.UnloggedEventFlag.Category;
-import che.glucosemonitorbe.entity.UnloggedEventFlag.State;
+import che.glucosemonitorbe.entity.GlycemicEvent;
+import che.glucosemonitorbe.entity.GlycemicEvent.Category;
+import che.glucosemonitorbe.entity.GlycemicEvent.State;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.repository.UnloggedEventFlagRepository;
+import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.hovorka.learning.DigitalTwinCalibrator;
 import che.glucosemonitorbe.service.DigitalTwinCalibrationService;
-import che.glucosemonitorbe.service.UnloggedEventDetectionService;
+import che.glucosemonitorbe.service.GlycemicEventScanService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +40,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * End-to-end tests for the unlogged-event detector: detection + classification + dedupe + the
+ * End-to-end tests for the glycemic-event detector: detection + classification + dedupe + the
  * confirm/dismiss API. Seeds a synthetic unexplained rise (elevated CGM with no logged carbs) and
  * asserts the model residual flags it.
  */
@@ -49,13 +49,13 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-    "app.features.unlogged-event-detection-enabled=true",
+    "app.features.glycemic-event-detection-enabled=true",
     "app.features.digital-twin-enabled=true",   // for the calibration-exclusion test
     "app.features.activity-logging-enabled=true",// for the activity-aware detection test
     "app.glucose-sync.enabled=false"             // keep sync schedulers quiet during the test
 })
 @SuppressWarnings({"resource", "null"})
-class UnloggedEventE2ETest {
+class GlycemicEventE2ETest {
 
     @Container
     @ServiceConnection
@@ -67,8 +67,8 @@ class UnloggedEventE2ETest {
     @Autowired private UserRepository userRepository;
     @Autowired private CgmReadingRepository cgmReadingRepository;
     @Autowired private NoteRepository noteRepository;
-    @Autowired private UnloggedEventFlagRepository flagRepository;
-    @Autowired private UnloggedEventDetectionService detectionService;
+    @Autowired private GlycemicEventRepository flagRepository;
+    @Autowired private GlycemicEventScanService detectionService;
     @Autowired private DigitalTwinCalibrationService calibrationService;
     @Autowired private che.glucosemonitorbe.repository.UserSettingsRepository userSettingsRepository;
     private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
@@ -92,11 +92,11 @@ class UnloggedEventE2ETest {
         UUID userId = userId();
         seedRiseWindow(userId);
 
-        Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
+        Optional<GlycemicEvent> flag = detectionService.scanUser(userId);
 
         assertTrue(flag.isPresent(), "a flag should be opened");
         assertEquals(Category.UNLOGGED_FOOD, flag.get().getCategory());
-        assertEquals(UnloggedEventFlag.Direction.RISE, flag.get().getDirection());
+        assertEquals(GlycemicEvent.Direction.RISE, flag.get().getDirection());
         assertEquals(State.OPEN, flag.get().getState());
         assertTrue(flag.get().getMeanResidualMmol() > 0, "residual is a rise");
     }
@@ -120,7 +120,7 @@ class UnloggedEventE2ETest {
         n.setUpdatedAt(LocalDateTime.now());
         noteRepository.save(n);
 
-        Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
+        Optional<GlycemicEvent> flag = detectionService.scanUser(userId);
 
         assertTrue(flag.isPresent());
         assertEquals(Category.UNDER_ESTIMATED_FOOD, flag.get().getCategory());
@@ -161,7 +161,7 @@ class UnloggedEventE2ETest {
         n.setUpdatedAt(LocalDateTime.now());
         noteRepository.save(n);
 
-        Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
+        Optional<GlycemicEvent> flag = detectionService.scanUser(userId);
 
         assertTrue(flag.isPresent());
         // The carbs ARE logged, just under-estimated. Comparing a local-wall note against a
@@ -212,8 +212,8 @@ class UnloggedEventE2ETest {
         UUID flagId = detectionService.scanUser(userId).orElseThrow().getId();
 
         ResponseEntity<String> resp = rest.exchange(
-                "/api/unlogged-events/" + flagId + "/confirm", HttpMethod.POST,
-                new HttpEntity<>(new ConfirmUnloggedEventRequest(45.0, null), authHeaders), String.class);
+                "/api/glycemic-events/" + flagId + "/confirm", HttpMethod.POST,
+                new HttpEntity<>(new ConfirmGlycemicEventRequest(45.0, null), authHeaders), String.class);
 
         assertEquals(HttpStatus.OK, resp.getStatusCode());
         JsonNode body = mapper.readTree(resp.getBody());
@@ -233,7 +233,7 @@ class UnloggedEventE2ETest {
         UUID flagId = detectionService.scanUser(userId).orElseThrow().getId();
 
         ResponseEntity<String> resp = rest.exchange(
-                "/api/unlogged-events/" + flagId + "/dismiss", HttpMethod.POST,
+                "/api/glycemic-events/" + flagId + "/dismiss", HttpMethod.POST,
                 new HttpEntity<>(authHeaders), String.class);
 
         assertEquals(HttpStatus.OK, resp.getStatusCode());
@@ -249,11 +249,11 @@ class UnloggedEventE2ETest {
         UUID userId = userId();
         seedFallWindow(userId);
 
-        Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
+        Optional<GlycemicEvent> flag = detectionService.scanUser(userId);
 
         assertTrue(flag.isPresent());
         assertEquals(Category.UNLOGGED_INSULIN, flag.get().getCategory());
-        assertEquals(UnloggedEventFlag.Direction.FALL, flag.get().getDirection());
+        assertEquals(GlycemicEvent.Direction.FALL, flag.get().getDirection());
         assertTrue(flag.get().getMeanResidualMmol() < 0, "residual is a fall");
     }
 
@@ -273,7 +273,7 @@ class UnloggedEventE2ETest {
         n.setUpdatedAt(LocalDateTime.now());
         noteRepository.save(n);
 
-        Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
+        Optional<GlycemicEvent> flag = detectionService.scanUser(userId);
 
         assertTrue(flag.isPresent());
         assertEquals(Category.UNDER_ESTIMATED_INSULIN, flag.get().getCategory());
@@ -290,7 +290,7 @@ class UnloggedEventE2ETest {
 
         HttpHeaders otherUser = registerAndLogin();   // a second, unrelated user
         ResponseEntity<String> resp = rest.exchange(
-                "/api/unlogged-events/" + flagId + "/dismiss", HttpMethod.POST,
+                "/api/glycemic-events/" + flagId + "/dismiss", HttpMethod.POST,
                 new HttpEntity<>(otherUser), String.class);
 
         assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode());
@@ -303,11 +303,11 @@ class UnloggedEventE2ETest {
         seedRiseWindow(userId);
         UUID flagId = detectionService.scanUser(userId).orElseThrow().getId();
 
-        rest.exchange("/api/unlogged-events/" + flagId + "/dismiss", HttpMethod.POST,
+        rest.exchange("/api/glycemic-events/" + flagId + "/dismiss", HttpMethod.POST,
                 new HttpEntity<>(authHeaders), String.class);
         ResponseEntity<String> second = rest.exchange(
-                "/api/unlogged-events/" + flagId + "/confirm", HttpMethod.POST,
-                new HttpEntity<>(new ConfirmUnloggedEventRequest(30.0, null), authHeaders), String.class);
+                "/api/glycemic-events/" + flagId + "/confirm", HttpMethod.POST,
+                new HttpEntity<>(new ConfirmGlycemicEventRequest(30.0, null), authHeaders), String.class);
 
         assertEquals(HttpStatus.CONFLICT, second.getStatusCode());
     }
@@ -321,12 +321,12 @@ class UnloggedEventE2ETest {
         seedRiseWindow(userId);
         detectionService.scanUser(userId);
 
-        ResponseEntity<String> all = rest.exchange("/api/unlogged-events", HttpMethod.GET,
+        ResponseEntity<String> all = rest.exchange("/api/glycemic-events", HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class);
         assertEquals(HttpStatus.OK, all.getStatusCode());
         assertTrue(mapper.readTree(all.getBody()).size() >= 1);
 
-        ResponseEntity<String> dismissed = rest.exchange("/api/unlogged-events?state=DISMISSED",
+        ResponseEntity<String> dismissed = rest.exchange("/api/glycemic-events?state=DISMISSED",
                 HttpMethod.GET, new HttpEntity<>(authHeaders), String.class);
         assertEquals(0, mapper.readTree(dismissed.getBody()).size(), "no DISMISSED flags yet");
     }
@@ -339,7 +339,7 @@ class UnloggedEventE2ETest {
         UUID flagId = detectionService.scanUser(userId).orElseThrow().getId();
 
         ResponseEntity<String> resp = rest.exchange(
-                "/api/unlogged-events/" + flagId + "/confirm", HttpMethod.POST,
+                "/api/glycemic-events/" + flagId + "/confirm", HttpMethod.POST,
                 new HttpEntity<>(authHeaders), String.class);
 
         assertEquals(HttpStatus.OK, resp.getStatusCode());
@@ -364,9 +364,9 @@ class UnloggedEventE2ETest {
         long now = Instant.now().toEpochMilli();
         LocalDateTime wEnd = toLdt(now - 6 * 3600_000L);
         LocalDateTime wStart = wEnd.minusHours(4);
-        UnloggedEventFlag flag = flagRepository.save(UnloggedEventFlag.builder()
+        GlycemicEvent flag = flagRepository.save(GlycemicEvent.builder()
                 .userId(userId).category(Category.UNLOGGED_FOOD)
-                .direction(UnloggedEventFlag.Direction.RISE)
+                .direction(GlycemicEvent.Direction.RISE)
                 .windowStart(wStart).windowEnd(wEnd)
                 .meanResidualMmol(5.0).sigmaMultiple(3.0)
                 .state(State.CONFIRMED).updatedAt(LocalDateTime.now()).build());
@@ -391,7 +391,7 @@ class UnloggedEventE2ETest {
         long dropStart = seedFallWindow(userId);   // sustained fall, no bolus
 
         // Without any activity, the drop is unexplained -> flagged with a large negative residual.
-        UnloggedEventFlag before = detectionService.scanUser(userId).orElseThrow();
+        GlycemicEvent before = detectionService.scanUser(userId).orElseThrow();
         assertEquals(Category.UNLOGGED_INSULIN, before.getCategory());
         double residualBefore = Math.abs(before.getMeanResidualMmol());
 

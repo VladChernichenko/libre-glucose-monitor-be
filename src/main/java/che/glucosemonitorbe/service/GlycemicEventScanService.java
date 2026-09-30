@@ -9,13 +9,13 @@ import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
-import che.glucosemonitorbe.dto.UnloggedEventFlagDTO;
+import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.entity.UnloggedEventFlag;
-import che.glucosemonitorbe.entity.UnloggedEventFlag.Category;
-import che.glucosemonitorbe.entity.UnloggedEventFlag.Direction;
-import che.glucosemonitorbe.entity.UnloggedEventFlag.State;
+import che.glucosemonitorbe.entity.GlycemicEvent;
+import che.glucosemonitorbe.entity.GlycemicEvent.Category;
+import che.glucosemonitorbe.entity.GlycemicEvent.Direction;
+import che.glucosemonitorbe.entity.GlycemicEvent.State;
 import che.glucosemonitorbe.hovorka.ActivityProvider;
 import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.NotesActivityProvider;
@@ -27,7 +27,7 @@ import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.repository.UnloggedEventFlagRepository;
+import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -50,15 +50,15 @@ import java.util.UUID;
 
 /**
  * Detects windows where glucose moved in a way the logged inputs (COB/IOB) do not explain, using the
- * physiological model residual (see {@code specs/unlogged-event-detector.md}). Runs the raw Hovorka
+ * physiological model residual (see {@code specs/glycemic-event-detector.md}). Runs the raw Hovorka
  * prediction over a recent CGM window, finds a sustained same-sign residual that exceeds an adaptive
- * (robust-σ) threshold, classifies it, and persists an {@link UnloggedEventFlag} (deduped against any
+ * (robust-σ) threshold, classifies it, and persists an {@link GlycemicEvent} (deduped against any
  * open flag). Also serves the list / confirm / dismiss operations.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class UnloggedEventDetectionService {
+public class GlycemicEventScanService {
 
     private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
     private static final String SEED_EMAIL_PATTERN = "azt1d-subject-%@dataset.local";
@@ -67,7 +67,7 @@ public class UnloggedEventDetectionService {
     private final CgmReadingRepository cgmReadingRepository;
     private final NoteRepository noteRepository;
     private final UserRepository userRepository;
-    private final UnloggedEventFlagRepository flagRepository;
+    private final GlycemicEventRepository flagRepository;
     private final HovorkaParameterService paramService;
     private final HovorkaOdeSolver odeSolver;
     private final DallaManGutModel gutModel;
@@ -77,27 +77,27 @@ public class UnloggedEventDetectionService {
     private final FeatureToggleConfig featureToggleConfig;
 
     /** Length of the CGM window scanned each pass [min]. */
-    @Value("${app.unlogged-events.window-minutes:180}")
+    @Value("${app.glycemic-events.window-minutes:180}")
     private int windowMinutes;
     /** Minimum aligned residual points needed to estimate σ and run the scan. */
-    @Value("${app.unlogged-events.min-readings:24}")
+    @Value("${app.glycemic-events.min-readings:24}")
     private int minReadings;
     /** Robust-σ multiple the sustained mean residual must exceed to flag. */
-    @Value("${app.unlogged-events.sigma-multiple:2.0}")
+    @Value("${app.glycemic-events.sigma-multiple:2.0}")
     private double sigmaMultiple;
     /** Minimum duration of the sustained run [min] - rejects transient sensor artifacts. */
-    @Value("${app.unlogged-events.persistence-minutes:45}")
+    @Value("${app.glycemic-events.persistence-minutes:45}")
     private int persistenceMinutes;
     /** Tolerance when aligning a predicted point to an actual CGM reading [ms]. */
-    @Value("${app.unlogged-events.align-tolerance-ms:150000}")
+    @Value("${app.glycemic-events.align-tolerance-ms:150000}")
     private long alignToleranceMs;
     /** How far before the run a matching logged event may sit and still count as "logged" [min]. */
-    @Value("${app.unlogged-events.match-lead-minutes:45}")
+    @Value("${app.glycemic-events.match-lead-minutes:45}")
     private int matchLeadMinutes;
     /** Plausibility caps for a confirm-backfill amount. */
-    @Value("${app.unlogged-events.backfill-max-carbs:300}")
+    @Value("${app.glycemic-events.backfill-max-carbs:300}")
     private double maxBackfillCarbs;
-    @Value("${app.unlogged-events.backfill-max-insulin:50}")
+    @Value("${app.glycemic-events.backfill-max-insulin:50}")
     private double maxBackfillInsulin;
 
     /** Raw predictor (no twin overlay, no residual correction) - the calibration-consistent baseline. */
@@ -135,14 +135,14 @@ public class UnloggedEventDetectionService {
 
     /** Scan every real (non-seed) user. No-op unless the feature is enabled. */
     public ScanSummary scanAllRealUsers() {
-        if (!featureToggleConfig.isUnloggedEventDetectionEnabled()) {
+        if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) {
             return new ScanSummary(0, 0, 0, 0);
         }
         List<User> users = userRepository.findByEmailNotLike(SEED_EMAIL_PATTERN);
         int scanned = 0, flagged = 0, skipped = 0, failed = 0;
         for (User user : users) {
             try {
-                Optional<UnloggedEventFlag> flag = scanUser(user.getId());
+                Optional<GlycemicEvent> flag = scanUser(user.getId());
                 scanned++;
                 if (flag.isPresent()) flagged++; else skipped++;
             } catch (Exception e) {
@@ -161,8 +161,8 @@ public class UnloggedEventDetectionService {
      * residual is found, else empty (feature off, too little data, or nothing unexplained).
      */
     @Transactional
-    public Optional<UnloggedEventFlag> scanUser(UUID userId) {
-        if (!featureToggleConfig.isUnloggedEventDetectionEnabled()) return Optional.empty();
+    public Optional<GlycemicEvent> scanUser(UUID userId) {
+        if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) return Optional.empty();
 
         // Run on the user's own clock. notes.timestamp holds local wall time, while CGM rows hold
         // true UTC epochs - comparing a local-wall note against a UTC-wall CGM window put every
@@ -266,7 +266,7 @@ public class UnloggedEventDetectionService {
         return best;
     }
 
-    private UnloggedEventFlag persistFlag(UUID userId, Run run, double sigma, List<Note> notes,
+    private GlycemicEvent persistFlag(UUID userId, Run run, double sigma, List<Note> notes,
                                           java.time.ZoneId userZone) {
         boolean rise = run.mean() > 0;
         LocalDateTime wStart = toLdt(run.startMs(), userZone);
@@ -287,11 +287,11 @@ public class UnloggedEventDetectionService {
         double sigmaMult = sigma > 0 ? Math.abs(run.mean()) / sigma : 0.0;
 
         // Dedupe: update an existing OPEN flag that overlaps this window, else create.
-        UnloggedEventFlag flag = flagRepository
+        GlycemicEvent flag = flagRepository
                 .findByUserIdAndStateIn(userId, List.of(State.OPEN)).stream()
                 .filter(f -> overlaps(f, wStart, wEnd))
                 .findFirst()
-                .orElseGet(() -> UnloggedEventFlag.builder().userId(userId).state(State.OPEN).build());
+                .orElseGet(() -> GlycemicEvent.builder().userId(userId).state(State.OPEN).build());
 
         flag.setCategory(category);
         flag.setDirection(direction);
@@ -303,18 +303,18 @@ public class UnloggedEventDetectionService {
         return flagRepository.save(flag);
     }
 
-    private static boolean overlaps(UnloggedEventFlag f, LocalDateTime start, LocalDateTime end) {
+    private static boolean overlaps(GlycemicEvent f, LocalDateTime start, LocalDateTime end) {
         return !f.getWindowStart().isAfter(end) && !start.isAfter(f.getWindowEnd());
     }
 
     // -- List / confirm / dismiss -----------------------------------------------
 
     @Transactional(readOnly = true)
-    public List<UnloggedEventFlagDTO> list(UUID userId, State stateFilter) {
-        List<UnloggedEventFlag> flags = stateFilter == null
+    public List<GlycemicEventDTO> list(UUID userId, State stateFilter) {
+        List<GlycemicEvent> flags = stateFilter == null
                 ? flagRepository.findByUserIdOrderByDetectedAtDesc(userId)
                 : flagRepository.findByUserIdAndStateOrderByDetectedAtDesc(userId, stateFilter);
-        return flags.stream().map(UnloggedEventFlagDTO::from).toList();
+        return flags.stream().map(GlycemicEventDTO::from).toList();
     }
 
     /**
@@ -322,8 +322,8 @@ public class UnloggedEventDetectionService {
      * note (validated); otherwise the flag is simply marked confirmed.
      */
     @Transactional
-    public UnloggedEventFlagDTO confirm(UUID userId, UUID flagId, Double carbs, Double insulin) {
-        UnloggedEventFlag flag = requireOpenFlag(userId, flagId);
+    public GlycemicEventDTO confirm(UUID userId, UUID flagId, Double carbs, Double insulin) {
+        GlycemicEvent flag = requireOpenFlag(userId, flagId);
         boolean backfill = (carbs != null && carbs > 0) || (insulin != null && insulin > 0);
         if (backfill) {
             double c = validateAmount(carbs, maxBackfillCarbs, "carbs");
@@ -342,20 +342,20 @@ public class UnloggedEventDetectionService {
         flag.setState(State.CONFIRMED);
         flag.setResolvedAt(LocalDateTime.now());
         flag.setUpdatedAt(LocalDateTime.now());
-        return UnloggedEventFlagDTO.from(flagRepository.save(flag));
+        return GlycemicEventDTO.from(flagRepository.save(flag));
     }
 
     @Transactional
-    public UnloggedEventFlagDTO dismiss(UUID userId, UUID flagId) {
-        UnloggedEventFlag flag = requireOpenFlag(userId, flagId);
+    public GlycemicEventDTO dismiss(UUID userId, UUID flagId) {
+        GlycemicEvent flag = requireOpenFlag(userId, flagId);
         flag.setState(State.DISMISSED);
         flag.setResolvedAt(LocalDateTime.now());
         flag.setUpdatedAt(LocalDateTime.now());
-        return UnloggedEventFlagDTO.from(flagRepository.save(flag));
+        return GlycemicEventDTO.from(flagRepository.save(flag));
     }
 
-    private UnloggedEventFlag requireOpenFlag(UUID userId, UUID flagId) {
-        UnloggedEventFlag flag = flagRepository.findById(flagId)
+    private GlycemicEvent requireOpenFlag(UUID userId, UUID flagId) {
+        GlycemicEvent flag = flagRepository.findById(flagId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag not found"));
         if (!flag.getUserId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Flag not found"); // don't leak existence

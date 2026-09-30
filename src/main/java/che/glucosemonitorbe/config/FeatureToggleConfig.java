@@ -29,7 +29,7 @@ public class FeatureToggleConfig {
     // don't explain (probable unlogged/under-estimated food or insulin). Feeds user confirmation and
     // digital-twin calibration down-weighting. Follows the digital-twin convention (off here, enabled
     // per-environment in application.yml).
-    private boolean unloggedEventDetectionEnabled = false;
+    private boolean glycemicEventDetectionEnabled = false;
 
     // Activity logging: user-logged activity notes (type/intensity/duration) feed the glucose model's
     // activity signal a(t). When off, activity notes may still be stored but are not consumed by
@@ -38,7 +38,7 @@ public class FeatureToggleConfig {
 
     // Hypo rescue-carb logging: prompt the user to log fast carbs when glucose drops below
     // 3.9 mmol/L. Off here, enabled per-environment in application.yml, matching the convention
-    // used by digital-twin-enabled and unlogged-event-detection-enabled.
+    // used by digital-twin-enabled and glycemic-event-detection-enabled.
     private boolean hypoRescueLoggingEnabled = false;
 
 }

@@ -45,7 +45,7 @@ public final class RescueCarbProfile {
      *
      * <p>Every consumer that turns a {@code hypo_treatment} note into a {@link CarbsEntry} must go
      * through here. Four separate code paths build a {@code CarbsEntry} - the shared note mapper,
-     * the twin-replay engine, the unlogged-event detector and the AI context aggregator - and three
+     * the twin-replay engine, the glycemic-event detector and the AI context aggregator - and three
      * of them once built it by hand without an {@code absorptionMode}, so {@link #isRescue} was
      * false and the rescue silently reverted to the user's 240-minute mixed-meal curve. In the twin
      * fit that is not merely cosmetic: the model saw a sharp real glucose rise it could not explain

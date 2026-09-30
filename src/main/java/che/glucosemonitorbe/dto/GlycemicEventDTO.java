@@ -1,12 +1,12 @@
 package che.glucosemonitorbe.dto;
 
-import che.glucosemonitorbe.entity.UnloggedEventFlag;
+import che.glucosemonitorbe.entity.GlycemicEvent;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-/** API view of an {@link UnloggedEventFlag}. */
-public record UnloggedEventFlagDTO(
+/** API view of an {@link GlycemicEvent}. */
+public record GlycemicEventDTO(
         UUID id,
         String category,
         String direction,
@@ -18,8 +18,8 @@ public record UnloggedEventFlagDTO(
         LocalDateTime detectedAt,
         LocalDateTime resolvedAt) {
 
-    public static UnloggedEventFlagDTO from(UnloggedEventFlag f) {
-        return new UnloggedEventFlagDTO(
+    public static GlycemicEventDTO from(GlycemicEvent f) {
+        return new GlycemicEventDTO(
                 f.getId(),
                 f.getCategory().name(),
                 f.getDirection().name(),
