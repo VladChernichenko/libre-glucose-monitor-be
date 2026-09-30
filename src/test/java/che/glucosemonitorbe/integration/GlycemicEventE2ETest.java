@@ -213,7 +213,7 @@ class GlycemicEventE2ETest {
 
         ResponseEntity<String> resp = rest.exchange(
                 "/api/glycemic-events/" + flagId + "/confirm", HttpMethod.POST,
-                new HttpEntity<>(new ConfirmGlycemicEventRequest(45.0, null), authHeaders), String.class);
+                new HttpEntity<>(new ConfirmGlycemicEventRequest(null, 45.0, null), authHeaders), String.class);
 
         assertEquals(HttpStatus.OK, resp.getStatusCode());
         JsonNode body = mapper.readTree(resp.getBody());
@@ -307,7 +307,7 @@ class GlycemicEventE2ETest {
                 new HttpEntity<>(authHeaders), String.class);
         ResponseEntity<String> second = rest.exchange(
                 "/api/glycemic-events/" + flagId + "/confirm", HttpMethod.POST,
-                new HttpEntity<>(new ConfirmGlycemicEventRequest(30.0, null), authHeaders), String.class);
+                new HttpEntity<>(new ConfirmGlycemicEventRequest(null, 30.0, null), authHeaders), String.class);
 
         assertEquals(HttpStatus.CONFLICT, second.getStatusCode());
     }
@@ -321,12 +321,14 @@ class GlycemicEventE2ETest {
         seedRiseWindow(userId);
         detectionService.scanUser(userId);
 
-        ResponseEntity<String> all = rest.exchange("/api/glycemic-events", HttpMethod.GET,
+        String range = "?from=" + LocalDateTime.now(java.time.ZoneOffset.UTC).minusDays(1).withNano(0)
+                + "&to=" + LocalDateTime.now(java.time.ZoneOffset.UTC).plusHours(1).withNano(0);
+        ResponseEntity<String> all = rest.exchange("/api/glycemic-events" + range, HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class);
         assertEquals(HttpStatus.OK, all.getStatusCode());
         assertTrue(mapper.readTree(all.getBody()).size() >= 1);
 
-        ResponseEntity<String> dismissed = rest.exchange("/api/glycemic-events?state=DISMISSED",
+        ResponseEntity<String> dismissed = rest.exchange("/api/glycemic-events" + range + "&state=DISMISSED",
                 HttpMethod.GET, new HttpEntity<>(authHeaders), String.class);
         assertEquals(0, mapper.readTree(dismissed.getBody()).size(), "no DISMISSED flags yet");
     }

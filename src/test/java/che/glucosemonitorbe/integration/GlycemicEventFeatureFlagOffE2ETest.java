@@ -82,7 +82,8 @@ class GlycemicEventFeatureFlagOffE2ETest {
     @Test
     @DisplayName("with the feature off, the API returns 404")
     void api404_whenFeatureDisabled() {
-        ResponseEntity<String> resp = rest.exchange("/api/glycemic-events", HttpMethod.GET,
+        ResponseEntity<String> resp = rest.exchange(
+                "/api/glycemic-events?from=2026-01-01T00:00:00&to=2026-01-02T00:00:00", HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class);
         assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode());
     }

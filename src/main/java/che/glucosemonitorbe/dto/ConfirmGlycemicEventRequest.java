@@ -1,8 +1,8 @@
 package che.glucosemonitorbe.dto;
 
 /**
- * Body for confirming an glycemic-event. Both amounts are optional: when supplied, the confirmed
- * event is backfilled as a real note (so the model uses real data); when omitted, the flag is simply
- * marked confirmed (the window is down-weighted in calibration).
+ * Body for confirming a glycemic event. {@code category} confirms or relabels (required for a PROVISIONAL
+ * event; must match the event's direction). {@code carbs} may be backfilled only for a food category and
+ * {@code insulin} only for an insulin category; either becomes a real note at the event's onset.
  */
-public record ConfirmGlycemicEventRequest(Double carbs, Double insulin) {}
+public record ConfirmGlycemicEventRequest(String category, Double carbs, Double insulin) {}

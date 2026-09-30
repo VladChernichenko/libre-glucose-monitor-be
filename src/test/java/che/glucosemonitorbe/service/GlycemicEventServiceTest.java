@@ -1,11 +1,12 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.config.GlycemicEventProperties;
+import che.glucosemonitorbe.dto.ConfirmGlycemicEventRequest;
+import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.entity.GlycemicEvent;
-import che.glucosemonitorbe.entity.GlycemicEvent.Category;
-import che.glucosemonitorbe.entity.GlycemicEvent.Direction;
-import che.glucosemonitorbe.entity.GlycemicEvent.State;
-import che.glucosemonitorbe.entity.GlycemicEventHistory.Actor;
+import che.glucosemonitorbe.entity.GlycemicEvent.*;
 import che.glucosemonitorbe.entity.GlycemicEventHistory.Kind;
+import che.glucosemonitorbe.repository.GlycemicEventHistoryRepository;
 import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,77 +15,96 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class GlycemicEventServiceTest {
 
     private final GlycemicEventRepository events = mock(GlycemicEventRepository.class);
+    private final GlycemicEventHistoryRepository history = mock(GlycemicEventHistoryRepository.class);
     private final NoteRepository notes = mock(NoteRepository.class);
+    private final UserSettingsService settings = mock(UserSettingsService.class);
     private final GlycemicEventHistoryRecorder recorder = mock(GlycemicEventHistoryRecorder.class);
+    private final GlycemicLearnerTrainingCache cache = mock(GlycemicLearnerTrainingCache.class);
     private GlycemicEventService service;
     private final UUID user = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        service = new GlycemicEventService(events, notes, recorder, new che.glucosemonitorbe.config.GlycemicEventProperties(),
-                mock(GlycemicLearnerTrainingCache.class));
+        service = new GlycemicEventService(events, history, notes, settings, new GlycemicEventProperties(), recorder, cache);
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(events.findByLinkedEventId(any())).thenReturn(List.of());
     }
 
-    private GlycemicEvent open(UUID owner) {
-        return GlycemicEvent.builder().id(UUID.randomUUID()).userId(owner)
-                .category(Category.UNLOGGED_FOOD).direction(Direction.RISE)
+    private GlycemicEvent stored(UUID owner, Category c, Phase p, State s) {
+        GlycemicEvent e = GlycemicEvent.builder().id(UUID.randomUUID()).userId(owner).category(c).detectorCategory(c)
+                .direction(c.direction()).phase(p).onsetAt(LocalDateTime.now().minusHours(1))
                 .windowStart(LocalDateTime.now().minusHours(1)).windowEnd(LocalDateTime.now())
-                .meanResidualMmol(3.0).state(State.OPEN).build();
+                .meanResidualMmol(3.0).state(s).build();
+        when(events.findById(e.getId())).thenReturn(Optional.of(e));
+        return e;
     }
 
-    @Test
-    void confirmingAnotherUsersEventIs404() {
-        GlycemicEvent e = open(UUID.randomUUID());
-        when(events.findById(e.getId())).thenReturn(Optional.of(e));
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.confirm(user, e.getId(), null, null));
-        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
+    private HttpStatus status(Runnable r) {
+        return (HttpStatus) assertThrows(ResponseStatusException.class, r::run).getStatusCode();
     }
 
-    @Test
-    void confirmingAResolvedEventIs409() {
-        GlycemicEvent e = open(user);
-        e.setState(State.DISMISSED);
-        when(events.findById(e.getId())).thenReturn(Optional.of(e));
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.confirm(user, e.getId(), 30.0, null));
-        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+    @Test void foreignEventIs404() {
+        GlycemicEvent e = stored(UUID.randomUUID(), Category.UNLOGGED_FOOD, Phase.FINAL, State.OPEN);
+        assertThat(status(() -> service.confirm(user, e.getId(), null))).isEqualTo(HttpStatus.NOT_FOUND);
     }
-
-    @Test
-    void backfillAboveCapIs422AndWritesNoNote() {
-        GlycemicEvent e = open(user);
-        when(events.findById(e.getId())).thenReturn(Optional.of(e));
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> service.confirm(user, e.getId(), 400.0, null));
-        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, ex.getStatusCode());
+    @Test void resolvedEventIs409BeforeAnyValidation() {
+        GlycemicEvent e = stored(user, Category.UNLOGGED_FOOD, Phase.FINAL, State.DISMISSED);
+        assertThat(status(() -> service.confirm(user, e.getId(), new ConfirmGlycemicEventRequest("NOPE", 999.0, null))))
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+    @Test void unknownCategoryIs422() {
+        GlycemicEvent e = stored(user, Category.UNLOGGED_FOOD, Phase.FINAL, State.OPEN);
+        assertThat(status(() -> service.confirm(user, e.getId(), new ConfirmGlycemicEventRequest("NOPE", null, null))))
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+    @Test void wrongDirectionIs422() {
+        GlycemicEvent e = stored(user, Category.UNLOGGED_FOOD, Phase.FINAL, State.OPEN);
+        assertThat(status(() -> service.confirm(user, e.getId(), new ConfirmGlycemicEventRequest("UNLOGGED_INSULIN", null, null))))
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+    @Test void provisionalWithoutCategoryIs422() {
+        GlycemicEvent e = stored(user, Category.STRESS, Phase.PROVISIONAL, State.OPEN);
+        assertThat(status(() -> service.confirm(user, e.getId(), null))).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+    @Test void backfillMustMatchCategory() {
+        GlycemicEvent stress = stored(user, Category.STRESS, Phase.FINAL, State.OPEN);
+        assertThat(status(() -> service.confirm(user, stress.getId(), new ConfirmGlycemicEventRequest(null, 20.0, null))))
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        GlycemicEvent food = stored(user, Category.UNLOGGED_FOOD, Phase.FINAL, State.OPEN);
+        assertThat(status(() -> service.confirm(user, food.getId(), new ConfirmGlycemicEventRequest(null, null, 2.0))))
+                .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
         verify(notes, never()).save(any());
     }
-
-    @Test
-    void dismissMarksDismissed() {
-        GlycemicEvent e = open(user);
-        when(events.findById(e.getId())).thenReturn(Optional.of(e));
-        assertEquals("DISMISSED", service.dismiss(user, e.getId()).state());
-        verify(recorder).record(same(e), eq(Kind.DISMISSED), eq(Category.UNLOGGED_FOOD), eq(Actor.USER), isNull());
+    @Test void relabelSetsUserLabelKeepsDetectorCategoryAndFinalises() {
+        GlycemicEvent e = stored(user, Category.STRESS, Phase.PROVISIONAL, State.OPEN);
+        GlycemicEventDTO dto = service.confirm(user, e.getId(), new ConfirmGlycemicEventRequest("LIPODYSTROPHY", null, null));
+        assertThat(dto.category()).isEqualTo("LIPODYSTROPHY");
+        assertThat(dto.userLabel()).isEqualTo("LIPODYSTROPHY");
+        assertThat(dto.detectorCategory()).isEqualTo("STRESS");
+        assertThat(dto.phase()).isEqualTo("FINAL");
+        assertThat(dto.state()).isEqualTo("CONFIRMED");
+        verify(recorder).record(any(), eq(Kind.RELABELLED), eq(Category.STRESS), any(), isNull());
+        verify(cache).invalidate(user);
     }
-
-    @Test
-    void confirmRecordsConfirmedHistoryByUser() {
-        GlycemicEvent e = open(user);
-        when(events.findById(e.getId())).thenReturn(Optional.of(e));
-        assertEquals("CONFIRMED", service.confirm(user, e.getId(), null, null).state());
-        verify(recorder).record(same(e), eq(Kind.CONFIRMED), eq(Category.UNLOGGED_FOOD), eq(Actor.USER), isNull());
+    @Test void dismissingAParentDismissesItsChildren() {
+        GlycemicEvent parent = stored(user, Category.ABSORPTION_DELAY, Phase.FINAL, State.OPEN);
+        GlycemicEvent child = GlycemicEvent.builder().id(UUID.randomUUID()).userId(user)
+                .category(Category.ABSORPTION_DELAY).direction(Direction.FALL).linkedEventId(parent.getId())
+                .state(State.OPEN).build();
+        when(events.findByLinkedEventId(parent.getId())).thenReturn(List.of(child));
+        service.dismiss(user, parent.getId());
+        assertThat(child.getState()).isEqualTo(State.DISMISSED);
     }
 }
