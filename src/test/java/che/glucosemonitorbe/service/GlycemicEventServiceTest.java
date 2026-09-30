@@ -4,6 +4,8 @@ import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.Category;
 import che.glucosemonitorbe.entity.GlycemicEvent.Direction;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
+import che.glucosemonitorbe.entity.GlycemicEventHistory.Actor;
+import che.glucosemonitorbe.entity.GlycemicEventHistory.Kind;
 import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,12 +26,13 @@ class GlycemicEventServiceTest {
 
     private final GlycemicEventRepository events = mock(GlycemicEventRepository.class);
     private final NoteRepository notes = mock(NoteRepository.class);
+    private final GlycemicEventHistoryRecorder recorder = mock(GlycemicEventHistoryRecorder.class);
     private GlycemicEventService service;
     private final UUID user = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        service = new GlycemicEventService(events, notes, mock(GlycemicEventHistoryRecorder.class));
+        service = new GlycemicEventService(events, notes, recorder);
         ReflectionTestUtils.setField(service, "maxBackfillCarbs", 300.0);
         ReflectionTestUtils.setField(service, "maxBackfillInsulin", 50.0);
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -76,5 +79,14 @@ class GlycemicEventServiceTest {
         GlycemicEvent e = open(user);
         when(events.findById(e.getId())).thenReturn(Optional.of(e));
         assertEquals("DISMISSED", service.dismiss(user, e.getId()).state());
+        verify(recorder).record(same(e), eq(Kind.DISMISSED), eq(Category.UNLOGGED_FOOD), eq(Actor.USER), isNull());
+    }
+
+    @Test
+    void confirmRecordsConfirmedHistoryByUser() {
+        GlycemicEvent e = open(user);
+        when(events.findById(e.getId())).thenReturn(Optional.of(e));
+        assertEquals("CONFIRMED", service.confirm(user, e.getId(), null, null).state());
+        verify(recorder).record(same(e), eq(Kind.CONFIRMED), eq(Category.UNLOGGED_FOOD), eq(Actor.USER), isNull());
     }
 }
