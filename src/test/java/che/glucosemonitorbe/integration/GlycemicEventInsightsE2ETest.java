@@ -44,4 +44,19 @@ class GlycemicEventInsightsE2ETest extends AbstractGlycemicEventE2ETest {
         assertThat(rest.exchange("/api/glycemic-events/insights?days=91", HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class).getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
     }
+
+    @Test
+    void noEffectCountIgnoresTheDaysWindow() throws Exception {
+        UUID u = userId();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC).withHour(10).withMinute(0).withSecond(0).withNano(0);
+        ev(u, Category.LIPODYSTROPHY, now.minusDays(10), State.OPEN, null); // 10 days ago, outside 7-day window
+        ev(u, Category.LIPODYSTROPHY, now.minusDays(3), State.OPEN, null);  // 3 days ago, inside 7-day window
+
+        ResponseEntity<String> resp = rest.exchange("/api/glycemic-events/insights?days=7", HttpMethod.GET,
+                new HttpEntity<>(authHeaders), String.class);
+        JsonNode body = mapper.readTree(resp.getBody());
+
+        assertThat(body.path("counts").path("LIPODYSTROPHY").asInt()).isEqualTo(1); // only the 3-day event
+        assertThat(body.path("noEffectCount14d").asInt()).isEqualTo(2); // both events (14-day fixed window)
+    }
 }
