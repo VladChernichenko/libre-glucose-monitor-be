@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS glycemic_events (
     detected_at        TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at         TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     resolved_at        TIMESTAMPTZ,
+    version            BIGINT           NOT NULL DEFAULT 0,
     CONSTRAINT fk_glycemic_events_user   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_glycemic_events_parent FOREIGN KEY (linked_event_id) REFERENCES glycemic_events(id) ON DELETE SET NULL,
     CONSTRAINT chk_glycemic_category CHECK (category IN

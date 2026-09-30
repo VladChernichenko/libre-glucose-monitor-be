@@ -148,6 +148,11 @@ public class GlycemicEvent {
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
 
+    /** Optimistic lock: a scan's stale copy must never overwrite a user's answer (and vice versa). */
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
+
     /** Rows built without the new fields (older tests, manual inserts) get safe defaults. */
     @PrePersist
     void defaults() {

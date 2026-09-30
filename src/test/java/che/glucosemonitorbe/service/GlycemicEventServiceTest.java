@@ -11,6 +11,7 @@ import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -118,5 +119,13 @@ class GlycemicEventServiceTest {
         assertThat(child.getCategory()).isEqualTo(Category.LIPODYSTROPHY);
         assertThat(child.getUserLabel()).isEqualTo(Category.LIPODYSTROPHY);
         assertThat(child.getDetectorCategory()).isEqualTo(Category.ABSORPTION_DELAY);
+    }
+    @Test void aConcurrentScanWriteDuringConfirmOrDismissIs409() {
+        doThrow(new ObjectOptimisticLockingFailureException(GlycemicEvent.class, UUID.randomUUID())).when(events).flush();
+        GlycemicEvent a = stored(user, Category.UNLOGGED_FOOD, Phase.FINAL, State.OPEN);
+        assertThat(status(() -> service.confirm(user, a.getId(), null))).isEqualTo(HttpStatus.CONFLICT);
+        GlycemicEvent b = stored(user, Category.UNLOGGED_FOOD, Phase.FINAL, State.OPEN);
+        assertThat(status(() -> service.dismiss(user, b.getId()))).isEqualTo(HttpStatus.CONFLICT);
+        verify(cache, never()).invalidate(any());
     }
 }

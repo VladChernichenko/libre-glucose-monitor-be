@@ -28,8 +28,12 @@ import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -64,19 +68,29 @@ public class GlycemicEventScanService {
     private final GlycemicEventHistoryRecorder historyRecorder;
     private final GlycemicTailService tailService;
     private final GlycemicLearnerTrainingCache trainingCache;
+    private final PlatformTransactionManager transactionManager;
 
     /** Aggregate outcome of a scan pass. */
     public record ScanSummary(int scanned, int flagged, int skipped, int failed) {}
 
-    /** Scan every real (non-seed) user. No-op unless the feature is enabled. */
+    /**
+     * Scan every real (non-seed) user. No-op unless the feature is enabled. Each user runs in its own
+     * transaction (event rows and their history commit together); a user whose events changed under the
+     * scan (e.g. answered meanwhile - optimistic lock) is skipped and picked up by the next pass.
+     */
     public ScanSummary scanAllRealUsers() {
         if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) return new ScanSummary(0, 0, 0, 0);
+        TransactionTemplate perUser = new TransactionTemplate(transactionManager);
+        perUser.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         int scanned = 0, flagged = 0, skipped = 0, failed = 0;
         for (User user : userRepository.findByEmailNotLike(SEED_EMAIL_PATTERN)) {
             try {
-                List<GlycemicEvent> touched = scanUserEvents(user.getId());
+                List<GlycemicEvent> touched = perUser.execute(status -> scanUserEvents(user.getId()));
                 scanned++;
-                if (touched.isEmpty()) skipped++; else flagged++;
+                if (touched == null || touched.isEmpty()) skipped++; else flagged++;
+            } catch (ObjectOptimisticLockingFailureException e) {
+                skipped++;
+                log.info("Glycemic-event scan skipped user {}: an event changed during the scan", user.getId());
             } catch (Exception e) {
                 failed++;
                 log.warn("Glycemic-event scan failed for user {}: {}", user.getId(), e.getMessage());

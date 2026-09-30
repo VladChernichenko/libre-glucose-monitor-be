@@ -5,11 +5,13 @@ import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.*;
 import che.glucosemonitorbe.entity.UserSettings;
 import che.glucosemonitorbe.repository.UserSettingsRepository;
+import che.glucosemonitorbe.service.GlycemicEventService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -17,10 +19,12 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GlycemicEventApiE2ETest extends AbstractGlycemicEventE2ETest {
 
     @Autowired UserSettingsRepository userSettingsRepository;
+    @Autowired GlycemicEventService eventService;
 
     private GlycemicEvent event(UUID u, Category c, Phase p, LocalDateTime onset, double confidence) {
         return eventRepository.save(GlycemicEvent.builder().userId(u).category(c).detectorCategory(c)
@@ -133,5 +137,23 @@ class GlycemicEventApiE2ETest extends AbstractGlycemicEventE2ETest {
         HttpHeaders other = registerAndLogin();
         assertThat(rest.exchange("/api/glycemic-events/" + rise.getId() + "/history", HttpMethod.GET,
                 new HttpEntity<>(other), String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("a scan's stale copy cannot revert a confirm (optimistic locking)")
+    void staleScanCopyCannotRevertAConfirm() {
+        UUID u = userId();
+        GlycemicEvent e = event(u, Category.UNLOGGED_FOOD, Phase.FINAL, utcNow().minusHours(1), 0.6);
+        GlycemicEvent scanCopy = eventRepository.findById(e.getId()).orElseThrow();   // the scan loaded it OPEN
+
+        eventService.confirm(u, e.getId(), new ConfirmGlycemicEventRequest("STRESS", null, null));
+
+        scanCopy.setConfidence(0.7);
+        scanCopy.setUpdatedAt(LocalDateTime.now());
+        assertThatThrownBy(() -> eventRepository.save(scanCopy)).isInstanceOf(ObjectOptimisticLockingFailureException.class);
+        GlycemicEvent after = eventRepository.findById(e.getId()).orElseThrow();
+        assertThat(after.getState()).isEqualTo(State.CONFIRMED);
+        assertThat(after.getUserLabel()).isEqualTo(Category.STRESS);
+        assertThat(after.getResolvedAt()).isNotNull();
     }
 }

@@ -17,6 +17,7 @@ import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -93,9 +94,7 @@ public class GlycemicEventService {
             event.setCategory(requested);
         }
         resolve(event, State.CONFIRMED);
-        GlycemicEvent saved = eventRepository.save(event);
-        historyRecorder.record(saved, relabel ? Kind.RELABELLED : Kind.CONFIRMED, before, Actor.USER, null);
-        mirrorChildren(saved);
+        GlycemicEvent saved = writeAnswer(event, relabel ? Kind.RELABELLED : Kind.CONFIRMED, before);
         trainingCache.invalidate(userId);
         return GlycemicEventDTO.from(saved);
     }
@@ -105,9 +104,7 @@ public class GlycemicEventService {
         GlycemicEvent event = requireOpen(userId, eventId);
         Category before = event.getCategory();
         resolve(event, State.DISMISSED);
-        GlycemicEvent saved = eventRepository.save(event);
-        historyRecorder.record(saved, Kind.DISMISSED, before, Actor.USER, null);
-        mirrorChildren(saved);
+        GlycemicEvent saved = writeAnswer(event, Kind.DISMISSED, before);
         trainingCache.invalidate(userId);
         return GlycemicEventDTO.from(saved);
     }
@@ -159,6 +156,22 @@ public class GlycemicEventService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Event already resolved");
         }
         return event;
+    }
+
+    /**
+     * Saves the answer, its history row and the mirrored children, flushing so that a concurrent scan
+     * write (optimistic lock) surfaces here as 409 rather than as a 500 at commit.
+     */
+    private GlycemicEvent writeAnswer(GlycemicEvent event, Kind kind, Category before) {
+        try {
+            GlycemicEvent saved = eventRepository.save(event);
+            historyRecorder.record(saved, kind, before, Actor.USER, null);
+            mirrorChildren(saved);
+            eventRepository.flush();
+            return saved;
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Event changed meanwhile - reload and try again");
+        }
     }
 
     private void resolve(GlycemicEvent e, State state) {
