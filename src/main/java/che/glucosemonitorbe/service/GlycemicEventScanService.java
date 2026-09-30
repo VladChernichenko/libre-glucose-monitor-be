@@ -18,6 +18,7 @@ import che.glucosemonitorbe.entity.GlycemicEventHistory.Actor;
 import che.glucosemonitorbe.entity.GlycemicEventHistory.Kind;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.glycemic.EventClassifier;
+import che.glucosemonitorbe.glycemic.EventLabelLearner;
 import che.glucosemonitorbe.glycemic.GlycemicEventDetector;
 import che.glucosemonitorbe.glycemic.GlycemicEventDetector.Detection;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
@@ -62,6 +63,7 @@ public class GlycemicEventScanService {
     private final GlycemicEventDetector detector;
     private final GlycemicEventHistoryRecorder historyRecorder;
     private final GlycemicTailService tailService;
+    private final GlycemicLearnerTrainingCache trainingCache;
 
     /** Aggregate outcome of a scan pass. */
     public record ScanSummary(int scanned, int flagged, int skipped, int failed) {}
@@ -112,6 +114,9 @@ public class GlycemicEventScanService {
                 userId, List.of(State.CONFIRMED, State.DISMISSED), windowStart.minusHours(1));
         EventClassifier classifier = new EventClassifier(classifierConfig(in.iob()));
 
+        EventLabelLearner learner = new EventLabelLearner(props.getLearnerK(), props.getLearnerPriorWeight(),
+                props.getLearnerOverride());
+
         List<GlycemicEvent> touched = new ArrayList<>();
         for (Detection d : detections) {
             LocalDateTime onset = toLdt(d.onsetMs(), zone), wEnd = toLdt(d.run().endMs(), zone);
@@ -122,8 +127,14 @@ public class GlycemicEventScanService {
                 if (claimed.isPresent()) { touched.add(claimed.get()); continue; }
             }
             EventClassifier.Classification c = classifier.classify(d.direction(), d.features());
-            double confidence = EventClassifier.confidence(c.baseConfidence(), d.features().sigmaMultiple());
-            touched.add(persist(userId, d, c, confidence, false, c.reason(), open, zone));
+            double ruleConfidence = EventClassifier.confidence(c.baseConfidence(), d.features().sigmaMultiple());
+            EventLabelLearner.Decision ld = learner.decide(d.direction(), c.category(), ruleConfidence,
+                    c.phase() == Phase.PROVISIONAL, d.features(), trainingCache.examples(userId, d.direction()));
+            EventClassifier.Classification effective = ld.overridden()
+                    ? new EventClassifier.Classification(ld.category(), c.phase(), c.resolveAfterMinutes(),
+                            c.baseConfidence(), "learner")
+                    : c;
+            touched.add(persist(userId, d, effective, ld.confidence(), ld.suppressed(), effective.reason(), open, zone));
         }
         touched.addAll(tailService.resolveDue(in, open));
         return touched;

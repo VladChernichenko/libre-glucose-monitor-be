@@ -31,6 +31,7 @@ public class GlycemicEventService {
     private final NoteRepository noteRepository;
     private final GlycemicEventHistoryRecorder historyRecorder;
     private final GlycemicEventProperties props;
+    private final GlycemicLearnerTrainingCache trainingCache;
 
     @Transactional(readOnly = true)
     public List<GlycemicEventDTO> list(UUID userId, State stateFilter) {
@@ -63,6 +64,7 @@ public class GlycemicEventService {
         event.setUpdatedAt(LocalDateTime.now());
         GlycemicEvent saved = eventRepository.save(event);
         historyRecorder.record(saved, Kind.CONFIRMED, saved.getCategory(), Actor.USER, null);
+        trainingCache.invalidate(userId);
         return GlycemicEventDTO.from(saved);
     }
 
@@ -74,6 +76,7 @@ public class GlycemicEventService {
         event.setUpdatedAt(LocalDateTime.now());
         GlycemicEvent saved = eventRepository.save(event);
         historyRecorder.record(saved, Kind.DISMISSED, saved.getCategory(), Actor.USER, null);
+        trainingCache.invalidate(userId);
         return GlycemicEventDTO.from(saved);
     }
 

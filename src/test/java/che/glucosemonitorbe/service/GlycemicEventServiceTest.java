@@ -31,7 +31,8 @@ class GlycemicEventServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GlycemicEventService(events, notes, recorder, new che.glucosemonitorbe.config.GlycemicEventProperties());
+        service = new GlycemicEventService(events, notes, recorder, new che.glucosemonitorbe.config.GlycemicEventProperties(),
+                mock(GlycemicLearnerTrainingCache.class));
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
