@@ -123,7 +123,9 @@ public class GlycemicEventScanService {
         detections.sort(Comparator.comparingLong(Detection::onsetMs));
 
         LocalDateTime windowStart = end.minusMinutes(props.getWindowMinutes());
-        List<GlycemicEvent> open = new ArrayList<>(eventRepository.findByUserIdAndStateIn(userId, List.of(State.OPEN)));
+        // OPEN events a detection or tail can still touch: the window plus DIA, and any still PROVISIONAL
+        LocalDateTime openAfter = windowStart.minusMinutes(Math.round(in.iob().diaHours() * 60));
+        List<GlycemicEvent> open = new ArrayList<>(eventRepository.findOpenForScan(userId, openAfter));
         List<GlycemicEvent> answered = eventRepository.findByUserIdAndStateInAndWindowEndAfter(
                 userId, List.of(State.CONFIRMED, State.DISMISSED), windowStart.minusHours(1));
         EventClassifier classifier = new EventClassifier(classifierConfig(in.iob()));

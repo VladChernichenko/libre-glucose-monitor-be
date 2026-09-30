@@ -62,11 +62,7 @@ public class GlycemicEventService {
     @Transactional(readOnly = true)
     public Optional<GlycemicEventDTO> prompt(UUID userId) {
         LocalDateTime oldest = LocalDateTime.now(userZone(userId)).minusHours(props.getPromptMaxAgeHours());
-        return eventRepository.findByUserIdAndStateIn(userId, List.of(State.OPEN)).stream()
-                .filter(e -> !e.isSuppressed() && e.getLinkedEventId() == null)
-                .filter(e -> e.getConfidence() != null && e.getConfidence() >= props.getPromptMinConfidence())
-                .filter(e -> !e.getOnsetAt().isBefore(oldest))
-                .max(Comparator.comparing(GlycemicEvent::getConfidence).thenComparing(GlycemicEvent::getOnsetAt))
+        return eventRepository.findPromptCandidate(userId, props.getPromptMinConfidence(), oldest)
                 .map(GlycemicEventDTO::from);
     }
 
