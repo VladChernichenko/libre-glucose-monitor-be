@@ -28,7 +28,8 @@ class GlycemicEventPipelineE2ETest extends AbstractGlycemicEventE2ETest {
         seed(u, start, concat(repeat(24, 110), new int[]{120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220, 230}));
         GlycemicEvent e = scanService.scanUser(u).orElseThrow();
         assertThat(e.getCategory()).isEqualTo(Category.UNLOGGED_FOOD);
-        assertThat(Math.abs(ms(e.getOnsetAt()) - (start + 24 * STEP))).isLessThanOrEqualTo(15 * 60_000L);
+        assertThat(ms(e.getOnsetAt())).isLessThanOrEqualTo(start + 24 * STEP);
+        assertThat(ms(e.getOnsetAt())).isGreaterThanOrEqualTo(start + 21 * STEP);
     }
 
     @Test
