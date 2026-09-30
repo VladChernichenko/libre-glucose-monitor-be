@@ -174,14 +174,37 @@ public class GlycemicTailService {
         return TailResolver.effectRatio(gNo, gAct, gPred, props.getEffectDenominatorFloor());
     }
 
+    /** Adopts an earlier standalone OPEN fall overlapping the detection as the child, else creates one. */
     private GlycemicEvent saveChild(GlycemicEvent parent, Detection d, ZoneId zone, List<GlycemicEvent> open) {
+        LocalDateTime onset = UserZones.toWallTime(d.onsetMs(), zone);
+        LocalDateTime wEnd = UserZones.toWallTime(d.run().endMs(), zone);
+        Optional<GlycemicEvent> standalone = open.stream()
+                .filter(e -> e.getDirection() == Direction.FALL && e.getLinkedEventId() == null
+                        && e.getState() == State.OPEN && !e.getId().equals(parent.getId())
+                        && GlycemicEventScanService.overlaps(e, onset, wEnd))
+                .findFirst();
+        if (standalone.isPresent()) {
+            GlycemicEvent c = standalone.get();
+            Category before = c.getCategory();
+            c.setLinkedEventId(parent.getId());
+            c.setCategory(parent.getCategory());
+            c.setDetectorCategory(parent.getCategory());
+            c.setPhase(Phase.FINAL);
+            c.setResolvesAt(null);
+            if (wEnd.isAfter(c.getWindowEnd())) c.setWindowEnd(wEnd);
+            c.setMeanResidualMmol(GlycemicEventScanService.round2(d.run().mean()));
+            c.setUpdatedAt(LocalDateTime.now());
+            GlycemicEvent saved = eventRepository.save(c);
+            historyRecorder.record(saved, Kind.RESOLVED, before, Actor.SYSTEM, "tail:child");
+            return saved;
+        }
         GlycemicEvent child = eventRepository.save(GlycemicEvent.builder()
                 .userId(parent.getUserId()).linkedEventId(parent.getId())
                 .category(parent.getCategory()).detectorCategory(parent.getCategory())
                 .direction(Direction.FALL).phase(Phase.FINAL)
-                .onsetAt(UserZones.toWallTime(d.onsetMs(), zone))
+                .onsetAt(onset)
                 .windowStart(UserZones.toWallTime(d.run().startMs(), zone))
-                .windowEnd(UserZones.toWallTime(d.run().endMs(), zone))
+                .windowEnd(wEnd)
                 .meanResidualMmol(GlycemicEventScanService.round2(d.run().mean()))
                 .sigmaMultiple(GlycemicEventScanService.round2(d.features().sigmaMultiple()))
                 .confidence(parent.getConfidence()).suppressed(parent.isSuppressed())

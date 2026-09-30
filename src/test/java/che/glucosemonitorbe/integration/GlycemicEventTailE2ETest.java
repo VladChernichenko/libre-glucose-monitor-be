@@ -53,6 +53,26 @@ class GlycemicEventTailE2ETest extends AbstractGlycemicEventE2ETest {
     }
 
     @Test
+    @DisplayName("a slingshot adopts an earlier standalone drop as the linked child instead of duplicating it")
+    void slingshotAdoptsAnEarlierStandaloneDrop() {
+        UUID u = userId();
+        long now = nowMs();
+        seed(u, now - 47 * STEP, concat(repeat(36, 200), repeat(12, 90)));
+        GlycemicEvent parent = provisional(u, Direction.RISE, Category.STRESS,
+                toLdt(now - 3 * H), toLdt(now - 2 * H), toLdt(now + 3 * H));
+        GlycemicEvent standalone = provisional(u, Direction.FALL, Category.UNLOGGED_INSULIN,
+                toLdt(now - 55 * MIN), toLdt(now - 10 * MIN), toLdt(now + 60 * MIN));
+
+        scanService.scanUserEvents(u);
+
+        GlycemicEvent p = eventRepository.findById(parent.getId()).orElseThrow();
+        assertThat(p.getCategory()).isEqualTo(Category.ABSORPTION_DELAY);
+        assertThat(eventRepository.findByLinkedEventId(p.getId()))
+                .singleElement().satisfies(c -> assertThat(c.getId()).isEqualTo(standalone.getId()));
+        assertThat(eventRepository.findAll()).noneMatch(e -> e.getCategory() == Category.UNLOGGED_INSULIN);
+    }
+
+    @Test
     @DisplayName("insulin with no measurable effect over its full action resolves LIPODYSTROPHY")
     void lipodystrophy() {
         UUID u = userId();
