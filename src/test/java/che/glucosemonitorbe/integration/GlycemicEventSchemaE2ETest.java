@@ -91,7 +91,7 @@ class GlycemicEventSchemaE2ETest {
                 .category(Category.ABSORPTION_DELAY).direction(Direction.FALL).linkedEventId(parent.getId())
                 .windowStart(t.plusHours(3)).windowEnd(t.plusHours(4)).meanResidualMmol(-2.0).build());
         history.save(GlycemicEventHistory.builder().eventId(parent.getId()).userId(userId)
-                .kind(GlycemicEventHistory.Kind.RESOLVED).categoryAfter(Category.ABSORPTION_DELAY)
+                .at(t).kind(GlycemicEventHistory.Kind.RESOLVED).categoryAfter(Category.ABSORPTION_DELAY)
                 .actor(GlycemicEventHistory.Actor.SYSTEM).reason("tail:slingshot").build());
 
         assertThat(events.findByLinkedEventId(parent.getId())).extracting(GlycemicEvent::getId).containsExactly(child.getId());

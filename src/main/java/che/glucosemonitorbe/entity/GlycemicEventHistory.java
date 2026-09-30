@@ -3,7 +3,6 @@ package che.glucosemonitorbe.entity;
 import che.glucosemonitorbe.entity.GlycemicEvent.Category;
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UuidGenerator;
 
 import java.time.LocalDateTime;
@@ -34,7 +33,7 @@ public class GlycemicEventHistory {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    @CreationTimestamp
+    /** User's local wall time of the change, set by the recorder. */
     @Column(name = "at", nullable = false, updatable = false)
     private LocalDateTime at;
 

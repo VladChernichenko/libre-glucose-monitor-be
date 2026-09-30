@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.*;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -40,6 +41,17 @@ class GlycemicEventApiE2ETest extends AbstractGlycemicEventE2ETest {
 
     private ResponseEntity<String> post(String path, Object body) {
         return rest.exchange(path, HttpMethod.POST, new HttpEntity<>(body, authHeaders), String.class);
+    }
+
+    private void setUserZone(UUID u, ZoneId zone, int utcOffsetMinutes) {
+        UserSettings s = userSettingsRepository.findByUserId(u).orElseGet(() -> {
+            UserSettings fresh = new UserSettings();
+            fresh.setUserId(u);
+            return fresh;
+        });
+        s.setTimezone(zone.getId());
+        s.setUtcOffsetMinutes(utcOffsetMinutes);
+        userSettingsRepository.save(s);
     }
 
     private static LocalDateTime utcNow() { return LocalDateTime.now(ZoneOffset.UTC).withNano(0); }
@@ -88,14 +100,7 @@ class GlycemicEventApiE2ETest extends AbstractGlycemicEventE2ETest {
     void promptUsesUserClock() {
         UUID u = userId();
         ZoneId tbilisi = ZoneId.of("Asia/Tbilisi");
-        UserSettings s = userSettingsRepository.findByUserId(u).orElseGet(() -> {
-            UserSettings fresh = new UserSettings();
-            fresh.setUserId(u);
-            return fresh;
-        });
-        s.setTimezone(tbilisi.getId());
-        s.setUtcOffsetMinutes(240);
-        userSettingsRepository.save(s);
+        setUserZone(u, tbilisi, 240);
         LocalDateTime localNow = LocalDateTime.now(tbilisi).withNano(0);
 
         GlycemicEvent old = event(u, Category.UNLOGGED_FOOD, Phase.FINAL, localNow.minusHours(7), 0.9);
@@ -155,5 +160,25 @@ class GlycemicEventApiE2ETest extends AbstractGlycemicEventE2ETest {
         assertThat(after.getState()).isEqualTo(State.CONFIRMED);
         assertThat(after.getUserLabel()).isEqualTo(Category.STRESS);
         assertThat(after.getResolvedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("answer and history timestamps are the user's wall time, not the server's")
+    void answerTimestampsUseTheUsersClock() throws Exception {
+        UUID u = userId();
+        // UTC-10: differs from UTC and from a UTC+4 server, so a server-clock timestamp can't pass by accident
+        ZoneId honolulu = ZoneId.of("Pacific/Honolulu");
+        setUserZone(u, honolulu, -600);
+        LocalDateTime localNow = LocalDateTime.now(honolulu).withNano(0);
+        GlycemicEvent e = event(u, Category.UNLOGGED_FOOD, Phase.FINAL, localNow.minusHours(1), 0.6);
+
+        JsonNode confirmed = mapper.readTree(post("/api/glycemic-events/" + e.getId() + "/confirm",
+                new ConfirmGlycemicEventRequest(null, null, null)).getBody());
+        JsonNode h = mapper.readTree(get("/api/glycemic-events/" + e.getId() + "/history").getBody());
+        LocalDateTime at = LocalDateTime.parse(h.get(h.size() - 1).path("at").asText());
+        LocalDateTime resolvedAt = LocalDateTime.parse(confirmed.path("resolvedAt").asText());
+
+        assertThat(Duration.between(localNow, at).abs()).isLessThan(Duration.ofMinutes(2));
+        assertThat(Duration.between(localNow, resolvedAt).abs()).isLessThan(Duration.ofMinutes(2));
     }
 }

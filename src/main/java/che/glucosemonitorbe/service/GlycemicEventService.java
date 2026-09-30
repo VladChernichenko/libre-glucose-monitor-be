@@ -93,7 +93,7 @@ public class GlycemicEventService {
             event.setUserLabel(requested);
             event.setCategory(requested);
         }
-        resolve(event, State.CONFIRMED);
+        resolve(event, State.CONFIRMED, LocalDateTime.now(userZone(userId)));
         GlycemicEvent saved = writeAnswer(event, relabel ? Kind.RELABELLED : Kind.CONFIRMED, before);
         trainingCache.invalidate(userId);
         return GlycemicEventDTO.from(saved);
@@ -103,7 +103,7 @@ public class GlycemicEventService {
     public GlycemicEventDTO dismiss(UUID userId, UUID eventId) {
         GlycemicEvent event = requireOpen(userId, eventId);
         Category before = event.getCategory();
-        resolve(event, State.DISMISSED);
+        resolve(event, State.DISMISSED, LocalDateTime.now(userZone(userId)));
         GlycemicEvent saved = writeAnswer(event, Kind.DISMISSED, before);
         trainingCache.invalidate(userId);
         return GlycemicEventDTO.from(saved);
@@ -174,8 +174,8 @@ public class GlycemicEventService {
         }
     }
 
-    private void resolve(GlycemicEvent e, State state) {
-        LocalDateTime now = LocalDateTime.now();
+    /** {@code now} is the user's wall time, like every other event timestamp. */
+    private void resolve(GlycemicEvent e, State state, LocalDateTime now) {
         e.setState(state);
         e.setPhase(Phase.FINAL);
         e.setResolvesAt(null);
@@ -189,7 +189,7 @@ public class GlycemicEventService {
             child.setCategory(parent.getCategory());
             child.setUserLabel(parent.getUserLabel());
             child.setResolvedAt(parent.getResolvedAt());
-            child.setUpdatedAt(LocalDateTime.now());
+            child.setUpdatedAt(parent.getUpdatedAt());
             eventRepository.save(child);
         }
     }
