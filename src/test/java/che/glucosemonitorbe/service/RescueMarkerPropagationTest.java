@@ -3,6 +3,7 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.glycemic.GlycemicEventDetector;
 import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine;
 import org.junit.jupiter.api.Test;
 
@@ -70,7 +71,7 @@ class RescueMarkerPropagationTest {
      */
     @Test
     void glycemicEventScanEntryCarriesTheRescueMarker() {
-        CarbsEntry entry = GlycemicEventScanService.toCarbsEntry(hypoTreatmentNote(15.0));
+        CarbsEntry entry = GlycemicEventDetector.toCarbsEntry(hypoTreatmentNote(15.0));
 
         assertThat(RescueCarbProfile.isRescue(entry.getAbsorptionMode()))
                 .as("absorptionMode was %s", entry.getAbsorptionMode())
@@ -81,7 +82,7 @@ class RescueMarkerPropagationTest {
 
     @Test
     void glycemicEventScanEntryLeavesAnOrdinaryMealUnmarked() {
-        CarbsEntry entry = GlycemicEventScanService.toCarbsEntry(ordinaryMealNote(15.0));
+        CarbsEntry entry = GlycemicEventDetector.toCarbsEntry(ordinaryMealNote(15.0));
 
         assertThat(RescueCarbProfile.isRescue(entry.getAbsorptionMode())).isFalse();
     }

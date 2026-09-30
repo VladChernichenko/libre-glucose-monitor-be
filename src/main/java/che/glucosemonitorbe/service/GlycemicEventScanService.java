@@ -2,301 +2,207 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.config.GlycemicEventProperties;
-import che.glucosemonitorbe.glycemic.ResidualPoint;
-import che.glucosemonitorbe.glycemic.ResidualRun;
-import che.glucosemonitorbe.glycemic.ResidualScanner;
-import che.glucosemonitorbe.glycemic.ResidualSeries;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.CgmReading;
-import che.glucosemonitorbe.domain.InsulinDose;
-import che.glucosemonitorbe.domain.RescueCarbProfile;
+import che.glucosemonitorbe.domain.GlucoseConversion;
 import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.domain.UserZones;
-import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
-import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.Category;
-import che.glucosemonitorbe.entity.GlycemicEvent.Direction;
+import che.glucosemonitorbe.entity.GlycemicEvent.Phase;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
-import che.glucosemonitorbe.entity.GlycemicEventHistory;
-import che.glucosemonitorbe.hovorka.ActivityProvider;
-import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
-import che.glucosemonitorbe.hovorka.NotesActivityProvider;
-import che.glucosemonitorbe.hovorka.DallaManGutModel;
-import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
-import che.glucosemonitorbe.hovorka.HovorkaOdeSolver;
+import che.glucosemonitorbe.entity.GlycemicEventHistory.Actor;
+import che.glucosemonitorbe.entity.GlycemicEventHistory.Kind;
+import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.glycemic.EventClassifier;
+import che.glucosemonitorbe.glycemic.GlycemicEventDetector;
+import che.glucosemonitorbe.glycemic.GlycemicEventDetector.Detection;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
-import che.glucosemonitorbe.hovorka.HovorkaParameters;
-import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
-import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.GlycemicEventRepository;
+import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.UserRepository;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.TreeMap;
-import java.util.UUID;
+import java.util.*;
 
 /**
- * Detects windows where glucose moved in a way the logged inputs (COB/IOB) do not explain, using the
- * physiological model residual (see {@code specs/glycemic-event-detector.md}). Runs the raw Hovorka
- * prediction over a recent CGM window, finds a sustained same-sign residual that exceeds an adaptive
- * (robust-σ) threshold, classifies it, and persists an {@link GlycemicEvent} (deduped against any
- * open flag). User operations (list / confirm / dismiss) live in {@link GlycemicEventService}.
+ * Periodic glycemic-event scan (spec section 2): loads one user's recent CGM + notes, runs the pure
+ * {@link GlycemicEventDetector}, classifies each detection and persists it (merging into an overlapping
+ * OPEN event of the same direction). User operations live in {@link GlycemicEventService}.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class GlycemicEventScanService {
 
-    private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
+    private static final double MGDL_PER_MMOL = GlucoseConversion.MGDL_PER_MMOL;
     private static final String SEED_EMAIL_PATTERN = "azt1d-subject-%@dataset.local";
     private static final int WARMUP_LOOKBACK_HOURS = 8;
 
     private final CgmReadingRepository cgmReadingRepository;
     private final NoteRepository noteRepository;
     private final UserRepository userRepository;
-    private final GlycemicEventRepository flagRepository;
+    private final GlycemicEventRepository eventRepository;
     private final HovorkaParameterService paramService;
-    private final HovorkaOdeSolver odeSolver;
-    private final DallaManGutModel gutModel;
-    private final BasalInsulinResolver basalResolver;
     private final UserInsulinPreferencesService insulinPrefsService;
     private final UserSettingsService userSettingsService;
+    private final CarbsOnBoardService carbsOnBoardService;
     private final FeatureToggleConfig featureToggleConfig;
-    private final GlycemicEventHistoryRecorder historyRecorder;
-
     private final GlycemicEventProperties props;
-
-    /** Raw predictor (no twin overlay, no residual correction) - the calibration-consistent baseline. */
-    private HovorkaGlucosePredictionService rawPredictor;
-
-    @PostConstruct
-    void initPredictor() {
-        this.rawPredictor = new HovorkaGlucosePredictionService(
-                paramService, odeSolver, basalResolver, insulinPrefsService, gutModel,
-                userSettingsService, PredictionResidualProvider.NONE);
-    }
+    private final GlycemicEventDetector detector;
+    private final GlycemicEventHistoryRecorder historyRecorder;
 
     /** Aggregate outcome of a scan pass. */
     public record ScanSummary(int scanned, int flagged, int skipped, int failed) {}
 
-    /**
-     * Note -> the warm-up / forward-prediction carb input for the residual scan.
-     *
-     * <p>A {@code hypo_treatment} note carries the rescue marker through
-     * {@link RescueCarbProfile#mark}. Left unmarked, the raw forward prediction absorbs a 15 g
-     * dextrose tablet on the user's 240-minute mixed-meal curve, under-predicts the recovery rise,
-     * and produces a large positive residual - flagging a <em>logged</em> hypo recovery as unlogged
-     * food. That flag then feeds back into the digital-twin fit as a down-weighted window.
-     *
-     * <p>Package-private and static so the marker's survival on this path is directly testable;
-     * the scan has no other seam that exposes the entries it builds.
-     */
-    static CarbsEntry toCarbsEntry(Note n) {
-        CarbsEntry entry = CarbsEntry.builder()
-                .timestamp(n.getTimestamp()).carbs(n.getCarbs()).build();
-        return n.isHypoTreatment() ? RescueCarbProfile.mark(entry) : entry;
-    }
-
-    // -- Scan -----------------------------------------------------------------
-
     /** Scan every real (non-seed) user. No-op unless the feature is enabled. */
     public ScanSummary scanAllRealUsers() {
-        if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) {
-            return new ScanSummary(0, 0, 0, 0);
-        }
-        List<User> users = userRepository.findByEmailNotLike(SEED_EMAIL_PATTERN);
+        if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) return new ScanSummary(0, 0, 0, 0);
         int scanned = 0, flagged = 0, skipped = 0, failed = 0;
-        for (User user : users) {
+        for (User user : userRepository.findByEmailNotLike(SEED_EMAIL_PATTERN)) {
             try {
-                Optional<GlycemicEvent> flag = scanUser(user.getId());
+                List<GlycemicEvent> touched = scanUserEvents(user.getId());
                 scanned++;
-                if (flag.isPresent()) flagged++; else skipped++;
+                if (touched.isEmpty()) skipped++; else flagged++;
             } catch (Exception e) {
                 failed++;
-                log.warn("Unlogged-event scan failed for user {}: {}", user.getId(), e.getMessage());
+                log.warn("Glycemic-event scan failed for user {}: {}", user.getId(), e.getMessage());
             }
         }
         ScanSummary summary = new ScanSummary(scanned, flagged, skipped, failed);
-        log.info("Unlogged-event scan: scanned={}, flagged={}, skipped={}, failed={}",
-                scanned, flagged, skipped, failed);
+        log.info("Glycemic-event scan: scanned={}, flagged={}, skipped={}, failed={}", scanned, flagged, skipped, failed);
         return summary;
     }
 
-    /**
-     * Scan one user's recent window. Returns the created/updated flag when a sustained unexplained
-     * residual is found, else empty (feature off, too little data, or nothing unexplained).
-     */
+    /** The strongest event touched by one scan (largest |mean residual|), for callers that want one. */
     @Transactional
     public Optional<GlycemicEvent> scanUser(UUID userId) {
-        if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) return Optional.empty();
-
-        // Run on the user's own clock. notes.timestamp holds local wall time, while CGM rows hold
-        // true UTC epochs - comparing a local-wall note against a UTC-wall CGM window put every
-        // logged meal `offset` hours outside the window that its own carbs caused, so a logged
-        // event was mislabelled UNLOGGED_* and its CGM data was then excluded from digital-twin
-        // calibration (audit F26). Same clock choice as the calibrator and the live dashboard.
-        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
-        java.time.ZoneId userZone = resolveUserZone(settings);
-
-        LocalDateTime end = LocalDateTime.now(userZone);
-        LocalDateTime start = end.minusMinutes(props.getWindowMinutes());
-        long startMs = toEpochMs(start, userZone);
-        long endMs = toEpochMs(end, userZone);
-
-        List<CgmReading> readings = cgmReadingRepository
-                .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, startMs, endMs);
-        if (readings.size() < props.getMinReadings()) return Optional.empty();
-
-        // Events for warm-up + prediction inputs (and for the matching-event check).
-        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(
-                userId, start.minusHours(WARMUP_LOOKBACK_HOURS), end);
-        List<CarbsEntry> carbs = new ArrayList<>();
-        List<InsulinDose> insulin = new ArrayList<>();
-        List<Note> longActing = new ArrayList<>();
-        for (Note n : notes) {
-            if (n.isLongActing()) { longActing.add(n); continue; }
-            if (n.getCarbs() != null && n.getCarbs() > 0) {
-                carbs.add(toCarbsEntry(n));
-            }
-            if (n.getInsulin() != null && n.getInsulin() > 0) {
-                insulin.add(InsulinDose.builder().timestamp(n.getTimestamp())
-                        .units(n.getInsulin()).type(InsulinDose.InsulinType.BOLUS).build());
-            }
-        }
-
-        // Raw forward prediction anchored at the window start.
-        CgmReading first = readings.get(0);
-        if (first.getSgv() == null) return Optional.empty();
-        LocalDateTime anchorTime = toLdt(first.getDateTimestamp(), userZone);
-        double g0 = first.getSgv() / MGDL_PER_MMOL;
-        HovorkaParameters baseParams = paramService.buildRawForUser(userId);
-        RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
-        // Make the residual activity-aware so an exercise-driven drop from a logged activity is
-        // explained (not mistaken for unlogged insulin). Inert when activity logging is off.
-        ActivityProvider activity = featureToggleConfig.isActivityLoggingEnabled()
-                ? NotesActivityProvider.fromNotes(notes) : ActivityProvider.NONE;
-        List<PredictionPointDTO> predicted = rawPredictor.buildPredictionPath(
-                baseParams, rapidIob, settings, g0, anchorTime, carbs, insulin, longActing,
-                userId, props.getWindowMinutes(), activity);
-
-        // Align predicted -> actual; residual = actual − predicted [mmol/L].
-        TreeMap<Long, Double> predByMs = new TreeMap<>();
-        for (PredictionPointDTO pt : predicted) {
-            if (pt.getPredictedGlucose() != null) predByMs.put(toEpochMs(pt.getTimestamp(), userZone), pt.getPredictedGlucose());
-        }
-        List<ResidualPoint> aligned = new ArrayList<>();
-        for (CgmReading r : readings) {
-            if (r.getSgv() == null || r.getDateTimestamp() == null) continue;
-            Double p = nearest(predByMs, r.getDateTimestamp(), props.getAlignToleranceMs());
-            if (p == null) continue;
-            aligned.add(new ResidualPoint(r.getDateTimestamp(), r.getSgv() / MGDL_PER_MMOL, p));
-        }
-        ResidualSeries series = ResidualScanner.series(aligned);
-        ResidualScanner scanner = new ResidualScanner(props.getSigmaMultiple(), props.getPersistenceMinutes(),
-                props.getMaxGapMinutes(), props.getMinReadings());
-        Optional<ResidualRun> best = ResidualScanner.strongest(scanner.runs(series));
-        if (best.isEmpty()) return Optional.empty();
-        return Optional.of(persistFlag(userId, best.get(), series.sigma(), notes, userZone));
+        return scanUserEvents(userId).stream()
+                .max(Comparator.comparingDouble(e -> Math.abs(e.getMeanResidualMmol())));
     }
 
-    // -- Persistence ------------------------------------------------------------
+    /** Scan one user's recent window; returns every event created or updated by this pass. */
+    @Transactional
+    public List<GlycemicEvent> scanUserEvents(UUID userId) {
+        if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) return List.of();
 
-    private GlycemicEvent persistFlag(UUID userId, ResidualRun run, double sigma, List<Note> notes,
-                                          java.time.ZoneId userZone) {
-        boolean rise = run.mean() > 0;
-        LocalDateTime wStart = toLdt(run.startMs(), userZone);
-        LocalDateTime wEnd = toLdt(run.endMs(), userZone);
-        LocalDateTime matchFrom = wStart.minusMinutes(props.getMatchLeadMinutes());
+        // Run on the user's own clock: notes hold local wall time, CGM rows hold UTC epochs (audit F26).
+        UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
+        ZoneId zone = resolveUserZone(settings);
+        LocalDateTime end = LocalDateTime.now(zone);
+        GlycemicEventDetector.Input in = loadInput(userId, settings, zone, end);
 
-        boolean matchingLogged = notes.stream().anyMatch(nt -> {
-            LocalDateTime t = nt.getTimestamp();
-            if (t == null || t.isBefore(matchFrom) || t.isAfter(wEnd)) return false;
-            return rise ? (nt.getCarbs() != null && nt.getCarbs() > 0)
-                        : (nt.getInsulin() != null && nt.getInsulin() > 0);
-        });
+        List<Detection> detections = new ArrayList<>(detector.detect(in));
+        detections.sort(Comparator.comparingLong(Detection::onsetMs));
 
-        Category category = rise
-                ? (matchingLogged ? Category.UNDER_ESTIMATED_FOOD : Category.UNLOGGED_FOOD)
-                : (matchingLogged ? Category.UNDER_ESTIMATED_INSULIN : Category.UNLOGGED_INSULIN);
-        Direction direction = rise ? Direction.RISE : Direction.FALL;
-        double sigmaMult = sigma > 0 ? Math.abs(run.mean()) / sigma : 0.0;
+        LocalDateTime windowStart = end.minusMinutes(props.getWindowMinutes());
+        List<GlycemicEvent> open = new ArrayList<>(eventRepository.findByUserIdAndStateIn(userId, List.of(State.OPEN)));
+        List<GlycemicEvent> answered = eventRepository.findByUserIdAndStateInAndWindowEndAfter(
+                userId, List.of(State.CONFIRMED, State.DISMISSED), windowStart.minusHours(1));
+        EventClassifier classifier = new EventClassifier(classifierConfig(in.iob()));
 
-        // Dedupe: update an existing OPEN flag that overlaps this window, else create.
-        GlycemicEvent flag = flagRepository
-                .findByUserIdAndStateIn(userId, List.of(State.OPEN)).stream()
-                .filter(f -> overlaps(f, wStart, wEnd))
-                .findFirst()
-                .orElseGet(() -> GlycemicEvent.builder().userId(userId).state(State.OPEN).build());
+        List<GlycemicEvent> touched = new ArrayList<>();
+        for (Detection d : detections) {
+            LocalDateTime onset = toLdt(d.onsetMs(), zone), wEnd = toLdt(d.run().endMs(), zone);
+            // The user already answered this move - never re-open it as a fresh marker.
+            if (answered.stream().anyMatch(a -> a.getDirection() == d.direction() && overlaps(a, onset, wEnd))) continue;
+            EventClassifier.Classification c = classifier.classify(d.direction(), d.features());
+            double confidence = EventClassifier.confidence(c.baseConfidence(), d.features().sigmaMultiple());
+            touched.add(persist(userId, d, c, confidence, false, c.reason(), open, zone));
+        }
+        return touched;
+    }
 
-        boolean isNew = flag.getId() == null;
-        Category before = flag.getCategory();
-        flag.setCategory(category);
-        flag.setDetectorCategory(category);
-        flag.setPhase(GlycemicEvent.Phase.FINAL);
-        flag.setOnsetAt(wStart);
-        flag.setDirection(direction);
-        flag.setWindowStart(wStart);
-        flag.setWindowEnd(wEnd);
-        flag.setMeanResidualMmol(round2(run.mean()));
-        flag.setSigmaMultiple(round2(sigmaMult));
-        flag.setUpdatedAt(LocalDateTime.now());
-        GlycemicEvent saved = flagRepository.save(flag);
+    GlycemicEventDetector.Input loadInput(UUID userId, UserSettingsDTO settings, ZoneId zone, LocalDateTime end) {
+        LocalDateTime start = end.minusMinutes(props.getWindowMinutes());
+        List<CgmReading> readings = cgmReadingRepository.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                userId, UserZones.toEpochMs(start, zone), UserZones.toEpochMs(end, zone));
+        List<GlycemicEventDetector.CgmPoint> cgm = readings.stream()
+                .filter(r -> r.getSgv() != null && r.getDateTimestamp() != null)
+                .map(r -> new GlycemicEventDetector.CgmPoint(r.getDateTimestamp(), r.getSgv() / MGDL_PER_MMOL))
+                .toList();
+        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, start.minusHours(WARMUP_LOOKBACK_HOURS), end);
+        List<CarbsEntry> carbEntries = notes.stream()
+                .filter(n -> !n.isLongActing() && n.getCarbs() != null && n.getCarbs() > 0)
+                .map(GlycemicEventDetector::toCarbsEntry).toList();
+        return new GlycemicEventDetector.Input(userId, zone, end, cgm, notes, paramService.buildRawForUser(userId),
+                insulinPrefsService.getRapidIobParameters(userId), settings,
+                t -> carbsOnBoardService.calculateTotalCarbsOnBoard(carbEntries, t, settings),
+                featureToggleConfig.isActivityLoggingEnabled());
+    }
+
+    EventClassifier.Config classifierConfig(RapidInsulinIobParameters iob) {
+        return new EventClassifier.Config(props.getSignificantIobDropMmol(), props.getCobZeroGrams(),
+                props.getDawnStartHour(), props.getDawnEndHour(), props.getDawnMaxSlope(),
+                (int) Math.round(iob.diaHours() * 60), props.getDropResolveMinutes());
+    }
+
+    /**
+     * Create an event, or update the overlapping OPEN event of the same direction. An existing event keeps
+     * its category and phase unless the new classification comes from something the user logged
+     * (rules R1/R2/F1/F3) - a later log is the one thing that should change the engine's mind.
+     */
+    GlycemicEvent persist(UUID userId, Detection d, EventClassifier.Classification c, double confidence,
+                          boolean suppressed, String reason, List<GlycemicEvent> open, ZoneId zone) {
+        LocalDateTime onset = toLdt(d.onsetMs(), zone);
+        LocalDateTime wStart = toLdt(d.run().startMs(), zone);
+        LocalDateTime wEnd = toLdt(d.run().endMs(), zone);
+        Optional<GlycemicEvent> existing = open.stream()
+                .filter(e -> e.getDirection() == d.direction() && e.getLinkedEventId() == null && overlaps(e, onset, wEnd))
+                .findFirst();
+        boolean isNew = existing.isEmpty();
+        GlycemicEvent e = existing.orElseGet(() -> GlycemicEvent.builder().userId(userId).state(State.OPEN).build());
+        Category before = e.getCategory();
+        Phase phaseBefore = isNew ? null : e.getPhase();
+
+        if (isNew || EventClassifier.isLoggedContextRule(c.reason())) {
+            e.setCategory(c.category());
+            e.setDetectorCategory(c.category());
+            e.setPhase(c.phase());
+            e.setResolvesAt(c.resolveAfterMinutes() == null ? null : onset.plusMinutes(c.resolveAfterMinutes()));
+        }
+        e.setDirection(d.direction());
+        e.setOnsetAt(isNew || onset.isBefore(e.getOnsetAt()) ? onset : e.getOnsetAt());
+        e.setWindowStart(isNew || wStart.isBefore(e.getWindowStart()) ? wStart : e.getWindowStart());
+        e.setWindowEnd(isNew || wEnd.isAfter(e.getWindowEnd()) ? wEnd : e.getWindowEnd());
+        e.setMeanResidualMmol(round2(d.run().mean()));
+        e.setSigmaMultiple(round2(d.features().sigmaMultiple()));
+        if (e.getFeatures() == null || e.getFeatures().insulinEffectRatio() == null) e.setFeatures(d.features());
+        e.setConfidence(round2(confidence));
+        e.setSuppressed(suppressed);
+        e.setUpdatedAt(LocalDateTime.now());
+
+        GlycemicEvent saved = eventRepository.save(e);
         if (isNew) {
-            historyRecorder.record(saved, GlycemicEventHistory.Kind.DETECTED, null,
-                    GlycemicEventHistory.Actor.SYSTEM, "rule:legacy");
-        } else if (before != category) {
-            historyRecorder.record(saved, GlycemicEventHistory.Kind.UPDATED, before,
-                    GlycemicEventHistory.Actor.SYSTEM, "rule:legacy");
+            open.add(saved);
+            historyRecorder.record(saved, Kind.DETECTED, null, Actor.SYSTEM, reason);
+        } else if (before != saved.getCategory() || phaseBefore != saved.getPhase()) {
+            historyRecorder.record(saved, Kind.UPDATED, before, Actor.SYSTEM, reason);
         }
         return saved;
     }
 
-    private static boolean overlaps(GlycemicEvent f, LocalDateTime start, LocalDateTime end) {
-        return !f.getWindowStart().isAfter(end) && !start.isAfter(f.getWindowEnd());
+    static boolean overlaps(GlycemicEvent e, LocalDateTime start, LocalDateTime end) {
+        LocalDateTime from = e.getOnsetAt() != null && e.getOnsetAt().isBefore(e.getWindowStart())
+                ? e.getOnsetAt() : e.getWindowStart();
+        return !from.isAfter(end) && !start.isAfter(e.getWindowEnd());
     }
 
-    // -- Math / time helpers -----------------------------------------------------
-
-    /** Nearest value in a time->value map within tolerance, or null. */
-    private static Double nearest(TreeMap<Long, Double> map, long target, long tolMs) {
-        Map.Entry<Long, Double> floor = map.floorEntry(target);
-        Map.Entry<Long, Double> ceil = map.ceilingEntry(target);
-        Map.Entry<Long, Double> best = null;
-        long bestDiff = Long.MAX_VALUE;
-        if (floor != null) { best = floor; bestDiff = target - floor.getKey(); }
-        if (ceil != null && (ceil.getKey() - target) < bestDiff) { best = ceil; bestDiff = ceil.getKey() - target; }
-        return (best != null && bestDiff <= tolMs) ? best.getValue() : null;
-    }
-
-    /** @see UserZones#resolve(String, Integer) */
-    private static java.time.ZoneId resolveUserZone(UserSettingsDTO settings) {
+    private static ZoneId resolveUserZone(UserSettingsDTO settings) {
         if (settings == null) return ZoneOffset.UTC;
         return UserZones.resolve(settings.getTimezone(), settings.getUtcOffsetMinutes());
     }
 
-    private static LocalDateTime toLdt(long epochMs, java.time.ZoneId zone) {
-        return UserZones.toWallTime(epochMs, zone);
-    }
+    private static LocalDateTime toLdt(long epochMs, ZoneId zone) { return UserZones.toWallTime(epochMs, zone); }
 
-    private static long toEpochMs(LocalDateTime ldt, java.time.ZoneId zone) {
-        return UserZones.toEpochMs(ldt, zone);
-    }
-
-    private static double round2(double v) {
-        return Math.round(v * 100.0) / 100.0;
-    }
+    static double round2(double v) { return Math.round(v * 100.0) / 100.0; }
 }
