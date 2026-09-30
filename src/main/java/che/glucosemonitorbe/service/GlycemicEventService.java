@@ -5,6 +5,7 @@ import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.ConfirmGlycemicEventRequest;
 import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.dto.GlycemicEventHistoryDTO;
+import che.glucosemonitorbe.dto.GlycemicInsightsDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.*;
@@ -24,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * User-facing operations on glycemic events (spec section 5): range listing for the chart, the single
@@ -115,6 +117,38 @@ public class GlycemicEventService {
         eventRepository.findById(eventId).filter(e -> e.getUserId().equals(userId))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Event not found"));
         return historyRepository.findByEventIdOrderByAtAsc(eventId).stream().map(GlycemicEventHistoryDTO::from).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public GlycemicInsightsDTO insights(UUID userId, int days) {
+        if (days < 1 || days > 90) throw unprocessable("days must be between 1 and 90");
+        LocalDateTime now = LocalDateTime.now(userZone(userId));
+        List<GlycemicEvent> all = eventRepository
+                .findByUserIdAndOnsetAtLessThanEqualAndWindowEndGreaterThanEqualOrderByOnsetAtAsc(userId, now, now.minusDays(days))
+                .stream().filter(e -> e.getLinkedEventId() == null).toList();
+
+        Map<String, Integer> counts = new TreeMap<>();
+        Map<String, List<Integer>> hours = new TreeMap<>();
+        for (GlycemicEvent e : all) {
+            if (e.getState() == State.DISMISSED) continue;
+            String key = e.getCategory().name();
+            counts.merge(key, 1, Integer::sum);
+            List<Integer> h = hours.computeIfAbsent(key, k -> new ArrayList<>(Collections.nCopies(24, 0)));
+            h.set(e.getOnsetAt().getHour(), h.get(e.getOnsetAt().getHour()) + 1);
+        }
+        int noEffect = (int) all.stream()
+                .filter(e -> e.getCategory() == Category.LIPODYSTROPHY && e.getState() != State.DISMISSED)
+                .filter(e -> e.getOnsetAt().isAfter(now.minusDays(14))).count();
+
+        Map<String, Double> agreement = new TreeMap<>();
+        Map<Category, List<GlycemicEvent>> answeredByDetector = all.stream()
+                .filter(e -> e.getState() != State.OPEN && e.getDetectorCategory() != null)
+                .collect(Collectors.groupingBy(GlycemicEvent::getDetectorCategory));
+        answeredByDetector.forEach((cat, list) -> {
+            long agreed = list.stream().filter(e -> e.getState() == State.CONFIRMED && e.getUserLabel() == null).count();
+            agreement.put(cat.name(), Math.round(1000.0 * agreed / list.size()) / 1000.0);
+        });
+        return new GlycemicInsightsDTO(days, counts, hours, noEffect, agreement);
     }
 
     GlycemicEvent requireOpen(UUID userId, UUID eventId) {

@@ -3,6 +3,7 @@ package che.glucosemonitorbe.controller;
 import che.glucosemonitorbe.dto.ConfirmGlycemicEventRequest;
 import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.dto.GlycemicEventHistoryDTO;
+import che.glucosemonitorbe.dto.GlycemicInsightsDTO;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
 import che.glucosemonitorbe.service.FeatureToggleService;
 import che.glucosemonitorbe.service.GlycemicEventService;
@@ -48,6 +49,13 @@ public class GlycemicEventController {
         requireFeature();
         return eventService.prompt(userId(auth)).map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    @Operation(summary = "Per-category counts, hour histograms, lipodystrophy recurrence and agreement rate")
+    @GetMapping("/insights")
+    public ResponseEntity<GlycemicInsightsDTO> insights(Authentication auth, @RequestParam(defaultValue = "30") int days) {
+        requireFeature();
+        return ResponseEntity.ok(eventService.insights(userId(auth), days));
     }
 
     @Operation(summary = "Confirm or relabel; optionally backfill the real carbs/insulin as a note")
