@@ -273,12 +273,16 @@ public class DigitalTwinCalibrationService {
      * Remove CGM readings inside an OPEN/CONFIRMED glycemic-event window, so calibration doesn't learn
      * from a window the user's log can't explain. Falls back to the full set when the exclusion would
      * drop below {@link #MIN_CGM_READINGS} (fitting on that data beats not fitting at all).
+     * Dawn-phenomenon windows are kept: they are systematic, repeatable patterns that the residual-bias
+     * model should learn, not ignore.
      */
     private List<PredictionReplayEngine.Reading> excludeFlaggedWindows(
             UUID userId, List<PredictionReplayEngine.Reading> cgm, java.time.ZoneId userZone) {
         if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) return cgm;
         List<GlycemicEvent> flags = glycemicEventRepository.findByUserIdAndStateIn(
                 userId, List.of(GlycemicEvent.State.OPEN, GlycemicEvent.State.CONFIRMED));
+        // Dawn is a systematic, repeatable pattern: ResidualBiasModel should learn it, not ignore it.
+        flags = flags.stream().filter(f -> f.getCategory() != GlycemicEvent.Category.DAWN_PHENOMENON).toList();
         if (flags.isEmpty()) return cgm;
 
         long[][] intervals = new long[flags.size()][2];
