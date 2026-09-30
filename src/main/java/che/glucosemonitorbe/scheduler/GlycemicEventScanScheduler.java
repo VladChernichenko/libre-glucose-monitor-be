@@ -20,7 +20,7 @@ public class GlycemicEventScanScheduler {
 
     @Scheduled(
             initialDelayString = "${app.glycemic-events.initial-delay-ms:60000}",
-            fixedDelayString = "${app.glycemic-events.scan-interval-ms:1200000}")
+            fixedDelayString = "${app.glycemic-events.scan-interval-ms:600000}")
     public void scan() {
         log.debug("GlycemicEventScanScheduler: starting scan");
         try {

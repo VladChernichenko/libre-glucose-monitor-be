@@ -11,7 +11,6 @@ import che.glucosemonitorbe.repository.NoteRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
@@ -32,9 +31,7 @@ class GlycemicEventServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GlycemicEventService(events, notes, recorder);
-        ReflectionTestUtils.setField(service, "maxBackfillCarbs", 300.0);
-        ReflectionTestUtils.setField(service, "maxBackfillInsulin", 50.0);
+        service = new GlycemicEventService(events, notes, recorder, new che.glucosemonitorbe.config.GlycemicEventProperties());
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 

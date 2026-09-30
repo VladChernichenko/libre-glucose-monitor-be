@@ -1,6 +1,11 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
+import che.glucosemonitorbe.config.GlycemicEventProperties;
+import che.glucosemonitorbe.glycemic.ResidualPoint;
+import che.glucosemonitorbe.glycemic.ResidualRun;
+import che.glucosemonitorbe.glycemic.ResidualScanner;
+import che.glucosemonitorbe.glycemic.ResidualSeries;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.InsulinDose;
@@ -32,14 +37,12 @@ import che.glucosemonitorbe.repository.UserRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -75,24 +78,7 @@ public class GlycemicEventScanService {
     private final FeatureToggleConfig featureToggleConfig;
     private final GlycemicEventHistoryRecorder historyRecorder;
 
-    /** Length of the CGM window scanned each pass [min]. */
-    @Value("${app.glycemic-events.window-minutes:180}")
-    private int windowMinutes;
-    /** Minimum aligned residual points needed to estimate σ and run the scan. */
-    @Value("${app.glycemic-events.min-readings:24}")
-    private int minReadings;
-    /** Robust-σ multiple the sustained mean residual must exceed to flag. */
-    @Value("${app.glycemic-events.sigma-multiple:2.0}")
-    private double sigmaMultiple;
-    /** Minimum duration of the sustained run [min] - rejects transient sensor artifacts. */
-    @Value("${app.glycemic-events.persistence-minutes:45}")
-    private int persistenceMinutes;
-    /** Tolerance when aligning a predicted point to an actual CGM reading [ms]. */
-    @Value("${app.glycemic-events.align-tolerance-ms:150000}")
-    private long alignToleranceMs;
-    /** How far before the run a matching logged event may sit and still count as "logged" [min]. */
-    @Value("${app.glycemic-events.match-lead-minutes:45}")
-    private int matchLeadMinutes;
+    private final GlycemicEventProperties props;
 
     /** Raw predictor (no twin overlay, no residual correction) - the calibration-consistent baseline. */
     private HovorkaGlucosePredictionService rawPredictor;
@@ -167,13 +153,13 @@ public class GlycemicEventScanService {
         java.time.ZoneId userZone = resolveUserZone(settings);
 
         LocalDateTime end = LocalDateTime.now(userZone);
-        LocalDateTime start = end.minusMinutes(windowMinutes);
+        LocalDateTime start = end.minusMinutes(props.getWindowMinutes());
         long startMs = toEpochMs(start, userZone);
         long endMs = toEpochMs(end, userZone);
 
         List<CgmReading> readings = cgmReadingRepository
                 .findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, startMs, endMs);
-        if (readings.size() < minReadings) return Optional.empty();
+        if (readings.size() < props.getMinReadings()) return Optional.empty();
 
         // Events for warm-up + prediction inputs (and for the matching-event check).
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(
@@ -205,67 +191,36 @@ public class GlycemicEventScanService {
                 ? NotesActivityProvider.fromNotes(notes) : ActivityProvider.NONE;
         List<PredictionPointDTO> predicted = rawPredictor.buildPredictionPath(
                 baseParams, rapidIob, settings, g0, anchorTime, carbs, insulin, longActing,
-                userId, windowMinutes, activity);
+                userId, props.getWindowMinutes(), activity);
 
         // Align predicted -> actual; residual = actual − predicted [mmol/L].
         TreeMap<Long, Double> predByMs = new TreeMap<>();
         for (PredictionPointDTO pt : predicted) {
             if (pt.getPredictedGlucose() != null) predByMs.put(toEpochMs(pt.getTimestamp(), userZone), pt.getPredictedGlucose());
         }
-        List<long[]> tMs = new ArrayList<>();
-        List<Double> resid = new ArrayList<>();
+        List<ResidualPoint> aligned = new ArrayList<>();
         for (CgmReading r : readings) {
             if (r.getSgv() == null || r.getDateTimestamp() == null) continue;
-            Double p = nearest(predByMs, r.getDateTimestamp(), alignToleranceMs);
+            Double p = nearest(predByMs, r.getDateTimestamp(), props.getAlignToleranceMs());
             if (p == null) continue;
-            tMs.add(new long[]{r.getDateTimestamp()});
-            resid.add(r.getSgv() / MGDL_PER_MMOL - p);
+            aligned.add(new ResidualPoint(r.getDateTimestamp(), r.getSgv() / MGDL_PER_MMOL, p));
         }
-        if (resid.size() < minReadings) return Optional.empty();
-
-        double sigma = robustScale(resid);
-        double threshold = sigmaMultiple * sigma;
-
-        // Strongest sustained same-sign run above threshold.
-        Run best = strongestRun(tMs, resid, threshold, persistenceMinutes);
-        if (best == null) return Optional.empty();
-
-        return Optional.of(persistFlag(userId, best, sigma, notes, userZone));
+        ResidualSeries series = ResidualScanner.series(aligned);
+        ResidualScanner scanner = new ResidualScanner(props.getSigmaMultiple(), props.getPersistenceMinutes(),
+                props.getMaxGapMinutes(), props.getMinReadings());
+        Optional<ResidualRun> best = ResidualScanner.strongest(scanner.runs(series));
+        if (best.isEmpty()) return Optional.empty();
+        return Optional.of(persistFlag(userId, best.get(), series.sigma(), notes, userZone));
     }
 
-    // -- Detection helpers ------------------------------------------------------
+    // -- Persistence ------------------------------------------------------------
 
-    record Run(long startMs, long endMs, double mean) {}
-
-    /** Strongest sustained same-sign run whose mean |residual| >= threshold and duration >= persistence. */
-    static Run strongestRun(List<long[]> tMs, List<Double> resid, double threshold, int persistenceMinutes) {
-        int n = resid.size();
-        Run best = null;
-        int i = 0;
-        while (i < n) {
-            int sign = resid.get(i) >= 0 ? 1 : -1;
-            int j = i;
-            double sum = 0.0;
-            while (j < n && (resid.get(j) >= 0 ? 1 : -1) == sign) { sum += resid.get(j); j++; }
-            int count = j - i;
-            long runStart = tMs.get(i)[0], runEnd = tMs.get(j - 1)[0];
-            double durMin = (runEnd - runStart) / 60_000.0;
-            double mean = sum / count;
-            if (durMin >= persistenceMinutes && Math.abs(mean) >= threshold
-                    && (best == null || Math.abs(mean) > Math.abs(best.mean()))) {
-                best = new Run(runStart, runEnd, mean);
-            }
-            i = j;
-        }
-        return best;
-    }
-
-    private GlycemicEvent persistFlag(UUID userId, Run run, double sigma, List<Note> notes,
+    private GlycemicEvent persistFlag(UUID userId, ResidualRun run, double sigma, List<Note> notes,
                                           java.time.ZoneId userZone) {
         boolean rise = run.mean() > 0;
         LocalDateTime wStart = toLdt(run.startMs(), userZone);
         LocalDateTime wEnd = toLdt(run.endMs(), userZone);
-        LocalDateTime matchFrom = wStart.minusMinutes(matchLeadMinutes);
+        LocalDateTime matchFrom = wStart.minusMinutes(props.getMatchLeadMinutes());
 
         boolean matchingLogged = notes.stream().anyMatch(nt -> {
             LocalDateTime t = nt.getTimestamp();
@@ -315,23 +270,6 @@ public class GlycemicEventScanService {
     }
 
     // -- Math / time helpers -----------------------------------------------------
-
-    /** Robust spread: 1.4826*MAD, floored at 0.3 mmol/L (CGM sensor noise) - matches the calibrator. */
-    static double robustScale(List<Double> values) {
-        if (values.isEmpty()) return 0.3;
-        double[] a = values.stream().mapToDouble(Double::doubleValue).toArray();
-        double median = median(a.clone());
-        double[] dev = new double[a.length];
-        for (int i = 0; i < a.length; i++) dev[i] = Math.abs(a[i] - median);
-        return Math.max(0.3, 1.4826 * median(dev));
-    }
-
-    private static double median(double[] a) {
-        Arrays.sort(a);
-        int n = a.length;
-        if (n == 0) return 0.0;
-        return (n % 2 == 1) ? a[n / 2] : 0.5 * (a[n / 2 - 1] + a[n / 2]);
-    }
 
     /** Nearest value in a time->value map within tolerance, or null. */
     private static Double nearest(TreeMap<Long, Double> map, long target, long tolMs) {

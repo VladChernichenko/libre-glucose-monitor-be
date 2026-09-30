@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.config.GlycemicEventProperties;
 import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
@@ -9,7 +10,6 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,11 +30,7 @@ public class GlycemicEventService {
     private final GlycemicEventRepository eventRepository;
     private final NoteRepository noteRepository;
     private final GlycemicEventHistoryRecorder historyRecorder;
-
-    @Value("${app.glycemic-events.backfill-max-carbs:300}")
-    private double maxBackfillCarbs;
-    @Value("${app.glycemic-events.backfill-max-insulin:50}")
-    private double maxBackfillInsulin;
+    private final GlycemicEventProperties props;
 
     @Transactional(readOnly = true)
     public List<GlycemicEventDTO> list(UUID userId, State stateFilter) {
@@ -49,8 +45,8 @@ public class GlycemicEventService {
         GlycemicEvent event = requireOpen(userId, eventId);
         boolean backfill = (carbs != null && carbs > 0) || (insulin != null && insulin > 0);
         if (backfill) {
-            double c = validateAmount(carbs, maxBackfillCarbs, "carbs");
-            double u = validateAmount(insulin, maxBackfillInsulin, "insulin");
+            double c = validateAmount(carbs, props.getBackfillMaxCarbs(), "carbs");
+            double u = validateAmount(insulin, props.getBackfillMaxInsulin(), "insulin");
             Note note = new Note();
             note.setUserId(userId);
             note.setTimestamp(event.getWindowStart());

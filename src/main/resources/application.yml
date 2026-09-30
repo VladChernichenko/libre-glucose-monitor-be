@@ -157,6 +157,11 @@ app:
     # Activity logging: logged activity notes feed the model's activity signal a(t).
     activity-logging-enabled: ${APP_FEATURES_ACTIVITY_LOGGING_ENABLED:true}
 
+  # Glycemic event engine (spec 2026-09-30). All keys optional - defaults live in GlycemicEventProperties.
+  glycemic-events:
+    scan-interval-ms: ${GLYCEMIC_EVENTS_SCAN_INTERVAL_MS:600000}
+    window-minutes: 240
+
   # Background Nightscout -> DB sync (stored chart data), every 5 minutes per user with active config
   glucose-sync:
     enabled: true
