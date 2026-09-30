@@ -3,6 +3,8 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.dto.GlycemicEventDTO;
 import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
+import che.glucosemonitorbe.entity.GlycemicEventHistory.Actor;
+import che.glucosemonitorbe.entity.GlycemicEventHistory.Kind;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.GlycemicEventRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
@@ -27,6 +29,7 @@ public class GlycemicEventService {
 
     private final GlycemicEventRepository eventRepository;
     private final NoteRepository noteRepository;
+    private final GlycemicEventHistoryRecorder historyRecorder;
 
     @Value("${app.glycemic-events.backfill-max-carbs:300}")
     private double maxBackfillCarbs;
@@ -62,7 +65,9 @@ public class GlycemicEventService {
         event.setState(State.CONFIRMED);
         event.setResolvedAt(LocalDateTime.now());
         event.setUpdatedAt(LocalDateTime.now());
-        return GlycemicEventDTO.from(eventRepository.save(event));
+        GlycemicEvent saved = eventRepository.save(event);
+        historyRecorder.record(saved, Kind.CONFIRMED, saved.getCategory(), Actor.USER, null);
+        return GlycemicEventDTO.from(saved);
     }
 
     @Transactional
@@ -71,7 +76,9 @@ public class GlycemicEventService {
         event.setState(State.DISMISSED);
         event.setResolvedAt(LocalDateTime.now());
         event.setUpdatedAt(LocalDateTime.now());
-        return GlycemicEventDTO.from(eventRepository.save(event));
+        GlycemicEvent saved = eventRepository.save(event);
+        historyRecorder.record(saved, Kind.DISMISSED, saved.getCategory(), Actor.USER, null);
+        return GlycemicEventDTO.from(saved);
     }
 
     GlycemicEvent requireOpen(UUID userId, UUID eventId) {

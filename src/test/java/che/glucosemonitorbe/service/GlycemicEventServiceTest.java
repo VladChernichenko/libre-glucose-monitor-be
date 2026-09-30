@@ -29,7 +29,7 @@ class GlycemicEventServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GlycemicEventService(events, notes);
+        service = new GlycemicEventService(events, notes, mock(GlycemicEventHistoryRecorder.class));
         ReflectionTestUtils.setField(service, "maxBackfillCarbs", 300.0);
         ReflectionTestUtils.setField(service, "maxBackfillInsulin", 50.0);
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));

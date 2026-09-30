@@ -15,6 +15,7 @@ import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.Category;
 import che.glucosemonitorbe.entity.GlycemicEvent.Direction;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
+import che.glucosemonitorbe.entity.GlycemicEventHistory;
 import che.glucosemonitorbe.hovorka.ActivityProvider;
 import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.NotesActivityProvider;
@@ -72,6 +73,7 @@ public class GlycemicEventScanService {
     private final UserInsulinPreferencesService insulinPrefsService;
     private final UserSettingsService userSettingsService;
     private final FeatureToggleConfig featureToggleConfig;
+    private final GlycemicEventHistoryRecorder historyRecorder;
 
     /** Length of the CGM window scanned each pass [min]. */
     @Value("${app.glycemic-events.window-minutes:180}")
@@ -285,14 +287,27 @@ public class GlycemicEventScanService {
                 .findFirst()
                 .orElseGet(() -> GlycemicEvent.builder().userId(userId).state(State.OPEN).build());
 
+        boolean isNew = flag.getId() == null;
+        Category before = flag.getCategory();
         flag.setCategory(category);
+        flag.setDetectorCategory(category);
+        flag.setPhase(GlycemicEvent.Phase.FINAL);
+        flag.setOnsetAt(wStart);
         flag.setDirection(direction);
         flag.setWindowStart(wStart);
         flag.setWindowEnd(wEnd);
         flag.setMeanResidualMmol(round2(run.mean()));
         flag.setSigmaMultiple(round2(sigmaMult));
         flag.setUpdatedAt(LocalDateTime.now());
-        return flagRepository.save(flag);
+        GlycemicEvent saved = flagRepository.save(flag);
+        if (isNew) {
+            historyRecorder.record(saved, GlycemicEventHistory.Kind.DETECTED, null,
+                    GlycemicEventHistory.Actor.SYSTEM, "rule:legacy");
+        } else if (before != category) {
+            historyRecorder.record(saved, GlycemicEventHistory.Kind.UPDATED, before,
+                    GlycemicEventHistory.Actor.SYSTEM, "rule:legacy");
+        }
+        return saved;
     }
 
     private static boolean overlaps(GlycemicEvent f, LocalDateTime start, LocalDateTime end) {
