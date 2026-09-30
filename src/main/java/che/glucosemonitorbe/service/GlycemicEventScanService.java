@@ -11,6 +11,7 @@ import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.Category;
+import che.glucosemonitorbe.entity.GlycemicEvent.Direction;
 import che.glucosemonitorbe.entity.GlycemicEvent.Phase;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
 import che.glucosemonitorbe.entity.GlycemicEventHistory.Actor;
@@ -60,6 +61,7 @@ public class GlycemicEventScanService {
     private final GlycemicEventProperties props;
     private final GlycemicEventDetector detector;
     private final GlycemicEventHistoryRecorder historyRecorder;
+    private final GlycemicTailService tailService;
 
     /** Aggregate outcome of a scan pass. */
     public record ScanSummary(int scanned, int flagged, int skipped, int failed) {}
@@ -115,10 +117,15 @@ public class GlycemicEventScanService {
             LocalDateTime onset = toLdt(d.onsetMs(), zone), wEnd = toLdt(d.run().endMs(), zone);
             // The user already answered this move - never re-open it as a fresh marker.
             if (answered.stream().anyMatch(a -> a.getDirection() == d.direction() && overlaps(a, onset, wEnd))) continue;
+            if (d.direction() == Direction.FALL) {
+                Optional<GlycemicEvent> claimed = tailService.claimFall(d, in, open);
+                if (claimed.isPresent()) { touched.add(claimed.get()); continue; }
+            }
             EventClassifier.Classification c = classifier.classify(d.direction(), d.features());
             double confidence = EventClassifier.confidence(c.baseConfidence(), d.features().sigmaMultiple());
             touched.add(persist(userId, d, c, confidence, false, c.reason(), open, zone));
         }
+        touched.addAll(tailService.resolveDue(in, open));
         return touched;
     }
 
