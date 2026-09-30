@@ -107,4 +107,16 @@ class GlycemicEventServiceTest {
         service.dismiss(user, parent.getId());
         assertThat(child.getState()).isEqualTo(State.DISMISSED);
     }
+    @Test void relabellingAParentRelabelsItsChildren() {
+        GlycemicEvent parent = stored(user, Category.ABSORPTION_DELAY, Phase.FINAL, State.OPEN);
+        GlycemicEvent child = GlycemicEvent.builder().id(UUID.randomUUID()).userId(user)
+                .category(Category.ABSORPTION_DELAY).detectorCategory(Category.ABSORPTION_DELAY)
+                .direction(Direction.FALL).linkedEventId(parent.getId()).state(State.OPEN).build();
+        when(events.findByLinkedEventId(parent.getId())).thenReturn(List.of(child));
+        service.confirm(user, parent.getId(), new ConfirmGlycemicEventRequest("LIPODYSTROPHY", null, null));
+        assertThat(child.getState()).isEqualTo(State.CONFIRMED);
+        assertThat(child.getCategory()).isEqualTo(Category.LIPODYSTROPHY);
+        assertThat(child.getUserLabel()).isEqualTo(Category.LIPODYSTROPHY);
+        assertThat(child.getDetectorCategory()).isEqualTo(Category.ABSORPTION_DELAY);
+    }
 }

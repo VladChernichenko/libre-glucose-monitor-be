@@ -142,6 +142,7 @@ public class GlycemicEventService {
         for (GlycemicEvent child : eventRepository.findByLinkedEventId(parent.getId())) {
             child.setState(parent.getState());
             child.setCategory(parent.getCategory());
+            child.setUserLabel(parent.getUserLabel());
             child.setResolvedAt(parent.getResolvedAt());
             child.setUpdatedAt(LocalDateTime.now());
             eventRepository.save(child);
