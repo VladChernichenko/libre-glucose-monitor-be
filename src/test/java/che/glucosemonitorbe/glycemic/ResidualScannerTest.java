@@ -94,4 +94,32 @@ class ResidualScannerTest {
         ResidualSeries s = series(concat(noise(20), flat(10, 3.0), noise(20), flat(10, -4.0), noise(10)));
         assertThat(ResidualScanner.strongest(scanner.runs(s)).orElseThrow().direction()).isEqualTo(Direction.FALL);
     }
+
+    @Test
+    void aRunBelowTheAdaptiveThresholdIsRejected() {
+        // sigma floor 0.3 -> threshold 0.6 (sigmaMultiple 2.0)
+        // flat(12, 0.5) should not produce a run (mean below threshold)
+        ResidualSeries s1 = series(concat(noise(20), flat(12, 0.5), noise(20)));
+        assertThat(scanner.runs(s1)).isEmpty();
+
+        // flat(12, 0.8) should produce exactly one RISE run (mean above threshold after smoothing)
+        // Note: 0.7 was diluted below 0.6 by boundary noise points during median-3 smoothing
+        ResidualSeries s2 = series(concat(noise(20), flat(12, 0.8), noise(20)));
+        List<ResidualRun> runs = scanner.runs(s2);
+        assertThat(runs).hasSize(1);
+        assertThat(runs.get(0).direction()).isEqualTo(Direction.RISE);
+    }
+
+    @Test
+    void robustScaleResistsAFewLargeSpikes() {
+        // 30 values of 0.1 alternating sign + three values of 6.0
+        List<Double> values = new ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            values.add(i % 2 == 0 ? 0.1 : -0.1);
+        }
+        values.add(6.0);
+        values.add(6.0);
+        values.add(6.0);
+        assertThat(ResidualScanner.robustScale(values)).isLessThan(0.5);
+    }
 }
