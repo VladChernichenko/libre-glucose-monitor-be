@@ -161,7 +161,7 @@ class HupaUcmCalibrationValidationTest {
 
     // -- Predictor wiring (raw model, no DB) -------------------------------------
 
-    private static HovorkaGlucosePredictionService rawPredictor() {
+    static HovorkaGlucosePredictionService rawPredictor() {
         DallaManGutModel gut = new DallaManGutModel();
         HovorkaOdeSolver solver = new HovorkaOdeSolver(gut);
         BasalInsulinResolver basal = new BasalInsulinResolver();
@@ -171,7 +171,7 @@ class HupaUcmCalibrationValidationTest {
                 mock(UserSettingsService.class), PredictionResidualProvider.NONE);
     }
 
-    private static HovorkaParameters personalParams(HupaUcmDataset.Profile p) {
+    static HovorkaParameters personalParams(HupaUcmDataset.Profile p) {
         double w = p.weightKg() > 0 ? p.weightKg() : HovorkaParameters.DEFAULT_WEIGHT;
         double isf = p.isfMmolPerU() > 0 ? p.isfMmolPerU() : 2.2;
         double vG = HovorkaParameters.VG_PER_KG * w;
