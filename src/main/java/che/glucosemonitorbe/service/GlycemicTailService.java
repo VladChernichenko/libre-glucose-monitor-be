@@ -110,8 +110,7 @@ public class GlycemicTailService {
             if (e.getDirection() == Direction.RISE) {
                 Double ratio = effectRatio(in, e);
                 Category cat = tail.resolveResistance(ratio);
-                long recent = eventRepository.countByUserIdAndDetectorCategoryAndOnsetAtAfter(
-                        e.getUserId(), Category.LIPODYSTROPHY, now.minusDays(14));
+                long recent = eventRepository.countLipodystrophyRecurrence(e.getUserId(), now.minusDays(14));
                 if (cat == Category.LIPODYSTROPHY) {
                     e.setConfidence(GlycemicEventScanService.round2(TailResolver.lipodystrophyConfidence(recent)));
                 }

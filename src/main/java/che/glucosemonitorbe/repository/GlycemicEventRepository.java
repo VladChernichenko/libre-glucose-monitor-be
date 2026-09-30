@@ -2,8 +2,9 @@ package che.glucosemonitorbe.repository;
 
 import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.GlycemicEvent.State;
-import che.glucosemonitorbe.entity.GlycemicEvent.Category;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -27,8 +28,16 @@ public interface GlycemicEventRepository extends JpaRepository<GlycemicEvent, UU
     /** Linked children of a parent event. */
     List<GlycemicEvent> findByLinkedEventId(UUID parentId);
 
-    /** Recurrence count for lipodystrophy confidence. */
-    long countByUserIdAndDetectorCategoryAndOnsetAtAfter(UUID userId, Category category, LocalDateTime after);
+    /**
+     * Recurrence count of possible injection-site issues: top-level LIPODYSTROPHY events (effective
+     * category) the user has not dismissed or relabelled away, with onset after {@code after}.
+     */
+    @Query("SELECT COUNT(e) FROM GlycemicEvent e WHERE e.userId = :userId"
+            + " AND e.category = che.glucosemonitorbe.entity.GlycemicEvent.Category.LIPODYSTROPHY"
+            + " AND e.state IN (che.glucosemonitorbe.entity.GlycemicEvent.State.OPEN,"
+            + " che.glucosemonitorbe.entity.GlycemicEvent.State.CONFIRMED)"
+            + " AND e.linkedEventId IS NULL AND e.onsetAt > :after")
+    long countLipodystrophyRecurrence(@Param("userId") UUID userId, @Param("after") LocalDateTime after);
 
     /** Events whose [onset_at, window_end] intersects [from, to] (note the argument order: to, then from). */
     List<GlycemicEvent> findByUserIdAndOnsetAtLessThanEqualAndWindowEndGreaterThanEqualOrderByOnsetAtAsc(

@@ -51,6 +51,7 @@ class GlycemicEventInsightsE2ETest extends AbstractGlycemicEventE2ETest {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC).withHour(10).withMinute(0).withSecond(0).withNano(0);
         ev(u, Category.LIPODYSTROPHY, now.minusDays(10), State.OPEN, null); // 10 days ago, outside 7-day window
         ev(u, Category.LIPODYSTROPHY, now.minusDays(3), State.OPEN, null);  // 3 days ago, inside 7-day window
+        ev(u, Category.LIPODYSTROPHY, now.minusDays(5), State.DISMISSED, null); // the user said no - never counted
 
         ResponseEntity<String> resp = rest.exchange("/api/glycemic-events/insights?days=7", HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class);
@@ -58,5 +59,23 @@ class GlycemicEventInsightsE2ETest extends AbstractGlycemicEventE2ETest {
 
         assertThat(body.path("counts").path("LIPODYSTROPHY").asInt()).isEqualTo(1); // only the 3-day event
         assertThat(body.path("noEffectCount14d").asInt()).isEqualTo(2); // both events (14-day fixed window)
+    }
+
+    @Test
+    void noEffectCountSkipsDismissedRelabelledAndLinkedEvents() throws Exception {
+        UUID u = userId();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC).withHour(10).withMinute(0).withSecond(0).withNano(0);
+        ev(u, Category.LIPODYSTROPHY, now.minusDays(1), State.CONFIRMED, null);                // counted
+        ev(u, Category.LIPODYSTROPHY, now.minusDays(2), State.DISMISSED, null);                // dismissed
+        ev(u, Category.LIPODYSTROPHY, now.minusDays(3), State.CONFIRMED, Category.STRESS);     // relabelled away
+        GlycemicEvent parent = eventRepository.findAll().get(0);
+        eventRepository.save(GlycemicEvent.builder().userId(u).category(Category.LIPODYSTROPHY)
+                .detectorCategory(Category.LIPODYSTROPHY).direction(Direction.RISE).linkedEventId(parent.getId())
+                .onsetAt(now.minusDays(1)).windowStart(now.minusDays(1)).windowEnd(now.minusDays(1).plusMinutes(50))
+                .meanResidualMmol(2.0).state(State.OPEN).build());                             // linked child
+
+        ResponseEntity<String> resp = rest.exchange("/api/glycemic-events/insights?days=30", HttpMethod.GET,
+                new HttpEntity<>(authHeaders), String.class);
+        assertThat(mapper.readTree(resp.getBody()).path("noEffectCount14d").asInt()).isEqualTo(1);
     }
 }

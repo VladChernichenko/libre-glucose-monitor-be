@@ -136,7 +136,7 @@ public class GlycemicEventService {
             List<Integer> h = hours.computeIfAbsent(key, k -> new ArrayList<>(Collections.nCopies(24, 0)));
             h.set(e.getOnsetAt().getHour(), h.get(e.getOnsetAt().getHour()) + 1);
         }
-        int noEffect = (int) eventRepository.countByUserIdAndDetectorCategoryAndOnsetAtAfter(userId, Category.LIPODYSTROPHY, now.minusDays(14));
+        int noEffect = (int) eventRepository.countLipodystrophyRecurrence(userId, now.minusDays(14));
 
         Map<String, Double> agreement = new TreeMap<>();
         Map<Category, List<GlycemicEvent>> answeredByDetector = all.stream()
