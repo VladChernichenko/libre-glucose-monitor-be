@@ -16,6 +16,9 @@ public final class TailResolver {
     /** A drop whose window has not grown for this long is considered to have stopped. */
     private static final long STOPPED_GRACE_MS = 15 * 60_000L;
 
+    /** Smoothing can put a fall's onset slightly inside the rise window; anything earlier came first. */
+    private static final long ANAEROBIC_ONSET_TOLERANCE_MS = 15 * 60_000L;
+
     private final Config c;
 
     public TailResolver(Config config) { this.c = config; }
@@ -65,6 +68,7 @@ public final class TailResolver {
     public boolean isAnaerobicPair(double riseDurationMin, long riseWindowEndMs, long fallOnsetMs, List<Long> bolusEpochMs) {
         if (riseDurationMin > c.anaerobicMaxRiseMinutes()) return false;
         if (fallOnsetMs - riseWindowEndMs > c.anaerobicMaxGapMinutes() * 60_000L) return false;
+        if (fallOnsetMs < riseWindowEndMs - ANAEROBIC_ONSET_TOLERANCE_MS) return false; // the fall preceded the rise
         long from = Math.min(riseWindowEndMs, fallOnsetMs), to = Math.max(riseWindowEndMs, fallOnsetMs);
         return bolusEpochMs.stream().noneMatch(b -> b >= from && b <= to);
     }

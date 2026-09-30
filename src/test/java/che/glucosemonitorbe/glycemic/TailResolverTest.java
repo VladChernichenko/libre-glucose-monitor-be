@@ -70,4 +70,10 @@ class TailResolverTest {
         assertThat(tail.isAnaerobicPair(50, 100 * MIN, 140 * MIN, List.of())).isFalse();
         assertThat(tail.isAnaerobicPair(50, 100 * MIN, 120 * MIN, List.of(110 * MIN))).isFalse();
     }
+    @Test void anaerobicRejectsAFallThatStartedBeforeTheRiseEnded() {
+        assertThat(tail.isAnaerobicPair(50, 100 * MIN, 40 * MIN, List.of())).isFalse();   // 60 min before rise end
+    }
+    @Test void anaerobicToleratesAFallOnsetSlightlyInsideTheRiseWindow() {
+        assertThat(tail.isAnaerobicPair(50, 100 * MIN, 90 * MIN, List.of())).isTrue();    // 10 min before (smoothing)
+    }
 }
