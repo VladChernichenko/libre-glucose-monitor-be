@@ -14,12 +14,11 @@ package che.glucosemonitorbe.hovorka;
  *   G       = Q1 / vG              [mmol/L]  - blood glucose concentration
  *   F01_c   = f01 * min(1, G/4.5)  [mmol/min] - non-insulin-dependent utilisation
  *
- *   dQ1/dt  = -F01_c - k12*Q1 + k21*Q2 + Ra(t) + EGP(t) - insulinEffect(t)
+ *   dQ1/dt  = -F01_c - k12*Q1 + k21*Q2 + Ra(t) + egp0 - insulinEffect(t)
  *   dQ2/dt  = k12*Q1 - k21*Q2
  *   dD1/dt  = aG * carbRateMmolPerMin(t) - D1/tMaxG
  *   dD2/dt  = D1/tMaxG - D2/tMaxG
  *   Ra(t)   = D2 / tMaxG
- *   EGP(t)  = egp0 * max(0, 1 - x3(t))
  *
  *   insulinEffect(t) = isf * vG * iobActivityRate(t)   [mmol/min]
  * </pre>
