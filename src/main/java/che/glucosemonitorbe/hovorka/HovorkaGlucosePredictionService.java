@@ -297,20 +297,12 @@ public class HovorkaGlucosePredictionService {
         if (longActingNotes == null || longActingNotes.isEmpty()) {
             egpNow = p.f01();
         }
-        // Re-parameterise: set egpNet = egpNow (basal-adjusted) and egp0 = egpNow as well.
-        // Gap 1 (EGP suppression) is fully active during active boluses: x3 rises with plasma
-        // insulin, suppressing EGP beyond its basal level. However, the basal/fasting case is
-        // not improved here — egp0 is set equal to egpNow so EGP(t=0) = egpNow regardless of
-        // x3's value, keeping it stable without a modelled basal PK compartment. A complete
-        // basal EGP bias correction requires a steady-state PK compartment (future work).
+        // Re-parameterise: set egpNet = egpNow (basal-adjusted) and egp0 = egpNow as well, so the
+        // ODE's constant EGP term is the basal-adjusted value. Bolus insulin does not suppress EGP
+        // separately - its whole measured effect is carried by insulinEffect via the user's ISF.
         HovorkaParameters pAdj = new HovorkaParameters(
                 p.vG(), p.f01(), egpNow, egpNow, p.k12(), p.k21(),
                 p.tMaxG(), p.aG(), p.isf(), p.weightKg());
-
-        // With egp0 = egpNow and x3=0: EGP(0) = egpNow*(1-0) = egpNow (correct starting EGP).
-        // x3Init = 0: no prior x3 suppression needed; boluses drive x3 up during the prediction.
-        // x3 stays near 0 without insulin (dx3 = 0 at x3=0, plasmInsulin=0).
-        state = state.withX3(0.0);
 
         // -- Pre-compute per-dose IOB timelines, each tagged with the ISF that --
         //    was in effect when that dose was administered --------------------
@@ -372,21 +364,13 @@ public class HovorkaGlucosePredictionService {
             // dose's entire activity curve if the dose was given in that window, even once
             // most of its activity plays out after the window ends (e.g. a dinner-time
             // correction bolus peaking after 22:00 still uses isfDinner).
-            //
-            // insulinActivityRate: the same sum without the ISF weighting [units/min]. It drives
-            // plasma insulin in the solver's x3 bridge, which is a pharmacokinetic quantity: how
-            // fast insulin is acting, not how much glucose that action removes. The solver used to
-            // recover it as insulinEffect / (isf x V), which is exact only while every dose carries
-            // the same ISF - no longer true now each dose is priced at its own meal window's ISF.
             double insulinEffect = 0.0;
-            double insulinActivityRate = 0.0;
             for (DoseActivity dose : doseActivities) {
                 // IOB activity rate: how many units/min this dose is "working" during the
                 // step that advances state from t=now+(min-1) to t=now+min, i.e. the IOB
                 // decay during [min-1, min] - NOT [min, min+1].
                 double iobActivityRate = iobActivityRate(dose.iobTimeline(), min - 1);
-                insulinEffect       += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
-                insulinActivityRate += iobActivityRate;
+                insulinEffect += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
             }
 
             // Future carbs delivered to gut D1 at this minute [mmol]
@@ -419,17 +403,11 @@ public class HovorkaGlucosePredictionService {
                 double aSens = activity.stepSensitivity(aInst);
                 double sensFactor = activity.insulinSensitivityFactor(aSens);
                 double insulinEffectMod = insulinEffect * sensFactor;
-                // Scaled by the same factor as the effect, so this change stays purely algebraic
-                // and the activity branch keeps emitting the curve it emitted before. Whether
-                // exercise should amplify plasma insulin at all (it amplifies insulin ACTION, not
-                // plasma concentration) is a real physiological question, deliberately left alone
-                // here: changing it would be a behaviour change hidden inside a refactor.
-                double insulinActivityRateMod = insulinActivityRate * sensFactor;
                 state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow,
-                        insulinEffectMod, insulinActivityRateMod, activity.uptakeRate(aInst));
+                        insulinEffectMod, activity.uptakeRate(aInst));
             } else {
                 state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow,
-                        insulinEffect, insulinActivityRate, 0.0);
+                        insulinEffect, 0.0);
             }
 
             // Advance the sensor model every minute, not only at emission points.
@@ -625,7 +603,7 @@ public class HovorkaGlucosePredictionService {
         }
 
         HovorkaState warm = new HovorkaState(
-                ss.q1(), ss.q2(), qsto1, qsto2, qgut, inc, 0.0, protFatGut, dRef, activeGi);
+                ss.q1(), ss.q2(), qsto1, qsto2, qgut, inc, protFatGut, dRef, activeGi);
 
         log.debug("Dalla Man warm state: G={}mmol/L Q1={} Qsto1={} Qsto2={} Qgut={} Inc={} ProtFatGut={} GI={} tMaxG={}min",
                 currentGlucose, warm.q1(), warm.qsto1(), warm.qsto2(), warm.qgut(),

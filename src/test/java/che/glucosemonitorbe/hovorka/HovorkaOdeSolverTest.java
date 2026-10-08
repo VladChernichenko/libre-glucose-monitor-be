@@ -30,14 +30,13 @@ class HovorkaOdeSolverTest {
         double weight = 70.0;
         double vG     = HovorkaParameters.VG_PER_KG * weight;   // 11.2 L
         double f01    = HovorkaParameters.F01_PER_KG * weight;  // 0.679 mmol/min
-        // For unit-test stability: set egp0 = f01 so that EGP(x3=0) = egp0 = f01 = egpNet.
-        // This avoids needing continuous basal insulin to maintain x3; x3_ss = 0 at this configuration.
+        // For unit-test stability: set egp0 = f01 so that EGP = egp0 = f01 = egpNet.
         // The population egp0 (EGP0_PER_KG * weight = 1.127) is tested separately in
-        // noCobNoIob_uncompensatedEgp_glucoseRisesOver4h and the new x3 dynamics tests.
+        // noCobNoIob_uncompensatedEgp_glucoseRisesOver4h.
         double egp0   = f01;  // egp0 = egpNet for stable no-insulin tests
         params = new HovorkaParameters(
                 vG, f01, f01,                                    // egpNet = f01 (SS identity)
-                egp0,                                            // egp0 = f01 → x3_ss = 0, EGP(0) = f01
+                egp0,                                            // egp0 = f01 → EGP = f01
                 HovorkaParameters.K12_POP,
                 HovorkaParameters.K21_POP,
                 45.0 / 1.68,                                     // tMaxG ≈ 26.8 min (kept for params)
@@ -54,9 +53,7 @@ class HovorkaOdeSolverTest {
     @Test
     void steadyState_noInputs_glucoseIsStable() {
         double g0 = 5.5;
-        // Warm-start x3 so EGP(ss) = egp0*(1-x3_ss) = egpNet = f01
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState state = HovorkaState.steadyState(g0, params).withX3(x3ss);
+        HovorkaState state = HovorkaState.steadyState(g0, params);
 
         for (int m = 0; m < 120; m++) {
             state = solver.step(state, params, 0.0, 0.0);
@@ -76,9 +73,7 @@ class HovorkaOdeSolverTest {
         double diaMin = 4.5 * 60;
         double peakMin = 55.0;
 
-        // Warm-start x3 so basal EGP(ss) = egpNet = f01 (no drift without bolus)
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState state = HovorkaState.steadyState(g0, params).withX3(x3ss);
+        HovorkaState state = HovorkaState.steadyState(g0, params);
 
         for (int m = 1; m <= (int) diaMin; m++) {
             double iobNow  = iobExponential(1.0, m,     diaMin, peakMin);
@@ -103,9 +98,7 @@ class HovorkaOdeSolverTest {
         double g0    = 5.5;
         double carbs = 20.0;
 
-        // Warm-start x3 so basal EGP is stable (egpNet = f01 at SS)
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState state = HovorkaState.steadyState(g0, params).withX3(x3ss);
+        HovorkaState state = HovorkaState.steadyState(g0, params);
 
         double carbMmol = carbs * params.aG() / 0.18;
         double peakGlucose = g0;
@@ -126,8 +119,7 @@ class HovorkaOdeSolverTest {
 
     @Test
     void gutAbsorption_raIsZeroAtMealTime_noInstantaneousSpike() {
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState before = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState before = HovorkaState.steadyState(5.5, params);
         double gBefore = before.glucoseMmolL(params);
 
         double carbMmol = 50.0 * params.aG() / 0.18;
@@ -148,8 +140,7 @@ class HovorkaOdeSolverTest {
 
     @Test
     void integration_stateVariablesAlwaysNonNegative() {
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState state = HovorkaState.steadyState(3.5, params).withX3(x3ss);
+        HovorkaState state = HovorkaState.steadyState(3.5, params);
 
         for (int m = 0; m < 240; m++) {
             double insulinEffect = params.isf() * params.vG() * 0.01;
@@ -170,8 +161,7 @@ class HovorkaOdeSolverTest {
 
     @Test
     void hypoglycaemia_f01cClamp_preventsFurtherGlucoseDrop() {
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState state = HovorkaState.steadyState(3.0, params).withX3(x3ss);
+        HovorkaState state = HovorkaState.steadyState(3.0, params);
 
         double minGlucose = 3.0;
         for (int m = 0; m < 120; m++) {
@@ -209,11 +199,9 @@ class HovorkaOdeSolverTest {
 
     @Test
     void derivatives_atSteadyState_allZero() {
-        // With dynamic EGP, x3 must be at basal steady state so EGP(ss) = egpNet = f01.
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState ss = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState ss = HovorkaState.steadyState(5.5, params);
         double[] y = new double[]{ss.q1(), ss.q2(), ss.qsto1(), ss.qsto2(), ss.qgut(), ss.inc(),
-                                   ss.x3(), ss.protFatGut()};
+                                   ss.protFatGut()};
 
         double[] dy = solver.derivatives(y, params, 0.0, 0.0);
 
@@ -223,8 +211,7 @@ class HovorkaOdeSolverTest {
         assertThat(dy[3]).isCloseTo(0.0, within(1e-6)); // dQsto2/dt = 0
         assertThat(dy[4]).isCloseTo(0.0, within(1e-6)); // dQgut/dt  = 0
         assertThat(dy[5]).isCloseTo(0.0, within(1e-6)); // dInc/dt   = 0
-        assertThat(dy[6]).isCloseTo(0.0, within(1e-6)); // dx3 at steady state
-        assertThat(dy[7]).isCloseTo(0.0, within(1e-6)); // dProtFatGut at steady state
+        assertThat(dy[6]).isCloseTo(0.0, within(1e-6)); // dProtFatGut at steady state
     }
 
     // ---
@@ -261,11 +248,9 @@ class HovorkaOdeSolverTest {
     void noCobNoIob_steadyStateEgpEqualsF01_glucoseRemainsFlat() {
         // When egpNet = f01 (basal at steady state), glucose must stay flat.
         // This is the CORRECT behaviour the prediction service must produce.
-        // With dynamic EGP, x3 must be warm-started so EGP(ss) = egp0*(1-x3_ss) = egpNet = f01.
         double g0 = 7.2;
         // params already has egpNet = f01 (set in setUp() as the SS identity)
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState state = HovorkaState.steadyState(g0, params).withX3(x3ss);
+        HovorkaState state = HovorkaState.steadyState(g0, params);
         for (int m = 0; m < 240; m++) {
             state = solver.step(state, params, 0.0, 0.0);
         }
@@ -278,22 +263,20 @@ class HovorkaOdeSolverTest {
 
     @Test
     void renalClearance_activatesAboveThreshold_inactiveBelow() {
-        // At SS Q2 balance (k12*Q1 = k21*Q2), gut empty, egpNet=f01, x3=x3_ss:
-        //   dq1 = -f01c - FR + EGP(x3_ss) = -f01 - FR + f01 = -FR
+        // At SS Q2 balance (k12*Q1 = k21*Q2), gut empty, egp0=f01:
+        //   dq1 = -f01c - FR + EGP = -f01 - FR + f01 = -FR
         // So at G=5.5: dq1 ≈ 0 (FR inactive); at G=12: dq1 = -FR < 0.
         double q2Ratio = HovorkaParameters.K12_POP / HovorkaParameters.K21_POP; // = 1.0
-        // With dynamic EGP, set x3=x3_ss so EGP(x3_ss) = egpNet = f01
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
 
         // Euglycemia (G=5.5 < KE2=9.0) - FR must not fire
         double q1Low = 5.5 * params.vG();
-        double[] yLow = {q1Low, q2Ratio * q1Low, 0, 0, 0, 0, x3ss, 0};
+        double[] yLow = {q1Low, q2Ratio * q1Low, 0, 0, 0, 0, 0};
         double[] dyLow = solver.derivatives(yLow, params, 0.0, 0.0);
         assertThat(dyLow[0]).isCloseTo(0.0, within(1e-4));
 
         // Hyperglycemia (G=12 > KE2=9.0) - FR fires, pulling Q1 down
         double q1High = 12.0 * params.vG();
-        double[] yHigh = {q1High, q2Ratio * q1High, 0, 0, 0, 0, x3ss, 0};
+        double[] yHigh = {q1High, q2Ratio * q1High, 0, 0, 0, 0, 0};
         double[] dyHigh = solver.derivatives(yHigh, params, 0.0, 0.0);
         assertThat(dyHigh[0]).isLessThan(0.0);
 
@@ -316,7 +299,7 @@ class HovorkaOdeSolverTest {
         // Manually construct a state with high inc, Qsto1 empty, Qsto2 full (mid-emptying)
         // This isolates the draining effect without interference from Qsto1->Qsto2 flow
         HovorkaState highInc = new HovorkaState(
-                state.q1(), state.q2(), 0.0, 50.0, 0.0, 10.0, 0.0, 0.0, mealMmol, 70);
+                state.q1(), state.q2(), 0.0, 50.0, 0.0, 10.0, 0.0, mealMmol, 70);
 
         HovorkaState next = solver.step(highInc, params, 0.0, 0.0);
         // Qsto2 should drain (kemptEff > 0 always), not be frozen at the clamp floor
@@ -335,7 +318,7 @@ class HovorkaOdeSolverTest {
         // Isolate Qsto2 draining: Qsto1 empty, Qsto2 at half-full (50 mmol)
         // At qsto=50 with mealMmol=100, kempt is reduced toward K_MIN
         HovorkaState withStomach = new HovorkaState(
-                state.q1(), state.q2(), 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, mealMmol, 70);
+                state.q1(), state.q2(), 0.0, 100.0, 0.0, 0.0, 0.0, mealMmol, 70);
         HovorkaState next = solver.step(withStomach, params, 0.0, 0.0);
         // With qsto=100 (full), kempt ≈ K_MAX * giScale; phi=1.0, activeGI=70 -> giScale=0.70
         // drain = 100 * 0.0558 * 0.70 ≈ 3.906 mmol/min
@@ -352,8 +335,7 @@ class HovorkaOdeSolverTest {
         // dInc/dt = K_INC_PF*ProtFatGut − K_DEL*Inc; ProtFatGut drains at K_PF_DRAIN.
         // Inc is now driven by protein+fat gut transit (NOT carb Ra — Gap 4 fix).
         // Inject 400 kcal protein+fat alongside the carb meal; Inc must peak above baseline.
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState state = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState state = HovorkaState.steadyState(5.5, params);
         double carbMmol = 60.0 * params.aG() / 0.18;
         // 400 kcal protein+fat drives GLP-1; carbs alone leave Inc at 0 in the new model
         state = solver.step(state, params, carbMmol, 70, 400.0, 0.0, 0.0);
@@ -374,11 +356,10 @@ class HovorkaOdeSolverTest {
     @Test
     void glp1Driver_protFatLoaded_incRises() {
         // Load 500 kcal protein+fat into protFatGut — Inc should rise over 60 min
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState s0 = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState s0 = HovorkaState.steadyState(5.5, params);
         // Manually inject 500 kcal into protFatGut via the protFatKcalNow argument
         HovorkaState withPF = new HovorkaState(
-                s0.q1(), s0.q2(), 0, 0, 0, 0.0, 0.0, 500.0, 0.0, 70);
+                s0.q1(), s0.q2(), 0, 0, 0, 0.0, 500.0, 0.0, 70);
 
         HovorkaState s60 = withPF;
         for (int i = 0; i < 60; i++) {
@@ -398,9 +379,8 @@ class HovorkaOdeSolverTest {
         // and delayed gastric emptying - never through insulin-independent uptake. A gut load of
         // protein and fat with no carbs and no insulin must therefore leave glucose flat.
         double g0 = 5.5;
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
         HovorkaState s = new HovorkaState(
-                g0 * params.vG(), g0 * params.vG(), 0, 0, 0, 0.0, x3ss, 500.0, 0.0, 70);
+                g0 * params.vG(), g0 * params.vG(), 0, 0, 0, 0.0, 500.0, 0.0, 70);
 
         for (int m = 1; m <= 240; m++) {
             s = solver.step(s, params, 0.0, 70, 0.0, 0.0, 0.0);
@@ -416,12 +396,11 @@ class HovorkaOdeSolverTest {
         // The ileal brake is bounded: fat and protein roughly double gastric half-emptying time
         // for a mixed meal, they do not halt it. Unbounded Inc drove phi = 1/(1 + KAPPA*Inc)
         // toward zero, leaving the meal stuck in the stomach and its carbs never available.
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
         double carbMmol = 60.0 * params.aG() / 0.18;
 
-        HovorkaState braked = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState braked = HovorkaState.steadyState(5.5, params);
         braked = solver.step(braked, params, carbMmol, 70, 1000.0, 0.0, 0.0);
-        HovorkaState plain = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState plain = HovorkaState.steadyState(5.5, params);
         plain = solver.step(plain, params, carbMmol, 70, 0.0, 0.0, 0.0);
 
         for (int m = 1; m <= 240; m++) {
@@ -438,12 +417,11 @@ class HovorkaOdeSolverTest {
     @Test
     void glp1_brakeStillDelaysEmptying() {
         // Guard against over-correcting: the brake must remain a real effect, not a no-op.
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
         double carbMmol = 60.0 * params.aG() / 0.18;
 
-        HovorkaState braked = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState braked = HovorkaState.steadyState(5.5, params);
         braked = solver.step(braked, params, carbMmol, 70, 500.0, 0.0, 0.0);
-        HovorkaState plain = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState plain = HovorkaState.steadyState(5.5, params);
         plain = solver.step(plain, params, carbMmol, 70, 0.0, 0.0, 0.0);
 
         for (int m = 1; m <= 60; m++) {
@@ -459,8 +437,7 @@ class HovorkaOdeSolverTest {
     @Test
     void glp1Driver_noProtFat_incStaysZero() {
         // Without protein/fat, Inc should stay at 0
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState s0 = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState s0 = HovorkaState.steadyState(5.5, params);
         HovorkaState s60 = s0;
         for (int i = 0; i < 60; i++) {
             s60 = solver.step(s60, params, 0.0, 70, 0.0, 0.0, 0.0);
@@ -477,9 +454,8 @@ class HovorkaOdeSolverTest {
         // Two identical 50g carb meals, GI=30 vs GI=100
         // After 60 min, high-GI should have less remaining in qsto2 and qgut
         double carbMmol = 50.0 / 0.18;  // ~277.8 mmol
-        double x3ss = Math.max(0.0, 1.0 - params.egpNet() / params.egp0());
-        HovorkaState ssHi = HovorkaState.steadyState(5.5, params).withX3(x3ss);
-        HovorkaState ssLo = HovorkaState.steadyState(5.5, params).withX3(x3ss);
+        HovorkaState ssHi = HovorkaState.steadyState(5.5, params);
+        HovorkaState ssLo = HovorkaState.steadyState(5.5, params);
 
         HovorkaState stateHi = solver.step(ssHi, params, carbMmol, 100, 0.0, 0.0, 0.0);
         HovorkaState stateLo = solver.step(ssLo, params, carbMmol, 30,  0.0, 0.0, 0.0);
@@ -492,78 +468,6 @@ class HovorkaOdeSolverTest {
         assertThat(stateHi.qsto1()).isLessThan(stateLo.qsto1());
         // High GI raises blood glucose faster (more Ra delivered)
         assertThat(stateHi.q1()).isGreaterThan(stateLo.q1());
-    }
-
-    // ---
-    // Task 7: x3 dynamics and dynamic EGP tests
-    // ---
-
-    @Test
-    void x3Dynamics_largeBolus_raisesX3() {
-        // Verify that a large insulin effect drives x3 upward from zero.
-        // With the empirical bridge: plasmInsulin = insulinEffect/(isf*effVol)*V_I_SCALE
-        // and dx3 = -KA3*x3 + KB3*plasmInsulin.
-        // A sustained large bolus effect (5 U over 60 min) must produce measurable x3 > 0.
-        HovorkaState s0 = HovorkaState.steadyState(10.0, params);
-        // bigEffect: a realistic 5U correction spread over 60 min
-        double bigEffect = 5.0 * params.isf() * params.effectiveInsulinVolume() / 60.0;
-        HovorkaState s60 = s0;
-        for (int i = 0; i < 60; i++) {
-            s60 = solver.step(s60, params, 0.0, 70, 0.0, bigEffect, 0.0);
-        }
-        // x3 must be strictly positive and greater than zero start value
-        assertThat(s60.x3()).isGreaterThan(0.0);
-        // Glucose must have fallen (insulin effect)
-        assertThat(s60.glucoseMmolL(params)).isLessThan(10.0);
-    }
-
-    @Test
-    void x3Dynamics_noInsulin_x3StaysAtZero() {
-        // Without any insulin, x3 has no drive (dx3 = -KA3*x3 + KB3*0 = 0 at x3=0).
-        // Starting at zero, x3 must stay at zero.
-        HovorkaState s0 = HovorkaState.steadyState(5.5, params);
-        assertThat(s0.x3()).isEqualTo(0.0); // starts at zero
-        HovorkaState s60 = s0;
-        for (int i = 0; i < 60; i++) {
-            s60 = solver.step(s60, params, 0.0, 70, 0.0, 0.0, 0.0);
-        }
-        assertThat(s60.x3()).isLessThan(0.001); // stays near zero (no insulin driver)
-    }
-
-    @Test
-    void x3Dynamics_dynamicEgp_lowerThanStaticWhenInsulinated() {
-        // With population egp0 > egpNet, after a bolus x3 rises and EGP is suppressed
-        // below egp0. This tests that EGP(t) = egp0*(1-x3) < egp0 when x3 > 0.
-        double weight  = params.weightKg();
-        double popEgp0 = HovorkaParameters.EGP0_PER_KG * weight; // 1.127 > f01 = 0.679
-        HovorkaParameters pPop = new HovorkaParameters(
-                params.vG(), params.f01(), params.egpNet(), popEgp0,
-                HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
-                params.tMaxG(), params.aG(), params.isf(), weight);
-
-        // With egp0 > egpNet and x3=0: EGP = egp0 > egpNet → glucose rises without insulin
-        HovorkaState s0 = HovorkaState.steadyState(7.2, pPop);
-        double bigEffect = 5.0 * pPop.isf() * pPop.effectiveInsulinVolume() / 60.0;
-
-        HovorkaState sWithInsulin = s0;
-        HovorkaState sNoInsulin   = s0;
-        for (int i = 0; i < 120; i++) {
-            sWithInsulin = solver.step(sWithInsulin, pPop, 0.0, 70, 0.0, bigEffect, 0.0);
-            sNoInsulin   = solver.step(sNoInsulin,   pPop, 0.0, 70, 0.0, 0.0,        0.0);
-        }
-        // With insulin: x3 > 0 → EGP suppressed → glucose lower than no-insulin
-        assertThat(sWithInsulin.x3()).isGreaterThan(sNoInsulin.x3());
-        assertThat(sWithInsulin.glucoseMmolL(pPop)).isLessThan(sNoInsulin.glucoseMmolL(pPop));
-    }
-
-    // -- Sentinel: HovorkaState 10-field record (Task 4) -----------------------
-
-    @Test
-    void hovorkaState_hasX3Field() {
-        HovorkaState s = new HovorkaState(1, 2, 3, 4, 5, 6, 0.0, 0.0, 0.0, 70);
-        assertThat(s.x3()).isEqualTo(0.0);
-        assertThat(s.protFatGut()).isEqualTo(0.0);
-        assertThat(s.activeGI()).isEqualTo(70);
     }
 
     // -- Helper: OpenAPS IOB (same formula as InsulinCalculatorService) --------

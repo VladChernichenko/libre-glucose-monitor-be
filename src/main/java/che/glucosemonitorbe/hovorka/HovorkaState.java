@@ -1,9 +1,9 @@
 package che.glucosemonitorbe.hovorka;
 
 /**
- * Hovorka model extended state vector — 8 ODE variables + 2 tracking fields.
+ * Hovorka model extended state vector — 7 ODE variables + 2 tracking fields.
  *
- * <h3>ODE state variables (y[0]..y[7])</h3>
+ * <h3>ODE state variables (y[0]..y[6])</h3>
  * <ul>
  *   <li>q1        [0] glucose mass in central compartment [mmol]</li>
  *   <li>q2        [1] glucose mass in peripheral compartment [mmol]</li>
@@ -11,8 +11,7 @@ package che.glucosemonitorbe.hovorka;
  *   <li>qsto2     [3] Dalla Man liquid-stomach compartment [mmol]</li>
  *   <li>qgut      [4] Dalla Man intestinal compartment [mmol]</li>
  *   <li>inc       [5] incretin GLP-1 effect [dimensionless]</li>
- *   <li>x3        [6] delayed insulin action on EGP suppression [dimensionless, 0-1]</li>
- *   <li>protFatGut[7] protein+fat caloric load in gut compartment [kcal] — GLP-1 driver</li>
+ *   <li>protFatGut[6] protein+fat caloric load in gut compartment [kcal] — GLP-1 driver</li>
  * </ul>
  *
  * <h3>Non-ODE tracking fields</h3>
@@ -28,7 +27,6 @@ public record HovorkaState(
         double qsto2,
         double qgut,
         double inc,
-        double x3,          // NEW: delayed insulin action on EGP (ODE var)
         double protFatGut,  // NEW: protein+fat caloric load in gut (ODE var, GLP-1 driver)
         double mealMmol,
         int    activeGI     // NEW: GI of meal being absorbed [0-100]; default 70
@@ -41,14 +39,12 @@ public record HovorkaState(
     }
 
     /**
-     * Steady state: Q1/Q2 from current glucose, all gut/incretin/x3/protFatGut at zero.
-     * x3 is initialised to 0 here; callers that know the basal x3 should apply
-     * {@link #withX3(double)} after construction.
+     * Steady state: Q1/Q2 from current glucose, all gut/incretin/protFatGut at zero.
      */
     public static HovorkaState steadyState(double glucoseMmolL, HovorkaParameters p) {
         double q1Init = glucoseMmolL * p.vG();
         double q2Init = q1Init;
-        return new HovorkaState(q1Init, q2Init, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 70);
+        return new HovorkaState(q1Init, q2Init, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 70);
     }
 
     /**
@@ -63,15 +59,9 @@ public record HovorkaState(
                 Math.max(0.0, qsto2),
                 Math.max(0.0, qgut),
                 Math.max(0.0, inc),
-                Math.max(0.0, x3),
                 Math.max(0.0, protFatGut),
                 mealMmol,
                 activeGI
         );
-    }
-
-    /** Return a copy with x3 replaced (used to inject basal steady-state x3 after warm-up). */
-    public HovorkaState withX3(double newX3) {
-        return new HovorkaState(q1, q2, qsto1, qsto2, qgut, inc, newX3, protFatGut, mealMmol, activeGI);
     }
 }
