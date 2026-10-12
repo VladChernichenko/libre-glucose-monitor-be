@@ -102,12 +102,12 @@ class HovorkaGlucosePredictionServiceTest {
     // ---
 
     @Test
-    @DisplayName("Waning basal (22h post-injection): rises over 4h but must not jump at t+5min")
+    @DisplayName("Waning basal (26h post-injection): rises over 4h but must not jump at t+5min")
     void waningBasal_noCobNoIob_risesGraduallyWithoutInitialJump() {
         double g0 = 6.1;
         Note basal = new Note();
         basal.setUserId(USER_ID);
-        basal.setTimestamp(NOW.minusHours(22));
+        basal.setTimestamp(NOW.minusHours(26));
         basal.setInsulin(20.0);
         basal.setType(Note.TYPE_LONG_ACTING);
         basal.setMeal("Long-acting");
@@ -119,10 +119,10 @@ class HovorkaGlucosePredictionServiceTest {
 
         assertThat(curve).isNotEmpty();
 
-        // Sanity: waning basal (20-28h taper) should raise glucose over the 4h window even
+        // Sanity: waning basal (24-32h taper) should raise glucose over the 4h window even
         // with zero COB/IOB - this is the expected/legitimate model behaviour.
         double at2h = curve.get(23).getPredictedGlucose(); // minute 120
-        assertThat(at2h).as("EGP suppression fading over the 20-28h taper should raise glucose "
+        assertThat(at2h).as("EGP suppression fading over the 24-32h taper should raise glucose "
                 + "above baseline by the 2h mark").isGreaterThan(g0);
 
         // Bug candidate: the chart in the screenshots shows a near-vertical jump right at

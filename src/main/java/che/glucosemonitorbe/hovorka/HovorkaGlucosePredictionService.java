@@ -144,7 +144,8 @@ public class HovorkaGlucosePredictionService {
         UserSettingsDTO settings  = userSettingsService.getUserSettings(userId);
         return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                ActivityProvider.NONE);
+                ActivityProvider.NONE,
+                insulinPrefsService.getLongActingDurationHours(userId));
     }
 
     /**
@@ -166,7 +167,8 @@ public class HovorkaGlucosePredictionService {
         UserSettingsDTO settings  = userSettingsService.getUserSettings(userId);
         return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider);
+                activityProvider,
+                insulinPrefsService.getLongActingDurationHours(userId));
     }
 
     /**
@@ -199,7 +201,8 @@ public class HovorkaGlucosePredictionService {
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                ActivityProvider.NONE);
+                ActivityProvider.NONE,
+                insulinPrefsService.getLongActingDurationHours(userId));
     }
 
     /** Pre-built-parameters prediction path that also accounts for logged activity. */
@@ -218,7 +221,8 @@ public class HovorkaGlucosePredictionService {
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider);
+                activityProvider,
+                insulinPrefsService.getLongActingDurationHours(userId));
     }
 
     /**
@@ -242,7 +246,8 @@ public class HovorkaGlucosePredictionService {
 
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                ActivityProvider.NONE);
+                ActivityProvider.NONE,
+                BasalInsulinResolver.DEFAULT_DURATION_HOURS);
     }
 
     /**
@@ -265,7 +270,31 @@ public class HovorkaGlucosePredictionService {
 
         return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider);
+                activityProvider,
+                BasalInsulinResolver.DEFAULT_DURATION_HOURS);
+    }
+
+    /**
+     * Hot-path overload that also takes the duration of action of the user's long-acting insulin
+     * [hours], so a calibration replay prices basal coverage exactly as the live forecast does.
+     */
+    public List<PredictionPointDTO> buildPredictionPath(
+            HovorkaParameters customParams,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider,
+            double basalDurationHours) {
+
+        return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider, basalDurationHours);
     }
 
     /**
@@ -282,19 +311,21 @@ public class HovorkaGlucosePredictionService {
             List<Note> longActingNotes,
             UUID userId,
             int pathMinutes,
-            ActivityProvider activityProvider) {
+            ActivityProvider activityProvider,
+            double basalDurationHours) {
 
         // -- State warm-up -----------------------------------------------------
         WarmUp warmUp = buildWarmState(currentGlucose, pastCarbsEntries, currentTime, p);
         HovorkaState state = warmUp.state();
 
         // -- EGP net from long-acting insulin ----------------------------------
-        double x3Basal  = basalResolver.resolveEgpSuppression(longActingNotes, currentTime);
+        double x3Basal  = basalResolver.resolveEgpSuppression(longActingNotes, currentTime, basalDurationHours);
         double egp0Abs  = HovorkaParameters.EGP0_PER_KG * p.weightKg();
         double egpNow   = basalResolver.netEgp(p.f01(), egp0Abs, x3Basal);
-        // No basal logged -> assume fasting steady state (T1D on continuous unlogged background basal).
+        // No basal logged, or the newest logged dose is too old to say anything about current
+        // coverage -> assume fasting steady state (T1D on continuous unlogged background basal).
         // Without this guard, egpNow = EGP0 >> f01 and glucose rises ~9 mmol/L in 4 h with no COB/IOB.
-        if (longActingNotes == null || longActingNotes.isEmpty()) {
+        if (!basalResolver.hasActiveDose(longActingNotes, currentTime, basalDurationHours)) {
             egpNow = p.f01();
         }
         // Re-parameterise: set egpNet = egpNow (basal-adjusted) and egp0 = egpNow as well, so the

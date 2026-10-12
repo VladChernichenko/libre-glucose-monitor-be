@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.PredictRequest;
 import che.glucosemonitorbe.dto.PredictResponse;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
@@ -398,7 +399,8 @@ public class GlucosePredictService {
 
     private List<Note> loadLongActingNotes(UUID userId, LocalDateTime now) {
         try {
-            return noteRepository.findByUserIdAndTimestampBetween(userId, now.minusHours(36), now)
+            return noteRepository.findByUserIdAndTimestampBetween(
+                            userId, now.minusHours(BasalInsulinResolver.LOOKBACK_HOURS), now)
                     .stream().filter(Note::isLongActing).toList();
         } catch (Exception e) {
             log.warn("loadLongActingNotes user={}: {}", userId, e.getMessage());

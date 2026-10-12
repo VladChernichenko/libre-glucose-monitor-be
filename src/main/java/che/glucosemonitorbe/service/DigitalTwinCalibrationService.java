@@ -184,6 +184,7 @@ public class DigitalTwinCalibrationService {
                         : che.glucosemonitorbe.hovorka.ActivityProvider.NONE;
 
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
+        cfg.basalDurationHours = insulinPrefsService.getLongActingDurationHours(userId);
         PredictionReplayEngine train = new PredictionReplayEngine(
                 rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userZone);
         PredictionReplayEngine val = new PredictionReplayEngine(

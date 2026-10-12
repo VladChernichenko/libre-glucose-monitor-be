@@ -5,6 +5,7 @@ import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
 import che.glucosemonitorbe.repository.NoteRepository;
@@ -533,15 +534,15 @@ public class GlucoseCalculationsService {
     }
     
     /**
-     * Load long-acting (basal) insulin notes from the last 36 hours.
-     * Lantus/Tresiba have a DIA of ~24-28 h, so a dose taken yesterday must be included
+     * Load long-acting (basal) insulin notes far enough back to cover the longest-acting catalog
+     * insulin plus its overdue window, so a dose taken yesterday or the day before is included
      * for accurate EGP suppression modelling in the Hovorka path.
      *
      * <p>C3: repository failures propagate deliberately. Returning an empty list here would
      * report zero basal on board as fact.
      */
     private List<Note> getLongActingNotes(UUID userId, LocalDateTime currentTime) {
-        LocalDateTime since = currentTime.minusHours(36);
+        LocalDateTime since = currentTime.minusHours(BasalInsulinResolver.LOOKBACK_HOURS);
         return noteRepository.findByUserIdAndTimestampBetween(userId, since, currentTime)
                 .stream()
                 .filter(Note::isLongActing)

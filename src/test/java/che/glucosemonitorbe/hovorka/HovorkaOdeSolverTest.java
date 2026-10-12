@@ -187,9 +187,9 @@ class HovorkaOdeSolverTest {
                 .isCloseTo(BasalInsulinResolver.PEAK_X3_BASAL, within(0.001));
         assertThat(resolver.suppressionCurve(5.0))
                 .isCloseTo(BasalInsulinResolver.PEAK_X3_BASAL, within(0.001));
-        assertThat(resolver.suppressionCurve(20.0))
+        assertThat(resolver.suppressionCurve(24.0))
                 .isCloseTo(BasalInsulinResolver.PEAK_X3_BASAL, within(0.001));
-        assertThat(resolver.suppressionCurve(28.0)).isCloseTo(0.0, within(0.001));
+        assertThat(resolver.suppressionCurve(32.0)).isCloseTo(0.0, within(0.001));
         assertThat(resolver.suppressionCurve(35.0)).isZero();
     }
 
