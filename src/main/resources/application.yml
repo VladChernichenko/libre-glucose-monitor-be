@@ -154,6 +154,8 @@ app:
     glycemic-event-detection-enabled: ${APP_FEATURES_GLYCEMIC_EVENT_DETECTION_ENABLED:true}
     # Hypo rescue-carb logging: prompt to log fast carbs when glucose drops below 3.9 mmol/L.
     hypo-rescue-logging-enabled: ${APP_FEATURES_HYPO_RESCUE_LOGGING_ENABLED:true}
+    # Empirical twin forecast engine (prediction_engine EMPIRICAL / BOTH): params tuned on one person only.
+    empirical-twin-enabled: ${APP_FEATURES_EMPIRICAL_TWIN_ENABLED:false}
     # Activity logging: logged activity notes feed the model's activity signal a(t).
     activity-logging-enabled: ${APP_FEATURES_ACTIVITY_LOGGING_ENABLED:true}
 

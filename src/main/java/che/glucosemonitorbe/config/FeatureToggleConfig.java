@@ -41,4 +41,9 @@ public class FeatureToggleConfig {
     // used by digital-twin-enabled and glycemic-event-detection-enabled.
     private boolean hypoRescueLoggingEnabled = false;
 
+    // Empirical twin as a dashboard forecast engine (user_settings.prediction_engine EMPIRICAL / BOTH).
+    // Its parameters were hand-tuned on one person's data, so it stays off until validated more
+    // widely: when off, every user forecasts with Hovorka and the setting can only be HOVORKA.
+    private boolean empiricalTwinEnabled = false;
+
 }

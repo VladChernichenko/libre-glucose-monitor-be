@@ -117,6 +117,11 @@ public class HovorkaGlucosePredictionService {
      *  Use {@link PredictionResidualProvider#NONE} to run the raw model (e.g. during calibration). */
     private final PredictionResidualProvider    residualProvider;
 
+    /** Coverage of the prediction band (matches the empirical twin's likely-range cone). */
+    private static final double BAND_CONFIDENCE = 0.9;
+    /** Standard-normal z for a central {@link #BAND_CONFIDENCE} interval. */
+    private static final double BAND_Z = 1.6449;
+
     /**
      * Build the full prediction path using the Hovorka ODE model.
      * Parameters are loaded from the user's COB settings and experiments.
@@ -460,9 +465,24 @@ public class HovorkaGlucosePredictionService {
                 double carbEffect  = gutModel.ra(state.qgut(), kAbsDisplay) * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
+                // Confidence cone from the twin's per-horizon σ: narrow near now, wider further out.
+                // The NONE provider (calibration replay) returns σ = 0, so no band is emitted.
+                double sd = residualProvider.uncertaintySdMmol(userId, min);
+                Double lower = null, upper = null, sdOut = null, level = null;
+                if (sd > 0) {
+                    double half = BAND_Z * sd;
+                    lower = Math.round(Math.max(G_MIN, gAdj - half) * 10.0) / 10.0;
+                    upper = Math.round(Math.min(G_MAX, gAdj + half) * 10.0) / 10.0;
+                    sdOut = Math.round(sd * 100.0) / 100.0;
+                    level = BAND_CONFIDENCE;
+                }
                 points.add(PredictionPointDTO.builder()
                         .timestamp(pointTime)
                         .predictedGlucose(Math.round(gAdj * 10.0) / 10.0)
+                        .predictedGlucoseLower(lower)
+                        .predictedGlucoseUpper(upper)
+                        .uncertaintySd(sdOut)
+                        .confidenceLevel(level)
                         .carbAbsorptionEffect(Math.round(carbEffect * 100.0) / 100.0)
                         .insulinActivityEffect(Math.round(insulinEff * 100.0) / 100.0)
                         .absorptionMode("DALLA_MAN_3COMP")

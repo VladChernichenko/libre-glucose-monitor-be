@@ -167,3 +167,7 @@ Thumbs.db
 
 # claude-flow / ruflo tool state
 .claude-flow/
+
+# Empirical-twin fixtures: real personal health data, never commit (specs/empirical-twin-port.md)
+src/test/resources/twin/
+specs/twin-port/*.json

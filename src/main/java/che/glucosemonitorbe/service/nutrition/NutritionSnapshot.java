@@ -22,6 +22,9 @@ public class NutritionSnapshot {
     private Double estimatedGi;
     private Double glycemicLoad;
     private String absorptionSpeedClass; // FAST | MEDIUM | SLOW | DEFAULT
+    // Empirical-twin flags; null = neutral (ordinary meal curve, no slow split)
+    private Boolean fattyMeal;
+    private Boolean fruit;
     private List<String> normalizedFoods;
 
     // Per-food breakdown from AR volume scan (null for non-AR sources)

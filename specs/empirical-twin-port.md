@@ -81,6 +81,39 @@ the forecast vs the linearly interpolated CGM at +60 and +120 min (gaps > 50 min
    ~20 mg/dL/h with ~1 h tail (relevant to `ActivityModulation.gainIndep` in
    `specs/activity-integration.md`).
 
+## Event mapping (as implemented)
+
+`EmpiricalEventMapper` maps the app's event model onto `EmpiricalEvent`. On the dashboard path the
+events come from the same `CarbsEntry` / `InsulinDose` lists the Hovorka path is given (so
+prospective what-if notes are included) plus the user's recent notes for activity.
+
+| Empirical type | App source | Notes |
+|---|---|---|
+| `INSULIN` | `InsulinDose` (note with `insulin > 0`, not `long_acting`) | units |
+| `BASAL` | `long_acting` note | no effect in the model (basal holds glucose flat), so it is not passed to the engine |
+| `MEAL` | `CarbsEntry` (note with `carbs > 0`) | grams; carb ratio chosen by the note's wall-clock hour |
+| `FAST` | `CarbsEntry` marked as a rescue carb (`hypo_treatment` note) | grams; carries the rescue profile's GI of 100 |
+| `WALK` | `activity` note with `duration_min > 0` | start = `timestamp`, end = `timestamp + duration_min`; every activity type and intensity maps here (the model has one activity term). Only when `app.features.activity-logging-enabled` is on, as for Hovorka |
+| `ALCOHOL`, `HEAT` | none | the app has no such event; never produced |
+
+| Empirical field | App source | When absent |
+|---|---|---|
+| `gi` | `nutrition_profile.estimatedGi` (existing) | null -> speed ratio 1 |
+| `fat` | `nutrition_profile.fattyMeal` (new, nullable boolean) | null -> no slow split |
+| `fruit` | `nutrition_profile.fruit` (new, nullable boolean) | null -> ordinary meal curve |
+| walk start / end | activity note `timestamp` / `duration_min` (existing) | no duration -> not a walk |
+| `localHour` | hour of the note's wall-clock `timestamp` | - |
+
+The new flags live in the `nutrition_profile` JSON (`NutritionSnapshot`), so they need no migration.
+They, like `estimatedGi`, reach the engine only when `app.features.nutrition-aware-prediction-enabled`
+is on. Nothing derives them: a meal is fatty or fruit only when a client says so.
+
+Engine selection is `user_settings.prediction_engine` (`HOVORKA` default, `EMPIRICAL`, `BOTH`), set
+through `PUT /api/user-settings` and read by `GlucoseCalculationsService` for
+`POST /api/glucose-calculations/`. `EMPIRICAL` puts the empirical curve in `predictionPath`; `BOTH`
+keeps `predictionPath` as it was and adds `empiricalPredictionPath`. `POST /api/predict`
+(`GlucosePredictService`) is unchanged. The empirical path always uses `EmpiricalTwinParams.defaults()`.
+
 ## Out of scope
 
 iOS UI, live LibreLinkUp ingestion, automatic refitting of empirical params (the calibrator stays

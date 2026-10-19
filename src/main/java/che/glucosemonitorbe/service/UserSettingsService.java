@@ -1,7 +1,10 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.config.FeatureToggleConfig;
+import che.glucosemonitorbe.domain.PredictionEngine;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.UserSettings;
+import che.glucosemonitorbe.exception.InvalidConfigurationException;
 import che.glucosemonitorbe.repository.UserSettingsRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +23,7 @@ import java.util.UUID;
 public class UserSettingsService {
 
     private final UserSettingsRepository userSettingsRepository;
+    private final FeatureToggleConfig featureToggleConfig;
     
     /**
      * Get COB settings for a user, creating default settings if none exist
@@ -128,6 +132,14 @@ public class UserSettingsService {
         if (settingsDTO.getIsfNight() != null) {
             settings.setIsfNight(settingsDTO.getIsfNight());
         }
+        if (settingsDTO.getPredictionEngine() != null) {
+            if (settingsDTO.getPredictionEngine() != PredictionEngine.HOVORKA
+                    && !featureToggleConfig.isEmpiricalTwinEnabled()) {
+                throw new InvalidConfigurationException(
+                        "Prediction engine " + settingsDTO.getPredictionEngine() + " is not enabled");
+            }
+            settings.setPredictionEngine(settingsDTO.getPredictionEngine());
+        }
     }
 
     /**
@@ -172,6 +184,7 @@ public class UserSettingsService {
         );
         dto.setTimezone(settings.getTimezone());
         dto.setUtcOffsetMinutes(settings.getUtcOffsetMinutes());
+        dto.setPredictionEngine(settings.getPredictionEngine());
         return dto;
     }
 }

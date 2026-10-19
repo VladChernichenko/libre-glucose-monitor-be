@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.entity;
 
+import che.glucosemonitorbe.domain.PredictionEngine;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -72,6 +73,11 @@ public class UserSettings {
 
     @Column(name = "isf_night")
     private Double isfNight;
+
+    /** Which engine forecasts the dashboard prediction path. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "prediction_engine", nullable = false, length = 16)
+    private PredictionEngine predictionEngine = PredictionEngine.HOVORKA;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

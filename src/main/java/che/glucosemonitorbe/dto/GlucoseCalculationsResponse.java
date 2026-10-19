@@ -43,4 +43,8 @@ public class GlucoseCalculationsResponse {
 
     // Minute-by-minute forecast path, typically 4 hours ahead
     private List<PredictionPointDTO> predictionPath;
+
+    // Empirical-twin forecast as a second series; populated only when the user's
+    // prediction_engine is BOTH (predictionPath then stays the Hovorka path)
+    private List<PredictionPointDTO> empiricalPredictionPath;
 }

@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.dto;
 
 import che.glucosemonitorbe.domain.MealWindow;
+import che.glucosemonitorbe.domain.PredictionEngine;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -34,6 +35,9 @@ public class UserSettingsDTO {
     private Double isfDinner;
     /** Manual ISF override for 22:00-05:00 (mmol/L per unit). NULL = use autotuned {@link #isf}. */
     private Double isfNight;
+
+    /** Dashboard forecast engine. NULL = {@link PredictionEngine#HOVORKA}. */
+    private PredictionEngine predictionEngine;
 
     // Constructors
     public UserSettingsDTO() {}
