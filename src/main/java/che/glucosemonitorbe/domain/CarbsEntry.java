@@ -41,4 +41,8 @@ public class CarbsEntry {
     private String bolusStrategy;
     private Double suggestedDurationHours;
     private String patternName;
+    /** Empirical twin: a share of this meal's carbs absorbs on the slow curve. Null = no. */
+    private Boolean fattyMeal;
+    /** Empirical twin: absorbs on the faster fruit curve. Null = no. */
+    private Boolean fruit;
 }

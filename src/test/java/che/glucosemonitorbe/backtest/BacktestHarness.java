@@ -346,7 +346,9 @@ public final class BacktestHarness {
         double x3 = Math.max(0.0, Math.min(BasalInsulinResolver.PEAK_X3_BASAL, 1.0 - ratio * egpScale));
         double hoursAgo = x3 >= BasalInsulinResolver.PEAK_X3_BASAL
                 ? 6.0                                                   // plateau
-                : 20.0 + 8.0 * (1.0 - x3 / BasalInsulinResolver.PEAK_X3_BASAL); // wane arm 20..28 h
+                // wane arm; kept just inside the window so x3 = 0 still reads as an active dose
+                : BasalInsulinResolver.DEFAULT_DURATION_HOURS + Math.min(BasalInsulinResolver.WANE_HOURS - 0.05,
+                        BasalInsulinResolver.WANE_HOURS * (1.0 - x3 / BasalInsulinResolver.PEAK_X3_BASAL));
         Note n = new Note();
         n.setTimestamp(toLdt(t0 - (long) (hoursAgo * 3600_000L)));
         n.setInsulin(10.0);

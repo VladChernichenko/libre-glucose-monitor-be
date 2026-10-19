@@ -2,10 +2,10 @@ package che.glucosemonitorbe.integration;
 
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.dto.*;
-import che.glucosemonitorbe.entity.UnloggedEventFlag;
+import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.UserRepository;
-import che.glucosemonitorbe.service.UnloggedEventDetectionService;
+import che.glucosemonitorbe.service.GlycemicEventScanService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,10 +36,10 @@ import static org.junit.jupiter.api.Assertions.*;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
 @TestPropertySource(properties = {
-    "app.features.unlogged-event-detection-enabled=false"
+    "app.features.glycemic-event-detection-enabled=false"
 })
 @SuppressWarnings({"resource", "null"})
-class UnloggedEventFeatureFlagOffE2ETest {
+class GlycemicEventFeatureFlagOffE2ETest {
 
     @Container
     @ServiceConnection
@@ -50,7 +50,7 @@ class UnloggedEventFeatureFlagOffE2ETest {
     @Autowired private TestRestTemplate rest;
     @Autowired private UserRepository userRepository;
     @Autowired private CgmReadingRepository cgmReadingRepository;
-    @Autowired private UnloggedEventDetectionService detectionService;
+    @Autowired private GlycemicEventScanService detectionService;
 
     private HttpHeaders authHeaders;
 
@@ -75,14 +75,15 @@ class UnloggedEventFeatureFlagOffE2ETest {
         }
         cgmReadingRepository.saveAll(batch);
 
-        Optional<UnloggedEventFlag> flag = detectionService.scanUser(userId);
+        Optional<GlycemicEvent> flag = detectionService.scanUser(userId);
         assertTrue(flag.isEmpty(), "no flag should be produced when the feature is disabled");
     }
 
     @Test
     @DisplayName("with the feature off, the API returns 404")
     void api404_whenFeatureDisabled() {
-        ResponseEntity<String> resp = rest.exchange("/api/unlogged-events", HttpMethod.GET,
+        ResponseEntity<String> resp = rest.exchange(
+                "/api/glycemic-events?from=2026-01-01T00:00:00&to=2026-01-02T00:00:00", HttpMethod.GET,
                 new HttpEntity<>(authHeaders), String.class);
         assertEquals(HttpStatus.NOT_FOUND, resp.getStatusCode());
     }

@@ -63,6 +63,8 @@ public class NoteToCarbsEntryMapper {
                 entry.setBolusStrategy(snapshot.getBolusStrategy());
                 entry.setSuggestedDurationHours(snapshot.getSuggestedDurationHours());
                 entry.setPatternName(snapshot.getPatternName());
+                entry.setFattyMeal(snapshot.getFattyMeal());
+                entry.setFruit(snapshot.getFruit());
             } catch (Exception e) {
                 log.warn("Failed to parse nutritionProfile for note {}: {}", note.getId(), e.getMessage());
                 entry.setAbsorptionMode("DEFAULT_DECAY");

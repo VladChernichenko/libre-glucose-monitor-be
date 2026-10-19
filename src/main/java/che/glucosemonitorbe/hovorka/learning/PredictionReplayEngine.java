@@ -35,6 +35,9 @@ import java.util.UUID;
  */
 public final class PredictionReplayEngine implements AnchorSampleSource {
 
+    private static final long BASAL_LOOKBACK_MS =
+            che.glucosemonitorbe.hovorka.BasalInsulinResolver.LOOKBACK_HOURS * 3600_000L;
+
     // -- FPU constants (mirror GlucosePredictService / BacktestHarness) ----------
     private static final int    FPU_ONSET_MIN     = 90;
     private static final double FPU_CARB_EQUIV_G  = 10.0;
@@ -83,6 +86,8 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         public boolean macroTMaxG     = true;
         /** Add FPU-equivalent slow-carb entries from protein/fat (mirrors GlucosePredictService). */
         public boolean fpuEquiv       = true;
+        /** Duration of action of the user's long-acting insulin [hours] (mirrors the live forecast). */
+        public double basalDurationHours = che.glucosemonitorbe.hovorka.BasalInsulinResolver.DEFAULT_DURATION_HOURS;
         /** Horizons (min) to emit samples at - must be a subset of the model's emission schedule. */
         public int[]  sampleHorizons  = {30, 60, 90, 120};
     }
@@ -191,7 +196,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
             HovorkaParameters p = applyScales(a.macroParams(), s);
             List<PredictionPointDTO> curve = predictor.buildPredictionPath(
                     p, rapidIob, settings, a.g0(), a.now(), a.carbs(), a.insulin(), a.longActing(),
-                    userId, cfg.horizonMin, activityProvider);
+                    userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours);
             long t0 = toEpochMs(a.now(), userZone);
             for (PredictionPointDTO pt : curve) {
                 int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
@@ -238,7 +243,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 boolean inPast   = age >= 0 && age <= 8 * 3600_000L;
                 boolean inFuture = age < 0 && -age <= horizonMs;
                 if (n.longActing()) {
-                    if (age >= 0 && age <= 36 * 3600_000L) longActing.add(makeLongActing(n, userZone));
+                    if (age >= 0 && age <= BASAL_LOOKBACK_MS) longActing.add(makeLongActing(n, userZone));
                     continue;
                 }
                 if (!inPast && !inFuture) continue;

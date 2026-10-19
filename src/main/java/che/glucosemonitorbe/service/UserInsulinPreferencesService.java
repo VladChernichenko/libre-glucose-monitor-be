@@ -65,6 +65,18 @@ public class UserInsulinPreferencesService {
         return new RapidInsulinIobParameters(dia, peak);
     }
 
+    /**
+     * Duration of action [hours] of the user's long-acting insulin, from the catalog; the default
+     * long-acting insulin's when the user has no preferences row.
+     */
+    @Transactional(readOnly = true)
+    public double getLongActingDurationHours(UUID userId) {
+        InsulinCatalog basal = userInsulinPreferencesRepository.findByUserId(userId)
+                .map(UserInsulinPreferences::getLongActingInsulin)
+                .orElseGet(() -> insulinCatalogService.getRequiredByCode(DEFAULT_LONG_ACTING_CODE));
+        return basal.getDiaHours() != null ? basal.getDiaHours() : 0.0;
+    }
+
     @Transactional
     public UserInsulinPreferencesDTO savePreferences(UUID userId, UpdateUserInsulinPreferencesRequest request) {
         log.info("[insulin-prefs] save request user={} rapid={} long={} injectionTimeRaw='{}'",

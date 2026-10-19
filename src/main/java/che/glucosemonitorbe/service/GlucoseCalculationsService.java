@@ -3,10 +3,18 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
+import che.glucosemonitorbe.domain.PredictionEngine;
 import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.empirical.EmpiricalEvent;
+import che.glucosemonitorbe.empirical.EmpiricalEventMapper;
+import che.glucosemonitorbe.empirical.EmpiricalForecastCone;
+import che.glucosemonitorbe.empirical.EmpiricalTwinEngine;
+import che.glucosemonitorbe.empirical.EmpiricalTwinParams;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
+import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
@@ -54,6 +62,11 @@ public class GlucoseCalculationsService {
     private static final int PREDICTION_PATH_STEP_MINUTES = 5;
     // Sparse step applies beyond 4 h (HFHP / Dual Wave tail) - 10 min is fine for that region.
     private static final int PREDICTION_PATH_STEP_SPARSE_MINUTES = 10;
+    /** Likely-range cone drawn around the empirical forecast (90% of past errors per horizon). */
+    private static final EmpiricalForecastCone EMPIRICAL_CONE = EmpiricalForecastCone.defaults();
+
+    /** {@code absorptionMode} stamped on points forecast by the empirical twin. */
+    private static final String EMPIRICAL_ABSORPTION_MODE = "EMPIRICAL_TWIN";
     private final UserSettingsService userSettingsService;
     private final NoteToCarbsEntryMapper noteToCarbsEntryMapper;
 
@@ -150,17 +163,29 @@ public class GlucoseCalculationsService {
         double confidence = calculateConfidence(carbsEntries.size(), insulinEntries.size(),
             request.getCurrentGlucose());
 
-        List<PredictionPointDTO> predictionPath = buildPredictionPath(
-                request.getCurrentGlucose(),
-                currentTime,
-                carbsEntries,
-                insulinEntries,
-                userUUID,
-                userSettings,
-                avgBolusToMealMinutes,
-                rapidIob,
-                request.getCurrentTrendMmolPerMin()
-        );
+        // A stored EMPIRICAL / BOTH falls back to Hovorka while the twin is switched off.
+        PredictionEngine engine = userSettings.getPredictionEngine() != null
+                && featureToggleConfig.isEmpiricalTwinEnabled()
+                ? userSettings.getPredictionEngine() : PredictionEngine.HOVORKA;
+        List<PredictionPointDTO> empiricalPath = engine == PredictionEngine.HOVORKA ? null
+                : buildEmpiricalPath(request.getCurrentGlucose(), currentTime,
+                        carbsEntries, insulinEntries, recentNotes);
+
+        // EMPIRICAL replaces the path (so the headline predictions below are read off it too);
+        // BOTH keeps the Hovorka path primary and returns the empirical one beside it.
+        List<PredictionPointDTO> predictionPath = engine == PredictionEngine.EMPIRICAL
+                ? empiricalPath
+                : buildPredictionPath(
+                        request.getCurrentGlucose(),
+                        currentTime,
+                        carbsEntries,
+                        insulinEntries,
+                        userUUID,
+                        userSettings,
+                        avgBolusToMealMinutes,
+                        rapidIob,
+                        request.getCurrentTrendMmolPerMin()
+                );
 
         // Determine trend from the same predictionPath the chart renders, not a separate
         // carbContribution-based formula - see determineTrend's javadoc for why.
@@ -214,6 +239,7 @@ public class GlucoseCalculationsService {
                 .confidence(Math.round(confidence * 100.0) / 100.0)
                 .factors(factors)
                 .predictionPath(predictionPath)
+                .empiricalPredictionPath(engine == PredictionEngine.BOTH ? empiricalPath : null)
                 .build();
     }
 
@@ -261,6 +287,48 @@ public class GlucoseCalculationsService {
     private double resolveIsf(UserSettingsDTO userSettings, LocalDateTime time) {
         Double effectiveIsf = userSettings.getEffectiveIsf(time);
         return effectiveIsf != null ? effectiveIsf : DEFAULT_ISF;
+    }
+
+    /**
+     * Forecast by the empirical twin from the same carb and insulin entries the Hovorka path is
+     * given (prospective overlays included), plus logged activity. Emits the same grid as the
+     * 4 h Hovorka path: one point every 5 min from +5 to +240.
+     */
+    private List<PredictionPointDTO> buildEmpiricalPath(
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> carbsEntries,
+            List<InsulinDose> insulinEntries,
+            List<Note> recentNotes
+    ) {
+        List<EmpiricalEvent> events = new ArrayList<>();
+        carbsEntries.forEach(c -> events.add(EmpiricalEventMapper.carbs(c)));
+        insulinEntries.forEach(d -> events.add(EmpiricalEventMapper.insulin(d)));
+        if (featureToggleConfig.isActivityLoggingEnabled()) {
+            recentNotes.forEach(n -> EmpiricalEventMapper.walk(n).ifPresent(events::add));
+        }
+
+        long anchor = EmpiricalEventMapper.epochMs(currentTime);
+        List<PredictionReplayEngine.Reading> cgm =
+                List.of(new PredictionReplayEngine.Reading(anchor, currentGlucose));
+        List<PredictionPointDTO> points = new ArrayList<>();
+        // Full horizon look-ahead: prospective entries ahead of now count, as in the Hovorka path.
+        for (EmpiricalTwinEngine.Point p : EmpiricalTwinEngine.forecast(anchor, cgm, events,
+                EmpiricalTwinParams.defaults(), EmpiricalTwinEngine.HORIZON_MIN)) {
+            if (p.minute() == 0) continue;
+            // Likely-range cone: a point at the anchor, widening with the horizon.
+            double half = EMPIRICAL_CONE.halfWidthMmol(p.minute());
+            points.add(PredictionPointDTO.builder()
+                    .timestamp(currentTime.plusMinutes(p.minute()))
+                    .predictedGlucose(Math.round(p.mmol() * 10.0) / 10.0)
+                    .predictedGlucoseLower(Math.round(Math.max(0.0, p.mmol() - half) * 10.0) / 10.0)
+                    .predictedGlucoseUpper(Math.round((p.mmol() + half) * 10.0) / 10.0)
+                    .uncertaintySd(Math.round(half / EmpiricalForecastCone.Z * 100.0) / 100.0)
+                    .confidenceLevel(EmpiricalForecastCone.COVERAGE)
+                    .absorptionMode(EMPIRICAL_ABSORPTION_MODE)
+                    .build());
+        }
+        return points;
     }
 
     private List<PredictionPointDTO> buildPredictionPath(
@@ -533,15 +601,15 @@ public class GlucoseCalculationsService {
     }
     
     /**
-     * Load long-acting (basal) insulin notes from the last 36 hours.
-     * Lantus/Tresiba have a DIA of ~24-28 h, so a dose taken yesterday must be included
+     * Load long-acting (basal) insulin notes far enough back to cover the longest-acting catalog
+     * insulin plus its overdue window, so a dose taken yesterday or the day before is included
      * for accurate EGP suppression modelling in the Hovorka path.
      *
      * <p>C3: repository failures propagate deliberately. Returning an empty list here would
      * report zero basal on board as fact.
      */
     private List<Note> getLongActingNotes(UUID userId, LocalDateTime currentTime) {
-        LocalDateTime since = currentTime.minusHours(36);
+        LocalDateTime since = currentTime.minusHours(BasalInsulinResolver.LOOKBACK_HOURS);
         return noteRepository.findByUserIdAndTimestampBetween(userId, since, currentTime)
                 .stream()
                 .filter(Note::isLongActing)
@@ -695,6 +763,8 @@ public class GlucoseCalculationsService {
                 entry.setBolusStrategy(snapshot.getBolusStrategy());
                 entry.setSuggestedDurationHours(snapshot.getSuggestedDurationHours());
                 entry.setPatternName(snapshot.getPatternName());
+                entry.setFattyMeal(snapshot.getFattyMeal());
+                entry.setFruit(snapshot.getFruit());
             } catch (Exception e) {
                 log.warn("Failed to parse nutritionProfileJson for prospective note: {}", e.getMessage());
             }

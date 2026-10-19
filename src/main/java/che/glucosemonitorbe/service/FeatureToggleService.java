@@ -28,7 +28,7 @@ public class FeatureToggleService {
         return switch (featureName.toLowerCase()) {
             case "experiments-enabled"         -> config.isExperimentsEnabled();
             case "digital-twin-enabled"        -> config.isDigitalTwinEnabled();
-            case "unlogged-event-detection-enabled" -> config.isUnloggedEventDetectionEnabled();
+            case "glycemic-event-detection-enabled" -> config.isGlycemicEventDetectionEnabled();
             case "hypo-rescue-logging-enabled"  -> config.isHypoRescueLoggingEnabled();
             case "activity-logging-enabled"    -> config.isActivityLoggingEnabled();
             default                            -> shouldUseBackend(featureName);

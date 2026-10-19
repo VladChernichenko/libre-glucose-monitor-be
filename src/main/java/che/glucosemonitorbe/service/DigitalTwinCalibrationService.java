@@ -7,7 +7,7 @@ import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.entity.UnloggedEventFlag;
+import che.glucosemonitorbe.entity.GlycemicEvent;
 import che.glucosemonitorbe.entity.UserDigitalTwin;
 import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.DallaManGutModel;
@@ -64,7 +64,7 @@ public class DigitalTwinCalibrationService {
     private final NoteRepository noteRepository;
     private final UserRepository userRepository;
     private final UserDigitalTwinRepository twinRepository;
-    private final che.glucosemonitorbe.repository.UnloggedEventFlagRepository unloggedEventFlagRepository;
+    private final che.glucosemonitorbe.repository.GlycemicEventRepository glycemicEventRepository;
 
     private final HovorkaParameterService paramService;
     private final HovorkaOdeSolver odeSolver;
@@ -184,6 +184,7 @@ public class DigitalTwinCalibrationService {
                         : che.glucosemonitorbe.hovorka.ActivityProvider.NONE;
 
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
+        cfg.basalDurationHours = insulinPrefsService.getLongActingDurationHours(userId);
         PredictionReplayEngine train = new PredictionReplayEngine(
                 rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userZone);
         PredictionReplayEngine val = new PredictionReplayEngine(
@@ -270,20 +271,24 @@ public class DigitalTwinCalibrationService {
     }
 
     /**
-     * Remove CGM readings inside an OPEN/CONFIRMED unlogged-event window, so calibration doesn't learn
+     * Remove CGM readings inside an OPEN/CONFIRMED glycemic-event window, so calibration doesn't learn
      * from a window the user's log can't explain. Falls back to the full set when the exclusion would
      * drop below {@link #MIN_CGM_READINGS} (fitting on that data beats not fitting at all).
+     * Dawn-phenomenon windows are kept: they are systematic, repeatable patterns that the residual-bias
+     * model should learn, not ignore.
      */
     private List<PredictionReplayEngine.Reading> excludeFlaggedWindows(
             UUID userId, List<PredictionReplayEngine.Reading> cgm, java.time.ZoneId userZone) {
-        if (!featureToggleConfig.isUnloggedEventDetectionEnabled()) return cgm;
-        List<UnloggedEventFlag> flags = unloggedEventFlagRepository.findByUserIdAndStateIn(
-                userId, List.of(UnloggedEventFlag.State.OPEN, UnloggedEventFlag.State.CONFIRMED));
+        if (!featureToggleConfig.isGlycemicEventDetectionEnabled()) return cgm;
+        List<GlycemicEvent> flags = glycemicEventRepository.findByUserIdAndStateIn(
+                userId, List.of(GlycemicEvent.State.OPEN, GlycemicEvent.State.CONFIRMED));
+        // Dawn is a systematic, repeatable pattern: ResidualBiasModel should learn it, not ignore it.
+        flags = flags.stream().filter(f -> f.getCategory() != GlycemicEvent.Category.DAWN_PHENOMENON).toList();
         if (flags.isEmpty()) return cgm;
 
         long[][] intervals = new long[flags.size()][2];
         for (int i = 0; i < flags.size(); i++) {
-            // Flag windows are stored in the user's local wall clock (UnloggedEventDetectionService
+            // Flag windows are stored in the user's local wall clock (GlycemicEventScanService
             // runs on that clock), so convert with the same zone rather than assuming UTC.
             intervals[i][0] = PredictionReplayEngine.toEpochMs(flags.get(i).getWindowStart(), userZone);
             intervals[i][1] = PredictionReplayEngine.toEpochMs(flags.get(i).getWindowEnd(), userZone);
@@ -302,7 +307,7 @@ public class DigitalTwinCalibrationService {
                     + "calibrating without exclusion", userId, flags.size(), MIN_CGM_READINGS);
             return cgm;
         }
-        log.info("User {}: excluded {} CGM reading(s) in {} flagged unlogged-event window(s) from calibration",
+        log.info("User {}: excluded {} CGM reading(s) in {} flagged glycemic-event window(s) from calibration",
                 userId, cgm.size() - kept.size(), flags.size());
         return kept;
     }

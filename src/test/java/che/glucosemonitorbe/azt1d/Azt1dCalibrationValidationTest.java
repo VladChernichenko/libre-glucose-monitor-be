@@ -287,7 +287,7 @@ class Azt1dCalibrationValidationTest {
 
     // -- Predictor wiring (raw model, no DB) -------------------------------------
 
-    private static HovorkaGlucosePredictionService rawPredictor() {
+    static HovorkaGlucosePredictionService rawPredictor() {
         DallaManGutModel gut = new DallaManGutModel();
         HovorkaOdeSolver solver = new HovorkaOdeSolver(gut);
         BasalInsulinResolver basal = new BasalInsulinResolver();
@@ -302,7 +302,7 @@ class Azt1dCalibrationValidationTest {
      * the physiological volumes, ISF sets insulin action. tMaxG (45-min carb half-life), A_G (1.0) and
      * the intercompartmental rates keep their population defaults - the twin refines the rest.
      */
-    private static HovorkaParameters personalParams(Azt1dDataset.Profile p) {
+    static HovorkaParameters personalParams(Azt1dDataset.Profile p) {
         double w = p.weightKg() > 0 ? p.weightKg() : HovorkaParameters.DEFAULT_WEIGHT;
         double isf = p.isfMmolPerU() > 0 ? p.isfMmolPerU() : 2.2;
         double vG = HovorkaParameters.VG_PER_KG * w;
