@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS notes (
     activity_type       VARCHAR(20),
     intensity           VARCHAR(12),
     duration_min        INTEGER,
+    -- Injection site of an insulin note (InjectionSiteZone code, e.g. 'abd_ur', or 'unknown'); NULL = not asked
+    site_zone           VARCHAR(16),
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_notes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

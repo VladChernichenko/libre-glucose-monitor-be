@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.NotesSummaryResponse;
 import che.glucosemonitorbe.dto.UpdateNoteRequest;
 import che.glucosemonitorbe.domain.ActivityIntensity;
 import che.glucosemonitorbe.domain.ActivityType;
+import che.glucosemonitorbe.domain.InjectionSiteZone;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.mapper.NoteMapper;
@@ -96,6 +97,7 @@ public class NotesService {
         );
         note.setType(request.getType() != null ? request.getType() : Note.TYPE_NORMAL);
         applyActivityFields(note, request.getActivityType(), request.getIntensity(), request.getDurationMin());
+        applySiteZone(note, request.getSiteZone());
         note.setMockData(Boolean.TRUE.equals(request.getMockData()));
         if (request.getAbsorptionMode() != null) {
             note.setAbsorptionMode(request.getAbsorptionMode());
@@ -208,6 +210,7 @@ public class NotesService {
             applyActivityFields(existingNote, existingNote.getActivityType(),
                     existingNote.getIntensity(), existingNote.getDurationMin());
         }
+        applySiteZone(existingNote, request.getSiteZone());
         // Only enrich a note that has no profile at all - never to replace an existing one.
         if (!clientProfileSupplied
                 && (existingNote.getNutritionProfile() == null
@@ -326,6 +329,22 @@ public class NotesService {
      * Rejects unknown type/intensity or non-positive/oversized duration, and fills the
      * NOT-NULL note columns (carbs/insulin/meal) that an activity note otherwise leaves empty.
      */
+    /**
+     * Validate + store the injection site of an insulin note (spec F7). {@code null} leaves it unchanged;
+     * an unknown code, or a site on a note without insulin, is a 400.
+     */
+    private void applySiteZone(Note note, String siteZone) {
+        if (siteZone == null) return;
+        InjectionSiteZone zone = InjectionSiteZone.fromCode(siteZone);
+        if (zone == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid site_zone");
+        }
+        if (note.getInsulin() == null || note.getInsulin() <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "site_zone applies only to insulin notes");
+        }
+        note.setSiteZone(zone.code());
+    }
+
     private void applyActivityFields(Note note, String activityType, String intensity, Integer durationMin) {
         if (!note.isActivity()) return;
         ActivityType type = ActivityType.fromName(activityType);

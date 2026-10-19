@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -191,6 +192,55 @@ class NotesServiceTest {
         ArgumentCaptor<Note> captor = ArgumentCaptor.forClass(Note.class);
         verify(noteRepository).save(captor.capture());
         return captor.getValue();
+    }
+
+    // --- injection site (spec F7) ---
+
+    @Test
+    void updateNoteStoresTheInjectionSiteOnAnInsulinNote() {
+        UUID userId = UUID.randomUUID();
+        Note dose = insulinNote(userId, 2.0);
+        when(noteRepository.save(any(Note.class))).thenAnswer(i -> i.getArgument(0));
+        when(noteMapper.toDto(any(Note.class))).thenReturn(new NoteDto());
+
+        UpdateNoteRequest request = new UpdateNoteRequest();
+        request.setSiteZone(" ABD_UL ");
+        notesService.updateNote(userId, dose.getId(), request);
+
+        assertEquals("abd_ul", capturedSavedNote().getSiteZone());
+    }
+
+    @Test
+    void updateNoteRejectsAnUnknownSiteCode() {
+        UUID userId = UUID.randomUUID();
+        Note dose = insulinNote(userId, 2.0);
+        UpdateNoteRequest request = new UpdateNoteRequest();
+        request.setSiteZone("left_ear");
+
+        Assertions.assertThatThrownBy(() -> notesService.updateNote(userId, dose.getId(), request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Invalid site_zone");
+        verify(noteRepository, never()).save(any());
+    }
+
+    @Test
+    void updateNoteRejectsASiteOnANoteWithoutInsulin() {
+        UUID userId = UUID.randomUUID();
+        Note meal = insulinNote(userId, 0.0);
+        UpdateNoteRequest request = new UpdateNoteRequest();
+        request.setSiteZone("unknown");
+
+        Assertions.assertThatThrownBy(() -> notesService.updateNote(userId, meal.getId(), request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("only to insulin notes");
+    }
+
+    private Note insulinNote(UUID userId, double units) {
+        Note note = new Note(userId, LocalDateTime.of(2026, 10, 19, 12, 0), 0.0, units, "Correction");
+        note.setId(UUID.randomUUID());
+        note.setNutritionProfile("{}");
+        when(noteRepository.findByIdAndUserId(note.getId(), userId)).thenReturn(Optional.of(note));
+        return note;
     }
 
     @Test

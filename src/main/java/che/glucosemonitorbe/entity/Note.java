@@ -81,6 +81,10 @@ public class Note {
     @Column(name = "duration_min")
     private Integer durationMin;
 
+    /** Injection site code (see {@link che.glucosemonitorbe.domain.InjectionSiteZone}); insulin notes only. */
+    @Column(name = "site_zone", length = 16)
+    private String siteZone;
+
     @Column(name = "mock_data", nullable = false)
     private boolean mockData = false;
     
@@ -266,6 +270,14 @@ public class Note {
 
     public void setDurationMin(Integer durationMin) {
         this.durationMin = durationMin;
+    }
+
+    public String getSiteZone() {
+        return siteZone;
+    }
+
+    public void setSiteZone(String siteZone) {
+        this.siteZone = siteZone;
     }
 
     public boolean isMockData() {

@@ -32,6 +32,7 @@ public class NoteMapper {
         dto.setActivityType(note.getActivityType());
         dto.setIntensity(note.getIntensity());
         dto.setDurationMin(note.getDurationMin());
+        dto.setSiteZone(note.getSiteZone());
         dto.setMockData(note.isMockData());
         dto.setCreatedAt(note.getCreatedAt());
         dto.setUpdatedAt(note.getUpdatedAt());
@@ -66,6 +67,7 @@ public class NoteMapper {
         note.setActivityType(dto.getActivityType());
         note.setIntensity(dto.getIntensity());
         note.setDurationMin(dto.getDurationMin());
+        note.setSiteZone(dto.getSiteZone());
         note.setMockData(dto.isMockData());
 
         return note;

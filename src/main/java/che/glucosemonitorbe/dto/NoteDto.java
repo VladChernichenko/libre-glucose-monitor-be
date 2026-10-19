@@ -196,4 +196,10 @@ public class NoteDto {
     public void setIntensity(String intensity) { this.intensity = intensity; }
     public Integer getDurationMin() { return durationMin; }
     public void setDurationMin(Integer durationMin) { this.durationMin = durationMin; }
+
+    /** Injection site code (e.g. {@code abd_ur}, or {@code unknown}); null when not recorded. */
+    private String siteZone;
+
+    public String getSiteZone() { return siteZone; }
+    public void setSiteZone(String siteZone) { this.siteZone = siteZone; }
 }
