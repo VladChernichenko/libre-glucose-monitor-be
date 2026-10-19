@@ -31,6 +31,7 @@ public class FeatureToggleService {
             case "glycemic-event-detection-enabled" -> config.isGlycemicEventDetectionEnabled();
             case "hypo-rescue-logging-enabled"  -> config.isHypoRescueLoggingEnabled();
             case "activity-logging-enabled"    -> config.isActivityLoggingEnabled();
+            case "empirical-twin-enabled"      -> config.isEmpiricalTwinEnabled();
             default                            -> shouldUseBackend(featureName);
         };
     }
