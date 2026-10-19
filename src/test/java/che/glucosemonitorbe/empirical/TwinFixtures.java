@@ -14,9 +14,9 @@ import java.util.List;
 /**
  * Loads the bundled empirical-twin fixtures ({@code src/test/resources/twin/}).
  *
- * <p>The fixtures are real personal health data and are git-ignored, so a clean checkout does not
- * have them. Every test that needs them is therefore data-gated: {@link #assumePresent()} skips
- * rather than fails when they are absent, the same convention as the AZT1D / HUPA harnesses.</p>
+ * <p>The fixtures are real personal health data, committed with the tests. Every test that needs
+ * them is still data-gated: {@link #assumePresent()} skips rather than fails when they are absent,
+ * the same convention as the AZT1D / HUPA harnesses.</p>
  */
 final class TwinFixtures {
 
@@ -29,7 +29,7 @@ final class TwinFixtures {
 
     static void assumePresent() {
         Assumptions.assumeTrue(TwinFixtures.class.getResource("/twin/golden-forecasts.json") != null,
-                "empirical-twin fixtures are not on the classpath (git-ignored personal data)");
+                "empirical-twin fixtures are not on the classpath");
     }
 
     static JsonNode read(String name) {

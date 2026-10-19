@@ -1,0 +1,142 @@
+{
+ "isf": {
+  "value": 27,
+  "unit": "mg/dL per U",
+  "label": "Insulin sensitivity (ISF)",
+  "source": "c-good / 3 corrections + refit",
+  "notes": "Your stated 1.5 mmol/L per unit (27). The Oct 10 refit across all logs agrees (27 fits best; 30 was slightly too strong)."
+ },
+ "crAM": {
+  "value": 7,
+  "unit": "g per U",
+  "label": "Carb ratio, morning (05–11)",
+  "source": "c-est / 2 breakfasts",
+  "notes": "Oct 9 breakfast was underdosed at 1:9; Oct 10 breakfast at ≈1:7 landed on target."
+ },
+ "crDay": {
+  "value": 10,
+  "unit": "g per U",
+  "label": "Carb ratio, rest of day",
+  "source": "c-est / fit Oct 10",
+  "notes": "Refit on Oct 9–10 lunches and dinners: 1:10 fits best. Sweets alone (Oct 9 cake) behaved stronger, about 1:7."
+ },
+ "csf": {
+  "value": 3.1,
+  "unit": "mg/dL per g",
+  "label": "Fast-sugar rise",
+  "source": "c-est / 1 event",
+  "notes": "From 16 g of regular cola on Oct 9, 00:39. Used for juice, sugar water and cola."
+ },
+ "dia": {
+  "value": 240,
+  "unit": "min",
+  "label": "Apidra duration",
+  "source": "c-def / label",
+  "notes": "Glulisine acts about 3–4 h."
+ },
+ "peak": {
+  "value": 55,
+  "unit": "min",
+  "label": "Apidra peak",
+  "source": "c-def / label",
+  "notes": "Glulisine peaks around 55 min."
+ },
+ "kMeal": {
+  "value": 35,
+  "unit": "min to peak",
+  "label": "Meal absorption",
+  "source": "c-def / default",
+  "notes": "Ordinary meals and the fast part of fatty meals."
+ },
+ "kFast": {
+  "value": 12,
+  "unit": "min to peak",
+  "label": "Fast-sugar absorption",
+  "source": "c-def / default",
+  "notes": "Liquid sugar."
+ },
+ "kFruit": {
+  "value": 18,
+  "unit": "min to peak",
+  "label": "Fruit absorption",
+  "source": "c-est / v2.2, Oct 12",
+  "notes": "Fresh and dried fruit (figs, cherries, mango). Faster than meals: the Oct 12 figs and cherries rose within 30 min, which the 35-min meal curve flattened."
+ },
+ "giPow": {
+  "value": 0.5,
+  "unit": "exponent",
+  "label": "Glycemic index: speed effect",
+  "source": "c-est / v2.3, Oct 12",
+  "notes": "Each food's GI scales its absorption speed relative to a reference (GI 55 for food, 65 for drinks): absorption time × (ref ÷ GI)^this. 0 turns GI off."
+ },
+ "giMag": {
+  "value": 0,
+  "unit": "exponent",
+  "label": "Glycemic index: size effect",
+  "source": "c-est / v2.3, Oct 12",
+  "notes": "Optionally scales how much a food raises glucose: carbs × (GI ÷ ref)^this. At 1 this is the same as dosing by glycemic load (GL = carbs × GI ÷ 100) instead of carbs. Tested Oct 12: it made forecasts worse (MAE 17.5 → 18.8), so it is off; GL is shown on each food for reference."
+ },
+ "oneU": {
+  "value": 1,
+  "unit": "fraction delivered",
+  "label": "Single-unit dose delivery",
+  "source": "c-est / v2.3, Oct 12",
+  "notes": "Vlad notes that a single 1 U press on his pens may not be fully delivered (low plunger pressure). This scales any 1 U dose; 1 = full."
+ },
+ "kSlow": {
+  "value": 90,
+  "unit": "min to peak",
+  "label": "Fatty-meal absorption",
+  "source": "c-est / fit Oct 10",
+  "notes": "Pizza, khachapuri, khinkali, tolma, ice cream, pastry, bread with cheese. Fat and protein slow carbs to a 2–4 h curve."
+ },
+ "fatSlow": {
+  "value": 0.3,
+  "unit": "fraction of carbs",
+  "label": "Fatty meal: slow share",
+  "source": "c-est / fit Oct 10",
+  "notes": "About 30% of a fatty meal's carbs arrive on the slow curve (peak ≈90 min, tail 3–4 h); the rest behave like a normal meal."
+ },
+ "walkBoost": {
+  "value": 1,
+  "unit": "× insulin effect",
+  "label": "Walking: insulin boost",
+  "source": "c-est / 1 walk",
+  "notes": "Fitted at 1.0: once fatty-meal timing is modelled, the Oct 10 walk shows no extra insulin effect the data can separate. Studies usually show 1.2–1.5× during moderate walking; set it per walk once a walk without a fatty meal is logged."
+ },
+ "walkDrop": {
+  "value": 20,
+  "unit": "mg/dL per hour",
+  "label": "Walking: direct glucose use",
+  "source": "c-est / v2.4, Oct 12",
+  "notes": "Working muscles take up glucose without insulin. Lowers the forecast by this much per hour while walking, fading over the after-effect time below. Fitted Oct 12: 20/h lifts today's hits 35→38 of 43 (MAE 17.0→14.2); 40+/h made forecasts worse."
+ },
+ "walkDropTail": {
+  "value": 1,
+  "unit": "h to fade",
+  "label": "Walking: direct-use after-effect",
+  "source": "c-est / v2.4, Oct 12",
+  "notes": "How long the direct glucose use keeps going after a walk ends, fading linearly. Tested 1, 2 and 4 h: anything over ~1 h made past forecasts worse (all-data hits 75% → 61% at 4 h), including after the 5 h walk on Oct 10 and the Oct 11 walk that was followed by a 3 h plateau near 200. Will be refitted if tonight shows a slow overnight fall after the 2 h walk."
+ },
+ "walkTail": {
+  "value": 3,
+  "unit": "h to fade",
+  "label": "Walking: after-effect",
+  "source": "c-est / 1 walk",
+  "notes": "The boost fades linearly over this many hours after the walk ends."
+ },
+ "alcDrop": {
+  "value": 40,
+  "unit": "mg/dL per drink",
+  "label": "Alcohol: liver block",
+  "source": "c-est / 1 drink, 1 evening",
+  "notes": "Alcohol blocks the liver's glucose release, spread over 2–10 h after the drink. The Oct 10 lager: the drift after 23:00 fits about 40 mg/dL per drink. One evening only; the overnight readings will confirm it."
+ },
+ "drift": {
+  "value": 0,
+  "unit": "mg/dL per h",
+  "label": "Background drift",
+  "source": "c-def / unknown",
+  "notes": "Tresiba off-schedule Oct 8–12. Set once a clean fasting stretch is logged."
+ }
+}
