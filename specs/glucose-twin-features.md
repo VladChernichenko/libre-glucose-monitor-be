@@ -1,8 +1,8 @@
 # Glucose Twin features: Specification
 
-**Status:** Revised 2026-10-16 against the code and the reference engine. Read *Revision notes* and *Open decisions* before implementing
-**Date:** 2026-10-15
-**Author:** Vlad + Claude (from the claude.ai "Vlad's Glucose Twin" artifact and 8 days of live coaching, Oct 8–15 2026)
+ G**Status:** Revised 2026-10-16 against the code and the reference engine; F13–F18 added 2026-10-19 (not yet revised, see R14). Read *Revision notes* and *Open decisions* before implementing
+**Date:** 2026-10-15 (F13–F18 added 2026-10-19)
+**Author:** Vlad + Claude (from the claude.ai "Vlad's Glucose Twin" artifact and 12 days of live coaching, Oct 8–19 2026)
 **Repo:** `glucose-monitor-be` (Spring Boot). The iOS app uses these APIs; UI notes are included per feature.
 
 ## Objective
@@ -27,9 +27,10 @@ This spec moves those features into the app. The forecasting engine is already s
 - scoring
 - parameters
 - pattern reports
+- uncertainty cone (F13), proactive checks (F14), stacking guard (F15), exercise planner (F16), diet summary (F17), miss detection (F18)
 
 **Prerequisite:** round 1 (`empirical-twin-port.md`) is merged, i.e. `EmpiricalTwinEngine.forecast(...)` exists and its golden test passes.
-If it is not merged yet, do round 1 first. (As of 2026-10-16 round 1 is implemented and green but not committed.)
+If it is not merged yet, do round 1 first. (Round 1 was merged to `main` on 2026-10-19, behind `app.features.empirical-twin-enabled`, off by default.)
 
 ## Safety principles (apply to every feature)
 
@@ -61,6 +62,7 @@ except where noted. Engine values below are the reference engine's own output. *
 | R11 | 03:00 check after a fat-flagged meal eaten after 17:00, or after a run that day; the Tresiba reminder is daily | P5 is at 20:00 and the bedtime flag only starts at 21:30. The 22:45 check is dropped: no rule produces it |
 | R12 | P1–P6 times and ranges recomputed from the rules and the engine | See F12.7. P1 and P3 now differ sharply from what happened on the day (D3) |
 | R13 | Rounding: half rounds up, except when the trend is < −1 | Only the falling case was specified |
+| R14 | F13–F18 come verbatim from the 2026-10-19 draft and have **not** been checked against the engine or the rules above | Added after this revision. Known links: F14 needs push delivery (D4); F15's "doses the snack alone" uses F3 with R13 rounding; F16's dose cut uses the R6 window; F17 and F18 acceptance needs Oct 19 data (D6) |
 
 ## Open decisions (recommended default in **bold**; confirm before building the affected feature)
 
@@ -71,7 +73,7 @@ except where noted. Engine values below are the reference engine's own output. *
 | D3 | Trend in the forecast | F3 what-if, F12 forecast and checks | The engine starts flat and ignores trend, while F3 projects BG with it. In P1 the explanation says "falling ~1.2/min" while the engine forecasts a rise to 166. **Add a decaying trend term in the advisor only (the golden round-1 test stays as is) and recompute F12.7** · keep the engine as is and show the trend only in text |
 | D4 | Push delivery | F5, F12 alarms | APNs is a stub (`GlucoseAlertService.deliverAlert` only logs). **Wire APNs as its own prerequisite step before F5** · in-app polling only |
 | D5 | Vision model for F6 | F6, F12 | The app uses Qwen with an Ollama fallback (`NutritionVisionService`). **Keep the existing gateway and extend its prompt** · add Claude (photos then go to a new external API) |
-| D6 | Oct 13–15 data | F2 acceptance, F10, F11 | Not in the repo. **Export from the artifact into the git-ignored `src/test/resources/twin/`**, then add the 42/56 acceptance back |
+| D6 | Oct 13–19 data | F2 acceptance, F10, F11, F17, F18 | Not in the repo (the committed fixtures end Oct 12). **Export from the artifact into `src/test/resources/twin/`**, then add the 42/56 acceptance back. The fixtures are now tracked in git, so check the repo's visibility first (safety principle 6) |
 | D7 | P4 history | F12.7 P4 range | IOB 0.6 U at 14:50 needs the doses that produced it. **List them** |
 
 ## Glossary
@@ -489,9 +491,107 @@ Tolerance: units exact, times ±5 min, expected ranges should overlap the engine
 
 ---
 
+## F13. Uncertainty cone around the forecast
+
+The forecast line is drawn inside a **cone that starts as a point at the current reading and widens with the horizon**. Its half-width at each horizon is the **90th percentile of the twin's own past absolute errors** at that horizon, so about 90% of readings land inside.
+
+| Horizon | +0 | +15 min | +30 min | +1 h | +1.5 h | +2 h | +3 h | +4 h |
+|---|---|---|---|---|---|---|---|---|
+| Default half-width (mg/dL, Vlad, model v2.5, ~135 anchors) | 0 | 19 | 33 | 52 | 58 | 61 | 72 | 78 |
+
+- Interpolate linearly between knots. Never narrower further out (monotone).
+- **Refit nightly** from the user's anchors (forecast vs CGM at each horizon; nearest knot; ≥ 5 samples per knot, else keep the default). Coverage is a per-user setting (default 0.90).
+- Response fields per point: `predictedGlucoseLower`, `predictedGlucoseUpper`, `uncertaintySd` (= half-width ÷ 1.645), `confidenceLevel`.
+- Legend: "Likely range (90% of past forecasts)".
+- **Already partly built:** `EmpiricalForecastCone` (+ test) and band fields in `GlucoseCalculationsService` / `HovorkaGlucosePredictionService`. The iPhone chart already draws the band, pinched at the anchor. Remaining: the nightly refit job and per-user storage.
+
+**Acceptance:** half-width 0 at +0; non-decreasing; with 11 errors 5…55 at +60 the fitted +60 width is 50; band visible on the iPhone chart.
+
+---
+
+## F14. Proactive checks (the app reads the CGM itself)
+
+Extends F5. At each scheduled check the server **reads the latest CGM values itself** and pushes a status with the next action, instead of only ringing an alarm.
+
+> "17:56 · 199 → · peak reached, ~2.7 U still active · no insulin · next check 18:25"
+
+- Compare the reading with the check's expectation and rule (from F3/F4/F12): within range → "on track"; outside → the rule's action (sugar grams, a correction, or "tell me").
+- If the action creates a follow-up (e.g. low treatment), schedule it automatically (+15 min).
+- If no CGM value in the last 20 min: push "Can't read your sensor, open Libre / send a reading".
+- Every check result is logged to the timeline (F9) and its readings to the event log.
+- Setting: proactive checks on/off (default on).
+
+**Acceptance:** a 17:55 check with a reading of 199 → flat and 2.7 U IOB pushes "no insulin"; a reading of 81 ↘ pushes "10–15 g now" and creates a +15 min check.
+
+---
+
+## F15. Stacking and grazing guard
+
+Today's pattern: 7 eating events and 5 doses within 2 h (mandarin, lemonade, shawarma, 2× raisins, almonds) → 81 low, then 199. The app should make that visible and dose each add-on correctly.
+
+- **Add-on snack dosing:** when a snack is logged while IOB ≥ 1 U or COB ≥ 10 g, the advisor doses the snack alone (carbs ÷ CR), **does not add a correction** if the last dose was < 90 min ago, and shows the combined forecast (peak and 2 h value) with and without the dose.
+- **Duplicate dose check:** a second dose of the same size within 5 min asks "Second injection or repeat entry?" before logging.
+- **Grazing banner:** ≥ 3 eating events or ≥ 3 doses in 90 min → "Lots of overlapping doses. Next time combine into one meal + one dose." Count shown in the daily summary (F17).
+- **Correction cooldown:** corrections within 90 min of a previous dose are flagged, with the projected nadir.
+
+**Acceptance:** raisins 12 g at 141 ↗ with 2.6 U IOB → "1 U (12 g ÷ 10), no correction, peak ~162 vs ~172 without"; 1 U logged twice 2 min apart → confirmation prompt.
+
+---
+
+## F16. Exercise planner (run / walk)
+
+Answers "when is the best time to run today?" and gives a go/no-go.
+
+- **Best window:** first time today when projected IOB < 1 U **and** forecast BG is 130–180, ending at least 2.5 h before the basal dose (23:00). Show IOB at each half-hour.
+- **Go/no-go rules at start (settings):**
+
+| Reading | Action |
+|---|---|
+| 130–180, flat or slowly falling | Go; carry 15–20 g fast sugar |
+| < 130 | 10–15 g first |
+| < 100 | 15–20 g, wait 15 min |
+| > 250 | Don't start |
+| Falling fast (↓) | Treat first |
+
+- Schedules a pre-run check (F14) 5 min before the window.
+- **After:** raise the correction threshold to 180 for 3 h, bedtime target ≥ 130, optional 03:00 check (F5).
+- Meal plans (F12) that know about a planned run cut the dose by the user's exercise factor (default 30%).
+
+**Acceptance:** with 3 U at 16:23, 1 U at 16:48 and 1 U at 17:18 the planner proposes 19:00–19:30 (IOB 0.8 → 0.4 U) and schedules an 18:55 pre-run check.
+
+---
+
+## F17. Daily diet summary
+
+Per day, from logged events:
+
+- total carbs; **sugar share** (fast carbs + sweets + sugary drinks + dried fruit, as % of carbs); grams used for **low treatment**;
+- number of **eating events** and **doses**; late eating (carbs after 21:00);
+- time in range (70–180), time above, time below, mean BG.
+
+A 7-day trend view, plus three plain-language observations when thresholds are crossed (settings): sugar share > 30%, eating events > 8, low-treatment grams > 20, late carbs > 30 g.
+Food categories come from the F6 photo estimate or a quick tag on the entry (`sweet`, `drink`, `dried_fruit`, `fruit`, `meal`).
+
+**Acceptance:** Oct 19 shows ~150 g carbs, ~33% sugar share, 10 eating events, 10 g low treatment. Oct 9 shows ~50% sugar share and triggers the sugar observation.
+
+---
+
+## F18. Miss detection and model refits
+
+When the forecast is repeatedly off in the same direction, say so and offer a refit.
+
+- **Live miss flag:** if the last two checks of one anchor are both outside the cone, or the reading leaves the cone in the first hour, show "Twin is running high/low today by ~N" and widen the advice margin (e.g. prefer the safer dose).
+- **Bias of the day:** mean signed error over today's anchors; if |bias| > 15 mg/dL, include it in check messages ("the twin has been ~15–20 high on carbs today").
+- **Manual refit (F8):** grid-search one parameter on all anchors and show MAE/hit-rate before → after; record a new parameter version only if MAE improves. Example: v2.5 (Oct 19) changed meal absorption `kMeal` 35 → 25 min (MAE 26.4 → 25.2, morning hits 66% → 77%); an insulin onset delay was tested and rejected.
+- Scores after a refit count only on new logs (honest scoring, F2).
+
+**Acceptance:** today's 13:31–15:52 sequence (forecast ~155 at 14:45, actual 126) raises the miss flag by 14:45.
+
+---
+
 ## F11. Tests
 
-- **Unit:** advisor cases A1–A6; meal-plan cases P1–P6 (with F6 stubbed to the listed carbs); F12 lifecycle and deviation re-plans; F5 supersede rules; F7 suggestion and warning; F10 detectors on the round-1 fixtures plus the Oct 13–15 data (export from the artifact).
+- **Unit:** advisor cases A1–A6; acceptance cases of F13–F18; meal-plan cases P1–P6 (with F6 stubbed to the listed carbs); F12 lifecycle and deviation re-plans; F5 supersede rules; F7 suggestion and warning; F10 detectors on the round-1 fixtures plus the Oct 13–15 data (export from the artifact).
 - **E2E:** use the `prediction-e2e-tests` skill for the advisor and score endpoints.
 - **Golden:** the round-1 golden test keeps passing; `node specs/twin-port/twin-reference.js --check` prints `OK`.
 
@@ -515,5 +615,11 @@ Tolerance: units exact, times ±5 min, expected ranges should overlap the engine
 9. F8 parameter versions
 10. F9 journal
 11. F10 report
+12. F13 cone refit job (band already served)
+13. F14 proactive checks (needs F5)
+14. F15 stacking guard (needs F3)
+15. F16 exercise planner
+16. F17 diet summary
+17. F18 miss detection
 
 Commit after each feature, with tests green.
