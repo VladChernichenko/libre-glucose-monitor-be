@@ -3,7 +3,9 @@ package che.glucosemonitorbe.service;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreaker;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerException;
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
+import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.*;
+import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
 import che.glucosemonitorbe.service.libre.LibreLinkUpResponseParser;
@@ -21,6 +23,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Orchestrates LibreLinkUp authentication and data retrieval (auth, connections, glucose graph,
@@ -45,18 +48,23 @@ public class LibreLinkUpService {
     private final LibreLinkUpSessionStore sessionStore;
     private final LibreLinkUpRegionResolver regionResolver;
     private final LibreLinkUpResponseParser responseParser;
+    /** Stored LibreLinkUp logins, for silently logging in again when the in-memory session is gone. */
+    private final UserDataSourceConfigRepository configRepository;
+    private final ConcurrentHashMap<UUID, Object> reloginLocks = new ConcurrentHashMap<>();
 
     public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager,
                               LibreLinkUpClient client,
                               LibreLinkUpSessionStore sessionStore,
                               LibreLinkUpRegionResolver regionResolver,
-                              LibreLinkUpResponseParser responseParser) {
+                              LibreLinkUpResponseParser responseParser,
+                              UserDataSourceConfigRepository configRepository) {
         this.objectMapper = new ObjectMapper();
         this.circuitBreakerManager = circuitBreakerManager;
         this.client = client;
         this.sessionStore = sessionStore;
         this.regionResolver = regionResolver;
         this.responseParser = responseParser;
+        this.configRepository = configRepository;
     }
 
     /** Resolved base URL for userId (falls back to the configured default). */
@@ -234,7 +242,7 @@ public class LibreLinkUpService {
      * BE-1: per-user token/baseUrl. BE-2: unwraps the {"data":[...]} envelope.
      */
     public List<LibreConnection> getConnections(UUID userId) throws Exception {
-        requireAuthenticated(userId);
+        ensureAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-connections:" + userId);
 
@@ -243,7 +251,7 @@ public class LibreLinkUpService {
                 try {
                     String url = baseUrl + "/llu/connections";
                     logger.info("Fetching LibreLinkUp connections from {}", url);
-                    JsonNode jsonResponse = client.authenticatedGet(userId, url);
+                    JsonNode jsonResponse = authenticatedGet(userId, url);
                     throwIfApiError(jsonResponse, "LibreLinkUp connections error: ");
 
                     List<LibreConnection> connections = responseParser.toConnections(jsonResponse);
@@ -267,7 +275,7 @@ public class LibreLinkUpService {
      * "no new readings".
      */
     public LibreGlucoseData getGlucoseData(String patientId, int days, UUID userId) throws Exception {
-        requireAuthenticated(userId);
+        ensureAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-data:" + userId);
 
@@ -276,7 +284,7 @@ public class LibreLinkUpService {
                 try {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
                     logger.info("Fetching LibreLinkUp glucose data for patient {} from {}", patientId, url);
-                    JsonNode jsonResponse = client.authenticatedGet(userId, url);
+                    JsonNode jsonResponse = authenticatedGet(userId, url);
                     throwIfApiError(jsonResponse, "LibreLinkUp glucose data error: ");
 
                     LibreGlucoseData glucoseData = responseParser.toGlucoseData(jsonResponse, patientId);
@@ -335,7 +343,7 @@ public class LibreLinkUpService {
      * Returns null-safe sensor info when no active sensor is present.
      */
     public LibreSensorInfo getSensorInfo(String patientId, UUID userId) throws Exception {
-        requireAuthenticated(userId);
+        ensureAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
         CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-sensor-info:" + userId);
 
@@ -344,7 +352,7 @@ public class LibreLinkUpService {
                 try {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
                     logger.info("Fetching sensor info for patient {} from {}", patientId, url);
-                    JsonNode json = client.authenticatedGet(userId, url);
+                    JsonNode json = authenticatedGet(userId, url);
                     return responseParser.toSensorInfo(json, patientId);
                 } catch (Exception e) {
                     logger.error("Failed to fetch sensor info for patient {}: {}", patientId, e.getMessage());
@@ -368,10 +376,63 @@ public class LibreLinkUpService {
         sessionStore.clear(userId);
     }
 
-    private void requireAuthenticated(UUID userId) {
-        if (sessionStore.token(userId) == null) {
-            throw new RuntimeException("Not authenticated with LibreLinkUp");
+    /**
+     * Make sure the user has a LibreLinkUp session, logging in again from the stored credentials when
+     * the in-memory token is gone (backend restart, or evicted after LibreLinkUp rejected it). Silent:
+     * while working credentials are stored, callers never see "not authenticated". The per-user lock
+     * makes a burst of requests after a restart log in once, not once each (LLU rate-limits logins).
+     */
+    private void ensureAuthenticated(UUID userId) throws Exception {
+        if (sessionStore.token(userId) != null) {
+            return;
         }
+        synchronized (reloginLocks.computeIfAbsent(userId, k -> new Object())) {
+            if (sessionStore.token(userId) != null) {
+                return;
+            }
+            LibreAuthRequest stored = storedCredentials(userId);
+            if (stored == null) {
+                throw new RuntimeException("Not authenticated with LibreLinkUp");
+            }
+            logger.info("LibreLinkUp session missing for user {} - logging in again from stored credentials", userId);
+            authenticate(stored, userId);
+        }
+    }
+
+    /**
+     * Authenticated GET with one silent re-login when LibreLinkUp rejects the token (expired/revoked):
+     * drop the session, log in again from the stored credentials, retry once.
+     */
+    private JsonNode authenticatedGet(UUID userId, String url) throws Exception {
+        try {
+            return client.authenticatedGet(userId, url);
+        } catch (HttpClientErrorException.Unauthorized e) {
+            if (storedCredentials(userId) == null) {
+                throw e;
+            }
+            logger.info("LibreLinkUp rejected the token for user {} - logging in again and retrying", userId);
+            sessionStore.clear(userId);
+            ensureAuthenticated(userId);
+            return client.authenticatedGet(userId, url);
+        }
+    }
+
+    /** The user's stored LibreLinkUp login, or null when none is configured. */
+    private LibreAuthRequest storedCredentials(UUID userId) {
+        if (userId == null) {
+            return null;
+        }
+        return configRepository
+                .findByUserIdAndDataSourceAndIsActiveTrue(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)
+                .filter(c -> c.getLibreEmail() != null && c.getLibrePassword() != null)
+                .map(c -> {
+                    LibreAuthRequest request = new LibreAuthRequest();
+                    request.setEmail(c.getLibreEmail());
+                    request.setPassword(c.getLibrePassword());
+                    request.setLocale(c.getLibreLocale());
+                    return request;
+                })
+                .orElse(null);
     }
 
     /** Throw a RuntimeException prefixed with {@code prefix} if the response carries an {@code {"error":...}} node. */

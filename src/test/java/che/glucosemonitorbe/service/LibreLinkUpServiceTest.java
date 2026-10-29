@@ -2,6 +2,7 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.dto.LibreConnection;
+import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
 import che.glucosemonitorbe.service.libre.LibreLinkUpResponseParser;
@@ -38,9 +39,11 @@ class LibreLinkUpServiceTest {
     private LibreLinkUpSessionStore sessionStore;
     private LibreLinkUpResponseParser responseParser;
     private LibreLinkUpService service;
+    private UserDataSourceConfigRepository configRepository;
 
     @BeforeEach
     void setUp() {
+        configRepository = mock(UserDataSourceConfigRepository.class);
         CircuitBreakerManager cbm = new CircuitBreakerManager();
         sessionStore = new LibreLinkUpSessionStore();
         responseParser = new LibreLinkUpResponseParser();
@@ -50,7 +53,8 @@ class LibreLinkUpServiceTest {
                 client,
                 sessionStore,
                 new LibreLinkUpRegionResolver(),
-                responseParser);
+                responseParser,
+                configRepository);
     }
 
     // -- BE-1: per-user token isolation ----------------------------------------
@@ -167,7 +171,7 @@ class LibreLinkUpServiceTest {
 
         LibreLinkUpService svc = new LibreLinkUpService(
                 new CircuitBreakerManager(), mockClient, sessionStore,
-                new LibreLinkUpRegionResolver(), responseParser);
+                new LibreLinkUpRegionResolver(), responseParser, configRepository);
 
         List<LibreConnection> connections = svc.getConnections(userId);
 
