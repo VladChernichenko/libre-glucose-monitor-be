@@ -156,8 +156,20 @@ public class LibreLinkUpController {
             case IN_PROGRESS                          -> HttpStatus.ACCEPTED;
             case SKIPPED_NO_CREDS                     -> HttpStatus.CONFLICT;
             case ERROR                                -> HttpStatus.BAD_GATEWAY;
+            case UNAVAILABLE                          -> HttpStatus.SERVICE_UNAVAILABLE;
         };
         return ResponseEntity.status(status).body(java.util.Map.of("outcome", outcome.name()));
+    }
+
+    /**
+     * Whether LibreLinkUp is answering for the authenticated user (the upstream circuit breaker).
+     * Cheap: reads in-memory state only, never calls LibreLinkUp, so the app can poll it on every refresh.
+     */
+    @Operation(summary = "LibreLinkUp availability for the current user (circuit breaker state)")
+    @ApiResponse(responseCode = "200", description = "Upstream status returned")
+    @GetMapping("/status")
+    public ResponseEntity<LibreUpstreamStatusDTO> upstreamStatus(Authentication authentication) {
+        return ResponseEntity.ok(libreLinkUpSyncService.upstreamStatus(userId(authentication)));
     }
 
     /**

@@ -1,9 +1,14 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.circuitbreaker.CircuitBreaker;
+import che.glucosemonitorbe.circuitbreaker.CircuitBreakerException;
+import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.dto.LibreAuthRequest;
+import che.glucosemonitorbe.dto.LibreGlucoseData;
+import che.glucosemonitorbe.dto.LibreUpstreamStatusDTO;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.libre.LibreLinkUpTrend;
@@ -63,13 +68,23 @@ public class LibreLinkUpSyncService {
         /** Another sync for this user is already running and could not be coalesced in time. */
         IN_PROGRESS,
         /** Sync failed (auth/network/decrypt error). */
-        ERROR
+        ERROR,
+        /** LibreLinkUp failed repeatedly; the upstream circuit is open and the call was not attempted. */
+        UNAVAILABLE
     }
+
+    /** Consecutive failed LibreLinkUp fetches that open the upstream circuit. */
+    static final int UPSTREAM_FAILURE_THRESHOLD = 3;
+    /** How long an open upstream circuit rejects calls before allowing one reconnect attempt. */
+    static final long UPSTREAM_OPEN_MS = 120_000;
+    /** Trial calls allowed while HALF_OPEN; one success closes the circuit. */
+    static final int UPSTREAM_HALF_OPEN_CALLS = 1;
 
     private final UserDataSourceConfigRepository configRepository;
     private final LibreLinkUpService libreLinkUpService;
     private final CgmReadingService cgmReadingService;
     private final UserGlucoseSyncStateService syncStateService;
+    private final CircuitBreakerManager circuitBreakerManager;
 
     @Value("${app.libre-sync.fast-interval-minutes:5}")
     private long fastIntervalMinutes;
@@ -93,6 +108,28 @@ public class LibreLinkUpSyncService {
 
     private ReentrantLock lockFor(UUID userId) {
         return userLocks.computeIfAbsent(userId, k -> new ReentrantLock());
+    }
+
+    /**
+     * Per-user circuit around the whole LibreLinkUp fetch (login + graph). CLOSED: calls pass;
+     * {@link #UPSTREAM_FAILURE_THRESHOLD} failures in a row -> OPEN: calls are rejected at once for
+     * {@link #UPSTREAM_OPEN_MS}; then HALF_OPEN: the next sync (scheduler or on-demand) is the
+     * reconnect attempt - success closes the circuit, failure re-opens it.
+     */
+    private CircuitBreaker upstreamBreaker(UUID userId) {
+        return circuitBreakerManager.getCircuitBreaker("libre-upstream:" + userId,
+                UPSTREAM_FAILURE_THRESHOLD, UPSTREAM_OPEN_MS, UPSTREAM_HALF_OPEN_CALLS);
+    }
+
+    /** Whether LibreLinkUp is answering for this user, read from the upstream circuit. */
+    public LibreUpstreamStatusDTO upstreamStatus(UUID userId) {
+        CircuitBreaker breaker = upstreamBreaker(userId);
+        CircuitBreaker.State state = breaker.getState();
+        boolean available = state == CircuitBreaker.State.CLOSED && breaker.getFailureCount() == 0;
+        LocalDateTime retryAt = breaker.getRetryAt();
+        Long retryIn = retryAt == null ? null
+                : Math.max(0, Duration.between(LocalDateTime.now(), retryAt).getSeconds());
+        return new LibreUpstreamStatusDTO(available, state.name(), retryIn);
     }
 
     /**
@@ -164,17 +201,13 @@ public class LibreLinkUpSyncService {
                 return Outcome.SKIPPED_NO_CREDS;
             }
 
-            // Ensure authenticated - re-authenticate if the in-memory token is missing (e.g. restart).
-            if (!libreLinkUpService.isAuthenticated(userId)) {
-                log.info("LibreLinkUp sync user={} re-authenticating (no in-memory token)", userId);
-                LibreAuthRequest authReq = new LibreAuthRequest();
-                authReq.setEmail(cfg.getLibreEmail());
-                authReq.setPassword(cfg.getLibrePassword());
-                authReq.setLocale(cfg.getLibreLocale());
-                libreLinkUpService.authenticate(authReq, userId);
+            LibreGlucoseData glucoseData;
+            try {
+                glucoseData = upstreamBreaker(userId).execute(() -> fetchFromLibre(userId, cfg));
+            } catch (CircuitBreakerException open) {
+                log.info("LibreLinkUp sync user={} skipped: upstream circuit is open", userId);
+                return Outcome.UNAVAILABLE;
             }
-
-            var glucoseData = libreLinkUpService.getGlucoseData(cfg.getLibrePatientId(), 1, userId);
             if (glucoseData == null || glucoseData.getData() == null || glucoseData.getData().isEmpty()) {
                 syncStateService.markNoChange(userId, now, now.plusMinutes(slowIntervalMinutes));
                 log.info("LibreLinkUp sync user={} no readings returned", userId);
@@ -232,6 +265,26 @@ public class LibreLinkUpSyncService {
             syncStateService.markError(userId, now);
             log.warn("LibreLinkUp sync failed for user {}: {}", userId, e.getMessage());
             return Outcome.ERROR;
+        }
+    }
+
+    /** The LibreLinkUp calls themselves: re-authenticate if needed, then fetch the graph. */
+    private LibreGlucoseData fetchFromLibre(UUID userId, UserDataSourceConfig cfg) {
+        try {
+            // Ensure authenticated - re-authenticate if the in-memory token is missing (e.g. restart).
+            if (!libreLinkUpService.isAuthenticated(userId)) {
+                log.info("LibreLinkUp sync user={} re-authenticating (no in-memory token)", userId);
+                LibreAuthRequest authReq = new LibreAuthRequest();
+                authReq.setEmail(cfg.getLibreEmail());
+                authReq.setPassword(cfg.getLibrePassword());
+                authReq.setLocale(cfg.getLibreLocale());
+                libreLinkUpService.authenticate(authReq, userId);
+            }
+            return libreLinkUpService.getGlucoseData(cfg.getLibrePatientId(), 1, userId);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e.getMessage(), e);
         }
     }
 

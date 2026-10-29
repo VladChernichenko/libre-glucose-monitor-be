@@ -261,14 +261,18 @@ public class LibreLinkUpService {
         );
     }
 
-    /** Get glucose data for a patient. BE-1: per-user credentials. */
+    /**
+     * Get glucose data for a patient. BE-1: per-user credentials. Failures (and an open circuit) are
+     * thrown, never answered with empty data, so callers can tell "LibreLinkUp is down" from
+     * "no new readings".
+     */
     public LibreGlucoseData getGlucoseData(String patientId, int days, UUID userId) throws Exception {
         requireAuthenticated(userId);
         String baseUrl = baseUrlFor(userId);
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-data:" + userId);
 
-        return circuitBreaker.executeWithFallback(
-            () -> {
+        try {
+            return circuitBreaker.execute(() -> {
                 try {
                     String url = baseUrl + "/llu/connections/" + patientId + "/graph";
                     logger.info("Fetching LibreLinkUp glucose data for patient {} from {}", patientId, url);
@@ -282,18 +286,11 @@ public class LibreLinkUpService {
                     logger.error("Failed to fetch LibreLinkUp glucose data for patient {}: {}", patientId, e.getMessage());
                     throw new RuntimeException("Failed to fetch LibreLinkUp glucose data: " + e.getMessage());
                 }
-            },
-            () -> {
-                logger.warn("LibreLinkUp glucose data circuit breaker is OPEN - returning empty data");
-                return new LibreGlucoseData(
-                    patientId,
-                    new ArrayList<>(),
-                    Instant.now().minusSeconds(12 * 60 * 60).toString(),
-                    Instant.now().toString(),
-                    "mmol/L"
-                );
-            }
-        );
+            });
+        } catch (CircuitBreakerException e) {
+            logger.warn("LibreLinkUp glucose data circuit breaker is OPEN");
+            throw new RuntimeException("LibreLinkUp glucose data is temporarily unavailable after repeated failures.", e);
+        }
     }
 
     /** Most recent reading for a patient. BE-1: per-user credentials. */

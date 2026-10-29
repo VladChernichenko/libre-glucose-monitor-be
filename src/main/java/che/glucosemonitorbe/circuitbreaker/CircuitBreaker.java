@@ -160,6 +160,17 @@ public class CircuitBreaker {
     }
     
     /**
+     * When an OPEN circuit will let the next trial call through; null unless OPEN.
+     */
+    public LocalDateTime getRetryAt() {
+        LocalDateTime lastFailure = lastFailureTime.get();
+        if (state.get() != State.OPEN || lastFailure == null) {
+            return null;
+        }
+        return lastFailure.plus(timeoutDurationMs, ChronoUnit.MILLIS);
+    }
+
+    /**
      * Get current failure count
      */
     public int getFailureCount() {

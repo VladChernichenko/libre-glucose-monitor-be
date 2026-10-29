@@ -14,7 +14,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Date;
@@ -39,6 +41,7 @@ class LibreLinkUpSyncServiceCgmTagTest {
     @Mock private LibreLinkUpService libreLinkUpService;
     @Mock private CgmReadingService cgmReadingService;
     @Mock private UserGlucoseSyncStateService syncStateService;
+    @Spy private CircuitBreakerManager circuitBreakerManager = new CircuitBreakerManager();
 
     @InjectMocks private LibreLinkUpSyncService sut;
 
