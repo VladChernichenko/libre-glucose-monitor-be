@@ -279,4 +279,64 @@ class AssistantServiceTest {
                 () -> service.undo(UUID.randomUUID(), userMsg.getId()));
         verify(writer, never()).undo(any(), any());
     }
+
+    @Test
+    void failedQuestionPathPersistsFailedReplyAndEmitsError() {
+        AnalysisContext ctx = AnalysisContext.builder().notes(List.of()).build();
+        when(contextAggregator.buildContext(eq(user), anyInt())).thenReturn(ctx);
+        when(llm.streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any()))
+                .thenAnswer(i -> {
+                    Consumer<String> c = i.getArgument(5);
+                    c.accept("Partial ");
+                    throw new IllegalStateException("provider exploded");
+                });
+
+        service.handle(user, text("Why was I high?"), sink);
+
+        assertEquals(2, saved.size());
+        ChatMessage reply = saved.get(1);
+        assertEquals(ChatMessage.Role.ASSISTANT, reply.getRole());
+        assertEquals(AssistantService.INTENT_QUESTION_FAILED, reply.getIntent());
+        assertEquals("Partial ", reply.getText());
+        assertInstanceOf(AssistantEvent.Token.class, events.get(0));
+        assertInstanceOf(AssistantEvent.Error.class, events.get(events.size() - 1));
+        assertTrue(events.stream().noneMatch(e -> e instanceof AssistantEvent.Done));
+    }
+
+    @Test
+    void failedContextBuildPersistsFailureNote() {
+        when(contextAggregator.buildContext(eq(user), anyInt())).thenThrow(new RuntimeException("db down"));
+
+        service.handle(user, text("Why was I high?"), sink);
+
+        ChatMessage reply = saved.get(1);
+        assertEquals(AssistantService.INTENT_QUESTION_FAILED, reply.getIntent());
+        assertFalse(reply.getText().isBlank());
+        assertEquals(List.of(AssistantEvent.Error.class), events.stream().map(Object::getClass).toList());
+    }
+
+    @Test
+    void slowForecastDoesNotHoldBackLogged() {
+        when(writer.write(eq(user), any(), any())).thenReturn(
+                new AssistantNoteWriter.WriteResult(List.of(UUID.randomUUID()), null));
+        when(freshness.freshReading(eq(user), any(Instant.class))).thenReturn(Optional.of(
+                new che.glucosemonitorbe.assistant.common.CgmReadingDTO(7.0, NOW, null, null)));
+        che.glucosemonitorbe.domain.User u = new che.glucosemonitorbe.domain.User();
+        u.setUsername("sergusson");
+        when(userService.getUserById(user)).thenReturn(u);
+        when(calculations.calculateGlucoseData(any())).thenAnswer(i -> {
+            Thread.sleep(3000);
+            return che.glucosemonitorbe.dto.GlucoseCalculationsResponse.builder()
+                    .predictionPath(List.of(point(NOW.plusHours(1), 4.0))).build();
+        });
+
+        long start = System.nanoTime();
+        service.handle(user, text("5u 50g"), sink);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        AssistantEvent.Logged logged = assertInstanceOf(AssistantEvent.Logged.class, events.get(0));
+        assertNull(logged.forecastMin());
+        assertTrue(elapsedMs < AssistantService.FORECAST_BUDGET.toMillis() + 700,
+                "Logged took " + elapsedMs + " ms");
+    }
 }

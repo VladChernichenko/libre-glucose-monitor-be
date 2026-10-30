@@ -19,12 +19,19 @@ import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
@@ -43,11 +50,24 @@ public class AssistantService {
     public static final String INTENT_QUICK_LOG = "quick_log";
     public static final String INTENT_QUICK_LOG_REJECTED = "quick_log_rejected";
     public static final String INTENT_QUESTION = "question";
+    public static final String INTENT_QUESTION_FAILED = "question_failed";
 
     static final int RECENT_TURNS = 10;
     private static final int FORECAST_HOURS = 4;
     private static final Pattern CYRILLIC = Pattern.compile("\\p{IsCyrillic}");
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
+    /** Max time the Logged event may wait for forecastMin before it is sent with null. */
+    static final Duration FORECAST_BUDGET = Duration.ofMillis(300);
+    /**
+     * Bounded pool for the forecast lookup. A lookup that overruns the budget keeps running here
+     * (its result is discarded), so the pool and queue are small and saturation means "skip".
+     */
+    private static final ExecutorService FORECAST_EXECUTOR = new ThreadPoolExecutor(
+            2, 2, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(8), r -> {
+                Thread t = new Thread(r, "assistant-forecast");
+                t.setDaemon(true);
+                return t;
+            });
 
     private final QuickLogParser quickLogParser;
     private final AssistantNoteWriter noteWriter;
@@ -58,6 +78,8 @@ public class AssistantService {
     private final CgmFreshnessService cgmFreshnessService;
     private final UserService userService;
     private final ObjectMapper objectMapper;
+    /** Overridable in tests. */
+    Duration forecastBudget = FORECAST_BUDGET;
 
     /** Result of an undo: {@code undone} is false when there was nothing (left) to undo. */
     public record UndoResult(UUID messageId, List<UUID> noteIds, boolean undone) {}
@@ -118,15 +140,33 @@ public class AssistantService {
 
     private void question(UUID userId, ChatMessage userMessage, IncomingMessage msg, String language,
                           Consumer<AssistantEvent> sink) {
-        List<AiAnalysisRequest.AiChatTurnDto> turns =
-                history.recentTurns(userId, userMessage.getCreatedAt(), RECENT_TURNS);
-        String question = msg.hasText() ? msg.text().trim() : "(The user sent a photo without text.)";
         long start = System.currentTimeMillis();
-        LlmGatewayService.GatewayResult result = aiInsightService.streamAssistantReply(
-                userId, question, turns, language, token -> sink.accept(new AssistantEvent.Token(token)));
-        long latency = result.getLatencyMs() > 0 ? result.getLatencyMs() : System.currentTimeMillis() - start;
+        StringBuilder seen = new StringBuilder();
         ObjectNode payload = history.newPayload().put("language", language);
-        ChatMessage reply = history.appendAssistant(userMessage, result.getRawOutput(), INTENT_QUESTION, payload,
+        LlmGatewayService.GatewayResult result;
+        try {
+            List<AiAnalysisRequest.AiChatTurnDto> turns =
+                    history.recentTurns(userId, userMessage.getCreatedAt(), RECENT_TURNS);
+            String question = msg.hasText() ? msg.text().trim() : "(The user sent a photo without text.)";
+            result = aiInsightService.streamAssistantReply(userId, question, turns, language, token -> {
+                sink.accept(new AssistantEvent.Token(token));
+                seen.append(token); // only what actually reached the client
+            });
+        } catch (RuntimeException e) {
+            log.warn("Assistant question path failed for userId={}", userId, e);
+            String text = seen.length() > 0 ? seen.toString()
+                    : ("ru".equals(language) ? "Не удалось получить ответ." : "The reply could not be generated.");
+            ChatMessage reply = history.appendAssistant(userMessage, text, INTENT_QUESTION_FAILED, payload, null,
+                    System.currentTimeMillis() - start);
+            try {
+                sink.accept(new AssistantEvent.Error("Assistant reply failed"));
+            } catch (RuntimeException closed) {
+                log.debug("Assistant stream already closed for userId={} reply={}", userId, reply.getId());
+            }
+            return;
+        }
+        long latency = result.getLatencyMs() > 0 ? result.getLatencyMs() : System.currentTimeMillis() - start;
+        ChatMessage reply = history.appendAssistant(userMessage, seen.toString(), INTENT_QUESTION, payload,
                 result.getModelId(), latency);
         sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_QUESTION));
     }
@@ -179,30 +219,41 @@ public class AssistantService {
         Optional<CgmReadingDTO> reading = cgmFreshnessService.freshReading(userId, Instant.now());
         if (reading.isEmpty()) return null;
         try {
-            GlucoseCalculationsResponse resp = calculationsService.calculateGlucoseData(
-                    GlucoseCalculationsRequest.builder()
-                            // calculateGlucoseData resolves this field by username, not UUID.
-                            .userId(userService.getUserById(userId).getUsername())
-                            .currentGlucose(reading.get().mmol())
-                            .predictionHorizonMinutes(FORECAST_HOURS * 60)
-                            // timestamp only: no timezone, so this read never rewrites the user's zone
-                            .clientTimeInfo(ClientTimeInfo.builder().timestamp(clientNow.toString()).build())
-                            .build());
-            List<PredictionPointDTO> path = resp.getPredictionPath();
-            if (path == null) return null;
-            LocalDateTime horizon = clientNow.plusHours(FORECAST_HOURS);
-            return path.stream()
-                    .filter(p -> p.getPredictedGlucose() != null)
-                    .filter(p -> p.getTimestamp() == null || !p.getTimestamp().isAfter(horizon))
-                    .mapToDouble(PredictionPointDTO::getPredictedGlucose)
-                    .min()
-                    .stream().boxed().findFirst()
-                    .map(v -> Math.round(v * 10.0) / 10.0)
-                    .orElse(null);
-        } catch (RuntimeException e) {
-            log.warn("Assistant forecastMin unavailable for userId={}: {}", userId, e.getMessage());
+            return CompletableFuture
+                    .supplyAsync(() -> computeForecastMin(userId, clientNow, reading.get()), FORECAST_EXECUTOR)
+                    .completeOnTimeout(null, forecastBudget.toMillis(), TimeUnit.MILLISECONDS)
+                    .exceptionally(e -> {
+                        log.warn("Assistant forecastMin unavailable for userId={}: {}", userId, e.getMessage());
+                        return null;
+                    })
+                    .join();
+        } catch (RejectedExecutionException e) {
+            log.warn("Assistant forecastMin skipped for userId={}: forecast pool saturated", userId);
             return null;
         }
+    }
+
+    private Double computeForecastMin(UUID userId, LocalDateTime clientNow, CgmReadingDTO reading) {
+        GlucoseCalculationsResponse resp = calculationsService.calculateGlucoseData(
+                GlucoseCalculationsRequest.builder()
+                        // calculateGlucoseData resolves this field by username, not UUID.
+                        .userId(userService.getUserById(userId).getUsername())
+                        .currentGlucose(reading.mmol())
+                        .predictionHorizonMinutes(FORECAST_HOURS * 60)
+                        // timestamp only: no timezone, so this read never rewrites the user's zone
+                        .clientTimeInfo(ClientTimeInfo.builder().timestamp(clientNow.toString()).build())
+                        .build());
+        List<PredictionPointDTO> path = resp.getPredictionPath();
+        if (path == null) return null;
+        LocalDateTime horizon = clientNow.plusHours(FORECAST_HOURS);
+        return path.stream()
+                .filter(p -> p.getPredictedGlucose() != null)
+                .filter(p -> p.getTimestamp() == null || !p.getTimestamp().isAfter(horizon))
+                .mapToDouble(PredictionPointDTO::getPredictedGlucose)
+                .min()
+                .stream().boxed().findFirst()
+                .map(v -> Math.round(v * 10.0) / 10.0)
+                .orElse(null);
     }
 
     static String summary(QuickLogCommand cmd, LocalDateTime clientNow, double iob, Double forecastMin, String lang) {

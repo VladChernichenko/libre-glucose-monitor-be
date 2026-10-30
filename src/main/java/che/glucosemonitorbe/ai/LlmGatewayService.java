@@ -262,16 +262,18 @@ public class LlmGatewayService {
     ) {
         long start = System.currentTimeMillis();
         String prompt = buildChatPrompt(context, chunks, question, conversationTurns, language);
+        ClientSink sink = new ClientSink(tokenConsumer);
         if (qwenGatewayService.isAvailable()) {
             try {
-                return qwenGatewayService.streamMarkdown(prompt, null, tokenConsumer);
+                return qwenGatewayService.streamMarkdown(prompt, null, sink);
             } catch (Exception e) {
+                sink.rethrowIfAborted();
                 log.warn("[Qwen] chat reply failed, falling back to Ollama. reason={}", e.getMessage());
             }
         }
         if (ollamaEnabled) {
             try {
-                OllamaResponse response = streamOllamaPrompt(prompt, ollamaModel, ollamaNumCtx, tokenConsumer);
+                OllamaResponse response = streamOllamaPrompt(prompt, ollamaModel, ollamaNumCtx, sink);
                 return GatewayResult.builder()
                         .modelId("ollama:" + ollamaModel)
                         .rawOutput(response.content())
@@ -281,19 +283,48 @@ public class LlmGatewayService {
                         .latencyMs(System.currentTimeMillis() - start)
                         .build();
             } catch (Exception e) {
+                sink.rethrowIfAborted();
                 log.warn("[Ollama] chat reply failed, falling back. reason={}", e.getMessage());
             }
         }
         String fallback = "ru".equals(language)
                 ? "Ассистент сейчас недоступен. Попробуйте ещё раз через минуту."
                 : "The assistant is unavailable right now. Please try again in a minute.";
-        if (tokenConsumer != null) tokenConsumer.accept(fallback);
+        sink.accept(fallback);
         return GatewayResult.builder()
                 .modelId("rules-only")
                 .rawOutput(fallback)
                 .contextWindow(ollamaNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
+    }
+
+    /**
+     * Wraps the chat token consumer so a failure thrown BY the consumer (the client went away) is
+     * told apart from a provider failure: it is rethrown instead of triggering the next provider.
+     */
+    private static final class ClientSink implements Consumer<String> {
+        private final Consumer<String> delegate;
+        private RuntimeException abort;
+
+        ClientSink(Consumer<String> delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void accept(String token) {
+            if (delegate == null) return;
+            try {
+                delegate.accept(token);
+            } catch (RuntimeException e) {
+                abort = e;
+                throw e;
+            }
+        }
+
+        void rethrowIfAborted() {
+            if (abort != null) throw abort;
+        }
     }
 
     private String buildChatPrompt(
