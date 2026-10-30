@@ -1,7 +1,9 @@
 package che.glucosemonitorbe.assistant.advice;
 
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
@@ -41,6 +43,11 @@ public class CarbAdviceHold {
             boolean newReading = readingTime != null
                     && (h.readingTime() == null || readingTime.isAfter(h.readingTime()));
             if (!newReading) return h;
+            // A held card from before a data gap describes a forecast that no longer applies.
+            if (h.readingTime() != null
+                    && Duration.between(h.readingTime(), readingTime).compareTo(CgmFreshnessService.MAX_AGE) > 0) {
+                return null;
+            }
             int streak = h.clearStreak() + 1;
             return streak >= CLEARING_READINGS ? null : new Held(h.advice(), readingTime, streak);
         });

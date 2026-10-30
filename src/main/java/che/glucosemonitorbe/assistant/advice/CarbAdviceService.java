@@ -94,7 +94,11 @@ public class CarbAdviceService {
                                          double trendMmolPerMin, List<PredictionPointDTO> forecast) {
         // Freshness is about the real clock, not the client's wall time.
         Optional<CgmReadingDTO> reading = cgmFreshness.freshReading(userId, clock.instant());
-        if (reading.isEmpty()) return Optional.empty();
+        if (reading.isEmpty()) {
+            // A gap in the data ends the hold: the held card's forecast and recheck time are stale.
+            hold.clear(userId);
+            return Optional.empty();
+        }
 
         if (Math.min(currentGlucose, reading.get().mmol()) < HypoThresholds.HYPO_MMOL
                 || hypoEvents.findOpenEvent(userId).isPresent()) {
@@ -104,7 +108,7 @@ public class CarbAdviceService {
         }
 
         LocalDateTime readingTime = reading.get().timestamp();
-        Optional<LocalDateTime> landingSince = lastFastCarbs(userId, now);
+        Optional<CarbAdvice.Landing> landingSince = lastFastCarbs(userId, now);
 
         if (!triggered(now, trendMmolPerMin, forecast)) {
             return hold.notTriggered(userId, readingTime)
@@ -114,7 +118,7 @@ public class CarbAdviceService {
         Optional<PredictionPointDTO> low = minimum(forecast, now, TARGET_WINDOW_MINUTES);
         if (low.isEmpty()) return Optional.empty();
         CarbAdvice without = new CarbAdvice(CarbAdvice.State.TAKE_NOW, null,
-                low.get().getPredictedGlucose(), low.get().getTimestamp(), null, forecast, null, null);
+                low.get().getPredictedGlucose(), low.get().getTimestamp(), null, forecast, null, null, null);
 
         CarbAdvice advice = landingSince.isPresent()
                 ? without.stillLanding(landingSince.get())
@@ -141,13 +145,16 @@ public class CarbAdviceService {
                 .min(Comparator.comparingDouble(PredictionPointDTO::getPredictedGlucose));
     }
 
-    /** When fast carbs (a hypo_treatment note) were last logged within the landing window, if at all. */
-    private Optional<LocalDateTime> lastFastCarbs(UUID userId, LocalDateTime now) {
-        return notes.findByUserIdAndTimestampBetween(userId, now.minusMinutes(LANDING_MINUTES), now).stream()
+    /** Fast carbs (hypo_treatment notes) logged within the landing window: newest time and total grams. */
+    private Optional<CarbAdvice.Landing> lastFastCarbs(UUID userId, LocalDateTime now) {
+        List<Note> fast = notes.findByUserIdAndTimestampBetween(userId, now.minusMinutes(LANDING_MINUTES), now).stream()
                 .filter(Note::isHypoTreatment)
-                .map(Note::getTimestamp)
-                .filter(Objects::nonNull)
-                .max(Comparator.naturalOrder());
+                .filter(n -> n.getTimestamp() != null)
+                .toList();
+        if (fast.isEmpty()) return Optional.empty();
+        LocalDateTime newest = fast.stream().map(Note::getTimestamp).max(Comparator.naturalOrder()).orElseThrow();
+        double grams = fast.stream().map(Note::getCarbs).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum();
+        return Optional.of(new CarbAdvice.Landing(newest, (int) Math.round(grams)));
     }
 
     private CarbAdvice withGrams(UUID userId, LocalDateTime now, double currentGlucose, double trend,
@@ -160,12 +167,12 @@ public class CarbAdviceService {
             min = minimum(curve, now, TARGET_WINDOW_MINUTES).map(PredictionPointDTO::getPredictedGlucose).orElse(null);
             if (min != null && min >= TARGET_MIN) {
                 return new CarbAdvice(CarbAdvice.State.TAKE_NOW, grams, without.minWithout(), without.minWithoutAt(),
-                        min, without.curveWithout(), curve, now.plusMinutes(RECHECK_MINUTES));
+                        min, without.curveWithout(), curve, now.plusMinutes(RECHECK_MINUTES), null);
             }
         }
         // Even 40 g does not keep the forecast at the target: advise 40 g and recheck sooner.
         return new CarbAdvice(CarbAdvice.State.TAKE_NOW, GRAMS_MAX, without.minWithout(), without.minWithoutAt(),
-                min, without.curveWithout(), curve, now.plusMinutes(RECHECK_AT_CAP_MINUTES));
+                min, without.curveWithout(), curve, now.plusMinutes(RECHECK_AT_CAP_MINUTES), null);
     }
 
     /**

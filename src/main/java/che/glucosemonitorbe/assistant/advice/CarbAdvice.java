@@ -19,7 +19,9 @@ import java.util.List;
  * @param curveWithout the dashboard forecast (no new carbs)
  * @param curveWith    the forecast with {@code grams} taken now; null when {@link State#STILL_LANDING}
  * @param recheckAt    when to look again: now + 15 min, now + 10 min when even 40 g is not enough,
- *                     or the logged fast carbs' time + 15 min when {@link State#STILL_LANDING}
+ *                     or the newest logged fast carbs' time + 15 min when {@link State#STILL_LANDING}
+ * @param landingGrams fast carbs [g] logged in the last 15 min (sum of {@code hypo_treatment} notes)
+ *                     when {@link State#STILL_LANDING}; null when {@link State#TAKE_NOW}
  */
 public record CarbAdvice(
         State state,
@@ -29,13 +31,18 @@ public record CarbAdvice(
         Double minWith,
         List<PredictionPointDTO> curveWithout,
         List<PredictionPointDTO> curveWith,
-        LocalDateTime recheckAt) {
+        LocalDateTime recheckAt,
+        Integer landingGrams) {
 
     public enum State { TAKE_NOW, STILL_LANDING }
 
-    /** This advice as "still landing" after fast carbs logged at {@code tookAt}: no grams, no with-curve. */
-    CarbAdvice stillLanding(LocalDateTime tookAt) {
+    /** Fast carbs logged within the landing window: newest note time and total grams. */
+    record Landing(LocalDateTime newestAt, int grams) {}
+
+    /** This advice as "still landing" after {@code landing}: no grams, no with-curve. */
+    CarbAdvice stillLanding(Landing landing) {
         return new CarbAdvice(State.STILL_LANDING, null, minWithout, minWithoutAt, null,
-                curveWithout, null, tookAt.plusMinutes(CarbAdviceService.LANDING_MINUTES));
+                curveWithout, null, landing.newestAt().plusMinutes(CarbAdviceService.LANDING_MINUTES),
+                landing.grams());
     }
 }

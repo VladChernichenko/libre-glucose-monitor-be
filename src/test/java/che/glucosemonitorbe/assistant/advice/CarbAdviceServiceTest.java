@@ -179,12 +179,14 @@ class CarbAdviceServiceTest {
     void stillLandingWithin15MinOfFastCarbs() {
         LocalDateTime tookAt = NOW.minusMinutes(10);
         when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any()))
-                .thenReturn(List.of(fastCarbsAt(tookAt, 15.0)));
+                .thenReturn(List.of(fastCarbsAt(NOW.minusMinutes(14), 10.0), fastCarbsAt(tookAt, 15.0)));
 
         CarbAdvice advice = service.evaluate(USER, NOW, 6.0, 0.0, vShape(6.0, 4.3, 45)).orElseThrow();
 
         assertThat(advice.state()).isEqualTo(CarbAdvice.State.STILL_LANDING);
         assertThat(advice.grams()).isNull();
+        // "the 25 g is still landing": all fast carbs in the window; recheck from the newest.
+        assertThat(advice.landingGrams()).isEqualTo(25);
         assertThat(advice.minWith()).isNull();
         assertThat(advice.curveWith()).isNull();
         assertThat(advice.recheckAt()).isEqualTo(tookAt.plusMinutes(15));
@@ -278,7 +280,35 @@ class CarbAdviceServiceTest {
         CarbAdvice held = service.evaluate(USER, NOW.plusMinutes(5), 6.0, 0.0, vShape(6.0, 5.8, 45)).orElseThrow();
         assertThat(held.state()).isEqualTo(CarbAdvice.State.STILL_LANDING);
         assertThat(held.grams()).isNull();
+        assertThat(held.landingGrams()).isEqualTo(15);
         assertThat(held.recheckAt()).isEqualTo(tookAt.plusMinutes(15));
+    }
+
+    @Test
+    void staleCgmEndsTheHold() {
+        service.evaluate(USER, NOW, 6.0, 0.0, vShape(6.0, 4.3, 45));
+
+        when(cgm.freshReading(eq(USER), any())).thenReturn(Optional.empty());
+        assertThat(service.evaluate(USER, NOW.plusMinutes(30), 6.0, 0.0, vShape(6.0, 5.8, 45))).isEmpty();
+
+        // Data back, first fresh reading does not trigger: the old card must not come back.
+        freshReadingAt(READING_0.plusMinutes(60), 6.0);
+        assertThat(service.evaluate(USER, NOW.plusMinutes(60), 6.0, 0.0, vShape(6.0, 5.8, 45))).isEmpty();
+    }
+
+    @Test
+    void heldAdviceFromBeforeAReadingGapIsDropped() {
+        // No stale call in between (e.g. no dashboard poll during the gap), but the next stored
+        // reading is more than 15 min after the one the advice was held on.
+        service.evaluate(USER, NOW, 6.0, 0.0, vShape(6.0, 4.3, 45));
+
+        freshReadingAt(READING_0.plusMinutes(16), 6.0);
+        assertThat(service.evaluate(USER, NOW.plusMinutes(16), 6.0, 0.0, vShape(6.0, 5.8, 45))).isEmpty();
+    }
+
+    @Test
+    void takeNowCarriesNoLandingGrams() {
+        assertThat(service.evaluate(USER, NOW, 6.0, 0.0, vShape(6.0, 4.3, 45)).orElseThrow().landingGrams()).isNull();
     }
 
     // -- the calculations hook ---------------------------------------------------------------
@@ -296,7 +326,7 @@ class CarbAdviceServiceTest {
                 .calculatedAt(NOW).predictionPath(forecast).build();
         doReturn(forecastOnly).when(calc).calculateGlucoseData(any());
         CarbAdvice shown = new CarbAdvice(CarbAdvice.State.TAKE_NOW, 15, 4.3, NOW.plusMinutes(45), 5.3,
-                forecast, forecast, NOW.plusMinutes(15));
+                forecast, forecast, NOW.plusMinutes(15), null);
         when(advice.evaluate(USER, NOW, 6.0, -0.12, forecast)).thenReturn(Optional.of(shown));
 
         // What-if request (Nutrition screen, or the gram search itself): advice is never evaluated.
