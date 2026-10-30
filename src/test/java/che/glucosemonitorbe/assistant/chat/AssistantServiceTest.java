@@ -4,13 +4,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import che.glucosemonitorbe.ai.AiAnalysisTraceService;
 import che.glucosemonitorbe.ai.AiInsightService;
 import che.glucosemonitorbe.ai.AnalysisContext;
 import che.glucosemonitorbe.ai.ContextAggregatorService;
 import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.ai.RagRetrieverService;
-import che.glucosemonitorbe.ai.SafetyAndScoringService;
 import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
 import che.glucosemonitorbe.assistant.quicklog.AssistantNoteWriter;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogParser;
@@ -45,7 +43,7 @@ class AssistantServiceTest {
     private final ContextAggregatorService contextAggregator = mock(ContextAggregatorService.class);
     private final RagRetrieverService rag = mock(RagRetrieverService.class);
     private final AiInsightService aiInsightService = new AiInsightService(
-            contextAggregator, rag, llm, mock(SafetyAndScoringService.class), mock(AiAnalysisTraceService.class));
+            contextAggregator, rag, llm);
 
     private final AssistantNoteWriter writer = mock(AssistantNoteWriter.class);
     private final GlucoseCalculationsService calculations = mock(GlucoseCalculationsService.class);

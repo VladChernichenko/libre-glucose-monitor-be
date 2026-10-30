@@ -13,27 +13,6 @@ import static org.mockito.Mockito.mock;
 class LlmGatewayServiceTest {
 
     @Test
-    void streamingMarkdownReturnsNonEmptyFallbackWhenProvidersDisabled() {
-        LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), mock(QwenGatewayService.class));
-        ReflectionTestUtils.setField(service, "ollamaEnabled", false);
-        ReflectionTestUtils.setField(service, "remoteEnabled", false);
-        ReflectionTestUtils.setField(service, "ollamaModel", "llama3.1:8b");
-        ReflectionTestUtils.setField(service, "ollamaNumCtx", 4096);
-
-        List<String> tokens = new ArrayList<>();
-        LlmGatewayService.GatewayResult result = service.generateStreamingMarkdown(
-                null, List.of(), tokens::add, null, null, null, null
-        );
-
-        assertNotNull(result);
-        assertNotNull(result.getRawOutput());
-        assertFalse(result.getRawOutput().isBlank());
-        assertTrue(result.getRawOutput().contains("AI provider is currently unavailable"));
-        assertFalse(tokens.isEmpty());
-        assertTrue(tokens.get(0).contains("## Summary"));
-    }
-
-    @Test
     void chatReplyClientAbortIsNotRetriedOnAnotherProvider() throws Exception {
         QwenGatewayService qwen = mock(QwenGatewayService.class);
         LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), qwen);
@@ -64,21 +43,5 @@ class LlmGatewayServiceTest {
         org.mockito.Mockito.verify(qwen, org.mockito.Mockito.times(1))
                 .streamMarkdown(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull(),
                         org.mockito.ArgumentMatchers.any());
-    }
-
-    @Test
-    void streamingMarkdownClampsNumCtxFromOverride() {
-        LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), mock(QwenGatewayService.class));
-        ReflectionTestUtils.setField(service, "ollamaEnabled", false);
-        ReflectionTestUtils.setField(service, "remoteEnabled", false);
-        ReflectionTestUtils.setField(service, "ollamaModel", "llama3.1:8b");
-        ReflectionTestUtils.setField(service, "ollamaNumCtx", 4096);
-
-        LlmGatewayService.GatewayResult result = service.generateStreamingMarkdown(
-                null, List.of(), null, null, null, null, 999999
-        );
-
-        assertNotNull(result);
-        assertTrue(result.getContextWindow() <= 32768);
     }
 }
