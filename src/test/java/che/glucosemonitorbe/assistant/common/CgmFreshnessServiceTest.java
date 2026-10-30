@@ -8,8 +8,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.TimeZone;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,7 +22,7 @@ import static org.mockito.Mockito.when;
 
 class CgmFreshnessServiceTest {
 
-    private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 30, 12, 0);
+    private static final Instant NOW = Instant.parse("2026-10-30T12:00:00Z");
 
     private final CgmReadingRepository readings = mock(CgmReadingRepository.class);
     private final LibreLinkUpSyncService libre = mock(LibreLinkUpSyncService.class);
@@ -33,7 +36,7 @@ class CgmFreshnessServiceTest {
     }
 
     private void newestReadingAgeMinutes(int minutes) {
-        long ts = NOW.minusMinutes(minutes).toInstant(ZoneOffset.UTC).toEpochMilli();
+        long ts = NOW.minus(Duration.ofMinutes(minutes)).toEpochMilli();
         when(readings.findFirstByUserIdOrderByDateTimestampDesc(userId)).thenReturn(Optional.of(
                 CgmReading.builder().userId(userId).sgv(126).dateTimestamp(ts).trend(4).direction("Flat").build()));
     }
@@ -45,7 +48,7 @@ class CgmFreshnessServiceTest {
         Optional<CgmReadingDTO> r = service.freshReading(userId, NOW);
         assertThat(r).isPresent();
         assertThat(r.get().mmol()).isEqualTo(7.0);
-        assertThat(r.get().timestamp()).isEqualTo(NOW.minusMinutes(14));
+        assertThat(r.get().timestamp()).isEqualTo(LocalDateTime.ofInstant(NOW.minus(Duration.ofMinutes(14)), ZoneOffset.UTC));
     }
 
     @Test
@@ -68,5 +71,22 @@ class CgmFreshnessServiceTest {
     void staleWhenNoReadings() {
         when(readings.findFirstByUserIdOrderByDateTimestampDesc(userId)).thenReturn(Optional.empty());
         assertThat(service.freshReading(userId, NOW)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("freshness does not depend on the JVM default time zone")
+    void freshnessIsIndependentOfJvmZone() {
+        TimeZone original = TimeZone.getDefault();
+        try {
+            for (String zone : new String[] {"Asia/Dubai", "America/Los_Angeles"}) {
+                TimeZone.setDefault(TimeZone.getTimeZone(zone));
+                newestReadingAgeMinutes(14);
+                assertThat(service.freshReading(userId, NOW)).as("14 min in " + zone).isPresent();
+                newestReadingAgeMinutes(16);
+                assertThat(service.freshReading(userId, NOW)).as("16 min in " + zone).isEmpty();
+            }
+        } finally {
+            TimeZone.setDefault(original);
+        }
     }
 }

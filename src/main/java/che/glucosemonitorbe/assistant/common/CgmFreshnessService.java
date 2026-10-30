@@ -29,15 +29,15 @@ public class CgmFreshnessService {
     private final CgmReadingRepository readingRepository;
     private final LibreLinkUpSyncService libreLinkUpSyncService;
 
-    /** {@code now} is UTC wall time (same convention as the other CGM window queries). */
-    public Optional<CgmReadingDTO> freshReading(UUID userId, LocalDateTime now) {
+    /** {@code now} is an absolute instant; the reading's epoch-ms is compared to it directly, so the JVM zone is irrelevant. */
+    public Optional<CgmReadingDTO> freshReading(UUID userId, Instant now) {
         Optional<CgmReading> newest = readingRepository.findFirstByUserIdOrderByDateTimestampDesc(userId);
         if (newest.isEmpty() || newest.get().getDateTimestamp() == null || newest.get().getSgv() == null) {
             return Optional.empty();
         }
         CgmReading r = newest.get();
         Instant readAt = Instant.ofEpochMilli(r.getDateTimestamp());
-        Duration age = Duration.between(readAt, now.toInstant(ZoneOffset.UTC));
+        Duration age = Duration.between(readAt, now);
         if (age.compareTo(MAX_AGE) > 0) {
             return Optional.empty();
         }
