@@ -37,7 +37,8 @@ class HypoEventServiceConfirmTest {
         noteRepository = mock(NoteRepository.class);
         FeatureToggleConfig config = new FeatureToggleConfig();
         config.setHypoRescueLoggingEnabled(true);
-        service = new HypoEventService(repository, noteRepository, config);
+        service = new HypoEventService(repository, noteRepository, config,
+                org.mockito.Mockito.mock(che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger.class));
         when(repository.save(any(HypoEvent.class))).thenAnswer(inv -> inv.getArgument(0));
         when(noteRepository.save(any(Note.class))).thenAnswer(inv -> {
             Note n = inv.getArgument(0);

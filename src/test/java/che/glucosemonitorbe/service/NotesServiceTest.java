@@ -49,6 +49,9 @@ class NotesServiceTest {
     @Mock
     private NotePhotoStorageService notePhotoStorageService;
 
+    @Mock
+    private che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger forecastSnapshotTrigger;
+
     @InjectMocks
     private NotesService notesService;
 

@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.NoteDto;
 import che.glucosemonitorbe.dto.NotesSummaryResponse;
@@ -28,6 +29,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Objects;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -45,6 +48,7 @@ public class NotesService {
     private final GlucoseAlertService glucoseAlertService;
     private final UserService userService;
     private final NotePhotoStorageService notePhotoStorageService;
+    private final ForecastSnapshotTrigger forecastSnapshotTrigger;
     
     /**
      * Get all notes for a user.
@@ -127,6 +131,8 @@ public class NotesService {
         log.info("Note created: id={} userId={} type={} timestamp={} carbs={} insulin={}",
                 savedNote.getId(), userId, savedNote.getType(), savedNote.getTimestamp(),
                 savedNote.getCarbs(), savedNote.getInsulin());
+        // Freeze the forecast after commit; never blocks or fails the save.
+        forecastSnapshotTrigger.noteSaved(userId, savedNote.getId());
 
         // Fire over-injection check asynchronously - does not block the response.
         // Condition: note has insulin AND we have a current glucose reading to anchor the prediction.
@@ -155,7 +161,11 @@ public class NotesService {
         if (existingNote == null) {
             return null;
         }
-        
+        LocalDateTime oldTimestamp = existingNote.getTimestamp();
+        Double oldCarbs = existingNote.getCarbs();
+        Double oldInsulin = existingNote.getInsulin();
+        String oldType = existingNote.getType();
+
         // Update fields if provided
         if (request.getTimestamp() != null) {
             existingNote.setTimestamp(request.getTimestamp());
@@ -212,6 +222,15 @@ public class NotesService {
         }
 
         Note updatedNote = noteRepository.save(existingNote);
+        boolean forecastInputsChanged = !Objects.equals(oldTimestamp, updatedNote.getTimestamp())
+                || !Objects.equals(oldCarbs, updatedNote.getCarbs())
+                || !Objects.equals(oldInsulin, updatedNote.getInsulin())
+                || !Objects.equals(oldType, updatedNote.getType());
+        if (forecastInputsChanged) {
+            // created_at is written by Hibernate on the JVM clock; convert it to an absolute instant.
+            forecastSnapshotTrigger.noteUpdated(userId, noteId, updatedNote.getCreatedAt() == null ? null
+                    : updatedNote.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant());
+        }
         return toDtoWithPhoto(updatedNote);
     }
     
@@ -233,6 +252,7 @@ public class NotesService {
             return false;
         }
         notePhotoStorageService.delete(note.getPhotoKey());
+        forecastSnapshotTrigger.noteDeleted(noteId);
         return true;
     }
     

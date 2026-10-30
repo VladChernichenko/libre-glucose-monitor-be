@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.dto.HypoEventDTO;
 import che.glucosemonitorbe.entity.HypoEvent;
@@ -36,6 +37,7 @@ public class HypoEventService {
     private final HypoEventRepository repository;
     private final NoteRepository noteRepository;
     private final FeatureToggleConfig featureToggleConfig;
+    private final ForecastSnapshotTrigger forecastSnapshotTrigger;
 
     /**
      * Advance the hypo lifecycle for one user given their latest CGM reading.
@@ -322,6 +324,8 @@ public class HypoEventService {
         note.setCreatedAt(LocalDateTime.now());
         note.setUpdatedAt(LocalDateTime.now());
         Note saved = noteRepository.save(note);
+        // Rescue carbs are fast sugar: an anchor. Frozen after commit, never blocks the confirm.
+        forecastSnapshotTrigger.noteSaved(userId, saved.getId());
 
         event.setState(State.CONFIRMED);
         event.setNoteId(saved.getId());

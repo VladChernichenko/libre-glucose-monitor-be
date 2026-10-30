@@ -38,7 +38,8 @@ class GlycemicEventServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new GlycemicEventService(events, history, notes, settings, new GlycemicEventProperties(), recorder, cache);
+        service = new GlycemicEventService(events, history, notes, settings, new GlycemicEventProperties(), recorder, cache,
+                org.mockito.Mockito.mock(che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger.class));
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(events.findByLinkedEventId(any())).thenReturn(List.of());
     }

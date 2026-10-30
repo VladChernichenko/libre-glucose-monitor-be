@@ -37,7 +37,8 @@ class HypoEventServiceTest {
         noteRepository = mock(NoteRepository.class);
         config = new FeatureToggleConfig();
         config.setHypoRescueLoggingEnabled(true);
-        service = new HypoEventService(repository, noteRepository, config);
+        service = new HypoEventService(repository, noteRepository, config,
+                org.mockito.Mockito.mock(che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger.class));
         // onGlucoseReading looks up the user's open event as an id-only projection (see
         // HypoEventRepository#findIdsByUserIdAndStateOrderByDetectedAtDesc) and only re-fetches
         // the entity, under findByIdForUpdate, when it needs to act on one - see stubOpenEvent.

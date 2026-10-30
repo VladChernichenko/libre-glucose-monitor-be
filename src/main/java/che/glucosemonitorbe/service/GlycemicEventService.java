@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
 import che.glucosemonitorbe.config.GlycemicEventProperties;
 import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.ConfirmGlycemicEventRequest;
@@ -47,6 +48,7 @@ public class GlycemicEventService {
     private final GlycemicEventProperties props;
     private final GlycemicEventHistoryRecorder historyRecorder;
     private final GlycemicLearnerTrainingCache trainingCache;
+    private final ForecastSnapshotTrigger forecastSnapshotTrigger;
 
     @Transactional(readOnly = true)
     public List<GlycemicEventDTO> listRange(UUID userId, LocalDateTime from, LocalDateTime to, State state) {
@@ -200,7 +202,10 @@ public class GlycemicEventService {
         note.setType(Note.TYPE_NORMAL);
         note.setCreatedAt(LocalDateTime.now());
         note.setUpdatedAt(LocalDateTime.now());
-        noteRepository.save(note);
+        Note saved = noteRepository.save(note);
+        // Backfills are timed at the event onset, so normally backdated (no snapshot); the
+        // freezer decides, after commit, never blocking the confirm.
+        if (saved != null) forecastSnapshotTrigger.noteSaved(userId, saved.getId());
     }
 
     private static Category parseCategory(String raw) {
