@@ -2,6 +2,8 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
+import che.glucosemonitorbe.domain.UserZones;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.dto.HypoEventDTO;
 import che.glucosemonitorbe.entity.HypoEvent;
 import che.glucosemonitorbe.entity.HypoEvent.State;
@@ -18,6 +20,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,6 +42,7 @@ public class HypoEventService {
     private final NoteRepository noteRepository;
     private final FeatureToggleConfig featureToggleConfig;
     private final ForecastSnapshotTrigger forecastSnapshotTrigger;
+    private final UserSettingsService userSettingsService;
 
     /**
      * Advance the hypo lifecycle for one user given their latest CGM reading.
@@ -315,7 +320,9 @@ public class HypoEventService {
 
         Note note = new Note();
         note.setUserId(userId);
-        note.setTimestamp(LocalDateTime.now());
+        // notes.timestamp is the user's wall time everywhere else (and what the forecast freezer
+        // judges backdating against); the JVM clock is only right when the server shares the zone.
+        note.setTimestamp(userWallNow(userId));
         note.setCarbs(amount);
         note.setInsulin(0.0);
         note.setMeal("Hypo treatment");
@@ -333,6 +340,13 @@ public class HypoEventService {
         event.setUpdatedAt(LocalDateTime.now());
         log.info("Hypo event {} confirmed with {} g rescue carbs", eventId, amount);
         return HypoEventDTO.from(repository.save(event));
+    }
+
+    /** Now on the user's wall clock: their stored zone, else their last offset, else UTC. */
+    private LocalDateTime userWallNow(UUID userId) {
+        UserSettingsDTO s = userSettingsService.getUserSettings(userId);
+        ZoneId zone = s == null ? ZoneOffset.UTC : UserZones.resolve(s.getTimezone(), s.getUtcOffsetMinutes());
+        return LocalDateTime.now(zone);
     }
 
     @Transactional
