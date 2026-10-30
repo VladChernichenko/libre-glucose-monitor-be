@@ -28,7 +28,7 @@ public class TwinForecastController {
     private final FeatureToggleService featureToggleService;
     private final UserService userService;
 
-    @Operation(summary = "Doses, meals and fast sugars logged in the last `days` days, oldest first")
+    @Operation(summary = "Logged notes with a frozen forecast in the last `days` days, newest first")
     @GetMapping("/anchors")
     public ResponseEntity<List<ForecastAnchorDTO>> anchors(Authentication auth,
             @RequestParam(defaultValue = "14") int days) {
@@ -36,7 +36,7 @@ public class TwinForecastController {
         return ResponseEntity.ok(historyService.anchors(userId(auth), days));
     }
 
-    @Operation(summary = "The twin's 4 h forecast from one logged note, with the CGM actuals")
+    @Operation(summary = "The 4 h forecast frozen when one note was logged, with the CGM actuals")
     @GetMapping("/anchors/{noteId}")
     public ResponseEntity<AnchorForecastDTO> forecast(Authentication auth, @PathVariable UUID noteId) {
         requireFeature();

@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.assistant.chat;
 
+import che.glucosemonitorbe.assistant.snapshot.HitRateService;
 import che.glucosemonitorbe.service.UserService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,7 +39,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 @Tag(name = "Assistant", description = "AI assistant chat: quick-log, questions, history and undo")
 @RestController
-@RequestMapping("/api/assistant/messages")
+@RequestMapping("/api/assistant")
 @Slf4j
 @RequiredArgsConstructor
 public class AssistantController {
@@ -51,10 +52,11 @@ public class AssistantController {
     private final ChatHistoryService chatHistoryService;
     private final NotePhotoStorageService photoStorage;
     private final UserService userService;
+    private final HitRateService hitRateService;
     private final ObjectMapper objectMapper;
 
     @Operation(summary = "Send a chat message; the reply streams as NDJSON AssistantEvents")
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_NDJSON_VALUE)
+    @PostMapping(path = "/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_NDJSON_VALUE)
     public ResponseEntity<StreamingResponseBody> send(
             Authentication authentication,
             @RequestParam(value = "text", required = false) String text,
@@ -96,7 +98,7 @@ public class AssistantController {
     }
 
     @Operation(summary = "A page of chat history strictly older than `before`, newest first")
-    @GetMapping
+    @GetMapping("/messages")
     public List<ChatMessageDTO> history(
             Authentication authentication,
             @RequestParam(value = "before", required = false) String before,
@@ -114,9 +116,15 @@ public class AssistantController {
     }
 
     @Operation(summary = "Undo the notes a quick-log message created (owner only; repeat is a no-op)")
-    @PostMapping("/{id}/undo")
+    @PostMapping("/messages/{id}/undo")
     public AssistantService.UndoResult undo(Authentication authentication, @PathVariable("id") UUID id) {
         return assistantService.undo(userId(authentication), id);
+    }
+
+    @Operation(summary = "Forecast hit rate over the last 14 days (+60 and +120 min checks)")
+    @GetMapping("/hit-rate")
+    public HitRateService.HitRate hitRate(Authentication authentication) {
+        return hitRateService.hitRate(userId(authentication), Instant.now());
     }
 
     private UUID userId(Authentication authentication) {

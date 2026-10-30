@@ -17,6 +17,8 @@ public interface ForecastSnapshotRepository extends JpaRepository<ForecastSnapsh
 
     Optional<ForecastSnapshot> findByNoteId(UUID noteId);
 
+    List<ForecastSnapshot> findByNoteIdInAndExcludedFalse(java.util.Collection<UUID> noteIds);
+
     List<ForecastSnapshot> findByCompleteFalseAndExcludedFalse();
 
     List<ForecastSnapshot> findByUserIdAndExcludedFalseAndMadeAtGreaterThanEqual(UUID userId, Instant since);
