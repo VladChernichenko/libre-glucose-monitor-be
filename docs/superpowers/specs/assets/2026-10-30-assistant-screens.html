@@ -1,0 +1,212 @@
+<style>
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:28px 18px;margin-top:16px}
+.scr h3{margin:0 0 4px;font-size:15px}
+.scr p.cap{margin:0 0 8px;font-size:12px;color:#666;min-height:32px}
+.phone{width:290px;height:600px;border:2px solid #444;border-radius:30px;padding:12px 10px;background:#fafafa;color:#111;font:11.5px -apple-system,sans-serif;margin:0 auto;display:flex;flex-direction:column;gap:6px;overflow:hidden;position:relative}
+.hdr{background:#e8f1ec;border-radius:12px;padding:7px 9px;display:flex;justify-content:space-between;align-items:center}
+.hdr b{font-size:19px}.mini{font-size:10px;color:#555}
+.hit{background:#fff;border:1px solid #bcd;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:600;color:#1f6f6a}
+.chart{background:#fff;border:1px solid #ddd;border-radius:10px;height:150px;position:relative;overflow:hidden}
+.chart svg{width:100%;height:100%}
+.strip{border-radius:10px;padding:6px 8px;font-size:11px}
+.calm{background:#e5f4e7;border:1px solid #9fd0a6}.urg{background:#fde4e1;border:1px solid #e9a39a}
+.bub{border-radius:12px;padding:6px 9px;max-width:86%;line-height:1.35}
+.me{background:#2d6cdf;color:#fff;align-self:flex-end}
+.ai{background:#fff;border:1px solid #ddd;align-self:flex-start}
+.sys{align-self:center;font-size:10px;color:#888}
+.log{align-self:flex-start;background:#eef6ee;border:1px solid #b9dcb9;border-radius:10px;padding:5px 8px;max-width:90%}
+.log a,.lnk{color:#2d6cdf;font-weight:600;text-decoration:none;margin-left:6px}
+.card{background:#fff;border:1px solid #cfd8e3;border-radius:12px;padding:8px;align-self:stretch}
+.big{font-size:17px;font-weight:700}
+.row{display:flex;justify-content:space-between;gap:6px;align-items:baseline}
+.mac{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin:4px 0}
+.mac div{background:#f4f6f9;border-radius:6px;padding:3px;text-align:center}
+.mac b{display:block;font-size:12px}
+.curve{height:56px;background:#f2f6fb;border-radius:6px;margin:5px 0}
+.curve svg{width:100%;height:100%}
+.tag{display:inline-block;background:#efe9fb;color:#5b3fa0;border-radius:8px;padding:1px 6px;font-size:10px;font-weight:600}
+.past{background:#fff7e6;border:1px solid #f0d49a;border-radius:10px;padding:5px 8px;font-size:10.5px;align-self:stretch}
+.banner{background:#fff1e0;border:2px solid #e08a1e;border-radius:12px;padding:7px;font-size:11px;align-self:stretch}
+.red{background:#fde4e1;border:2px solid #d0473a;border-radius:12px;padding:7px;font-size:11px;align-self:stretch}
+.amber{background:#fff4dc;border:2px solid #e0a21e;border-radius:12px;padding:7px;font-size:11px;align-self:stretch}
+.carb{background:#fde4e1;border:2px solid #d0473a;border-radius:12px;padding:7px;font-size:11.5px;align-self:stretch}
+.btns{display:flex;gap:5px;margin-top:6px}
+.btns span{flex:1;text-align:center;border-radius:8px;padding:5px;font-weight:600;font-size:11px}
+.p{background:#2d6cdf;color:#fff}.po{background:#e08a1e;color:#fff}.pr{background:#d0473a;color:#fff}.s{background:#fff;border:1px solid #ccc}
+.inp{margin-top:auto;border:1px solid #bbb;border-radius:18px;padding:7px 10px;color:#888;display:flex;justify-content:space-between;background:#fff}
+.sheet{background:#fff;border:1px solid #ccc;border-radius:16px 16px 0 0;padding:7px;display:flex;flex-direction:column;gap:5px;box-shadow:0 -3px 8px rgba(0,0,0,.08)}
+.grab{width:36px;height:4px;background:#ccc;border-radius:2px;margin:0 auto}
+.tabs{display:flex;justify-content:space-around;border-top:1px solid #ddd;padding-top:5px;font-size:10px;color:#666}
+.tabs .on{color:#2d6cdf;font-weight:600}
+.cite{display:inline-block;background:#eef3fb;border:1px solid #c9d8f2;border-radius:8px;padding:1px 6px;font-size:10px;margin:2px 2px 0 0;color:#2d5fb8}
+.photo{width:110px;height:64px;background:linear-gradient(135deg,#d9a35b,#f3e2b8);border-radius:8px;align-self:flex-end;display:flex;align-items:center;justify-content:center;color:#6b4a1a;font-size:10px}
+table.t{width:100%;border-collapse:collapse;font-size:10.5px}table.t td,table.t th{border-bottom:1px solid #e3e3e3;padding:4px 3px;text-align:left}
+.ok{color:#2f7d32;font-weight:700}.no{color:#c0392b;font-weight:700}
+.dim{opacity:.45}
+.nav{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.list div{background:#fff;border:1px solid #e2e2e2;border-radius:8px;padding:6px 8px;margin-bottom:5px}
+</style>
+
+<h2>All screens, with example content</h2>
+<p class="subtitle">Glucose in mg/dL (your display unit); the backend still works in mmol/L. Every number on a card comes from the model or your history, never from the AI. Tell me by number what to change.</p>
+
+<div class="grid">
+
+<!-- 1 -->
+<div class="scr"><h3>1 · Dashboard with chat peek</h3><p class="cap">Home stays the dashboard. The chat peeks at the bottom: last message + input. Watch strip on top as designed.</p>
+<div class="phone">
+  <div class="strip calm"><b>Watching breakfast</b> · peak ~185 at 9:05, in range by 10:30</div>
+  <div class="hdr"><div><b>142 →</b><div class="mini">IOB 4.1 U · COB 32 g</div></div><span class="hit">Twin 74%</span></div>
+  <div class="chart"><svg viewBox="0 0 100 50" preserveAspectRatio="none"><rect x="0" y="16" width="100" height="18" fill="#e3f1dc"/><polyline points="0,30 15,28 30,26 45,22" fill="none" stroke="#18232b" stroke-width="1.4"/><polyline points="45,22 60,16 72,18 85,24 100,28" fill="none" stroke="#2d5fb8" stroke-width="1.4" stroke-dasharray="3 2"/></svg></div>
+  <div class="mini" style="padding:0 4px">Notes · 08:12 6 U + 48 g oats · 07:30 Tresiba 18 U</div>
+  <div style="flex:1"></div>
+  <div class="sheet"><div class="grab"></div>
+    <div class="mini">✓ Logged 6 U + 48 g · IOB 4.1 U · lowest 104 at +3 h</div>
+    <div class="inp" style="margin:0"><span>Write or add a photo…</span><span>📷</span></div></div>
+  <div class="tabs"><span class="on">Dashboard</span><span>Notes</span><span>Settings</span></div>
+</div></div>
+
+<!-- 2 -->
+<div class="scr"><h3>2 · Expanded chat, quick logs</h3><p class="cap">Drag up: full scrollable history. Shorthand is logged instantly, no AI, each with Undo.</p>
+<div class="phone">
+  <div class="grab"></div>
+  <div class="hdr"><div><b>142 →</b><div class="mini">IOB 4.1 U · COB 32 g</div></div><span class="hit">Twin 74%</span></div>
+  <div class="sys">Yesterday</div>
+  <div class="bub me">18u T</div>
+  <div class="log">✓ Tresiba 18 U at 23:02 <a>Undo</a></div>
+  <div class="sys">Today</div>
+  <div class="bub me">6u 48g</div>
+  <div class="log">✓ 6 U + 48 g at 08:12 · IOB 6.0 U · forecast peak 185 at 9:05, lowest 104 at +3 h <a>Undo</a></div>
+  <div class="bub me">2.5u 20 min ago</div>
+  <div class="log">✓ 2.5 U at 10:41 · IOB 4.1 U <a>Undo</a></div>
+  <div class="bub me">coffee with milk, hot shower</div>
+  <div class="bub ai">Log these? <span class="tag">caffeine</span> <span class="tag">hot shower</span> at 11:05<div class="btns"><span class="p">Confirm</span><span class="s">No</span></div></div>
+  <div class="inp"><span>Write or add a photo…</span><span>📷</span></div>
+</div></div>
+
+<!-- 3 -->
+<div class="scr"><h3>3 · Meal prep: plan card</h3><p class="cap">"Prepare me for this." Macros as ranges (editable), dose from calculator, pause from the forecast, curve, pattern label, similar meals.</p>
+<div class="phone">
+  <div class="photo">📷 soup + bread</div>
+  <div class="bub me">prepare me for this, bread 40 g</div>
+  <div class="card">
+    <div class="row"><span class="tag">Moderate FPU</span><span class="mini">edit ✎</span></div>
+    <div class="mac"><div>carbs<b>36 g</b><span class="mini">30–42</span></div><div>fat<b>14 g</b><span class="mini">11–17</span></div><div>protein<b>22 g</b><span class="mini">18–26</span></div><div>fiber<b>5 g</b><span class="mini">4–6</span></div></div>
+    <div class="row"><span class="big">4 U</span><span class="big">wait 15 min</span></div>
+    <div class="curve"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><rect x="0" y="12" width="100" height="16" fill="#e3f1dc"/><path d="M0,26 L20,21 L35,13 L55,16 L72,20 L85,18 L100,22 L100,26 L85,23 L72,25 L55,22 L35,19 L20,24 Z" fill="#dbe6f8"/><polyline points="0,26 20,22 35,15 55,19 72,22 85,20 100,24" fill="none" stroke="#2d5fb8" stroke-width="1.5"/></svg></div>
+    <div class="mini">Peak ~172 at +55 min · small second rise ~+3.5 h (fat/protein) · lowest 112 · no low</div>
+    <div class="btns"><span class="p">Took it</span><span class="s">Edit</span><span class="s">Not eating</span></div>
+  </div>
+  <div class="past"><b>Similar meals</b><br>Oct 13 · soup + rye bread · 3 U · peak 245 ✗<br>Oct 11 · chicken soup · 1 U for 10 g · peak 146 ✓</div>
+  <div class="bub ai">Bread is most of the carbs. 15 min lets the insulin start first. Expect a small late rise from the chicken around 3–4 h.</div>
+</div></div>
+
+<!-- 4 -->
+<div class="scr"><h3>4 · Pause countdown → Eating now</h3><p class="cap">"Took it" logs the 4 U only. Meal is logged when you tap Eating now. Late? The card turns amber.</p>
+<div class="phone">
+  <div class="card">
+    <div class="row"><span>4 U taken 12:31</span><span class="mini">soup + bread</span></div>
+    <div style="text-align:center;margin:8px 0"><div class="big" style="font-size:28px">06:42</div><div class="mini">until you eat</div></div>
+    <div class="btns"><span class="p">Eating now</span><span class="s">Edit meal</span></div>
+  </div>
+  <div class="sys">— 50 min later, not tapped —</div>
+  <div class="amber"><b>Meal not logged</b> · 4 U is active (2.9 U left). If you ate, tap Eating now and set the time; if not, eat ~25 g or tell me.
+    <div class="btns"><span class="po">I ate at 12:46</span><span class="s">Didn't eat</span></div></div>
+  <div class="sys">— after tapping —</div>
+  <div class="log">✓ Meal 36 g (fat 14, protein 22, fiber 5) at 12:46 · forecast frozen <a>Undo</a></div>
+</div></div>
+
+<!-- 5 -->
+<div class="scr"><h3>5 · History disagrees (>20%)</h3><p class="cap">Past similar meals point to a different dose. Both curves shown, nothing preselected. Pending ISF suggestion mentioned.</p>
+<div class="phone">
+  <div class="bub me">prepare me for this</div>
+  <div class="banner"><b style="color:#9a4f00">Your past similar meals needed more</b><br>Model <b>4 U</b> · history <b>5 U</b> (+25%)<br><span class="mini">4 soup-and-bread lunches with ~4 U peaked 215–240, landed ~170.</span><br><span class="mini">An ISF change for lunch is also suggested on the dashboard.</span>
+    <div class="curve"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><rect x="0" y="12" width="100" height="16" fill="#e3f1dc"/><polyline points="0,26 20,19 35,10 55,14 75,20 100,23" fill="none" stroke="#2d5fb8" stroke-width="1.5"/><polyline points="0,26 20,21 35,15 55,20 75,25 100,27" fill="none" stroke="#e08a1e" stroke-width="1.5" stroke-dasharray="3 2"/></svg></div>
+    <div class="mini">Blue 4 U: peak 196 · Orange 5 U: peak 165, lowest 98</div>
+    <div class="btns"><span class="po">Use 5 U</span><span class="s">Keep 4 U</span></div></div>
+  <div class="card"><div class="row"><span class="big">? U</span><span class="big">wait 15 min</span></div><div class="mini">Choose a dose above</div></div>
+</div></div>
+
+<!-- 6 -->
+<div class="scr"><h3>6 · Chosen dose re-checked for lows</h3><p class="cap">After "Use 5 U" the model runs 5 U. Under 70 → red, needs a second tap. Under 81 → amber note.</p>
+<div class="phone">
+  <div class="red"><b style="color:#a12a1f">5 U may take you low</b><br>Forecast lowest <b>64</b> at +2 h 40 min (IOB 1.1 U already active).
+    <div class="curve"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><rect x="0" y="12" width="100" height="16" fill="#e3f1dc"/><line x1="0" y1="32" x2="100" y2="32" stroke="#d0473a" stroke-dasharray="2 2" stroke-width=".8"/><polyline points="0,24 20,20 35,16 55,26 75,34 100,30" fill="none" stroke="#e08a1e" stroke-width="1.5"/></svg></div>
+    <div class="btns"><span class="pr">Use 5 U anyway</span><span class="s">Back to 4 U</span></div></div>
+  <div class="sys">or</div>
+  <div class="amber"><b>Lowest 78 at +3 h</b> with 5 U. Keep ~10 g handy around 15:30.<div class="btns"><span class="po">Took 5 U</span><span class="s">Back</span></div></div>
+</div></div>
+
+<!-- 7 -->
+<div class="scr"><h3>7 · Falling: fast carbs in advance</h3><p class="cap">No waiting for a low. Triggered by the forecast / speed of drop. Grams = smallest amount keeping the forecast ≥ 90. Shows on the peek too.</p>
+<div class="phone">
+  <div class="hdr"><div><b>118 ↘</b><div class="mini">−2.7 mg/dL/min · IOB 1.8 U</div></div><span class="hit">Twin 74%</span></div>
+  <div class="carb"><b style="color:#a12a1f">Falling fast — take 15 g now</b><br>Forecast reaches 72 at 19:40 without carbs. With 15 g it stays above 95.
+    <div class="curve"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><rect x="0" y="12" width="100" height="16" fill="#e3f1dc"/><polyline points="0,14 25,22 45,32 70,34 100,30" fill="none" stroke="#d0473a" stroke-width="1.4" stroke-dasharray="3 2"/><polyline points="0,14 25,21 45,25 70,24 100,22" fill="none" stroke="#2f7d32" stroke-width="1.5"/></svg></div>
+    <div class="mini">Red: no carbs · green: 15 g now · recheck 19:20</div>
+    <div class="btns"><span class="pr">Took 15 g</span><span class="s">Took other…</span></div></div>
+  <div class="log">✓ 15 g fast at 19:05 <a>Undo</a></div>
+  <div class="bub ai">Wait — the 15 g is still landing. No more carbs unless under 80 at 19:20.</div>
+  <div class="sys">— peek line on the dashboard —</div>
+  <div class="sheet"><div class="grab"></div><div class="mini" style="color:#a12a1f;font-weight:600">⚠ Falling fast — take 15 g now</div></div>
+</div></div>
+
+<!-- 8 -->
+<div class="scr"><h3>8 · Question with history + sources</h3><p class="cap">Answer from your episodes first, clinical library second. Citations are tappable.</p>
+<div class="phone">
+  <div class="bub me">why do I go high 3 h after pork?</div>
+  <div class="past"><b>Your fatty dinners</b><br>Oct 14 pork · peak 230 at +5 h ✗<br>Oct 15 teriyaki chicken · +60 at +4 h<br>Oct 9 khinkali + cheese · 225 at +4 h</div>
+  <div class="bub ai">In your last three fatty, high-protein dinners glucose rose 60–80 mg/dL starting 3–5 h after eating, after the meal insulin had run out. Fat slows digestion and protein is partly turned into glucose later, which matches this delayed rise [1][2]. The model already shows this second bump on the plan card for such meals.
+    <div><span class="cite">[1] ADA Standards of Care 2026 · 7</span><span class="cite">[2] Bell et al. 2015 · Diabetes Care</span></div></div>
+</div></div>
+
+<!-- 9 -->
+<div class="scr"><h3>9 · "What caused this?" in the chat</h3><p class="cap">The event engine's prompt arrives as a quiet message, not a dashboard card. Low prompt stays on the dashboard.</p>
+<div class="phone">
+  <div class="bub ai"><b>Unexplained rise</b> 14:10–15:00, +58 mg/dL, no food or insulin logged. Anything to log?
+    <div class="btns"><span class="s">Missed meal</span><span class="s">Stress</span><span class="s">Not sure</span></div>
+    <div class="btns"><span class="s">Carbs…</span><span class="s">Insulin…</span><span class="s">Nothing</span></div></div>
+  <div class="bub me">forgot a banana, about 20 g</div>
+  <div class="log">✓ 20 g at 14:05 · event marked "missed meal" <a>Undo</a></div>
+</div></div>
+
+<!-- 10 -->
+<div class="scr"><h3>10 · Hit % → frozen forecasts</h3><p class="cap">Tap "Twin 74%". Forecasts as they were when logged vs Libre. Last 14 days, +1 h and +2 h count.</p>
+<div class="phone">
+  <div class="nav"><span>‹ Chat</span><span>Twin 74% (82/111)</span><span></span></div>
+  <table class="t"><tr><th>When</th><th>What</th><th>+1h</th><th>+2h</th><th>+4h</th></tr>
+  <tr><td>Today 08:12</td><td>6 U + 48 g</td><td>170/180 <span class="ok">✓</span></td><td>140/152 <span class="ok">✓</span></td><td class="mini">pending</td></tr>
+  <tr><td>Yest 19:05</td><td>15 g fast</td><td>112/104 <span class="ok">✓</span></td><td>126/131 <span class="ok">✓</span></td><td>118/122</td></tr>
+  <tr><td>Yest 12:46</td><td>4 U + 36 g</td><td>172/196 <span class="ok">✓</span></td><td>150/201 <span class="no">✗</span></td><td>128/175</td></tr>
+  <tr><td>Yest 07:40</td><td>5 U + 40 g</td><td>165/–</td><td class="mini">gap</td><td>–</td></tr></table>
+  <div class="chart" style="height:130px"><svg viewBox="0 0 100 50" preserveAspectRatio="none"><rect x="0" y="16" width="100" height="18" fill="#e3f1dc"/><polyline points="0,30 20,18 40,22 60,26 100,28" fill="none" stroke="#2d5fb8" stroke-width="1.4"/><polyline points="0,30 20,15 40,14 60,16 100,20" fill="none" stroke="#18232b" stroke-width="1.4"/></svg></div>
+  <div class="mini">Yest 12:46 · blue forecast (frozen) vs black Libre</div>
+</div></div>
+
+<!-- 11 -->
+<div class="scr"><h3>11 · Stale Libre data</h3><p class="cap">Reading older than 15 min: nutrition only, no dose, pause or banner.</p>
+<div class="phone">
+  <div class="hdr"><div><b class="dim">131</b><div class="mini">last reading 22 min ago</div></div><span class="hit">Twin 74%</span></div>
+  <div class="photo">📷 pasta</div>
+  <div class="card">
+    <div class="mac"><div>carbs<b>68 g</b><span class="mini">55–81</span></div><div>fat<b>18 g</b></div><div>protein<b>20 g</b></div><div>fiber<b>4 g</b></div></div>
+    <div class="amber" style="border-width:1px"><b>No dose advice</b> — Libre hasn't updated for 22 min. Check the sensor or do a fingerstick, then ask again.</div>
+  </div>
+</div></div>
+
+<!-- 12 -->
+<div class="scr"><h3>12 · Notes tab after the change</h3><p class="cap">No Experiments tab. Notes keeps manual entry and editing; the photo/AR scan now lives in the chat.</p>
+<div class="phone">
+  <div class="nav"><span>Notes</span><span style="color:#2d6cdf">+</span></div>
+  <div class="list">
+    <div><b>12:46</b> Meal 36 g · soup + rye bread <span class="tag">chat</span></div>
+    <div><b>12:31</b> Apidra 4 U · abd_ul</div>
+    <div><b>11:05</b> <span class="tag">caffeine</span> <span class="tag">hot shower</span></div>
+    <div><b>08:12</b> 6 U + 48 g oats</div>
+  </div>
+  <div class="card"><b>+ New note</b><div class="mini">Meal · Insulin · Long-acting · Activity · Fingerstick</div><div class="mini" style="margin-top:4px">📷 For photo/AR scan use the chat camera</div></div>
+  <div style="flex:1"></div>
+  <div class="tabs"><span>Dashboard</span><span class="on">Notes</span><span>Settings</span></div>
+</div></div>
+
+</div>
