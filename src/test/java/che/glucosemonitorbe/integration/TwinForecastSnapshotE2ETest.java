@@ -22,10 +22,8 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.TestPropertySource;
 
 /** The twin view and the hit rate are served from the forecast frozen when the note was saved. */
-@TestPropertySource(properties = "app.features.empirical-twin-enabled=true")
 class TwinForecastSnapshotE2ETest extends AbstractGlycemicEventE2ETest {
 
     @Autowired private ForecastSnapshotRepository snapshots;

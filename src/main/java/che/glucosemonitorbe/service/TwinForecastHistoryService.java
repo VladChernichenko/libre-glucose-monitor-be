@@ -75,7 +75,7 @@ public class TwinForecastHistoryService {
     private final ForecastSnapshotRepository snapshotRepository;
     private final ObjectMapper objectMapper;
 
-    /** Notes with a live snapshot, logged in the last {@code days} days, newest first. */
+    /** Notes with a live snapshot, logged in the last {@code days} days, oldest first. */
     public List<ForecastAnchorDTO> anchors(UUID userId, int days) {
         int d = Math.max(1, Math.min(MAX_DAYS, days));
         LocalDateTime now = LocalDateTime.now(zone(userId));
@@ -88,7 +88,7 @@ public class TwinForecastHistoryService {
                 .toList();
         return inWindow.stream()
                 .filter(n -> n.getTimestamp() != null && withSnapshot.contains(n.getId()))
-                .sorted(Comparator.comparing(Note::getTimestamp).reversed())
+                .sorted(Comparator.comparing(Note::getTimestamp))
                 .map(TwinForecastHistoryService::toAnchor)
                 .toList();
     }
