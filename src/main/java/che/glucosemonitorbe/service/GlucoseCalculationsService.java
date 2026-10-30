@@ -216,7 +216,8 @@ public class GlucoseCalculationsService {
                         userSettings,
                         avgBolusToMealMinutes,
                         rapidIob,
-                        request.getCurrentTrendMmolPerMin()
+                        request.getCurrentTrendMmolPerMin(),
+                        request.getPredictionPathMinutes()
                 );
 
         // Determine trend from the same predictionPath the chart renders, not a separate
@@ -369,14 +370,15 @@ public class GlucoseCalculationsService {
             UserSettingsDTO userSettings,
             Double avgBolusToMealMinutes,
             RapidInsulinIobParameters rapidIob,
-            Double currentTrendMmolPerMin
+            Double currentTrendMmolPerMin,
+            Integer pathMinutesOverride
     ) {
         // -- Hovorka 2-compartment ODE model (feature-flagged) -----------------
         if (featureToggleConfig.isHovorkaModelEnabled() && hovorkaService != null) {
             // Long-acting notes - load from a 36h window so Lantus taken yesterday is included
             List<Note> longActingNotes = getLongActingNotes(userUUID, currentTime);
             List<Note> recentNotes = getRecentNotes(userUUID, currentTime);
-            int pathMinutes = resolvePathDurationMinutes(carbsEntries);
+            int pathMinutes = resolvePathDurationMinutes(carbsEntries, pathMinutesOverride);
             log.debug("Using Hovorka ODE model for user={} pathMinutes={}", userUUID, pathMinutes);
             // Account for logged activity (inert when the feature is off or no activity is logged).
             che.glucosemonitorbe.hovorka.ActivityProvider activity =
@@ -401,7 +403,7 @@ public class GlucoseCalculationsService {
                 ? Math.max(-0.15, Math.min(0.15, currentTrendMmolPerMin))
                 : 0.0;
 
-        int pathMinutes = resolvePathDurationMinutes(carbsEntries);
+        int pathMinutes = resolvePathDurationMinutes(carbsEntries, pathMinutesOverride);
 
         List<PredictionPointDTO> points = new ArrayList<>();
         final double diaHours = rapidIob.diaHours();
@@ -745,6 +747,12 @@ public class GlucoseCalculationsService {
      * (Warsaw Method, ADA/ISPAD guidelines). Use the longest suggestedDurationHours
      * across active entries, clamped to [240, 480] minutes.
      */
+    private int resolvePathDurationMinutes(List<CarbsEntry> entries, Integer minimumMinutes) {
+        int base = resolvePathDurationMinutes(entries);
+        return minimumMinutes == null ? base
+                : Math.min(PREDICTION_PATH_MAX_MINUTES, Math.max(base, minimumMinutes));
+    }
+
     private int resolvePathDurationMinutes(List<CarbsEntry> entries) {
         int maxFromPattern = entries.stream()
                 .filter(e -> e.getSuggestedDurationHours() != null)

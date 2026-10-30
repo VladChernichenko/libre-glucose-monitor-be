@@ -53,6 +53,10 @@ public class PreBolusPauseOptimizer {
     static final double HYPO_PENALTY_WEIGHT = 50.0;
     /** Mild multiplier for points between the hypo threshold and target (low side of 5.5). */
     static final double LOW_SIDE_WEIGHT = 2.0;
+    /** Every candidate is judged over this many minutes after its own meal (as the old engine did). */
+    static final int POST_MEAL_MINUTES = 240;
+    /** Path asked of the dashboard forecast: long enough for the longest pause plus its window. */
+    static final int PATH_MINUTES = POST_MEAL_MINUTES + 30;
     /** Notes searched for a pre-bolus in flight; the resolver itself caps its age at 2 h. */
     private static final int LOOKBACK_HOURS = 8;
 
@@ -75,11 +79,20 @@ public class PreBolusPauseOptimizer {
      * @param now            the user's local wall time (as the dashboard's ClientTimeInfo)
      * @param currentGlucose [mmol/L]
      * @param doseUnits      the meal bolus [U], taken now; 0 or less = no dose, only pause 0 is scored
+     * @param meal           carbs 0 or less = nothing to time: no pause, and the curve is the dose alone
      */
     public PauseChoice choose(UUID userId, LocalDateTime now, double currentGlucose, double doseUnits,
                               MealMacros meal) {
         String username = users.getUserById(userId).getUsername();
         String nutritionJson = nutritionJson(meal);
+        Double dose = doseUnits > 0 ? doseUnits : null;
+
+        if (meal.carbs() <= 0) {
+            // The forecast drops a prospective meal without carbs, so every candidate would be
+            // "insulin, no meal": there is no pause to choose.
+            List<PredictionPointDTO> curve = forecast(username, now, currentGlucose, dose, null, null, 0);
+            return choice(null, curve, "No carbs, so no pre-bolus pause.");
+        }
 
         List<Note> recent = notes.findByUserIdAndTimestampBetween(userId, now.minusHours(LOOKBACK_HOURS), now);
         Optional<PreBolusContext> inFlight = preBolusResolver.resolve(null, recent, now);
@@ -91,7 +104,6 @@ public class PreBolusPauseOptimizer {
                     ctx.units(), ctx.elapsedMinutes()));
         }
 
-        Double dose = doseUnits > 0 ? doseUnits : null;
         List<PredictionPointDTO> eatNow = null;
         Integer bestPause = null;
         List<PredictionPointDTO> bestCurve = null;
@@ -102,7 +114,7 @@ public class PreBolusPauseOptimizer {
             List<PredictionPointDTO> curve = forecast(username, now, currentGlucose, dose, meal, nutritionJson, pause);
             if (pause == 0) eatNow = curve;
             double min = min(curve);
-            lowestMin = Math.min(lowestMin, min);
+            if (!Double.isNaN(min)) lowestMin = Math.min(lowestMin, min);
             if (Double.isNaN(min) || min < MIN_FLOOR) continue; // an empty forecast never wins
             double cost = timeWeightedMeanCost(curve, currentGlucose);
             if (cost < bestCost) { // strict: a tie keeps the shorter pause
@@ -113,9 +125,14 @@ public class PreBolusPauseOptimizer {
         }
 
         if (bestPause == null) {
-            return choice(null, eatNow, String.format(Locale.ROOT,
-                    "Every pause from 0 to 30 min forecasts a low under %.1f mmol/L (lowest %.1f), so no pre-bolus pause: eat now.",
-                    MIN_FLOOR, lowestMin));
+            String lowest = lowestMin == Double.MAX_VALUE ? ""
+                    : String.format(Locale.ROOT, " (lowest %.1f)", lowestMin);
+            String reason = dose == null
+                    ? String.format(Locale.ROOT, "Eating now forecasts a low under %.1f mmol/L%s.", MIN_FLOOR, lowest)
+                    : String.format(Locale.ROOT,
+                            "Every pause from 0 to 30 min forecasts a low under %.1f mmol/L%s, so no pre-bolus pause: eat now.",
+                            MIN_FLOOR, lowest);
+            return choice(null, eatNow, reason);
         }
         PauseChoice chosen = choice(bestPause, bestCurve, null);
         String reason = dose == null
@@ -128,18 +145,24 @@ public class PreBolusPauseOptimizer {
 
     // -- forecast ----------------------------------------------------------------------------
 
-    /** The dashboard forecast with {@code dose} now (none if null) and the meal at now + pause. */
+    /**
+     * The dashboard forecast with {@code dose} now (none if null) and the meal (none if null) at
+     * now + pause, asked for {@link #PATH_MINUTES} and cropped to now + pause + {@link #POST_MEAL_MINUTES},
+     * so each candidate is scored and floor-checked over the same 240 min after its own meal.
+     */
     private List<PredictionPointDTO> forecast(String username, LocalDateTime now, double currentGlucose,
                                               Double dose, MealMacros meal, String nutritionJson, int pause) {
         List<ProspectiveNoteDTO> prospective = new ArrayList<>();
         if (dose != null) {
             prospective.add(ProspectiveNoteDTO.builder().insulin(dose).minutesAgo(0).build());
         }
-        prospective.add(ProspectiveNoteDTO.builder()
-                .carbs(meal.carbs())
-                .nutritionProfileJson(nutritionJson)
-                .minutesAgo(-pause)
-                .build());
+        if (meal != null) {
+            prospective.add(ProspectiveNoteDTO.builder()
+                    .carbs(meal.carbs())
+                    .nutritionProfileJson(nutritionJson)
+                    .minutesAgo(-pause)
+                    .build());
+        }
         // Carrying prospective notes, this never computes carb advice.
         List<PredictionPointDTO> path = calculations.calculateGlucoseData(GlucoseCalculationsRequest.builder()
                 .userId(username) // resolved by username
@@ -147,8 +170,13 @@ public class PreBolusPauseOptimizer {
                 // timestamp only: no timezone, so this internal run never rewrites the user's zone
                 .clientTimeInfo(ClientTimeInfo.builder().timestamp(now.toString()).build())
                 .prospectiveNotes(prospective)
+                .predictionPathMinutes(PATH_MINUTES)
                 .build()).getPredictionPath();
-        return path != null ? path : List.of();
+        if (path == null) return List.of();
+        LocalDateTime until = now.plusMinutes(pause + POST_MEAL_MINUTES);
+        return path.stream()
+                .filter(p -> p.getTimestamp() == null || !p.getTimestamp().isAfter(until))
+                .toList();
     }
 
     private String nutritionJson(MealMacros meal) {

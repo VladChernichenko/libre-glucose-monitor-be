@@ -75,8 +75,13 @@ class PreBolusPauseOptimizerTest {
 
         /** 5-minute grid +5..+240 min. */
         private List<PredictionPointDTO> path(IntToDoubleFunction glucoseAtMinute) {
+            return path(240, glucoseAtMinute);
+        }
+
+        /** 5-minute grid +5..+lastMinute. */
+        private List<PredictionPointDTO> path(int lastMinute, IntToDoubleFunction glucoseAtMinute) {
             List<PredictionPointDTO> out = new ArrayList<>();
-            for (int m = 5; m <= 240; m += 5) {
+            for (int m = 5; m <= lastMinute; m += 5) {
                 out.add(PredictionPointDTO.builder().timestamp(NOW.plusMinutes(m))
                         .predictedGlucose(glucoseAtMinute.applyAsDouble(m)).build());
             }
@@ -134,6 +139,59 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
+        @DisplayName("a low after now+240 but within pause+240 rejects that pause; each curve is cropped to pause+240")
+        void lowAfterNowPlus240_rejectsLongPause() {
+            // Cost prefers longer pauses; a dip at +265 lies inside the 25- and 30-min windows only.
+            forecastByPause(p -> path(270, m -> m == 265 ? 4.0 : 8.0 - p * 0.08));
+
+            PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
+
+            assertThat(choice.pauseMinutes()).isEqualTo(20);
+            assertThat(choice.curve().get(choice.curve().size() - 1).getTimestamp()).isEqualTo(NOW.plusMinutes(260));
+            assertThat(choice.min()).isGreaterThanOrEqualTo(4.5);
+        }
+
+        @Test
+        @DisplayName("no carbs: no pause, one forecast with the dose alone, no candidate loop")
+        void noCarbs_returnsNullWithoutLoop() {
+            when(calculations.calculateGlucoseData(any())).thenReturn(
+                    GlucoseCalculationsResponse.builder().predictionPath(path(m -> 6.0)).build());
+
+            PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 2.0, new MealMacros(0, 20, 40, 0, null));
+
+            assertThat(choice.pauseMinutes()).isNull();
+            assertThat(choice.reason()).isEqualTo("No carbs, so no pre-bolus pause.");
+            ArgumentCaptor<GlucoseCalculationsRequest> req = ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
+            verify(calculations, times(1)).calculateGlucoseData(req.capture());
+            assertThat(req.getValue().getProspectiveNotes()).singleElement()
+                    .satisfies(n -> assertThat(n.getInsulin()).isEqualTo(2.0));
+        }
+
+        @Test
+        @DisplayName("no dose and eating now is low: the reason does not claim every pause was tried")
+        void noDoseLow_reasonDoesNotMentionEveryPause() {
+            forecastByPause(p -> path(m -> 4.2));
+
+            PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 0, FAST_CARBS);
+
+            assertThat(choice.pauseMinutes()).isNull();
+            assertThat(choice.reason()).contains("4.5").contains("4.2").doesNotContain("Every pause");
+            verify(calculations, times(1)).calculateGlucoseData(any());
+        }
+
+        @Test
+        @DisplayName("empty forecasts: no pause, and the reason never prints NaN")
+        void emptyForecasts_reasonHasNoNaN() {
+            when(calculations.calculateGlucoseData(any())).thenReturn(
+                    GlucoseCalculationsResponse.builder().predictionPath(List.of()).build());
+
+            PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
+
+            assertThat(choice.pauseMinutes()).isNull();
+            assertThat(choice.reason()).contains("Every pause").doesNotContain("NaN");
+        }
+
+        @Test
         @DisplayName("pre-bolus in flight: no pause, meal now, logged dose not added again")
         void preBolusInFlight_returnsNull() {
             when(resolver.resolve(any(), anyList(), eq(NOW))).thenReturn(Optional.of(new PreBolusContext(
@@ -170,6 +228,7 @@ class PreBolusPauseOptimizerTest {
                 assertThat(r.getCurrentGlucose()).isEqualTo(7.0);
                 assertThat(r.getClientTimeInfo().toLocalDateTime()).isEqualTo(NOW);
                 assertThat(r.getClientTimeInfo().getTimezone()).isNull();
+                assertThat(r.getPredictionPathMinutes()).as("240 after the longest pause").isEqualTo(270);
                 ProspectiveNoteDTO dose = r.getProspectiveNotes().stream().filter(n -> n.getInsulin() != null).findFirst().orElseThrow();
                 ProspectiveNoteDTO food = r.getProspectiveNotes().stream().filter(n -> n.getCarbs() != null).findFirst().orElseThrow();
                 assertThat(dose.getInsulin()).isEqualTo(4.5);
@@ -211,6 +270,16 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
+        @DisplayName("60 g GI 35 at 7.0 mmol/L, 2.5 U: a shorter pause than the same meal at GI 75, not 30")
+        void slowCarbsGetShorterPauseThanFastCarbs() {
+            PauseChoice slow = optimizer.choose(USER, NOW, 7.0, 2.5, new MealMacros(60, 0, 0, 0, 35.0));
+            PauseChoice fast = optimizer.choose(USER, NOW, 7.0, 2.5, new MealMacros(60, 0, 0, 0, 75.0));
+
+            assertThat(slow.pauseMinutes()).isNotNull().isLessThanOrEqualTo(15);
+            assertThat(fast.pauseMinutes()).isNotNull().isGreaterThan(slow.pauseMinutes());
+        }
+
+        @Test
         @DisplayName("the chosen curve is the dashboard forecast for the same prospective notes")
         void curveEqualsDashboardForecastForSameProspectiveNotes() throws Exception {
             MealMacros meal = new MealMacros(60, 15, 25, 4, 75.0);
@@ -226,9 +295,12 @@ class PreBolusPauseOptimizerTest {
                             ProspectiveNoteDTO.builder().insulin(RealDashboardForecast.DOSE_FOR_60G).minutesAgo(0).build(),
                             ProspectiveNoteDTO.builder().carbs(60.0).nutritionProfileJson(json)
                                     .minutesAgo(-choice.pauseMinutes()).build()))
+                    .predictionPathMinutes(270)
                     .build()).getPredictionPath();
+            LocalDateTime until = NOW.plusMinutes(choice.pauseMinutes() + 240);
 
-            assertThat(choice.curve()).isEqualTo(direct);
+            assertThat(choice.curve()).isEqualTo(direct.stream().filter(p -> !p.getTimestamp().isAfter(until)).toList());
+            assertThat(direct.get(direct.size() - 1).getTimestamp()).isEqualTo(NOW.plusMinutes(270));
         }
     }
 }

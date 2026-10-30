@@ -666,14 +666,14 @@ class GlucoseCalculationsServiceTest {
         Method method = GlucoseCalculationsService.class.getDeclaredMethod(
                 "buildPredictionPath",
                 double.class, LocalDateTime.class, List.class, List.class, UUID.class,
-                UserSettingsDTO.class, Double.class, RapidInsulinIobParameters.class, Double.class);
+                UserSettingsDTO.class, Double.class, RapidInsulinIobParameters.class, Double.class, Integer.class);
         method.setAccessible(true);
 
         @SuppressWarnings("unchecked")
         List<che.glucosemonitorbe.dto.PredictionPointDTO> points =
                 (List<che.glucosemonitorbe.dto.PredictionPointDTO>) method.invoke(
                         service, 8.0, currentTime, List.<CarbsEntry>of(), List.<InsulinDose>of(),
-                        userId, userSettings, null, new RapidInsulinIobParameters(4.0, 75.0), null);
+                        userId, userSettings, null, new RapidInsulinIobParameters(4.0, 75.0), null, null);
 
         // minute=5 -> 10:55, still BREAKFAST: step delta 0.05 U * isfBreakfast(1.0) = -0.05
         assertThat(points.get(0).getInsulinActivityEffect()).isCloseTo(-0.05, within(0.001));

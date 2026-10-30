@@ -42,4 +42,12 @@ public class GlucoseCalculationsRequest {
      * Null / absent means no momentum term (pure COB/IOB model).
      */
     private Double currentTrendMmolPerMin;
+
+    /**
+     * Optional minimum length of the prediction path [min]. The path is
+     * {@code min(480, max(default length, this))}; null keeps the default (240 min, longer for
+     * long-tail meal patterns). The pre-bolus pause search asks for 240 + its longest pause so
+     * every candidate is seen for 240 min after its own meal.
+     */
+    private Integer predictionPathMinutes;
 }
