@@ -2,6 +2,10 @@ package che.glucosemonitorbe.dto;
 
 import che.glucosemonitorbe.domain.MealWindow;
 import che.glucosemonitorbe.domain.PredictionEngine;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -38,6 +42,19 @@ public class UserSettingsDTO {
 
     /** Dashboard forecast engine. NULL = {@link PredictionEngine#HOVORKA}. */
     private PredictionEngine predictionEngine;
+
+    /** Value used when a client or stored row carries no target. */
+    public static final double DEFAULT_TARGET_GLUCOSE_MMOL = 5.55;
+
+    /** Correction target glucose (mmol/L), 4.4-10.0. NULL on input = leave unchanged. */
+    @DecimalMin(value = "4.4", message = "targetGlucoseMmol must be between 4.4 and 10.0")
+    @DecimalMax(value = "10.0", message = "targetGlucoseMmol must be between 4.4 and 10.0")
+    private Double targetGlucoseMmol;
+
+    /** Rescue carbs (g) for hypo treatment, 5-40. NULL on input = leave unchanged. */
+    @Min(value = 5, message = "rescueCarbsG must be between 5 and 40")
+    @Max(value = 40, message = "rescueCarbsG must be between 5 and 40")
+    private Integer rescueCarbsG;
 
     // Constructors
     public UserSettingsDTO() {}

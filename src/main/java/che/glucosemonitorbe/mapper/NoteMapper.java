@@ -33,6 +33,10 @@ public class NoteMapper {
         dto.setIntensity(note.getIntensity());
         dto.setDurationMin(note.getDurationMin());
         dto.setSiteZone(note.getSiteZone());
+        dto.setCarbsLow(note.getCarbsLow());
+        dto.setCarbsHigh(note.getCarbsHigh());
+        dto.setContextTags(note.getContextTags());
+        dto.setChatMessageId(note.getChatMessageId());
         dto.setMockData(note.isMockData());
         dto.setCreatedAt(note.getCreatedAt());
         dto.setUpdatedAt(note.getUpdatedAt());
@@ -68,6 +72,10 @@ public class NoteMapper {
         note.setIntensity(dto.getIntensity());
         note.setDurationMin(dto.getDurationMin());
         note.setSiteZone(dto.getSiteZone());
+        note.setCarbsLow(dto.getCarbsLow());
+        note.setCarbsHigh(dto.getCarbsHigh());
+        note.setContextTags(dto.getContextTags());
+        note.setChatMessageId(dto.getChatMessageId());
         note.setMockData(dto.isMockData());
 
         return note;

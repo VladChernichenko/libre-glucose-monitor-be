@@ -202,4 +202,19 @@ public class NoteDto {
 
     public String getSiteZone() { return siteZone; }
     public void setSiteZone(String siteZone) { this.siteZone = siteZone; }
+
+    private Double carbsLow;
+    private Double carbsHigh;
+    /** JSON array of context tag names, or null. */
+    private String contextTags;
+    private UUID chatMessageId;
+
+    public Double getCarbsLow() { return carbsLow; }
+    public void setCarbsLow(Double carbsLow) { this.carbsLow = carbsLow; }
+    public Double getCarbsHigh() { return carbsHigh; }
+    public void setCarbsHigh(Double carbsHigh) { this.carbsHigh = carbsHigh; }
+    public String getContextTags() { return contextTags; }
+    public void setContextTags(String contextTags) { this.contextTags = contextTags; }
+    public UUID getChatMessageId() { return chatMessageId; }
+    public void setChatMessageId(UUID chatMessageId) { this.chatMessageId = chatMessageId; }
 }

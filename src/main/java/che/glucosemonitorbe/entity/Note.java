@@ -85,6 +85,23 @@ public class Note {
     @Column(name = "site_zone", length = 16)
     private String siteZone;
 
+    /** Lower bound of the estimated carbs range (g); null when carbs are exact. */
+    @Column(name = "carbs_low")
+    private Double carbsLow;
+
+    /** Upper bound of the estimated carbs range (g); null when carbs are exact. */
+    @Column(name = "carbs_high")
+    private Double carbsHigh;
+
+    /** JSON array of {@code ContextTag} names, or null. */
+    @Column(name = "context_tags", columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String contextTags;
+
+    /** The assistant chat message this note was created from, or null. */
+    @Column(name = "chat_message_id")
+    private UUID chatMessageId;
+
     @Column(name = "mock_data", nullable = false)
     private boolean mockData = false;
     
@@ -279,6 +296,15 @@ public class Note {
     public void setSiteZone(String siteZone) {
         this.siteZone = siteZone;
     }
+
+    public Double getCarbsLow() { return carbsLow; }
+    public void setCarbsLow(Double carbsLow) { this.carbsLow = carbsLow; }
+    public Double getCarbsHigh() { return carbsHigh; }
+    public void setCarbsHigh(Double carbsHigh) { this.carbsHigh = carbsHigh; }
+    public String getContextTags() { return contextTags; }
+    public void setContextTags(String contextTags) { this.contextTags = contextTags; }
+    public UUID getChatMessageId() { return chatMessageId; }
+    public void setChatMessageId(UUID chatMessageId) { this.chatMessageId = chatMessageId; }
 
     public boolean isMockData() {
         return mockData;

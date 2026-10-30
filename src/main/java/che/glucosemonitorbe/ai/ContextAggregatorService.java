@@ -36,8 +36,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class ContextAggregatorService {
-    /** mmol/L glucose rise per 10 g carbs when no insulin is acting. */
-    private static final double CORRECTION_TARGET_MMOl = 6.5;
     private static final long PRE_BOLUS_WINDOW_MINUTES = 90L;
     private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
     private static final int TWO_HOURS_MINUTES = 120;
@@ -103,7 +101,7 @@ public class ContextAggregatorService {
         double activeIob = insulinCalculatorService.calculateTotalActiveInsulin(
                 inputs.insulinEntries(), end, rapidIob.diaHours(), rapidIob.peakMinutes());
         Double correctionUnits = glucoseValues.isEmpty() ? null
-                : estimateCorrectionUnits(userId, latest, activeIob, end);
+                : estimateCorrectionUnits(userId, latest, activeIob, end, cob);
         PauseStats pauseStats = computePauseStats(notes);
         double preBolusTimingContribution = calculatePreBolusTimingContribution(pauseStats.avgPauseMinutes);
         // #22: the 2 h forecast is the canonical prediction path's, not a second model. Computing
@@ -162,14 +160,17 @@ public class ContextAggregatorService {
      *
      * @return the estimate, or {@code null} when dosing was refused
      */
-    private Double estimateCorrectionUnits(UUID userId, double latest, double activeIob, LocalDateTime at) {
+    private Double estimateCorrectionUnits(UUID userId, double latest, double activeIob, LocalDateTime at,
+                                           UserSettingsDTO settings) {
+        double target = settings.getTargetGlucoseMmol() != null
+                ? settings.getTargetGlucoseMmol() : UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL;
         try {
             return insulinCalculatorService.calculateRecommendedInsulin(
                     InsulinCalculationRequest.builder()
                             .userId(userId.toString())
                             .carbs(0.0)                       // correction-only: no meal component
                             .currentGlucose(latest)
-                            .targetGlucose(CORRECTION_TARGET_MMOl)
+                            .targetGlucose(target)
                             .activeInsulin(activeIob)
                             // Pin the meal window to the analysis instant; without this the ISF
                             // resolves at server "now" (see InsulinCalculatorServiceIsfWindowTest).

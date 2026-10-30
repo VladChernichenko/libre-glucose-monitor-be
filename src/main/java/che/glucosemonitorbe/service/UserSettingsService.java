@@ -42,7 +42,12 @@ public class UserSettingsService {
     public UserSettingsDTO getUserSettings(UUID userId) {
         return userSettingsRepository.findByUserId(userId)
                 .map(this::convertToDTO)
-                .orElseGet(() -> new UserSettingsDTO(null, userId, 2.0, 1.0, 45, 240));
+                .orElseGet(() -> {
+                    UserSettingsDTO d = new UserSettingsDTO(null, userId, 2.0, 1.0, 45, 240);
+                    d.setTargetGlucoseMmol(UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL);
+                    d.setRescueCarbsG(15);
+                    return d;
+                });
     }
     
     /**
@@ -132,6 +137,12 @@ public class UserSettingsService {
         if (settingsDTO.getIsfNight() != null) {
             settings.setIsfNight(settingsDTO.getIsfNight());
         }
+        if (settingsDTO.getTargetGlucoseMmol() != null) {
+            settings.setTargetGlucoseMmol(settingsDTO.getTargetGlucoseMmol());
+        }
+        if (settingsDTO.getRescueCarbsG() != null) {
+            settings.setRescueCarbsG(settingsDTO.getRescueCarbsG());
+        }
         if (settingsDTO.getPredictionEngine() != null) {
             if (settingsDTO.getPredictionEngine() != PredictionEngine.HOVORKA
                     && !featureToggleConfig.isEmpiricalTwinEnabled()) {
@@ -185,6 +196,8 @@ public class UserSettingsService {
         dto.setTimezone(settings.getTimezone());
         dto.setUtcOffsetMinutes(settings.getUtcOffsetMinutes());
         dto.setPredictionEngine(settings.getPredictionEngine());
+        dto.setTargetGlucoseMmol(settings.getTargetGlucoseMmol());
+        dto.setRescueCarbsG(settings.getRescueCarbsG());
         return dto;
     }
 }

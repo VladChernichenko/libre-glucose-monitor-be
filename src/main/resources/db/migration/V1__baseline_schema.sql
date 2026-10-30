@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
     timezone            VARCHAR(64),                             -- IANA zone id (e.g. 'Europe/Berlin'); authoritative, DST-aware
     utc_offset_minutes  INTEGER,                                 -- minutes EAST of UTC (UTC+4 = 240); fallback when timezone is absent/unknown
     prediction_engine   VARCHAR(16)      NOT NULL DEFAULT 'HOVORKA', -- dashboard forecast engine: HOVORKA | EMPIRICAL | BOTH
+    target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,      -- correction target (mmol/L); validated 4.4-10.0 at the API
+    rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15,        -- rescue carb amount for hypo treatment (g); validated 5-40 at the API
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -93,6 +95,12 @@ CREATE TABLE IF NOT EXISTS notes (
     duration_min        INTEGER,
     -- Injection site of an insulin note (InjectionSiteZone code, e.g. 'abd_ur', or 'unknown'); NULL = not asked
     site_zone           VARCHAR(16),
+    -- Assistant chat: uncertainty band on estimated carbs, context tags (JSON array of ContextTag names)
+    -- and the chat message that produced this note.
+    carbs_low           DOUBLE PRECISION,
+    carbs_high          DOUBLE PRECISION,
+    context_tags        JSONB,
+    chat_message_id     UUID,
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_notes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
