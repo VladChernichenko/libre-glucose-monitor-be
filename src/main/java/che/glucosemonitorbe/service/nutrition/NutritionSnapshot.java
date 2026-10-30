@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service.nutrition;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -7,6 +8,8 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+// Stored snapshots may still carry the removed preBolusPauseMinutes; never fail on them.
+@JsonIgnoreProperties(ignoreUnknown = true)
 @Data
 @Builder
 @NoArgsConstructor
@@ -36,7 +39,6 @@ public class NutritionSnapshot {
     private Double suggestedDurationHours; // expected glucose elevation window
     private Integer mealSequencingPriority; // 1=eat first, 3=eat last
     private String curveDescription;      // human-readable curve explanation
-    private Integer preBolusPauseMinutes; // recommended minutes to wait after injection before eating
 
     @Data
     @Builder

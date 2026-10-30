@@ -83,7 +83,6 @@ All endpoints require a JWT bearer token except `/api/auth/**`, `/api/version/**
 |---|---|---|
 | GET · POST | `/api/glucose-calculations/` | Dashboard: headline COB/IOB + 2 h/4 h/8 h forecast + full prediction path |
 | GET | `/api/glucose-calculations/status` | Module status |
-| POST | `/api/predict` | Meal what-if: pre-bolus timing optimiser, always Hovorka |
 | GET | `/api/insulin-catalog` | Rapid / long-acting insulin PK catalogue |
 
 ### CGM data sources
@@ -190,14 +189,12 @@ Population constants (Hovorka 2004): `k12 = k21 = 0.066 /min`, `F01 = 0.0097 mmo
 | Renal | `FR = 0.003 × (Q1 − 9.0×VG)` above 9 mmol/L |
 | Digital twin | Multiplies `isf`/`aG`; adds the hourly residual (ramped in linearly over the first 30 min from the anchor); widens the band by σ |
 
-### 4.3 Meal what-if path — `POST /api/predict`
+### 4.3 Pre-bolus pause — `PreBolusPauseOptimizer` (no endpoint of its own)
 
-Always Hovorka. Loads 8 h of history, overrides `tMaxG` via `MacroNutrientGastricModel` (Elashoff + fiber viscosity), then branches:
+`assistant/mealplan/PreBolusPauseOptimizer` picks the pause on the dashboard forecast itself: each candidate is one `GlucoseCalculationsService.calculateGlucoseData` call with prospective notes (dose at now, meal with macros at now + pause via negative `minutesAgo`), so the pause, the meal card's curve and the dashboard are one computation. (`POST /api/predict`, which ran its own pipeline, was removed; no client called it.)
 
-- **Live-timer branch** — a logged pre-bolus is already in flight (`PreBolusResolver`, 2 h max age). The dose is already in history and isn't re-added; no optimisation runs; the response reports `observedPreBolusMinutes`.
-- **Advisory branch** — simulates candidate pauses `{0, 5, 10, 15, 20, 25, 30}` min, each over `horizon + pause`. Score = trapezoidal time-weighted mean of hypo-weighted squared deviation from 5.5 mmol/L, with a 50× quadratic penalty below 3.9 and a 2× weight on the low side of target. The winning pause is returned as `preBolusMinutes` together with **that candidate's own curve**.
-
-Protein gluconeogenesis is added as a secondary slow-carb entry at +120 min (0.40 g carb-equiv per g protein, ≥ 2 g threshold).
+- **Pre-bolus in flight** (`PreBolusResolver`, 2 h max age): no new pause; the forecast has the meal now and no extra dose.
+- **Otherwise** candidates `{0, 5, 10, 15, 20, 25, 30}` min, scored by the trapezoidal time-weighted mean of hypo-weighted squared deviation from 5.5 mmol/L (50× quadratic penalty below 3.9, 2× on the low side of target) over the dashboard path. Candidates whose forecast minimum is under 4.5 mmol/L are rejected; ties go to the shorter pause; if all are rejected, no pause (eat now) with the reason.
 
 ---
 
@@ -410,7 +407,7 @@ Deriving `gramsPerUnit` from ISF and CR (rather than storing it) means it inheri
 - **Activity is partly modelled.** Intensity maps to `a(t)`; activity *type* is stored for analytics only, and the per-user activity gain is specced but never fitted (always 1.0).
 - **Absorption is slowed through more than one channel.** GI scaling, `DallaManGutModel.caloricScale`, the GLP-1 ileal brake and `MacroNutrientGastricModel`'s `tMaxG` all damp fat/protein meals — documented in the code as a known compounding.
 - **A rescue carb still absorbs slower than COB reports it.** `DallaManGutModel.caloricScale` clamps its gastric-emptying correction at 1.5×, so the rescue's ≈8.9-min tMaxG only gets a 1.5× speed-up instead of the ≈3× its half-life implies — at 45 minutes a rescue is roughly 46 % absorbed in the ODE while `CarbsOnBoardService` reports it 100 % cleared. The clamp brings the resulting headline-versus-chart divergence for a hypo recovery down from roughly 3× to roughly 2× — reduced, not eliminated. Closing it fully needs a rescue-specific emptying bound rather than relaxing the shared clamp, since raising the clamp would change every meal's curve, not just rescue carbs'.
-- **Two prediction pipelines coexist.** `/api/glucose-calculations` can fall back to the OpenAPS exponential path; `/api/predict` is always Hovorka. Their parameters were audited (`docs/superpowers/specs/2026-08-18-parameter-audit-findings.md`) but they remain separate code paths.
+- **The dashboard can fall back to the OpenAPS exponential path** (`app.features.hovorka-model-enabled=false`); the pre-bolus pause then scores that path too.
 - **`ContextAggregatorService` loads a user's entire CGM history** and filters in memory rather than pushing the window into the query.
 - **Root-level clutter** — `cgm_readings_*.csv`, `fix_*.sql`, `cors-*.html`, `README.m` sit in the repo root against the project's own file-organisation rules.
 

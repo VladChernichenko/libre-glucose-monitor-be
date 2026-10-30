@@ -54,7 +54,6 @@ public class GlycemicPatternMatchingService {
         snapshot.setSuggestedDurationHours(match.getSuggestedDurationHours().doubleValue());
         snapshot.setMealSequencingPriority((int) match.getMealSequencingPriority());
         snapshot.setCurveDescription(match.getCurveDescription());
-        snapshot.setPreBolusPauseMinutes(computePreBolusPause(match.getBolusStrategy(), snapshot));
         return snapshot;
     }
 
@@ -95,33 +94,6 @@ public class GlycemicPatternMatchingService {
         }
 
         return null;
-    }
-
-    /**
-     * Recommended pre-bolus pause (minutes to wait after injection before eating).
-     *
-     * Dual Wave: HFHP meal still contains a fast-carb component (e.g. pizza dough).
-     *   The upfront bolus portion (30-50%) must cover that spike, so inject 10-15 min
-     *   before eating. Source: ADA/ISPAD Dual-Wave guidelines, Warsaw Method.
-     *
-     * Extended: pure protein/fat dominant meal with negligible fast-carb peak (e.g. steak).
-     *   Bolus starts at or after meal -> 0 min pre-bolus.
-     *
-     * Normal: GI-driven timing - high-GI food absorbs fastest and needs longest head-start.
-     */
-    private int computePreBolusPause(String bolusStrategy, NutritionSnapshot s) {
-        if (bolusStrategy == null) return 15;
-        return switch (bolusStrategy) {
-            case "Extended" -> 0;            // pure slow absorption - bolus at/after meal start
-            case "Dual Wave" -> 15;          // upfront portion covers fast-carb spike in mixed HFHP meal
-            default -> {
-                double gi = s.getEstimatedGi() != null ? s.getEstimatedGi() : 55.0;
-                if (gi >= 70) yield 20;      // fast carbs - inject 20 min early
-                if (gi >= 55) yield 15;      // medium GI
-                if (gi >= 40) yield 10;      // low-medium GI
-                yield 5;                     // very low GI / high-fiber - minimal pause
-            }
-        };
     }
 
     private boolean matches(GlycemicResponsePattern p,

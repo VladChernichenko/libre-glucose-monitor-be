@@ -102,7 +102,7 @@ class DuplicatedConstantPinningTest {
         assertThat(HovorkaParameterService.HALF_LIFE_TO_TMAX_G)
                 .as("HovorkaOdeSolver:349 hardcodes 1.68; changing this constant alone would "
                         + "desynchronise the ODE from the warm-up replay, MacroNutrientGastricModel, "
-                        + "PredictionReplayEngine and GlucosePredictService")
+                        + "PredictionReplayEngine and the dashboard path")
                 .isEqualTo(1.68);
     }
 

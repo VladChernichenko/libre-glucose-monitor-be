@@ -179,8 +179,8 @@ public class HovorkaGlucosePredictionService {
     /**
      * Build the prediction path with pre-built (possibly macro-modulated) parameters.
      *
-     * <p>Used by the {@code /api/predict} endpoint where
-     * {@link MacroNutrientGastricModel} has already computed a meal-specific tMaxG.</p>
+     * <p>For callers that built the parameters themselves (e.g. a meal-specific tMaxG from
+     * {@link MacroNutrientGastricModel}).</p>
      *
      * @param customParams           pre-built HovorkaParameters (tMaxG may be overridden)
      * @param currentGlucose         current CGM reading [mmol/L]
