@@ -80,6 +80,19 @@ class HypoEventServiceConfirmTest {
     }
 
     @Test
+    void taggedConfirmOnAlreadyConfirmedEventIsConflictNotIdempotent() {
+        HypoEvent alreadyConfirmed = openEvent();
+        alreadyConfirmed.setState(State.CONFIRMED);
+        alreadyConfirmed.setNoteId(NOTE_ID);
+        when(repository.findByIdForUpdate(EVENT_ID)).thenReturn(Optional.of(alreadyConfirmed));
+
+        assertThatThrownBy(() -> service.confirm(USER_ID, EVENT_ID, 15.0, UUID.randomUUID()))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("409");
+        verify(noteRepository, never()).save(any());
+    }
+
+    @Test
     void confirmOnADismissedEventIsRejected() {
         HypoEvent dismissed = openEvent();
         dismissed.setState(State.DISMISSED);

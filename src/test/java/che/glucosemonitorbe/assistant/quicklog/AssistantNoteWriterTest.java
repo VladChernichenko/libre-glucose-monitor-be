@@ -131,4 +131,20 @@ class AssistantNoteWriterTest {
         verify(notes).deleteNote(user, b);
         verifyNoInteractions(hypo);
     }
+
+    @Test
+    void fastSugarFallsBackWhenEventAlreadyConfirmedByTheTimeConfirmRuns() {
+        UUID eventId = UUID.randomUUID();
+        when(hypo.findOpenEvent(user)).thenReturn(Optional.of(
+                new HypoEventDTO(eventId, 3.2, "OPEN", null, AT, null)));
+        when(hypo.confirm(user, eventId, 15.0, msg)).thenThrow(
+                new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.CONFLICT, "409 Hypo event is no longer open"));
+
+        var r = writer.write(user, new QuickLogCommand(FAST_SUGAR, null, 15.0, AT), msg);
+
+        assertEquals(Note.TYPE_HYPO_TREATMENT, captureRequest().getType());
+        assertNull(r.hypoEventId());
+        assertEquals(1, r.noteIds().size());
+    }
 }

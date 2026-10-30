@@ -268,7 +268,11 @@ public class HypoEventService {
      */
     @Transactional
     public HypoEventDTO confirm(UUID userId, UUID eventId, Double grams) {
-        return confirm(userId, eventId, grams, null);
+        HypoEvent existing = requireOwnEvent(userId, eventId);
+        if (existing.getState() == State.CONFIRMED) {
+            return HypoEventDTO.from(existing);
+        }
+        return logRescue(existing, userId, eventId, grams, null);
     }
 
     /**
@@ -284,14 +288,18 @@ public class HypoEventService {
                 .findFirst();
     }
 
-    /** As {@link #confirm(UUID, UUID, Double)}, tagging the rescue note with the originating chat message. */
+    /**
+     * As {@link #confirm(UUID, UUID, Double)}, tagging the rescue note with the originating chat
+     * message. Strict: it always logs a new note or throws 409 - an already-CONFIRMED event is NOT
+     * returned idempotently, so the caller never mistakes an earlier note for its own.
+     */
     @Transactional
     public HypoEventDTO confirm(UUID userId, UUID eventId, Double grams, UUID chatMessageId) {
-        HypoEvent event = requireOwnEvent(userId, eventId);
+        return logRescue(requireOwnEvent(userId, eventId), userId, eventId, grams, chatMessageId);
+    }
 
-        if (event.getState() == State.CONFIRMED) {
-            return HypoEventDTO.from(event);
-        }
+    private HypoEventDTO logRescue(HypoEvent event, UUID userId, UUID eventId, Double grams, UUID chatMessageId) {
+
         // A prompt the client held on to past its useful life must not be able to write a note at
         // now() for a hypo that ended hours ago - the phantom-carb path this age-out exists to
         // close. Checked here as well as on read: the client may be acting on a cached event.
