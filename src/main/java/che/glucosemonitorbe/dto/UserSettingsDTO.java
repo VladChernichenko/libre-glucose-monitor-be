@@ -21,7 +21,7 @@ public class UserSettingsDTO {
     private String timezone;
     /** Minutes EAST of UTC (UTC+4 = 240); fallback when timezone is absent or unparseable. */
     private Integer utcOffsetMinutes;
-    /** Autotuned single ISF (mmol/L per unit), continuously adjusted by VerificationService. */
+    /** Autotuned single ISF (mmol/L per unit). */
     private Double isf;
     private Integer carbHalfLife;
     private Integer maxCOBDuration;

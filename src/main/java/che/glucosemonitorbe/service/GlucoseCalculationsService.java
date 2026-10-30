@@ -92,9 +92,7 @@ public class GlucoseCalculationsService {
         UUID userUUID = userService.getUserByUsername(userId).getId();
 
         // Shared, single source of truth for COB/IOB inputs, built from PERSISTED notes only
-        // (nutrition-aware, long-acting excluded). The Experiments "background check" calls the
-        // very same method, so the dashboard and the Experiments tab can never show different
-        // COB/IOB. See ExperimentService.checkBackground.
+        // (nutrition-aware, long-acting excluded).
         ActiveCobIobInputs inputs = activeCobIobInputs(userUUID, currentTime);
         UserSettingsDTO userSettings = inputs.settings();
         List<Note> recentNotes = inputs.notes();
@@ -139,7 +137,7 @@ public class GlucoseCalculationsService {
         RapidInsulinIobParameters rapidIob = inputs.rapidIob();
 
         // Headline COB/IOB = PERSISTED notes only (prospective excluded - see above), so these
-        // are byte-for-byte the same values ExperimentService.checkBackground reports.
+        // are the shared single-source values.
         double activeCOB = cobService.calculateTotalCarbsOnBoard(inputs.carbsEntries(), currentTime, userSettings);
 
         // Calculate active insulin on board (bolus IOB curve from user's rapid insulin catalog)
@@ -244,9 +242,7 @@ public class GlucoseCalculationsService {
     }
 
     // ---
-    // Shared COB/IOB inputs - single source of truth for the dashboard headline
-    // AND the Experiments background check (ExperimentService.checkBackground),
-    // so the two surfaces can never disagree on "active carbs / active insulin".
+    // Shared COB/IOB inputs - single source of truth for the dashboard headline.
     // ---
 
     /** COB/IOB calculation inputs derived from a user's persisted notes. */
@@ -260,8 +256,7 @@ public class GlucoseCalculationsService {
     /**
      * Builds COB/IOB inputs from a user's PERSISTED notes over the standard 8-hour window,
      * using the same nutrition-aware carb converter and the same long-acting exclusion the
-     * dashboard uses. Both {@link #calculateGlucoseData} and the Experiments readiness check
-     * delegate here, guaranteeing identical COB/IOB on both screens.
+     * dashboard uses. {@link #calculateGlucoseData} delegates here.
      */
     public ActiveCobIobInputs activeCobIobInputs(UUID userId, LocalDateTime now) {
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);

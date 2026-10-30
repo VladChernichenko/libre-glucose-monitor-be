@@ -40,8 +40,8 @@ The canonical schema is defined in `src/main/resources/db/migration/`:
 | `V2__seed_insulin_catalog.sql` | Insulin catalog seed data |
 | `V3__seed_glycemic_response_patterns.sql` | Glycemic response pattern seed data |
 | `V4__seed_clinical_knowledge.sql` | Clinical knowledge seed data |
-| `V5__experiments.sql` | `experiments`, `experiment_readings` tables |
-| `V6__verification_events.sql` | `verification_events` table |
+| `V5__experiments.sql` | (emptied; tables dropped in V13) |
+| `V6__verification_events.sql` | (emptied; tables dropped in V13) |
 | `V7__isf_meal_window_snapshots.sql` | `isf_meal_window_snapshots` table (per-user meal-window ISF cache) |
 
 **Always read the relevant migration file(s) before writing any query, entity, or repository - the schema is the source of truth for column names, types, constraints, and indexes.**

@@ -2,7 +2,7 @@ package che.glucosemonitorbe.hovorka.learning;
 
 /**
  * Per-user multiplicative corrections ("scales") learned by the digital-twin calibrator and
- * applied on top of the population/experiment-derived {@link che.glucosemonitorbe.hovorka.HovorkaParameters}.
+ * applied on top of the population-derived {@link che.glucosemonitorbe.hovorka.HovorkaParameters}.
  *
  * <p>Scales are centred on <b>1.0</b> (= no correction). Learning a scale rather than an absolute
  * value keeps the calibration regularised toward physiology and means the base value can still come

@@ -13,9 +13,6 @@ public class FeatureToggleConfig {
     private boolean glucoseCalculationsEnabled = false;
     private boolean nutritionAwarePredictionEnabled = false;
 
-    // Experiments - ISF / Carb Ratio determination (on by default)
-    private boolean experimentsEnabled = true;
-
     // Hovorka 2-compartment ODE model (replaces OpenAPS exponential path when enabled)
     // Off by default - toggle on per-environment after validation
     private boolean hovorkaModelEnabled = false;

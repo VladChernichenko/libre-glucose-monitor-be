@@ -6,7 +6,6 @@ import che.glucosemonitorbe.domain.MealWindow;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
-import che.glucosemonitorbe.entity.VerificationEvent;
 import che.glucosemonitorbe.repository.*;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -26,11 +25,9 @@ import static org.mockito.Mockito.*;
 
 /**
  * A rescue carb (fast glucose taken to treat a hypo) has no bolus behind it and no meal behind
- * it. Two self-tuning loops read every note indiscriminately and would otherwise be corrupted by
+ * it. The self-tuning ISF loop reads every note indiscriminately and would otherwise be corrupted by
  * one:
  * <ul>
- *   <li>{@link VerificationService} scores predicted-vs-actual glucose after a note to titrate
- *   carbRatio - scoring a rescue would feed unbolused carbs into that loop.</li>
  *   <li>{@link IsfMealWindowProfileService} sums nearby carbs against {@code CARB_THRESHOLD_GRAMS}
  *   to decide whether a bolus is a correction (weight 1.0) or meal-attached (weight 0.4), and
  *   subtracts the expected meal rise from the observed CGM delta. A rescue crossing that
@@ -42,34 +39,6 @@ class RescueCarbIsolationTest {
 
     private static final UUID USER_ID = UUID.randomUUID();
     private static final UUID NOTE_ID = UUID.randomUUID();
-
-    // -- VerificationService: rescue notes must never enter the titration loop --------------
-
-    @Test
-    void verificationSkipsHypoTreatmentNotes() {
-        VerificationEventRepository verificationEventRepository = mock(VerificationEventRepository.class);
-        VerificationSummaryRepository verificationSummaryRepository = mock(VerificationSummaryRepository.class);
-        NoteRepository noteRepository = mock(NoteRepository.class);
-        UserSettingsRepository userSettingsRepository = mock(UserSettingsRepository.class);
-        CgmReadingRepository cgmReadingRepository = mock(CgmReadingRepository.class);
-        VerificationService verificationService = new VerificationService(
-                verificationEventRepository, verificationSummaryRepository,
-                noteRepository, userSettingsRepository, cgmReadingRepository);
-
-        Note rescue = new Note(USER_ID, LocalDateTime.now(), 15.0, 0.0, "Hypo treatment");
-        rescue.setType(Note.TYPE_HYPO_TREATMENT);
-        rescue.setId(NOTE_ID);
-        when(noteRepository.findById(NOTE_ID)).thenReturn(Optional.of(rescue));
-        when(verificationEventRepository.findByNoteId(NOTE_ID)).thenReturn(Optional.empty());
-        when(verificationEventRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        verificationService.enqueueNote(NOTE_ID, USER_ID);
-
-        ArgumentCaptor<VerificationEvent> saved = ArgumentCaptor.forClass(VerificationEvent.class);
-        verify(verificationEventRepository).save(saved.capture());
-        assertThat(saved.getValue().getStatus()).isEqualTo(VerificationEvent.Status.SKIPPED);
-        assertThat(saved.getValue().getSkipReason()).isEqualTo("hypo_treatment");
-    }
 
     // -- IsfMealWindowProfileService: a rescue near a correction bolus must be inert --------
 

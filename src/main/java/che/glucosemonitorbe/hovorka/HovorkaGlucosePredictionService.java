@@ -124,7 +124,7 @@ public class HovorkaGlucosePredictionService {
 
     /**
      * Build the full prediction path using the Hovorka ODE model.
-     * Parameters are loaded from the user's COB settings and experiments.
+     * Parameters are loaded from the user's COB settings.
      *
      * @param currentGlucose         current CGM reading [mmol/L]
      * @param currentTime            client-side "now"

@@ -5,7 +5,7 @@ package che.glucosemonitorbe.hovorka;
  *
  * <p>Population constants are from Hovorka et al., "Nonlinear model predictive control of
  * glucose concentration in subjects with type 1 diabetes", Physiol Meas 2004.
- * User-specific values (isf, weight, carb half-life) are derived from experiments and settings.
+ * User-specific values (isf, weight, carb half-life) are derived from settings.
  * {@code carbRatio} is deliberately NOT among them: it is a dosing coefficient
  * (gramsPerUnit = 10 x isf / carbRatio) with no reader anywhere in this package.</p>
  *
@@ -34,7 +34,7 @@ package che.glucosemonitorbe.hovorka;
  *                  NOT a bioavailability factor - physiological carb bioavailability (~0.90) is
  *                  applied once, downstream, by {@code DallaManGutModel.F}. Must not be derived
  *                  from the carb ratio (an insulin-dosing quantity).
- * @param isf       Insulin sensitivity factor [mmol/L per unit] - from user experiment
+ * @param isf       Insulin sensitivity factor [mmol/L per unit] - from user settings
  * @param weightKg  Body weight [kg] - from user_settings or 70 kg default
  */
 public record HovorkaParameters(
@@ -86,7 +86,7 @@ public record HovorkaParameters(
      * a blood glucose (G = Q1/VG) change of only ISF/2 per unit.</p>
      *
      * <p>Multiplying by 2 restores the clinically observed ISF in G, making the model
-     * consistent with ISF values measured by the {@code ISF_ONE_UNIT} experiment.</p>
+     * consistent with ISF values from user settings.</p>
      */
     public double effectiveInsulinVolume() {
         return 2.0 * vG;
