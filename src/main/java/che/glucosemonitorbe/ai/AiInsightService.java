@@ -14,6 +14,9 @@ import java.util.function.Consumer;
 @RequiredArgsConstructor
 public class AiInsightService {
 
+    /** Context window for assistant chat replies (hours of notes and CGM before "now"). */
+    static final int ASSISTANT_WINDOW_HOURS = 12;
+
     private final ContextAggregatorService contextAggregatorService;
     private final RagRetrieverService ragRetrieverService;
     private final LlmGatewayService llmGatewayService;
@@ -36,6 +39,23 @@ public class AiInsightService {
         AiAnalysisResponse response = safetyAndScoringService.finalizeResponse(context, chunks, llm);
         aiAnalysisTraceService.record(userId, windowHours, context, response);
         return response;
+    }
+
+    /**
+     * Assistant chat question path: builds the current context (same basis as the retrospective
+     * stream), retrieves passages, and streams a reply in {@code language} ("ru"/"en") using the
+     * given recent chat turns (oldest first). No provider or model override.
+     */
+    public LlmGatewayService.GatewayResult streamAssistantReply(
+            UUID userId,
+            String question,
+            List<AiAnalysisRequest.AiChatTurnDto> recentTurns,
+            String language,
+            Consumer<String> tokenConsumer
+    ) {
+        AnalysisContext context = contextAggregatorService.buildContext(userId, ASSISTANT_WINDOW_HOURS);
+        List<ClinicalKnowledgeChunk> chunks = ragRetrieverService.retrieve(context);
+        return llmGatewayService.streamChatReply(context, chunks, question, recentTurns, language, tokenConsumer);
     }
 
     public LlmGatewayService.GatewayResult streamRetrospectiveMarkdown(UUID userId, int windowHours, Consumer<String> tokenConsumer) {

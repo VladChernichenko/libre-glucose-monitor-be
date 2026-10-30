@@ -247,6 +247,81 @@ public class LlmGatewayService {
                 .build();
     }
 
+    /**
+     * Assistant chat reply: streams a short answer to {@code question} in {@code language} ("ru" or
+     * "en"), grounded in the current context, retrieved passages and the given recent chat turns.
+     * Uses the configured provider (Qwen when available, else Ollama) with no model/provider override.
+     */
+    public GatewayResult streamChatReply(
+            AnalysisContext context,
+            List<ClinicalKnowledgeChunk> chunks,
+            String question,
+            List<AiAnalysisRequest.AiChatTurnDto> conversationTurns,
+            String language,
+            Consumer<String> tokenConsumer
+    ) {
+        long start = System.currentTimeMillis();
+        String prompt = buildChatPrompt(context, chunks, question, conversationTurns, language);
+        if (qwenGatewayService.isAvailable()) {
+            try {
+                return qwenGatewayService.streamMarkdown(prompt, null, tokenConsumer);
+            } catch (Exception e) {
+                log.warn("[Qwen] chat reply failed, falling back to Ollama. reason={}", e.getMessage());
+            }
+        }
+        if (ollamaEnabled) {
+            try {
+                OllamaResponse response = streamOllamaPrompt(prompt, ollamaModel, ollamaNumCtx, tokenConsumer);
+                return GatewayResult.builder()
+                        .modelId("ollama:" + ollamaModel)
+                        .rawOutput(response.content())
+                        .promptTokens(response.usage().promptTokens())
+                        .completionTokens(response.usage().completionTokens())
+                        .contextWindow(ollamaNumCtx)
+                        .latencyMs(System.currentTimeMillis() - start)
+                        .build();
+            } catch (Exception e) {
+                log.warn("[Ollama] chat reply failed, falling back. reason={}", e.getMessage());
+            }
+        }
+        String fallback = "ru".equals(language)
+                ? "Ассистент сейчас недоступен. Попробуйте ещё раз через минуту."
+                : "The assistant is unavailable right now. Please try again in a minute.";
+        if (tokenConsumer != null) tokenConsumer.accept(fallback);
+        return GatewayResult.builder()
+                .modelId("rules-only")
+                .rawOutput(fallback)
+                .contextWindow(ollamaNumCtx)
+                .latencyMs(System.currentTimeMillis() - start)
+                .build();
+    }
+
+    private String buildChatPrompt(
+            AnalysisContext context,
+            List<ClinicalKnowledgeChunk> chunks,
+            String question,
+            List<AiAnalysisRequest.AiChatTurnDto> conversationTurns,
+            String language
+    ) {
+        String languageName = "ru".equals(language) ? "Russian" : "English";
+        String refs = chunks.stream().map(this::toReferenceLine).collect(Collectors.joining("\n"));
+        String historyBlock = formatConversationTurns(conversationTurns);
+        return "You are a personal type 1 diabetes assistant chatting with the user. "
+                + "Reply in " + languageName + ", the language of the user's message, even though the facts below are in English. "
+                + "Be brief: a few sentences, markdown allowed. "
+                + "Quote numbers only from the facts below; never invent numbers. "
+                + "Never issue imperative dosing commands; provide cautious decision-support wording. "
+                + "Facts: latestGlucose=" + context.getLatestGlucose()
+                + ", delta=" + context.getDeltaGlucose()
+                + ", activeCOB=" + context.getActiveCob()
+                + ", activeIOB=" + context.getActiveIob()
+                + ", predicted2h=" + context.getPredictedGlucose2h()
+                + ". Recent notes:\n" + formatRecentNotes(context)
+                + "\nReferences:\n" + (refs.isBlank() ? "- none" : refs)
+                + (historyBlock.isBlank() ? "" : "\nConversation history (oldest first):\n" + historyBlock)
+                + "\nUser message:\n" + question;
+    }
+
     private boolean shouldUseQwen(String providerOverride) {
         if ("ollama".equalsIgnoreCase(providerOverride)) return false;
         if ("qwen".equalsIgnoreCase(providerOverride)) return qwenGatewayService.isAvailable();
@@ -343,9 +418,15 @@ public class LlmGatewayService {
             int numCtxOverride
     ) throws Exception {
         String prompt = buildMarkdownPrompt(context, chunks, followUpQuestion, conversationTurns);
-        String payload = buildOllamaPayload(prompt, true, false, modelOverride, numCtxOverride);
+        return streamOllamaPrompt(prompt, modelOverride, numCtxOverride, tokenConsumer);
+    }
 
-        log.debug("[Ollama] model={} url={} numCtx={} auth={}", modelOverride, ollamaUrl, numCtxOverride,
+    /** Streams a free-text (non-JSON) completion for {@code prompt} from Ollama. */
+    private OllamaResponse streamOllamaPrompt(
+            String prompt, String model, int numCtx, Consumer<String> tokenConsumer) throws Exception {
+        String payload = buildOllamaPayload(prompt, true, false, model, numCtx);
+
+        log.debug("[Ollama] model={} url={} numCtx={} auth={}", model, ollamaUrl, numCtx,
                 (ollamaApiKey != null && !ollamaApiKey.isBlank()) ? "Bearer ***" : "none");
         log.debug("[Ollama] PROMPT (stream/markdown):\n{}", prompt);
 
