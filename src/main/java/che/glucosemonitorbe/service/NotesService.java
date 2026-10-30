@@ -95,6 +95,7 @@ public class NotesService {
             request.getInsulinDose()
         );
         note.setType(request.getType() != null ? request.getType() : Note.TYPE_NORMAL);
+        note.setChatMessageId(request.getChatMessageId());
         applyActivityFields(note, request.getActivityType(), request.getIntensity(), request.getDurationMin());
         applySiteZone(note, request.getSiteZone());
         note.setMockData(Boolean.TRUE.equals(request.getMockData()));

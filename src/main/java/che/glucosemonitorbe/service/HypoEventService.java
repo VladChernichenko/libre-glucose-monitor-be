@@ -268,6 +268,25 @@ public class HypoEventService {
      */
     @Transactional
     public HypoEventDTO confirm(UUID userId, UUID eventId, Double grams) {
+        return confirm(userId, eventId, grams, null);
+    }
+
+    /**
+     * The user's newest still-live OPEN event, for callers (the assistant) that log rescue carbs
+     * without having the prompt's event id. Applies the same age-out as {@link #list}'s callers.
+     */
+    @Transactional(readOnly = true)
+    public Optional<HypoEventDTO> findOpenEvent(UUID userId) {
+        return list(userId, State.OPEN).stream()
+                .filter(e -> e.detectedAt() != null
+                        && Duration.between(e.detectedAt(), LocalDateTime.now()).toMinutes()
+                                < HypoThresholds.MAX_OPEN_MINUTES)
+                .findFirst();
+    }
+
+    /** As {@link #confirm(UUID, UUID, Double)}, tagging the rescue note with the originating chat message. */
+    @Transactional
+    public HypoEventDTO confirm(UUID userId, UUID eventId, Double grams, UUID chatMessageId) {
         HypoEvent event = requireOwnEvent(userId, eventId);
 
         if (event.getState() == State.CONFIRMED) {
@@ -291,6 +310,7 @@ public class HypoEventService {
         note.setInsulin(0.0);
         note.setMeal("Hypo treatment");
         note.setType(Note.TYPE_HYPO_TREATMENT);
+        note.setChatMessageId(chatMessageId);
         note.setCreatedAt(LocalDateTime.now());
         note.setUpdatedAt(LocalDateTime.now());
         Note saved = noteRepository.save(note);

@@ -26,6 +26,10 @@ public class CreateNoteRequest {
     /** Note category: "normal" (default) or "long_acting". */
     private String type;
 
+    /** Server-side only: set by the assistant when it logs a note from chat. Never read from client JSON. */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private java.util.UUID chatMessageId;
+
     /**
      * Pre-computed nutrition profile JSON from the iOS Nutrition analyser.
      * When present, {@code NotesService} stores it directly and skips server-side
@@ -35,6 +39,12 @@ public class CreateNoteRequest {
      */
     private String nutritionProfile;
     
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public java.util.UUID getChatMessageId() { return chatMessageId; }
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public void setChatMessageId(java.util.UUID chatMessageId) { this.chatMessageId = chatMessageId; }
+
     // Constructors
     public CreateNoteRequest() {}
     
