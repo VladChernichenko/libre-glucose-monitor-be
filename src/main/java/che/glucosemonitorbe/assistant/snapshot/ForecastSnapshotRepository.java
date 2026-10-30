@@ -7,6 +7,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -14,6 +16,10 @@ import java.util.UUID;
 public interface ForecastSnapshotRepository extends JpaRepository<ForecastSnapshot, UUID> {
 
     Optional<ForecastSnapshot> findByNoteId(UUID noteId);
+
+    List<ForecastSnapshot> findByCompleteFalseAndExcludedFalse();
+
+    List<ForecastSnapshot> findByUserIdAndExcludedFalseAndMadeAtGreaterThanEqual(UUID userId, Instant since);
 
     @Modifying
     @Transactional
