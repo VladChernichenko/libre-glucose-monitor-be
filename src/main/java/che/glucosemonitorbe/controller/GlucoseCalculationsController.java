@@ -94,7 +94,8 @@ public class GlucoseCalculationsController {
         }
         
         try {
-            GlucoseCalculationsResponse response = glucoseCalculationsService.calculateGlucoseData(request);
+            // The dashboard call: forecast plus carb advice (skipped for what-if requests).
+            GlucoseCalculationsResponse response = glucoseCalculationsService.calculateDashboard(request);
 
             return ResponseEntity.ok(Map.of(
                 "data", response,

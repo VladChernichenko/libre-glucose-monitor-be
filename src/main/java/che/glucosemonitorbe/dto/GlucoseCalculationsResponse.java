@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.dto;
 
+import che.glucosemonitorbe.assistant.advice.CarbAdvice;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -47,4 +48,7 @@ public class GlucoseCalculationsResponse {
     // Empirical-twin forecast as a second series; populated only when the user's
     // prediction_engine is BOTH (predictionPath then stays the Hovorka path)
     private List<PredictionPointDTO> empiricalPredictionPath;
+
+    // Fast carbs in advance on a falling forecast (spec §6.13); null when there is no advice
+    private CarbAdvice carbAdvice;
 }

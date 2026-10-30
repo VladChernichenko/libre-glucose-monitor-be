@@ -107,7 +107,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void a1_calculationService_throwsRuntimeException_mustReturn500NotBadRequest() throws Exception {
         when(featureToggleService.shouldUseBackend("glucose-calculations")).thenReturn(true);
-        when(glucoseCalculationsService.calculateGlucoseData(any(GlucoseCalculationsRequest.class)))
+        when(glucoseCalculationsService.calculateDashboard(any(GlucoseCalculationsRequest.class)))
                 .thenThrow(new RuntimeException("server down"));
 
         String requestJson = objectMapper.writeValueAsString(

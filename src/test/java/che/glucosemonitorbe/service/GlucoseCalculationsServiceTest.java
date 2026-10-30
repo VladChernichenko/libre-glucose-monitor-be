@@ -172,6 +172,25 @@ class GlucoseCalculationsServiceTest {
     }
 
     @Test
+    void prospectiveHypoTreatmentNoteUsesTheRescueProfile() {
+        UUID userId = UUID.randomUUID();
+        stubDashboardCall(userId, "alice", "Asia/Tbilisi", 240);
+        ArgumentCaptor<List<CarbsEntry>> carbs = ArgumentCaptor.forClass(List.class);
+        when(cobService.calculateTotalCarbsOnBoard(carbs.capture(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
+        GlucoseCalculationsRequest req = requestWithOffset("alice", 240);
+        req.setProspectiveNotes(List.of(ProspectiveNoteDTO.builder()
+                .carbs(15.0).type(Note.TYPE_HYPO_TREATMENT).minutesAgo(0).build()));
+
+        service.calculateGlucoseData(req);
+
+        assertThat(carbs.getAllValues()).flatExtracting(l -> l)
+                .anySatisfy(e -> {
+                    assertThat(e.getCarbs()).isEqualTo(15.0);
+                    assertThat(che.glucosemonitorbe.domain.RescueCarbProfile.isRescue(e.getAbsorptionMode())).isTrue();
+                });
+    }
+
+    @Test
     void trendFollowsThePredictionPathNotTheCarbRatioFormula() throws Exception {
         GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null, null);
         Method method = GlucoseCalculationsService.class.getDeclaredMethod(

@@ -1,9 +1,11 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.advice.CarbAdviceService;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.domain.PredictionEngine;
+import che.glucosemonitorbe.domain.RescueCarbProfile;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.empirical.EmpiricalEvent;
 import che.glucosemonitorbe.empirical.EmpiricalEventMapper;
@@ -22,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -76,6 +79,37 @@ public class GlucoseCalculationsService {
      */
     @Autowired(required = false)
     private HovorkaGlucosePredictionService hovorkaService;
+
+    /** Lazy: CarbAdviceService re-runs {@link #calculateGlucoseData} for its gram search. */
+    @Lazy
+    @Autowired(required = false)
+    private CarbAdviceService carbAdviceService;
+
+    /**
+     * The dashboard call: {@link #calculateGlucoseData} plus the fast-carbs-in-advance advice
+     * (§6.13), evaluated on the forecast just computed. Requests carrying prospective (what-if)
+     * notes skip the advice, so a what-if never touches the advice hold and the gram search's own
+     * re-runs cannot recurse. Internal callers (alerts, chat, snapshots) call
+     * {@link #calculateGlucoseData} directly: they send no CGM trend, so letting them evaluate would
+     * count trend-less forecasts against the hold.
+     */
+    public GlucoseCalculationsResponse calculateDashboard(GlucoseCalculationsRequest request) {
+        GlucoseCalculationsResponse response = calculateGlucoseData(request);
+        boolean whatIf = request.getProspectiveNotes() != null && !request.getProspectiveNotes().isEmpty();
+        if (whatIf || carbAdviceService == null || response.getPredictionPath() == null) {
+            return response;
+        }
+        try {
+            UUID userUUID = userService.getUserByUsername(request.getUserId()).getId();
+            double trend = request.getCurrentTrendMmolPerMin() != null ? request.getCurrentTrendMmolPerMin() : 0.0;
+            carbAdviceService.evaluate(userUUID, response.getCalculatedAt(), request.getCurrentGlucose(),
+                    trend, response.getPredictionPath()).ifPresent(response::setCarbAdvice);
+        } catch (RuntimeException e) {
+            // The forecast itself is still valid; never fail the dashboard over the advice.
+            log.warn("Carb advice unavailable for user={}: {}", request.getUserId(), e.getMessage(), e);
+        }
+        return response;
+    }
 
     /**
      * Calculate comprehensive glucose calculations including COB, IOB, and predictions
@@ -739,6 +773,11 @@ public class GlucoseCalculationsService {
                 .userId(userUUID)
                 .build();
         entry.setAbsorptionMode("DEFAULT_DECAY");
+        // A prospective fast sugar (the carb-advice gram search) gets the one rescue profile, as a
+        // logged hypo_treatment note does in NoteToCarbsEntryMapper.
+        if (Note.TYPE_HYPO_TREATMENT.equals(pn.getType())) {
+            return RescueCarbProfile.mark(entry);
+        }
 
         if (featureToggleConfig.isNutritionAwarePredictionEnabled()
                 && pn.getNutritionProfileJson() != null
