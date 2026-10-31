@@ -79,4 +79,50 @@ class IntentClassifierTest {
         assertEquals(IntentClassifier.Intent.MEAL_PREP, c.intent());
         assertEquals(1, c.items().size());
     }
+
+    private static final java.time.LocalDate TODAY = java.time.LocalDate.of(2026, 10, 30);
+
+    private IntentClassifier.Filters filters(String filtersJson) {
+        when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"QUESTION\",\"filters\":" + filtersJson + "}");
+        return classifier.classify("whatever", TODAY).filters();
+    }
+
+    @Test
+    void parsesQuestionFilters() {
+        IntentClassifier.Filters f = filters("{\"fromDate\":\"2026-10-01\",\"toDate\":\"2026-10-29\","
+                + "\"foodWords\":[\"pork\",\" Pork \",\"rice\"],\"eventKind\":\"meal\"}");
+        assertEquals(java.time.LocalDate.of(2026, 10, 1), f.fromDate());
+        assertEquals(java.time.LocalDate.of(2026, 10, 29), f.toDate());
+        assertEquals(List.of("pork", "rice"), f.foodWords());
+        assertEquals(IntentClassifier.EventKind.MEAL, f.eventKind());
+    }
+
+    @Test
+    void untrustedFiltersAreValidated() {
+        IntentClassifier.Filters f = filters("{\"fromDate\":\"2026-01-01\",\"toDate\":\"2026-10-29\","
+                + "\"foodWords\":[42,\"\",\"" + "y".repeat(100) + "\",\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\",\"j\"],"
+                + "\"eventKind\":\"DROP TABLE\"}");
+        assertNull(f.fromDate(), "range over 90 days is dropped");
+        assertNull(f.toDate());
+        assertEquals(IntentClassifier.MAX_FOOD_WORDS, f.foodWords().size());
+        assertEquals("y".repeat(IntentClassifier.MAX_FOOD_WORD_LENGTH), f.foodWords().get(0));
+        assertNull(f.eventKind());
+    }
+
+    @Test
+    void badDatesAreDropped() {
+        assertNull(filters("{\"fromDate\":\"yesterday\"}").fromDate());
+        IntentClassifier.Filters reversed = filters("{\"fromDate\":\"2026-10-20\",\"toDate\":\"2026-10-10\"}");
+        assertNull(reversed.fromDate());
+        assertNull(reversed.toDate());
+        // A lone fromDate counts up to today: more than 90 days back is dropped.
+        assertNull(filters("{\"fromDate\":\"2026-06-01\"}").fromDate());
+        assertEquals(java.time.LocalDate.of(2026, 10, 1), filters("{\"fromDate\":\"2026-10-01\"}").fromDate());
+    }
+
+    @Test
+    void missingFiltersAreEmpty() {
+        when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"QUESTION\"}");
+        assertEquals(IntentClassifier.Filters.NONE, classifier.classify("x", TODAY).filters());
+    }
 }

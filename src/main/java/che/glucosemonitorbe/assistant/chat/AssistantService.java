@@ -1,7 +1,5 @@
 package che.glucosemonitorbe.assistant.chat;
 
-import che.glucosemonitorbe.ai.AiInsightService;
-import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
 import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.assistant.quicklog.AssistantNoteWriter;
@@ -23,7 +21,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -42,6 +45,10 @@ import org.springframework.stereotype.Service;
  * Routes one chat message: quick-log shorthand (no LLM) first; then a photo, or text the
  * {@link IntentClassifier} calls MEAL_PREP, goes to {@link MealPrepFlow}; a recognised free-text event
  * is proposed as a tagged note; everything else takes the LLM question path. Persists the user message and the assistant reply and emits NDJSON events.
+ *
+ * <p>Question path (spec §6.7-6.8): a {@link FactsPayload} (state on the assistant clock, retrieved episodes,
+ * citations, recent turns) goes to the LLM; the {@code episodes} event (top {@link #EPISODES_SHOWN}) is sent
+ * before the reply; the reply is buffered behind the number guard and sent as one {@code token} event.
  */
 @Slf4j
 @Service
@@ -54,6 +61,7 @@ public class AssistantService {
     public static final String INTENT_QUESTION_FAILED = "question_failed";
 
     static final int RECENT_TURNS = 10;
+    static final int EPISODES_SHOWN = 5;
     private static final int FORECAST_HOURS = 4;
     private static final Pattern CYRILLIC = Pattern.compile("\\p{IsCyrillic}");
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
@@ -73,7 +81,6 @@ public class AssistantService {
     private final QuickLogParser quickLogParser;
     private final AssistantNoteWriter noteWriter;
     private final ChatHistoryService history;
-    private final AiInsightService aiInsightService;
     private final GlucoseCalculationsService calculationsService;
     private final InsulinCalculatorService insulinCalculatorService;
     private final CgmFreshnessService cgmFreshnessService;
@@ -81,6 +88,9 @@ public class AssistantService {
     private final ObjectMapper objectMapper;
     private final IntentClassifier intentClassifier;
     private final MealPrepFlow mealPrepFlow;
+    private final FactsService factsService;
+    private final EpisodeRetrieval episodeRetrieval;
+    private final GuardedReplyService guardedReply;
     /** Overridable in tests. */
     Duration forecastBudget = FORECAST_BUDGET;
 
@@ -106,7 +116,8 @@ public class AssistantService {
             mealPrepFlow.mealPrep(userId, userMessage, msg, List.of(), language, sink);
             return;
         }
-        IntentClassifier.Classification c = intentClassifier.classify(msg.text());
+        IntentClassifier.Classification c = intentClassifier.classify(msg.text(),
+                msg.clientNow() == null ? null : msg.clientNow().toLocalDate());
         if (c.intent() == IntentClassifier.Intent.MEAL_PREP) {
             mealPrepFlow.mealPrep(userId, userMessage, msg, c.items(), language, sink);
             return;
@@ -115,7 +126,7 @@ public class AssistantService {
             mealPrepFlow.proposeEvent(userMessage, msg.text(), c.tags(), language, sink);
             return;
         }
-        question(userId, userMessage, msg, language, sink);
+        question(userId, userMessage, msg, c.filters(), language, sink);
     }
 
     private void quickLog(UUID userId, ChatMessage userMessage, QuickLogCommand cmd, LocalDateTime clientNow,
@@ -153,20 +164,37 @@ public class AssistantService {
         sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_QUICK_LOG));
     }
 
-    private void question(UUID userId, ChatMessage userMessage, IncomingMessage msg, String language,
-                          Consumer<AssistantEvent> sink) {
+    private void question(UUID userId, ChatMessage userMessage, IncomingMessage msg, IntentClassifier.Filters filters,
+                          String language, Consumer<AssistantEvent> sink) {
         long start = System.currentTimeMillis();
         StringBuilder seen = new StringBuilder();
         ObjectNode payload = history.newPayload().put("language", language);
-        LlmGatewayService.GatewayResult result;
+        GuardedReplyService.Result result;
         try {
-            List<AiAnalysisRequest.AiChatTurnDto> turns =
-                    history.recentTurns(userId, userMessage.getCreatedAt(), RECENT_TURNS);
             String question = msg.hasText() ? msg.text().trim() : "(The user sent a photo without text.)";
-            result = aiInsightService.streamAssistantReply(userId, question, turns, language, token -> {
-                sink.accept(new AssistantEvent.Token(token));
-                seen.append(token); // only what actually reached the client
-            });
+            List<FactsPayload.TurnFacts> turns = new ArrayList<>(FactsService.turns(
+                    history.recentTurns(userId, userMessage.getCreatedAt(), RECENT_TURNS)));
+            turns.add(new FactsPayload.TurnFacts("user", question)); // its numbers are the user's own facts
+            FactsPayload.State state = factsService.state(userId, msg.clientNow(), msg.zone());
+            List<FactsPayload.EpisodeFacts> episodes = episodeRetrieval.forQuestion(userId, question, filters,
+                    state, msg.clientNow(), msg.zone());
+            FactsPayload facts = FactsPayload.builder()
+                    .language(language)
+                    .now(FactsService.wall(msg.clientNow()))
+                    .state(state)
+                    .episodes(episodes)
+                    .citations(factsService.citations(state))
+                    .turns(turns)
+                    .build();
+            List<FactsPayload.EpisodeFacts> shown = shown(episodes);
+            if (!shown.isEmpty()) {
+                payload.set("episodes", objectMapper.valueToTree(shown));
+                sink.accept(new AssistantEvent.Episodes(shown));
+            }
+            result = guardedReply.reply(userId, facts, offending -> AssistantPrompts.question(facts, question, offending),
+                    () -> AssistantPrompts.questionTemplate(facts), language);
+            sink.accept(new AssistantEvent.Token(result.text()));
+            seen.append(result.text()); // only what actually reached the client
         } catch (RuntimeException e) {
             log.warn("Assistant question path failed for userId={}", userId, e);
             String text = seen.length() > 0 ? seen.toString()
@@ -180,10 +208,26 @@ public class AssistantService {
             }
             return;
         }
-        long latency = result.getLatencyMs() > 0 ? result.getLatencyMs() : System.currentTimeMillis() - start;
         ChatMessage reply = history.appendAssistant(userMessage, seen.toString(), INTENT_QUESTION, payload,
-                result.getModelId(), latency);
+                result.modelId(), System.currentTimeMillis() - start);
         sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_QUESTION));
+    }
+
+    /**
+     * The episodes shown as cards: at most {@link #EPISODES_SHOWN}, taken round-robin across kinds so a
+     * question about everything does not show only meals. Order within a kind is the retrieval order.
+     */
+    static List<FactsPayload.EpisodeFacts> shown(List<FactsPayload.EpisodeFacts> episodes) {
+        if (episodes == null || episodes.isEmpty()) return List.of();
+        Map<String, Deque<FactsPayload.EpisodeFacts>> byKind = new LinkedHashMap<>();
+        episodes.forEach(e -> byKind.computeIfAbsent(e.kind(), k -> new ArrayDeque<>()).add(e));
+        List<FactsPayload.EpisodeFacts> out = new ArrayList<>();
+        while (out.size() < EPISODES_SHOWN && byKind.values().stream().anyMatch(d -> !d.isEmpty())) {
+            for (Deque<FactsPayload.EpisodeFacts> d : byKind.values()) {
+                if (!d.isEmpty() && out.size() < EPISODES_SHOWN) out.add(d.poll());
+            }
+        }
+        return out;
     }
 
     /**

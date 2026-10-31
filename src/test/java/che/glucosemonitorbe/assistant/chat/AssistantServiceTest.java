@@ -4,12 +4,12 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import che.glucosemonitorbe.ai.AiInsightService;
-import che.glucosemonitorbe.ai.AnalysisContext;
-import che.glucosemonitorbe.ai.ContextAggregatorService;
 import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.ai.RagRetrieverService;
 import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
+import che.glucosemonitorbe.domain.AiAnalysisTrace;
+import che.glucosemonitorbe.repository.AiAnalysisTraceRepository;
+import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.assistant.quicklog.AssistantNoteWriter;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogParser;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogRejectedException;
@@ -40,10 +40,10 @@ class AssistantServiceTest {
     private final List<ChatMessage> saved = new ArrayList<>();
 
     private final LlmGatewayService llm = mock(LlmGatewayService.class);
-    private final ContextAggregatorService contextAggregator = mock(ContextAggregatorService.class);
     private final RagRetrieverService rag = mock(RagRetrieverService.class);
-    private final AiInsightService aiInsightService = new AiInsightService(
-            contextAggregator, rag, llm);
+    private final CarbsOnBoardService carbsOnBoard = mock(CarbsOnBoardService.class);
+    private final AiAnalysisTraceRepository traces = mock(AiAnalysisTraceRepository.class);
+    private final EpisodeRetrieval retrieval = mock(EpisodeRetrieval.class);
 
     private final AssistantNoteWriter writer = mock(AssistantNoteWriter.class);
     private final GlucoseCalculationsService calculations = mock(GlucoseCalculationsService.class);
@@ -77,9 +77,11 @@ class AssistantServiceTest {
         when(freshness.freshReading(eq(user), any(Instant.class))).thenReturn(Optional.empty());
 
         ChatHistoryService history = new ChatHistoryService(repository, objectMapper);
-        service = new AssistantService(new QuickLogParser(), writer, history, aiInsightService,
+        FactsService facts = new FactsService(calculations, insulinCalculator, carbsOnBoard, freshness, rag);
+        GuardedReplyService guarded = new GuardedReplyService(llm, traces, objectMapper);
+        service = new AssistantService(new QuickLogParser(), writer, history,
                 calculations, insulinCalculator, freshness, userService, objectMapper,
-                new IntentClassifier(llm, objectMapper), mealPrepFlow);
+                new IntentClassifier(llm, objectMapper), mealPrepFlow, facts, retrieval, guarded);
     }
 
     private IncomingMessage text(String t) {
@@ -137,28 +139,32 @@ class AssistantServiceTest {
         return p;
     }
 
+    /** Stubs the LLM reply stream: each call streams the next of {@code replies} (the last one repeats). */
+    private void llmReplies(String... replies) {
+        int[] call = {0};
+        when(llm.streamPromptReply(anyString(), anyString(), any())).thenAnswer(i -> {
+            String r = replies[Math.min(call[0]++, replies.length - 1)];
+            Consumer<String> c = i.getArgument(2);
+            for (String part : r.split("(?<= )")) c.accept(part);
+            return LlmGatewayService.GatewayResult.builder().modelId("test-model").rawOutput(r).latencyMs(12).build();
+        });
+    }
+
+    private List<String> tokens() {
+        return events.stream().filter(e -> e instanceof AssistantEvent.Token)
+                .map(e -> ((AssistantEvent.Token) e).text()).toList();
+    }
+
     @Test
     void unparsedTextGoesToQuestionPath() {
-        AnalysisContext ctx = AnalysisContext.builder().notes(List.of()).build();
-        when(contextAggregator.buildContext(eq(user), anyInt())).thenReturn(ctx);
-        when(rag.retrieve(ctx)).thenReturn(List.of());
-        when(llm.streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any()))
-                .thenAnswer(i -> {
-                    Consumer<String> c = i.getArgument(5);
-                    c.accept("Hello");
-                    c.accept(" there");
-                    return LlmGatewayService.GatewayResult.builder()
-                            .modelId("test-model").rawOutput("Hello there").latencyMs(12).build();
-                });
+        llmReplies("Hello there");
 
         service.handle(user, text("Why was I high after lunch?"), sink);
 
         verifyNoInteractions(writer);
-        verify(llm).streamChatReply(eq(ctx), anyList(), eq("Why was I high after lunch?"), anyList(),
-                eq("en"), any());
-        assertEquals(List.of("Hello", " there"), events.stream()
-                .filter(e -> e instanceof AssistantEvent.Token)
-                .map(e -> ((AssistantEvent.Token) e).text()).toList());
+        verify(llm).streamPromptReply(contains("Why was I high after lunch?"), eq("en"), any());
+        // Buffered behind the number guard: the whole reply goes out as one token after the check.
+        assertEquals(List.of("Hello there"), tokens());
         assertInstanceOf(AssistantEvent.Done.class, events.get(events.size() - 1));
         ChatMessage reply = saved.get(1);
         assertEquals(ChatMessage.Role.ASSISTANT, reply.getRole());
@@ -168,14 +174,97 @@ class AssistantServiceTest {
 
     @Test
     void russianQuestionPassesRussianLanguage() {
-        AnalysisContext ctx = AnalysisContext.builder().notes(List.of()).build();
-        when(contextAggregator.buildContext(eq(user), anyInt())).thenReturn(ctx);
-        when(llm.streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any()))
-                .thenReturn(LlmGatewayService.GatewayResult.builder().modelId("m").rawOutput("ok").build());
+        llmReplies("ok");
 
         service.handle(user, text("Почему сахар высокий?"), sink);
 
-        verify(llm).streamChatReply(any(), anyList(), anyString(), anyList(), eq("ru"), any());
+        verify(llm).streamPromptReply(contains("Russian"), eq("ru"), any());
+    }
+
+    @Test
+    void factsStateUsesTheAssistantClockInTheUserZone() {
+        llmReplies("IOB is 5.3 U.");
+        when(freshness.freshReading(eq(user), any(Instant.class))).thenReturn(Optional.of(
+                new che.glucosemonitorbe.assistant.common.CgmReadingDTO(7.24, LocalDateTime.of(2026, 10, 30, 10, 55), null, null)));
+        when(carbsOnBoard.calculateTotalCarbsOnBoard(anyList(), eq(NOW), eq(user))).thenReturn(21.6);
+
+        service.handle(user, text("How am I doing?"), sink);
+
+        verify(calculations).activeCobIobInputs(user, NOW);
+        verify(freshness).freshReading(user, NOW.atZone(ZONE).toInstant());
+        // The prompt carries the facts: glucose read 10:55 UTC = 11:55 Berlin, IOB, COB.
+        verify(llm).streamPromptReply(argThat(p -> p.contains("\"glucose\":7.2") && p.contains("\"glucoseAt\":\"11:55\"")
+                && p.contains("\"iob\":5.3") && p.contains("\"cob\":21.6")), eq("en"), any());
+        assertEquals(List.of("IOB is 5.3 U."), tokens());
+    }
+
+    @Test
+    void inventedNumberRegeneratedThenTemplated() {
+        llmReplies("Take 6 U now.", "Still, take 6 U.");
+
+        service.handle(user, text("What should I do?"), sink);
+
+        verify(llm, times(2)).streamPromptReply(anyString(), eq("en"), any());
+        verify(llm).streamPromptReply(contains("not in the facts: 6"), eq("en"), any());
+        ChatMessage reply = saved.get(1);
+        String template = reply.getText();
+        assertFalse(template.contains("6 U"), template);
+        assertTrue(template.contains("5.3"), template); // IOB from the payload
+        assertEquals(List.of(template), tokens());
+        assertTrue(che.glucosemonitorbe.ai.NumberGuard.check(template,
+                FactsPayload.builder().state(FactsPayload.State.builder().iob(5.3).cob(0.0).build()).build()).ok());
+        verify(traces).save(argThat((AiAnalysisTrace t) -> t.getConfidence() == 0.0 && t.getWindowHours() == 0
+                && t.getUserId().equals(user)));
+    }
+
+    @Test
+    void inventedNumberRegeneratedOnceThenAccepted() {
+        llmReplies("Take 6 U now.", "IOB is 5.3 U.");
+
+        service.handle(user, text("What should I do?"), sink);
+
+        assertEquals(List.of("IOB is 5.3 U."), tokens());
+        verify(traces).save(argThat((AiAnalysisTrace t) -> t.getConfidence() == 0.5));
+    }
+
+    @Test
+    void questionEmitsEpisodesBeforeTokensAndRecordsEvidence() throws Exception {
+        llmReplies("Last time you peaked at 11.2.");
+        when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"QUESTION\",\"filters\":"
+                + "{\"foodWords\":[\"pork\"],\"eventKind\":\"MEAL\"}}");
+        FactsPayload.EpisodeFacts ep = FactsPayload.EpisodeFacts.builder()
+                .id("6f1c2b8e-1d2a-4c3b-9e8f-123456789abc").kind("MEAL").at("2026-10-12T13:00")
+                .text("pork chop").peak(11.2).build();
+        when(retrieval.forQuestion(eq(user), anyString(), any(), any(), eq(NOW), eq(ZONE))).thenReturn(List.of(ep));
+
+        service.handle(user, text("Why do I go high after pork?"), sink);
+
+        verify(retrieval).forQuestion(eq(user), eq("Why do I go high after pork?"),
+                argThat(f -> f.foodWords().equals(List.of("pork")) && f.eventKind() == IntentClassifier.EventKind.MEAL),
+                any(), eq(NOW), eq(ZONE));
+        AssistantEvent.Episodes e = assertInstanceOf(AssistantEvent.Episodes.class, events.get(0));
+        assertEquals(List.of(ep), e.episodes());
+        assertInstanceOf(AssistantEvent.Token.class, events.get(1));
+        assertEquals("Last time you peaked at 11.2.", saved.get(1).getText());
+        assertEquals("pork chop",
+                objectMapper.readTree(saved.get(1).getPayload()).path("episodes").get(0).path("text").asText());
+        verify(traces).save(argThat((AiAnalysisTrace t) -> t.getEvidenceChunkIds().contains(ep.id())
+                && t.getConfidence() == 1.0 && "test-model".equals(t.getModelId())));
+    }
+
+    @Test
+    void episodesEventIsCappedAtFive() {
+        llmReplies("ok");
+        List<FactsPayload.EpisodeFacts> many = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            many.add(FactsPayload.EpisodeFacts.builder().id("id" + i).kind(i % 2 == 0 ? "MEAL" : "LOW").build());
+        }
+        when(retrieval.forQuestion(eq(user), anyString(), any(), any(), any(), any())).thenReturn(many);
+
+        service.handle(user, text("Anything?"), sink);
+
+        AssistantEvent.Episodes e = assertInstanceOf(AssistantEvent.Episodes.class, events.get(0));
+        assertEquals(5, e.episodes().size());
     }
 
     @Test
@@ -239,7 +328,7 @@ class AssistantServiceTest {
 
         verify(mealPrepFlow).mealPrep(eq(user), any(), eq(msg),
                 eq(List.of(new IntentClassifier.FoodItem("rye bread", 40.0))), eq("en"), same(sink));
-        verify(llm, never()).streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any());
+        verify(llm, never()).streamPromptReply(anyString(), anyString(), any());
     }
 
     @Test
@@ -254,15 +343,12 @@ class AssistantServiceTest {
     @Test
     void eventIntentWithoutKnownTagsGoesToQuestionPath() {
         when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"EVENT\",\"tags\":[\"JUGGLING\"]}");
-        AnalysisContext ctx = AnalysisContext.builder().notes(List.of()).build();
-        when(contextAggregator.buildContext(eq(user), anyInt())).thenReturn(ctx);
-        when(llm.streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any()))
-                .thenReturn(LlmGatewayService.GatewayResult.builder().modelId("m").rawOutput("ok").build());
+        llmReplies("ok");
 
         service.handle(user, text("juggled for an hour"), sink);
 
         verifyNoInteractions(mealPrepFlow);
-        verify(llm).streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any());
+        verify(llm).streamPromptReply(anyString(), anyString(), any());
     }
 
     @Test
@@ -314,11 +400,9 @@ class AssistantServiceTest {
 
     @Test
     void failedQuestionPathPersistsFailedReplyAndEmitsError() {
-        AnalysisContext ctx = AnalysisContext.builder().notes(List.of()).build();
-        when(contextAggregator.buildContext(eq(user), anyInt())).thenReturn(ctx);
-        when(llm.streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any()))
+        when(llm.streamPromptReply(anyString(), anyString(), any()))
                 .thenAnswer(i -> {
-                    Consumer<String> c = i.getArgument(5);
+                    Consumer<String> c = i.getArgument(2);
                     c.accept("Partial ");
                     throw new IllegalStateException("provider exploded");
                 });
@@ -329,15 +413,29 @@ class AssistantServiceTest {
         ChatMessage reply = saved.get(1);
         assertEquals(ChatMessage.Role.ASSISTANT, reply.getRole());
         assertEquals(AssistantService.INTENT_QUESTION_FAILED, reply.getIntent());
-        assertEquals("Partial ", reply.getText());
-        assertInstanceOf(AssistantEvent.Token.class, events.get(0));
-        assertInstanceOf(AssistantEvent.Error.class, events.get(events.size() - 1));
-        assertTrue(events.stream().noneMatch(e -> e instanceof AssistantEvent.Done));
+        // Unguarded partial text never reached the client, so the failure note is stored instead.
+        assertEquals("The reply could not be generated.", reply.getText());
+        assertEquals(List.of(AssistantEvent.Error.class), events.stream().map(Object::getClass).toList());
+    }
+
+    @Test
+    void clientGoneWhileSendingReplyPersistsQuestionFailed() {
+        llmReplies("Hello there");
+        Consumer<AssistantEvent> closing = e -> {
+            if (e instanceof AssistantEvent.Token) throw new IllegalStateException("client gone");
+            events.add(e);
+        };
+
+        service.handle(user, text("Why was I high?"), closing);
+
+        ChatMessage reply = saved.get(1);
+        assertEquals(AssistantService.INTENT_QUESTION_FAILED, reply.getIntent());
+        assertEquals("The reply could not be generated.", reply.getText());
     }
 
     @Test
     void failedContextBuildPersistsFailureNote() {
-        when(contextAggregator.buildContext(eq(user), anyInt())).thenThrow(new RuntimeException("db down"));
+        when(calculations.activeCobIobInputs(eq(user), any())).thenThrow(new RuntimeException("db down"));
 
         service.handle(user, text("Why was I high?"), sink);
 

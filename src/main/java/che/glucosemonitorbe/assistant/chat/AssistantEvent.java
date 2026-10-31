@@ -6,7 +6,6 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -62,8 +61,11 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
      */
     record Proposal(UUID messageId, List<ContextTag> tags, String comment) implements AssistantEvent {}
 
-    /** Similar past episodes with outcomes (later task). */
-    record Episodes(List<Map<String, Object>> episodes) implements AssistantEvent {}
+    /**
+     * Past episodes with outcomes shown as cards (at most 5): after {@code plan} for a meal plan, before the
+     * reply tokens for a question. Null fields are omitted on the wire.
+     */
+    record Episodes(List<FactsPayload.EpisodeFacts> episodes) implements AssistantEvent {}
 
     /** A warning banner, e.g. the 20% history-dose banner (later task). */
     record Banner(String level, String text) implements AssistantEvent {}

@@ -1,14 +1,11 @@
 package che.glucosemonitorbe.assistant.chat;
 
-import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.assistant.common.ContextTag;
 import che.glucosemonitorbe.assistant.mealplan.MealActionService;
 import che.glucosemonitorbe.assistant.mealplan.MealMacros;
 import che.glucosemonitorbe.assistant.mealplan.MealNutritionResolver;
 import che.glucosemonitorbe.assistant.mealplan.MealPlan;
 import che.glucosemonitorbe.assistant.mealplan.MealPlanService;
-import che.glucosemonitorbe.assistant.mealplan.NutritionRange;
-import che.glucosemonitorbe.assistant.mealplan.PauseChoice;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -25,7 +22,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * The meal-prep route (spec §6.4) and the free-text event proposal (§6.1 path 3):
- * nutrition -> {@link MealPlanService} -> {@code plan} event -> explanation tokens; or a
+ * nutrition -> {@link MealPlanService} -> {@code plan} event -> {@code episodes} event (top similar meals)
+ * -> explanation (facts payload, number-guarded, sent as one token); or a
  * {@code proposal} event whose note is saved only on Confirm. The plan's state lives on the
  * assistant message's payload and is advanced by {@link MealActionService}.
  */
@@ -42,9 +40,11 @@ public class MealPrepFlow {
     private final ChatHistoryService history;
     private final MealNutritionResolver nutrition;
     private final MealPlanService planService;
-    private final LlmGatewayService llm;
     private final MealActionService mealActions;
     private final ObjectMapper objectMapper;
+    private final FactsService factsService;
+    private final EpisodeRetrieval episodeRetrieval;
+    private final GuardedReplyService guardedReply;
 
     public void mealPrep(UUID userId, ChatMessage userMessage, IncomingMessage msg,
                          List<IntentClassifier.FoodItem> items, String language, Consumer<AssistantEvent> sink) {
@@ -75,8 +75,9 @@ public class MealPrepFlow {
                 .put("description", description)
                 .put("plannedAt", MealActionService.iso(msg.clientNow()))
                 .put("doseValidUntil", MealActionService.iso(msg.clientNow().plus(MealActionService.DOSE_VALIDITY)));
-        payload.set("meal", objectMapper.valueToTree(new MealMacros(plan.carbs().mid(), plan.fat().mid(),
-                plan.protein().mid(), plan.fiber().mid(), plan.gi())));
+        MealMacros macros = new MealMacros(plan.carbs().mid(), plan.fat().mid(),
+                plan.protein().mid(), plan.fiber().mid(), plan.gi());
+        payload.set("meal", objectMapper.valueToTree(macros));
         ArrayNode itemsNode = payload.putArray("items");
         for (IntentClassifier.FoodItem i : items) {
             ObjectNode item = itemsNode.addObject().put("name", i.name());
@@ -90,15 +91,34 @@ public class MealPrepFlow {
         sink.accept(new AssistantEvent.Plan(reply.getId(), plan, payload.get("plannedAt").asText(),
                 payload.get("doseValidUntil").asText()));
 
+        FactsPayload.State state = null;
+        List<FactsPayload.EpisodeFacts> episodes = List.of();
+        try {
+            state = factsService.state(userId, msg.clientNow(), msg.zone());
+            episodes = episodeRetrieval.forPlan(userId, description, macros, msg.clientNow(), state.glucose(),
+                    state.iob() == null ? 0.0 : state.iob());
+        } catch (RuntimeException e) {
+            // Episodes and state are context for the explanation; their absence must not fail the card.
+            log.warn("Meal-prep facts incomplete for userId={}: {}", userId, e.toString());
+        }
+        if (!episodes.isEmpty()) sink.accept(new AssistantEvent.Episodes(episodes));
+
         StringBuilder seen = new StringBuilder();
         String modelId = null;
         try {
-            LlmGatewayService.GatewayResult r = llm.streamPromptReply(explanationPrompt(plan, description, language),
-                    language, token -> {
-                        sink.accept(new AssistantEvent.Token(token));
-                        seen.append(token);
-                    });
-            modelId = r == null ? null : r.getModelId();
+            FactsPayload facts = FactsPayload.builder()
+                    .language(language)
+                    .now(FactsService.wall(msg.clientNow()))
+                    .state(state)
+                    .plan(FactsService.plan(plan, description))
+                    .episodes(episodes)
+                    .build();
+            GuardedReplyService.Result r = guardedReply.reply(userId, facts,
+                    offending -> AssistantPrompts.plan(facts, offending),
+                    () -> AssistantPrompts.planTemplate(facts), language);
+            modelId = r.modelId();
+            sink.accept(new AssistantEvent.Token(r.text()));
+            seen.append(r.text());
         } catch (RuntimeException e) {
             // The card already went out; a missing explanation must not fail it.
             log.warn("Meal-prep explanation failed for userId={}: {}", userId, e.toString());
@@ -140,40 +160,6 @@ public class MealPrepFlow {
                     .collect(Collectors.joining(", "));
         }
         return msg.hasPhoto() ? "meal photo" : "meal";
-    }
-
-    /** Facts-only prompt: the model may use only these numbers (the full number guard is a later task). */
-    static String explanationPrompt(MealPlan plan, String description, String language) {
-        String languageName = "ru".equals(language) ? "Russian" : "English";
-        StringBuilder f = new StringBuilder();
-        f.append("meal=").append(description);
-        f.append("; carbsGrams=").append(range(plan.carbs()));
-        f.append("; fatGrams=").append(fmt(plan.fat().mid()));
-        f.append("; proteinGrams=").append(fmt(plan.protein().mid()));
-        f.append("; fiberGrams=").append(fmt(plan.fiber().mid()));
-        if (plan.patternLabel() != null) f.append("; pattern=").append(plan.patternLabel());
-        if (plan.stale()) {
-            f.append("; noFreshCgmReading=true (no dose or pause can be suggested)");
-        } else if (plan.refusalCode() != null) {
-            f.append("; calculatorRefused=").append(plan.refusalCode());
-        } else {
-            f.append("; modelDoseUnits=").append(fmt(plan.doseUnits()));
-            PauseChoice p = plan.pause();
-            if (p != null) {
-                f.append("; pauseMinutes=").append(p.pauseMinutes() == null ? "none" : p.pauseMinutes());
-                f.append("; forecastPeak=").append(fmt(p.peak())).append("; forecastLowest=").append(fmt(p.min()));
-                if (p.reason() != null) f.append("; pauseReason=").append(p.reason());
-            }
-        }
-        return "You explain a meal plan to a person with type 1 diabetes. Reply in " + languageName
-                + " in one to three short sentences, plain text. Use ONLY the numbers in the facts below; "
-                + "never invent or recompute numbers. Never issue imperative dosing commands; describe what the "
-                + "model suggests. If fat or protein is high, say the rise may come late. "
-                + "If the calculator refused or there is no fresh CGM reading, say so plainly.\nFacts: " + f;
-    }
-
-    private static String range(NutritionRange r) {
-        return fmt(r.mid()) + " (likely " + fmt(r.low()) + "-" + fmt(r.high()) + ")";
     }
 
     private static String fmt(Double v) {

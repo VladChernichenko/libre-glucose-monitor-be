@@ -4,6 +4,9 @@ import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.assistant.common.ContextTag;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -20,6 +23,9 @@ import org.springframework.stereotype.Component;
  * food items with optional weights and event context tags. The model's JSON is untrusted: the intent
  * must be a known value, names are trimmed and capped, grams must be positive and at most
  * {@link #MAX_GRAMS}, and only known {@link ContextTag}s survive. Any failure means QUESTION.
+ * For questions it also extracts retrieval {@link Filters} (spec §6.7), validated the same way: dates
+ * must parse and span at most {@link #MAX_RANGE_DAYS} days, food words are capped in count and length,
+ * and the event kind must be a known {@link EventKind}; anything invalid is dropped.
  */
 @Slf4j
 @Component
@@ -30,7 +36,19 @@ public class IntentClassifier {
 
     public record FoodItem(String name, Double grams) {}
 
-    public record Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags) {
+    /** The kind of past episode a question asks about. */
+    public enum EventKind { MEAL, CORRECTION, ACTIVITY, LOW }
+
+    /** Optional question filters; null / empty fields mean "no filter". Dates are the user's calendar. */
+    public record Filters(LocalDate fromDate, LocalDate toDate, List<String> foodWords, EventKind eventKind) {
+        public static final Filters NONE = new Filters(null, null, List.of(), null);
+    }
+
+    public record Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags, Filters filters) {
+        public Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags) {
+            this(intent, items, tags, Filters.NONE);
+        }
+
         static Classification question() {
             return new Classification(Intent.QUESTION, List.of(), List.of());
         }
@@ -39,6 +57,9 @@ public class IntentClassifier {
     static final int MAX_NAME_LENGTH = 80;
     static final int MAX_ITEMS = 12;
     static final double MAX_GRAMS = 2000.0;
+    static final int MAX_FOOD_WORDS = 10;
+    static final int MAX_FOOD_WORD_LENGTH = 40;
+    static final int MAX_RANGE_DAYS = 90;
     private static final String TAG_NAMES = Arrays.stream(ContextTag.values())
             .map(Enum::name).collect(Collectors.joining(", "));
 
@@ -46,29 +67,47 @@ public class IntentClassifier {
     private final ObjectMapper objectMapper;
 
     public Classification classify(String text) {
+        return classify(text, null);
+    }
+
+    /** @param today the user's calendar date (for relative dates and the range check); null = unknown */
+    public Classification classify(String text, LocalDate today) {
         String raw;
         try {
-            raw = llm.completeJson(prompt(text));
+            raw = llm.completeJson(prompt(text, today));
         } catch (RuntimeException e) {
             log.warn("Intent classification unavailable, treating as a question: {}", e.getMessage());
             return Classification.question();
         }
-        return parse(raw);
+        return parse(raw, today);
     }
 
     static String prompt(String text) {
+        return prompt(text, null);
+    }
+
+    static String prompt(String text, LocalDate today) {
         return "Classify a message a person with type 1 diabetes sent to their assistant. "
                 + "Return ONLY a JSON object: {\"intent\": \"MEAL_PREP\" | \"EVENT\" | \"QUESTION\", "
                 + "\"items\": [{\"name\": string, \"grams\": number (only if the user stated a weight)}], "
-                + "\"tags\": [string]}. "
+                + "\"tags\": [string], "
+                + "\"filters\": {\"fromDate\": \"YYYY-MM-DD\", \"toDate\": \"YYYY-MM-DD\", \"foodWords\": [string], "
+                + "\"eventKind\": \"MEAL\" | \"CORRECTION\" | \"ACTIVITY\" | \"LOW\"}}. "
                 + "MEAL_PREP: the user is about to eat or asks to prepare for a meal; list each food item. "
                 + "EVENT: the user reports something that happened (not food); tags may only be from: "
                 + TAG_NAMES + ". "
                 + "QUESTION: anything else. Items are empty unless MEAL_PREP; tags are empty unless EVENT. "
+                + "filters only for QUESTION and only what the question states: a date range it mentions, "
+                + "food words it names, and the kind of past event it asks about; omit unknown fields. "
+                + (today == null ? "" : "Today is " + today + ". ")
                 + "No markdown, no extra text.\nMessage:\n" + text;
     }
 
     Classification parse(String raw) {
+        return parse(raw, null);
+    }
+
+    Classification parse(String raw, LocalDate today) {
         JsonNode root;
         try {
             root = objectMapper.readTree(stripFence(raw));
@@ -83,7 +122,55 @@ public class IntentClassifier {
         } catch (IllegalArgumentException e) {
             return Classification.question();
         }
-        return new Classification(intent, items(root.path("items")), tags(root.path("tags")));
+        Filters filters = intent == Intent.QUESTION ? filters(root.path("filters"), today) : Filters.NONE;
+        return new Classification(intent, items(root.path("items")), tags(root.path("tags")), filters);
+    }
+
+    static Filters filters(JsonNode node, LocalDate today) {
+        if (!node.isObject()) return Filters.NONE;
+        LocalDate from = date(node.path("fromDate"));
+        LocalDate to = date(node.path("toDate"));
+        LocalDate end = to != null ? to : today;
+        boolean badRange = from != null && end != null
+                && (end.isBefore(from) || ChronoUnit.DAYS.between(from, end) > MAX_RANGE_DAYS);
+        boolean future = today != null && ((from != null && from.isAfter(today)) || (to != null && to.isAfter(today.plusDays(1))));
+        if (badRange || future) {
+            from = null;
+            to = null;
+        }
+        return new Filters(from, to, foodWords(node.path("foodWords")), eventKind(node.path("eventKind")));
+    }
+
+    private static LocalDate date(JsonNode node) {
+        if (!node.isTextual()) return null;
+        try {
+            return LocalDate.parse(node.asText().strip());
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    private static List<String> foodWords(JsonNode node) {
+        if (!node.isArray()) return List.of();
+        Set<String> out = new LinkedHashSet<>();
+        for (JsonNode w : node) {
+            if (out.size() >= MAX_FOOD_WORDS) break;
+            if (!w.isTextual()) continue;
+            String word = w.asText().replaceAll("\\p{Cntrl}", " ").strip().toLowerCase(Locale.ROOT);
+            if (word.isBlank()) continue;
+            if (word.length() > MAX_FOOD_WORD_LENGTH) word = word.substring(0, MAX_FOOD_WORD_LENGTH);
+            out.add(word);
+        }
+        return List.copyOf(out);
+    }
+
+    private static EventKind eventKind(JsonNode node) {
+        if (!node.isTextual()) return null;
+        try {
+            return EventKind.valueOf(node.asText().strip().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static List<FoodItem> items(JsonNode node) {
