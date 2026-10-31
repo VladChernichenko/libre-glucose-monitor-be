@@ -253,6 +253,18 @@ class AssistantServiceTest {
     }
 
     @Test
+    void retrievalFailureStillAnswers() {
+        llmReplies("ok");
+        when(retrieval.forQuestion(any(), anyString(), any(), any(), any(), any())).thenThrow(new RuntimeException("db"));
+        when(rag.retrieve(any())).thenThrow(new RuntimeException("db"));
+
+        service.handle(user, text("Anything?"), sink);
+
+        assertEquals(List.of("ok"), tokens());
+        assertEquals(AssistantService.INTENT_QUESTION, saved.get(1).getIntent());
+    }
+
+    @Test
     void episodesEventIsCappedAtFive() {
         llmReplies("ok");
         List<FactsPayload.EpisodeFacts> many = new ArrayList<>();

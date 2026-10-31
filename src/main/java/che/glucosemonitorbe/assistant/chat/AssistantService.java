@@ -176,14 +176,14 @@ public class AssistantService {
                     history.recentTurns(userId, userMessage.getCreatedAt(), RECENT_TURNS)));
             turns.add(new FactsPayload.TurnFacts("user", question)); // its numbers are the user's own facts
             FactsPayload.State state = factsService.state(userId, msg.clientNow(), msg.zone());
-            List<FactsPayload.EpisodeFacts> episodes = episodeRetrieval.forQuestion(userId, question, filters,
-                    state, msg.clientNow(), msg.zone());
+            List<FactsPayload.EpisodeFacts> episodes = optional("episodes", userId, () ->
+                    episodeRetrieval.forQuestion(userId, question, filters, state, msg.clientNow(), msg.zone()));
             FactsPayload facts = FactsPayload.builder()
                     .language(language)
                     .now(FactsService.wall(msg.clientNow()))
                     .state(state)
                     .episodes(episodes)
-                    .citations(factsService.citations(state))
+                    .citations(optional("citations", userId, () -> factsService.citations(state)))
                     .turns(turns)
                     .build();
             List<FactsPayload.EpisodeFacts> shown = shown(episodes);
@@ -211,6 +211,17 @@ public class AssistantService {
         ChatMessage reply = history.appendAssistant(userMessage, seen.toString(), INTENT_QUESTION, payload,
                 result.modelId(), System.currentTimeMillis() - start);
         sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_QUESTION));
+    }
+
+    /** Retrieval context is optional: a failure means "none", never a failed reply. */
+    private static <T> List<T> optional(String what, UUID userId, java.util.function.Supplier<List<T>> s) {
+        try {
+            List<T> v = s.get();
+            return v == null ? List.of() : v;
+        } catch (RuntimeException e) {
+            log.warn("Assistant {} unavailable for userId={}: {}", what, userId, e.toString());
+            return List.of();
+        }
     }
 
     /**
