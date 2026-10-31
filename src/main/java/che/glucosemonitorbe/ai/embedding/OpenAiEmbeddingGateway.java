@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -19,6 +20,8 @@ import java.util.Map;
 @Component
 public class OpenAiEmbeddingGateway implements EmbeddingGateway {
 
+    private static final int CONNECT_TIMEOUT_MS = 3000;
+
     private final RestClient client;
     private final String model;
     private final int dimensions;
@@ -30,11 +33,25 @@ public class OpenAiEmbeddingGateway implements EmbeddingGateway {
             @Value("${app.ai.embeddings.url:https://api.openai.com/v1}") String url,
             @Value("${app.ai.embeddings.model:text-embedding-3-small}") String model,
             @Value("${app.ai.embeddings.dimensions:1536}") int dimensions,
-            @Value("${app.ai.embeddings.api-key:}") String apiKey) {
-        this.client = builder.baseUrl(url).build();
+            @Value("${app.ai.embeddings.api-key:}") String apiKey,
+            @Value("${app.ai.embeddings.timeout-ms:8000}") int readTimeoutMs) {
+        this(builder.requestFactory(timeoutFactory(readTimeoutMs)).baseUrl(url).build(),
+                model, dimensions, apiKey);
+    }
+
+    /** Test seam: caller supplies a fully configured client. */
+    OpenAiEmbeddingGateway(RestClient client, String model, int dimensions, String apiKey) {
+        this.client = client;
         this.model = model;
         this.dimensions = dimensions;
         this.apiKey = apiKey;
+    }
+
+    private static SimpleClientHttpRequestFactory timeoutFactory(int readTimeoutMs) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        factory.setReadTimeout(readTimeoutMs);
+        return factory;
     }
 
     @Override

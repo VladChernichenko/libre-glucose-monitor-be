@@ -15,6 +15,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -27,7 +28,7 @@ class OpenAiEmbeddingGatewayTest {
     private OpenAiEmbeddingGateway gateway(String apiKey, int dims) {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        return new OpenAiEmbeddingGateway(builder, URL, "text-embedding-3-small", dims, apiKey);
+        return new OpenAiEmbeddingGateway(builder.baseUrl(URL).build(), "text-embedding-3-small", dims, apiKey);
     }
 
     @Test
@@ -88,5 +89,14 @@ class OpenAiEmbeddingGatewayTest {
 
         assertThatThrownBy(() -> gw.embed(List.of("a"))).isInstanceOf(EmbeddingUnavailableException.class);
         server.verify(); // no expectations registered: any call would have failed
+    }
+
+    @Test
+    void timeoutBecomesEmbeddingUnavailable() {
+        OpenAiEmbeddingGateway gw = gateway("sk-test", 2);
+        server.expect(requestTo(URL + "/embeddings"))
+                .andRespond(withException(new java.net.SocketTimeoutException("Read timed out")));
+
+        assertThatThrownBy(() -> gw.embed(List.of("a"))).isInstanceOf(EmbeddingUnavailableException.class);
     }
 }

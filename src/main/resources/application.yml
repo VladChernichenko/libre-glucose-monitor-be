@@ -116,6 +116,7 @@ app:
       url: ${OPENAI_EMBEDDINGS_URL:https://api.openai.com/v1}
       model: ${OPENAI_EMBEDDINGS_MODEL:text-embedding-3-small}
       dimensions: 1536
+      timeout-ms: ${OPENAI_EMBEDDINGS_TIMEOUT_MS:8000}
       api-key: ${OPENAI_API_KEY:}
     yolo:
       url: ${YOLO_SERVICE_URL:http://localhost:8001}
