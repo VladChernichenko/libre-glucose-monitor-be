@@ -164,6 +164,8 @@ app:
     empirical-twin-enabled: ${APP_FEATURES_EMPIRICAL_TWIN_ENABLED:false}
     # Activity logging: logged activity notes feed the model's activity signal a(t).
     activity-logging-enabled: ${APP_FEATURES_ACTIVITY_LOGGING_ENABLED:true}
+    # History dose + 20% banner on the chat meal card (advisory; never changes settings).
+    history-dose-enabled: ${APP_FEATURES_HISTORY_DOSE_ENABLED:true}
 
   # Glycemic event engine (spec 2026-09-30). All keys optional - defaults live in GlycemicEventProperties.
   glycemic-events:

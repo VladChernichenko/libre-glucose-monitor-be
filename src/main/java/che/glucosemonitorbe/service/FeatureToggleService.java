@@ -31,6 +31,7 @@ public class FeatureToggleService {
             case "hypo-rescue-logging-enabled"  -> config.isHypoRescueLoggingEnabled();
             case "activity-logging-enabled"    -> config.isActivityLoggingEnabled();
             case "empirical-twin-enabled"      -> config.isEmpiricalTwinEnabled();
+            case "history-dose-enabled"        -> config.isHistoryDoseEnabled();
             default                            -> shouldUseBackend(featureName);
         };
     }

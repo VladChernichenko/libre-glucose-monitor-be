@@ -45,6 +45,7 @@ class MealPlanServiceTest {
     private final PreBolusPauseOptimizer optimizer = mock(PreBolusPauseOptimizer.class);
     private final GlycemicPatternMatchingService patterns = mock(GlycemicPatternMatchingService.class);
     private final UserSettingsService settings = mock(UserSettingsService.class);
+    private final HistoryDoseService history = mock(HistoryDoseService.class);
     private MealPlanService service;
 
     private final NutritionSnapshot nutrition = NutritionSnapshot.builder()
@@ -53,10 +54,11 @@ class MealPlanServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MealPlanService(freshness, calcs, calculator, optimizer, patterns, settings,
+        service = new MealPlanService(freshness, calcs, calculator, optimizer, patterns, settings, history,
                 Clock.fixed(INSTANT, ZoneOffset.UTC));
         UserSettingsDTO s = new UserSettingsDTO();
         s.setTargetGlucoseMmol(5.55);
+        s.setIsf(2.0);
         when(settings.getUserSettings(USER)).thenReturn(s);
         GlucoseCalculationsService.ActiveCobIobInputs inputs = new GlucoseCalculationsService.ActiveCobIobInputs(
                 List.of(), List.of(), List.<InsulinDose>of(), s, new RapidInsulinIobParameters(4.0, 75));
@@ -65,6 +67,8 @@ class MealPlanServiceTest {
         when(freshness.freshReading(USER, INSTANT)).thenReturn(Optional.of(reading(8.0)));
         when(optimizer.choose(any(), any(), anyDouble(), anyDouble(), any()))
                 .thenReturn(new PauseChoice(10, List.of(), 9.0, 5.0, "ok"));
+        when(history.evaluate(any(), any(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(Optional.empty());
     }
 
     private static CgmReadingDTO reading(double mmol) {
@@ -172,5 +176,58 @@ class MealPlanServiceTest {
         assertThat(plan.doseUnits()).isEqualTo(0.0);
         assertThat(plan.refusalCode()).isNull();
         verify(optimizer).choose(eq(USER), eq(NOW), eq(8.0), eq(0.0), any());
+    }
+
+    @Test
+    void historyDoseAttachedWithTheCalculatorsOwnTerms() {
+        dose(3.0);
+        nutrition.setFoodMassBreakdown(List.of(
+                NutritionSnapshot.FoodMassBreakdown.builder().label("soup").build(),
+                NutritionSnapshot.FoodMassBreakdown.builder().label("bread").build()));
+        HistoryDose hd = new HistoryDose(4.0, 3.0, 33.3, List.of(UUID.randomUUID()), null);
+        when(history.evaluate(any(), any(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(Optional.of(hd));
+
+        MealPlan plan = service.plan(USER, nutrition, NOW);
+
+        assertThat(plan.history()).isSameAs(hd);
+        ArgumentCaptor<che.glucosemonitorbe.assistant.episode.Situation> sit =
+                ArgumentCaptor.forClass(che.glucosemonitorbe.assistant.episode.Situation.class);
+        // correction = (8.0 - 5.55) / ISF 2.0 = 1.225; IOB = the 1.23 U the calculator was given;
+        // model dose = the plan's rounded 3.0 U; carbs = 40 g.
+        verify(history).evaluate(eq(USER), sit.capture(), eq(3.0), doubleThat(c -> Math.abs(c - 1.225) < 1e-9),
+                eq(1.23), eq(40.0));
+        assertThat(sit.getValue().foodText()).isEqualTo("soup, bread");
+        assertThat(sit.getValue().minuteOfDay()).isEqualTo(13 * 60);
+        assertThat(sit.getValue().glucose()).isEqualTo(8.0);
+        assertThat(sit.getValue().iob()).isEqualTo(1.23);
+        assertThat(sit.getValue().activityMinutes()).isZero();
+        assertThat(sit.getValue().macros()).isEqualTo(new MealMacros(40, 10, 20, 5, 60.0));
+    }
+
+    @Test
+    void historyFoodTextFallsBackToPatternName() {
+        dose(3.0);
+        service.plan(USER, nutrition, NOW);
+        ArgumentCaptor<che.glucosemonitorbe.assistant.episode.Situation> sit =
+                ArgumentCaptor.forClass(che.glucosemonitorbe.assistant.episode.Situation.class);
+        verify(history).evaluate(eq(USER), sit.capture(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+        assertThat(sit.getValue().foodText()).isEqualTo("Fast Spike");
+    }
+
+    @Test
+    void historyNotEvaluatedWithoutADose() {
+        dose(0.4); // rounds to 0.0
+        assertThat(service.plan(USER, nutrition, NOW).history()).isNull();
+
+        when(freshness.freshReading(USER, INSTANT)).thenReturn(Optional.empty());
+        assertThat(service.plan(USER, nutrition, NOW).history()).isNull();
+
+        when(freshness.freshReading(USER, INSTANT)).thenReturn(Optional.of(reading(3.7)));
+        when(calculator.calculateRecommendedInsulin(any()))
+                .thenThrow(new DosingRefusedException(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD, "low"));
+        assertThat(service.plan(USER, nutrition, NOW).history()).isNull();
+
+        verifyNoInteractions(history);
     }
 }

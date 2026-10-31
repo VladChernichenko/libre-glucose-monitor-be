@@ -43,4 +43,8 @@ public class FeatureToggleConfig {
     // widely: when off, every user forecasts with Hovorka and the setting can only be HOVORKA.
     private boolean empiricalTwinEnabled = false;
 
+    // History dose and the 20% banner on the chat meal card (spec 2026-10-30 6.6): median units/gram of
+    // similar past meals vs the calculator. Advisory only, never changes settings. Default on.
+    private boolean historyDoseEnabled = true;
+
 }
