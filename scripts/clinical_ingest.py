@@ -200,11 +200,30 @@ def embed(texts: list[str]) -> list[list[float]]:
             r.raise_for_status()
             break
         data = sorted(r.json()["data"], key=lambda d: d["index"])
+        if len(data) != len(texts[i:i + 64]):
+            sys.exit(f"embedding count mismatch: sent {len(texts[i:i + 64])}, got {len(data)}")
         for d in data:
             if len(d["embedding"]) != EMBED_DIMS:
                 sys.exit(f"unexpected embedding size {len(d['embedding'])}")
             out.append(d["embedding"])
+    if len(out) != len(texts):
+        sys.exit(f"embedding count mismatch: sent {len(texts)}, got {len(out)}")
     return out
+
+
+def plan_document(chunks: list[str], existing: dict, reembed: bool) -> dict:
+    """existing: {chunk_index: (content, has_embedding)}. Every chunk is upserted (metadata + active=TRUE);
+    only changed/missing-embedding chunks (or all with reembed) are embedded; indexes past the end deactivate."""
+    embed_idx = [i for i, c in enumerate(chunks)
+                 if reembed or i not in existing or existing[i][0] != c or not existing[i][1]]
+    return {"upsert": list(range(len(chunks))), "embed": embed_idx,
+            "deactivate_from": len(chunks)}
+
+
+def plan_stale(stored_doc_ids, processed_doc_ids) -> list[str]:
+    """Stored non-null source_doc_ids not produced by this run (null ids, e.g. GENERAL, are never touched)."""
+    done = set(processed_doc_ids)
+    return sorted({d for d in stored_doc_ids if d is not None and d not in done})
 
 
 def jdbc_to_dsn(url: str) -> str:
@@ -216,29 +235,36 @@ INSERT INTO clinical_knowledge_chunk
  (title, content, condition_tag, evidence_level, active, source_name, source_url, source_title,
   source_topic, source_published_at, source_type, updated_at, embedding, citation, chunk_index, source_doc_id)
 VALUES (%(title)s, %(content)s, %(tag)s, %(evidence)s, TRUE, %(source_name)s, %(url)s, %(source_title)s,
-  %(topic)s, %(published)s, %(source_type)s, NOW(), %(embedding)s::vector, %(citation)s, %(idx)s, %(doc_id)s)
+  %(topic)s, %(published)s, %(source_type)s, NOW(), CAST(%(embedding)s AS vector), %(citation)s, %(idx)s, %(doc_id)s)
 ON CONFLICT (source_doc_id, chunk_index) DO UPDATE SET
   title=EXCLUDED.title, content=EXCLUDED.content, condition_tag=EXCLUDED.condition_tag,
   evidence_level=EXCLUDED.evidence_level, active=TRUE, source_name=EXCLUDED.source_name,
   source_url=EXCLUDED.source_url, source_title=EXCLUDED.source_title, source_topic=EXCLUDED.source_topic,
   source_published_at=EXCLUDED.source_published_at, source_type=EXCLUDED.source_type, updated_at=NOW(),
-  embedding=EXCLUDED.embedding, citation=EXCLUDED.citation
+  embedding=COALESCE(EXCLUDED.embedding, clinical_knowledge_chunk.embedding), citation=EXCLUDED.citation
 """
 
 
-def ingest(dsn: str, docs: list[dict], reembed: bool) -> None:
+def ingest(dsn: str, docs: list[dict], reembed: bool, prune: bool) -> None:
     import psycopg
     with psycopg.connect(jdbc_to_dsn(dsn)) as conn, conn.cursor() as cur:
+        plans = []
         for d in docs:
             chunks = chunk_text(d["text"])
+            if not chunks:
+                continue
             cur.execute("SELECT chunk_index, content, embedding IS NOT NULL FROM clinical_knowledge_chunk "
                         "WHERE source_doc_id=%s", (d["doc_id"],))
             existing = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
-            todo = [i for i, c in enumerate(chunks)
-                    if reembed or i not in existing or existing[i][0] != c or not existing[i][1]]
-            vecs = dict(zip(todo, embed([f"{d['title']}\n\n{chunks[i]}" for i in todo]))) if todo else {}
-            for i in todo:
-                n = len(chunks)
+            plans.append((d, chunks, plan_document(chunks, existing, reembed)))
+        # embed everything first so a failed/short embedding call aborts before any write
+        vecs_by_doc = []
+        for d, chunks, plan in plans:
+            texts = [f"{d['title']}\n\n{chunks[i]}" for i in plan["embed"]]
+            vecs_by_doc.append(dict(zip(plan["embed"], embed(texts))) if texts else {})
+        for (d, chunks, plan), vecs in zip(plans, vecs_by_doc):
+            n = len(chunks)
+            for i in plan["upsert"]:
                 cur.execute(UPSERT, {
                     "title": (d["title"] if n == 1 else f"{d['title']} (part {i + 1}/{n})")[:200],
                     "content": chunks[i], "tag": condition_tag(d["topic"]), "evidence": d["evidence"],
@@ -246,12 +272,21 @@ def ingest(dsn: str, docs: list[dict], reembed: bool) -> None:
                     "topic": d["topic"][:128],
                     "published": f"{d['year']}-01-01T00:00:00Z" if d.get("year") else None,
                     "source_type": d["source_type"],
-                    "embedding": "[" + ",".join(f"{x:.8f}" for x in vecs[i]) + "]",
+                    "embedding": ("[" + ",".join(f"{x:.8f}" for x in vecs[i]) + "]") if i in vecs else None,
                     "citation": d["citation"], "idx": i, "doc_id": d["doc_id"]})
             # chunks that no longer exist after a re-chunk are deactivated, never deleted
             cur.execute("UPDATE clinical_knowledge_chunk SET active=FALSE WHERE source_doc_id=%s AND chunk_index >= %s",
-                        (d["doc_id"], len(chunks)))
-            print(f"{d['doc_id']}: {len(chunks)} chunks, {len(todo)} upserted/embedded")
+                        (d["doc_id"], plan["deactivate_from"]))
+            print(f"{d['doc_id']}: {n} chunks upserted, {len(plan['embed'])} embedded")
+        cur.execute("SELECT DISTINCT source_doc_id FROM clinical_knowledge_chunk "
+                    "WHERE active AND source_doc_id IS NOT NULL")
+        stale = plan_stale([r[0] for r in cur.fetchall()], [d["doc_id"] for d, _, _ in plans])
+        if stale and prune:
+            cur.execute("UPDATE clinical_knowledge_chunk SET active=FALSE "
+                        "WHERE source_doc_id = ANY(%s) AND source_doc_id IS NOT NULL", (stale,))
+            print(f"PRUNED (active=false): {', '.join(stale)}")
+        elif stale:
+            print(f"STALE active source_doc_ids not in this run (use --prune to deactivate): {', '.join(stale)}")
         conn.commit()
 
 
@@ -260,6 +295,8 @@ def main() -> int:
     ap.add_argument("--db", default=os.environ.get("DATABASE_URL"), help="Postgres URL (or env DATABASE_URL)")
     ap.add_argument("--sources", type=Path, default=DEFAULT_SOURCES)
     ap.add_argument("--reembed", action="store_true", help="re-embed and rewrite all chunks")
+    ap.add_argument("--prune", action="store_true",
+                    help="after a successful run deactivate rows whose source_doc_id was not processed in this run")
     ap.add_argument("--dry-run", action="store_true", help="no network, no DB: print chunk counts")
     a = ap.parse_args()
 
@@ -277,7 +314,7 @@ def main() -> int:
         return 0
     if not a.db:
         sys.exit("--db or DATABASE_URL required")
-    ingest(a.db, docs, a.reembed)
+    ingest(a.db, docs, a.reembed, a.prune)
     return 0
 
 
