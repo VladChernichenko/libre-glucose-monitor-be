@@ -97,8 +97,9 @@ public class IntentClassifier {
                 + "EVENT: the user reports something that happened (not food); tags may only be from: "
                 + TAG_NAMES + ". "
                 + "QUESTION: anything else. Items are empty unless MEAL_PREP; tags are empty unless EVENT. "
-                + "filters only for QUESTION and only what the question states: a date range it mentions, "
-                + "food words it names, and the kind of past event it asks about; omit unknown fields. "
+                + "filters only for a QUESTION about past events and only what the question states: a date "
+                + "range it mentions, food words it names, and the kind of past event it asks about; omit "
+                + "unknown fields, and omit filters entirely when the message is not about the past. "
                 + (today == null ? "" : "Today is " + today + ". ")
                 + "No markdown, no extra text.\nMessage:\n" + text;
     }

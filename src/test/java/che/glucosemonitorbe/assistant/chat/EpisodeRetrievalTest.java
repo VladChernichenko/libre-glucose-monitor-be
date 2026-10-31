@@ -178,15 +178,39 @@ class EpisodeRetrievalTest {
     }
 
     @Test
-    void noKindMeansAllKinds() {
+    void datesWithoutKindMeanAllKinds() {
         when(search.similar(eq(user), any(), anyInt())).thenReturn(List.of(new ScoredEpisode(meal("soup", NOW.minusDays(1)), 0.8)));
         when(hypos.findByUserIdOrderByDetectedAtDesc(user)).thenReturn(List.of(HypoEvent.builder()
                 .id(UUID.randomUUID()).userId(user).triggerGlucoseMmol(3.4).detectedAt(NOW.minusDays(1)).build()));
+        IntentClassifier.Filters yesterday = new IntentClassifier.Filters(
+                NOW.toLocalDate().minusDays(1), NOW.toLocalDate().minusDays(1), List.of(), null);
 
-        List<FactsPayload.EpisodeFacts> out = retrieval.forQuestion(user, "what happened?",
-                IntentClassifier.Filters.NONE, state(), NOW, ZONE);
+        List<FactsPayload.EpisodeFacts> out = retrieval.forQuestion(user, "what happened yesterday?",
+                yesterday, state(), NOW, ZONE);
 
         assertEquals(List.of("MEAL", "LOW"), out.stream().map(FactsPayload.EpisodeFacts::kind).toList());
+    }
+
+    @Test
+    void aMessageNotAboutThePastGetsNoEpisodes() {
+        List<FactsPayload.EpisodeFacts> out = retrieval.forQuestion(user, "2u (testing feature)",
+                IntentClassifier.Filters.NONE, state(), NOW, ZONE);
+
+        assertTrue(out.isEmpty());
+        verifyNoInteractions(search, episodes, notes, hypos, snapshots, cgm);
+    }
+
+    @Test
+    void unmatchedFoodWordsShowOnlyCloseSemanticMatches() {
+        when(search.similar(eq(user), any(), anyInt())).thenReturn(List.of(
+                new ScoredEpisode(meal("борщ", NOW.minusDays(1)), 0.82),
+                new ScoredEpisode(meal("dried mango", NOW.minusDays(2)), 0.40)));
+        IntentClassifier.Filters f = new IntentClassifier.Filters(null, null, List.of("beet soup"), null);
+
+        List<FactsPayload.EpisodeFacts> out = retrieval.forQuestion(user, "beet soup last time?", f, state(), NOW, ZONE);
+
+        assertEquals(List.of("борщ"), out.stream().filter(e -> "MEAL".equals(e.kind()))
+                .map(FactsPayload.EpisodeFacts::text).toList());
     }
 
     private CgmReading reading(long ts, int sgv) {

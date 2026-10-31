@@ -285,7 +285,9 @@ tunes them on the backtest and records the final ones.
 
 Questions ("why do I go high after pork?") use the same table and also non-meal anchors (corrections,
 activity, lows from `hypo_events`) via text embedding plus structured filters the LLM extracts (time
-range, food words, event kind).
+range, food words, event kind). A message with none of those filters is not about the past and gets no
+episodes, neither as cards nor in the facts (user decision 2026-11-01: show past events only when they
+are relevant now). When the food words match no logged food text, only meals scoring ≥ 0.75 are shown.
 
 ### 6.8 The LLM's job and its guard
 

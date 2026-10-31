@@ -36,7 +36,8 @@ import org.springframework.stereotype.Component;
  * classifier's validated {@link IntentClassifier.Filters}: meals from {@link EpisodeSearchService},
  * corrections from {@code forecast_snapshot} anchors (rapid dose, carbs under 10 g) with their notes,
  * activity from activity notes with the CGM trace after them, lows from {@code hypo_events}.
- * Without dates the window is the last {@link IntentClassifier#MAX_RANGE_DAYS} days.
+ * Without dates the window is the last {@link IntentClassifier#MAX_RANGE_DAYS} days. A question with no
+ * filter at all gets no episodes.
  */
 @Component
 @RequiredArgsConstructor
@@ -47,6 +48,8 @@ public class EpisodeRetrieval {
     static final double CORRECTION_MAX_CARBS = 10.0;
     static final int ACTIVITY_WINDOW_MIN = 120;
     static final int LOW_WINDOW_MIN = 60;
+    /** Minimum similarity score for a meal shown when the question's food words match no food text. */
+    static final double MIN_FALLBACK_SCORE = 0.75;
     /** Neutral start glucose for the situation term when no fresh reading exists [mmol/L]. */
     static final double NEUTRAL_GLUCOSE = 7.0;
     private static final double MGDL_PER_MMOL = 18.0;
@@ -68,6 +71,7 @@ public class EpisodeRetrieval {
     public List<FactsPayload.EpisodeFacts> forQuestion(UUID userId, String question, IntentClassifier.Filters f,
                                                        FactsPayload.State state, LocalDateTime now, ZoneId zone) {
         IntentClassifier.Filters filters = f == null ? IntentClassifier.Filters.NONE : f;
+        if (!pointsToPast(filters)) return List.of();
         LocalDate toDate = filters.toDate() != null ? filters.toDate() : now.toLocalDate();
         LocalDate fromDate = filters.fromDate() != null ? filters.fromDate()
                 : toDate.minusDays(IntentClassifier.MAX_RANGE_DAYS);
@@ -112,10 +116,11 @@ public class EpisodeRetrieval {
                 .filter(se -> inRange(se.episode().getMealAt(), from, to))
                 .toList();
         // Food words filter the pool; when none matches (e.g. a translated food name), the semantic
-        // ranking of those same words decides instead.
+        // ranking of those same words decides instead - but only close matches, never just the newest meals.
         List<ScoredEpisode> matching = inRange.stream()
                 .filter(se -> mentions(se.episode().getFoodText(), words)).toList();
-        List<ScoredEpisode> chosen = matching.isEmpty() ? inRange : matching;
+        List<ScoredEpisode> chosen = !matching.isEmpty() || words.isEmpty() ? matching
+                : inRange.stream().filter(se -> se.score() >= MIN_FALLBACK_SCORE).toList();
         return chosen.stream().limit(PER_KIND).map(EpisodeRetrieval::meal).toList();
     }
 
@@ -246,6 +251,15 @@ public class EpisodeRetrieval {
                 .contaminated(e.isContaminated() ? Boolean.TRUE : null)
                 .score(se.score() > 0 ? FactsService.round2(se.score()) : null)
                 .build();
+    }
+
+    /**
+     * Past episodes only help when the question points at them: a kind of event, food words, or dates.
+     * Without any, the facts carry the current state alone - no unrelated "past events" card.
+     */
+    static boolean pointsToPast(IntentClassifier.Filters f) {
+        return f.eventKind() != null || f.fromDate() != null || f.toDate() != null
+                || (f.foodWords() != null && !f.foodWords().isEmpty());
     }
 
     private static boolean isCorrection(Note n) {
