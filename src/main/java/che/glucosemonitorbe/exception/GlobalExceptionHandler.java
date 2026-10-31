@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.catalina.connector.ClientAbortException;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -22,6 +23,7 @@ import org.springframework.web.context.request.async.AsyncRequestTimeoutExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -65,6 +67,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<CustomErrorResponse> handleResourceNotFound(
             ResourceNotFoundException ex, HttpServletRequest request) {
         return build(HttpStatus.NOT_FOUND, "Not Found", ex.getMessage(), request);
+    }
+
+    /**
+     * No controller or static resource for the path - typically an outdated client calling a removed
+     * endpoint. A plain 404, logged as one WARN line rather than an ERROR stack trace.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<CustomErrorResponse> handleNoResource(
+            NoResourceFoundException ex, HttpServletRequest request) {
+        log.warn("No endpoint for {} {}", request.getMethod(), request.getRequestURI());
+        return build(HttpStatus.NOT_FOUND, "Not Found", "No endpoint at this path.", request);
     }
 
     @ExceptionHandler(InvalidConfigurationException.class)
@@ -219,11 +232,16 @@ public class GlobalExceptionHandler {
                 message, request);
     }
 
+    /**
+     * The Content-Type is pinned to JSON so the error body is written even when the request asked for
+     * something else (e.g. {@code Accept: application/x-ndjson} on the streaming assistant endpoint);
+     * otherwise content negotiation fails and the client gets a 406 instead of the real status.
+     */
     private ResponseEntity<CustomErrorResponse> build(
             HttpStatus status, String error, String message, HttpServletRequest request) {
         CustomErrorResponse body = new CustomErrorResponse(
                 status.value(), error, message, request.getRequestURI());
-        return ResponseEntity.status(status).body(body);
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(body);
     }
 
     private static String correlationId() {

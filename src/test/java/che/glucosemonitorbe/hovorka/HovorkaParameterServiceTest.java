@@ -1,9 +1,6 @@
 package che.glucosemonitorbe.hovorka;
 
 import che.glucosemonitorbe.dto.UserSettingsDTO;
-import che.glucosemonitorbe.entity.Experiment;
-import che.glucosemonitorbe.entity.ExperimentReading;
-import che.glucosemonitorbe.repository.ExperimentRepository;
 import che.glucosemonitorbe.service.DigitalTwinService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -13,27 +10,24 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link HovorkaParameterService}.
- * Covers all branches in {@code buildForUser()} and {@code estimateEgpNet()}.
+ * Covers the branches in {@code buildForUser()}.
  */
 @ExtendWith(MockitoExtension.class)
 class HovorkaParameterServiceTest {
 
     @Mock UserSettingsService userSettingsService;
     @Mock UserInsulinPreferencesService insulinPrefsService;
-    @Mock ExperimentRepository experimentRepository;
     @Mock DigitalTwinService digitalTwinService;
 
     private HovorkaParameterService service;
@@ -41,9 +35,7 @@ class HovorkaParameterServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new HovorkaParameterService(userSettingsService, experimentRepository, digitalTwinService);
-        when(experimentRepository.findCompletedByUserIdAndType(any(), any()))
-                .thenReturn(List.of()); // default: no experiments
+        service = new HovorkaParameterService(userSettingsService, digitalTwinService);
         // No active twin by default -> buildForUser returns the base parameters unchanged.
         lenient().when(digitalTwinService.activeScales(any())).thenReturn(Optional.empty());
     }
@@ -167,75 +159,11 @@ class HovorkaParameterServiceTest {
     // -- EGP estimation --------------------------------------------------------
 
     @Test
-    void buildForUser_noBasalCheck_egpNetEqualsF01() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
-        // experimentRepository returns empty list (set in setUp)
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.egpNet()).isCloseTo(p.f01(), within(1e-6));
-    }
-
-    @Test
-    void buildForUser_stableBasalCheck_normalGlucose_egpNetEqualsF01() {
-        ExperimentReading reading = ExperimentReading.builder().glucoseMmol(5.5).build();
-        Experiment exp = Experiment.builder().isStable(true).readings(List.of(reading)).build();
-
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
-        when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
-                .thenReturn(List.of(exp));
-
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        // G=5.5 > G_THRESHOLD=4.5 -> clamp(5.5/4.5)=1 -> egpNet = f01 × 1
-        assertThat(p.egpNet()).isCloseTo(p.f01(), within(1e-5));
-    }
-
-    @Test
-    void buildForUser_stableBasalCheck_lowGlucose_egpNetReducedBelowF01() {
-        ExperimentReading reading = ExperimentReading.builder().glucoseMmol(3.0).build();
-        Experiment exp = Experiment.builder().isStable(true).readings(List.of(reading)).build();
-
+    void egpNetEqualsF01WithoutExperiments() {
         when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithWeight(70.0));
-        when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
-                .thenReturn(List.of(exp));
-
         HovorkaParameters p = service.buildForUser(USER_ID);
-        // G=3.0 < 4.5 -> egpNet = f01 × (3.0/4.5) < f01
-        assertThat(p.egpNet()).isLessThan(p.f01());
-    }
-
-    @Test
-    void buildForUser_unstableBasalCheck_noStable_fallsBackToFirst() {
-        ExperimentReading reading = ExperimentReading.builder().glucoseMmol(5.5).build();
-        Experiment exp = Experiment.builder().isStable(false).readings(List.of(reading)).build();
-
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
-        when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
-                .thenReturn(List.of(exp));
-
-        // No stable experiment -> uses first in list
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.egpNet()).isGreaterThan(0.0); // has readings, should calculate
-    }
-
-    @Test
-    void buildForUser_basalCheckWithNoReadings_fallsBackToF01() {
-        Experiment exp = Experiment.builder().isStable(true).readings(List.of()).build();
-
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
-        when(experimentRepository.findCompletedByUserIdAndType(eq(USER_ID), any()))
-                .thenReturn(List.of(exp));
-
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.egpNet()).isCloseTo(p.f01(), within(1e-6));
-    }
-
-    @Test
-    void buildForUser_repositoryThrows_egpFallsBackToF01() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
-        when(experimentRepository.findCompletedByUserIdAndType(any(), any()))
-                .thenThrow(new RuntimeException("DB error"));
-
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.egpNet()).isCloseTo(p.f01(), within(1e-6));
+        assertThat(p.weightKg()).isEqualTo(70.0);
+        assertThat(p.egpNet()).isEqualTo(p.f01());
     }
 
     @Test

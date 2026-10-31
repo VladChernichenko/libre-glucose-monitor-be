@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.ai;
 
+import che.glucosemonitorbe.ai.embedding.EmbeddingGateway;
+import che.glucosemonitorbe.ai.embedding.EmbeddingUnavailableException;
 import che.glucosemonitorbe.domain.ClinicalKnowledgeChunk;
 import che.glucosemonitorbe.repository.ClinicalKnowledgeChunkRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -10,12 +12,17 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -23,157 +30,89 @@ import static org.mockito.Mockito.when;
 class RagRetrieverServiceTest {
 
     @Mock ClinicalKnowledgeChunkRepository repo;
+    @Mock EmbeddingGateway embeddings;
     @InjectMocks RagRetrieverService service;
 
-    @Test
-    @DisplayName("always includes GENERAL tag")
-    void retrieve_alwaysIncludesGeneralTag() {
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(List.of());
+    private static ClinicalKnowledgeChunk chunk(String title, String tag) {
+        return ClinicalKnowledgeChunk.builder().id(UUID.randomUUID()).title(title).content(title + " text")
+                .conditionTag(tag).active(true).build();
+    }
 
-        AnalysisContext ctx = minimalContext(6.0, 0.0);
-        service.retrieve(ctx);
-
-        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repo).findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(captor.capture());
-        assertThat(captor.getValue()).contains("GENERAL");
+    private static AnalysisContext ctx(double glucose, double delta, Double iob, Double cob) {
+        return AnalysisContext.builder().userId(UUID.randomUUID()).latestGlucose(glucose).deltaGlucose(delta)
+                .activeIob(iob).activeCob(cob).notes(List.of()).build();
     }
 
     @Test
-    @DisplayName("adds HYPO tag when latest glucose < 3.9")
-    void retrieve_addsHypoTag() {
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(List.of());
+    @DisplayName("embeds question + situation, cosine top 4 among active, then the GENERAL row")
+    void topFourPlusGeneral() {
+        ClinicalKnowledgeChunk general = chunk("General safety disclaimer", "GENERAL");
+        List<ClinicalKnowledgeChunk> top = List.of(chunk("a", "LIB"), chunk("b", "LIB"), chunk("c", "LIB"),
+                chunk("d", "LIB"));
+        when(embeddings.embed(anyList())).thenReturn(List.of(new float[]{0.5f, 0.25f}));
+        when(repo.findNearestActive("[0.5,0.25]", RagRetrieverService.TOP_K)).thenReturn(top);
+        when(repo.findFirstByActiveTrueAndConditionTagOrderByUpdatedAtDesc("GENERAL")).thenReturn(Optional.of(general));
 
-        service.retrieve(minimalContext(3.5, 0.0));
+        List<ClinicalKnowledgeChunk> r = service.retrieve("How do I treat a low?", ctx(3.4, -2.5, 1.2, 0.0));
 
-        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repo).findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(captor.capture());
-        assertThat(captor.getValue()).contains("HYPO");
-        assertThat(captor.getValue()).doesNotContain("HYPER");
+        assertThat(RagRetrieverService.TOP_K).isEqualTo(4);
+        assertThat(r).containsExactly(top.get(0), top.get(1), top.get(2), top.get(3), general);
+        ArgumentCaptor<List<String>> texts = ArgumentCaptor.forClass(List.class);
+        verify(embeddings).embed(texts.capture());
+        assertThat(texts.getValue()).hasSize(1);
+        String text = texts.getValue().get(0);
+        assertThat(text).startsWith("How do I treat a low?");
+        assertThat(text).contains("low glucose").contains("falling").contains("insulin on board");
+        assertThat(text).doesNotContain("carbs on board");
     }
 
     @Test
-    @DisplayName("adds HYPER tag when latest glucose > 10.0")
-    void retrieve_addsHyperTag() {
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(List.of());
-
-        service.retrieve(minimalContext(12.0, 0.0));
-
-        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repo).findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(captor.capture());
-        assertThat(captor.getValue()).contains("HYPER");
-        assertThat(captor.getValue()).doesNotContain("HYPO");
+    @DisplayName("situation rendering never carries the user id")
+    void situationHasNoUserId() {
+        AnalysisContext c = ctx(12.5, 2.5, 0.0, 30.0);
+        String s = RagRetrieverService.situation(c);
+        assertThat(s).contains("high glucose").contains("rising").contains("carbs on board");
+        assertThat(s).doesNotContain(c.getUserId().toString());
     }
 
     @Test
-    @DisplayName("adds RISING tag when delta > 2.0")
-    void retrieve_addsRisingTag() {
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(List.of());
-
-        service.retrieve(minimalContext(8.0, 3.0));
-
-        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repo).findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(captor.capture());
-        assertThat(captor.getValue()).contains("RISING");
-        assertThat(captor.getValue()).doesNotContain("FALLING");
+    @DisplayName("without a fresh reading (glucose 0) the situation says so")
+    void noReading() {
+        assertThat(RagRetrieverService.situation(ctx(0.0, 0.0, null, null))).contains("no fresh glucose reading");
     }
 
     @Test
-    @DisplayName("adds FALLING tag when delta < -2.0")
-    void retrieve_addsFallingTag() {
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(List.of());
+    @DisplayName("embedding unavailable returns only the GENERAL row")
+    void embeddingDownReturnsGeneralOnly() {
+        ClinicalKnowledgeChunk general = chunk("General safety disclaimer", "GENERAL");
+        when(embeddings.embed(anyList())).thenThrow(new EmbeddingUnavailableException("down"));
+        when(repo.findFirstByActiveTrueAndConditionTagOrderByUpdatedAtDesc("GENERAL")).thenReturn(Optional.of(general));
 
-        service.retrieve(minimalContext(7.0, -3.0));
-
-        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repo).findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(captor.capture());
-        assertThat(captor.getValue()).contains("FALLING");
-        assertThat(captor.getValue()).doesNotContain("RISING");
+        assertThat(service.retrieve("why high?", ctx(9, 0, null, null))).containsExactly(general);
+        verify(repo, never()).findNearestActive(anyString(), anyInt());
     }
 
     @Test
-    @DisplayName("adds IOB and COB tags when active values > 0")
-    void retrieve_addsIobAndCobTags() {
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(List.of());
+    @DisplayName("no GENERAL row: passages only; nothing at all: empty list")
+    void missingGeneral() {
+        ClinicalKnowledgeChunk a = chunk("a", "LIB");
+        when(embeddings.embed(anyList())).thenReturn(List.of(new float[]{1f}));
+        lenient().when(repo.findNearestActive(eq("[1.0]"), anyInt())).thenReturn(List.of(a));
+        when(repo.findFirstByActiveTrueAndConditionTagOrderByUpdatedAtDesc("GENERAL")).thenReturn(Optional.empty());
 
-        AnalysisContext ctx = AnalysisContext.builder()
-                .latestGlucose(7.0)
-                .deltaGlucose(0.0)
-                .notes(List.of())
-                .activeCob(20.0)
-                .activeIob(1.5)
-                .estimatedCorrectionUnits(0.0)
-                .avgPreBolusPauseMinutes(null)
-                .predictedGlucose2h(7.5)
-                .build();
-        service.retrieve(ctx);
-
-        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repo).findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(captor.capture());
-        assertThat(captor.getValue()).contains("IOB", "COB");
+        assertThat(service.retrieve("q", ctx(6, 0, null, null))).containsExactly(a);
     }
 
     @Test
-    @DisplayName("result is limited to 8 chunks")
-    void retrieve_limitsTo8Chunks() {
-        List<ClinicalKnowledgeChunk> manyChunks = new ArrayList<>();
-        for (int i = 0; i < 15; i++) {
-            manyChunks.add(ClinicalKnowledgeChunk.builder()
-                    .id(UUID.randomUUID())
-                    .conditionTag("GENERAL")
-                    .title("chunk " + i)
-                    .content("content")
-                    .active(true)
-                    .build());
-        }
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(manyChunks);
+    @DisplayName("a blank question still retrieves by the situation")
+    void blankQuestion() {
+        when(embeddings.embed(anyList())).thenReturn(List.of(new float[]{1f}));
+        when(repo.findNearestActive(anyString(), anyInt())).thenReturn(List.of());
+        when(repo.findFirstByActiveTrueAndConditionTagOrderByUpdatedAtDesc("GENERAL")).thenReturn(Optional.empty());
 
-        List<ClinicalKnowledgeChunk> result = service.retrieve(minimalContext(7.0, 0.0));
-
-        assertThat(result).hasSize(8);
-    }
-
-    @Test
-    @DisplayName("adds PRE_BOLUS tag when avgPreBolusPauseMinutes is present")
-    void retrieve_addsPreBolusTagWhenPausePresent() {
-        when(repo.findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(anyList()))
-                .thenReturn(List.of());
-
-        AnalysisContext ctx = AnalysisContext.builder()
-                .latestGlucose(7.0)
-                .deltaGlucose(0.0)
-                .notes(List.of())
-                .activeCob(0.0)
-                .activeIob(0.0)
-                .estimatedCorrectionUnits(0.0)
-                .avgPreBolusPauseMinutes(20.0)
-                .predictedGlucose2h(7.0)
-                .build();
-        service.retrieve(ctx);
-
-        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
-        verify(repo).findByActiveTrueAndConditionTagInOrderByEvidenceLevelDescUpdatedAtDesc(captor.capture());
-        assertThat(captor.getValue()).contains("PRE_BOLUS");
-    }
-
-    // ---- helpers ----
-
-    private AnalysisContext minimalContext(double latest, double delta) {
-        return AnalysisContext.builder()
-                .latestGlucose(latest)
-                .deltaGlucose(delta)
-                .notes(List.of())
-                .activeCob(0.0)
-                .activeIob(0.0)
-                .estimatedCorrectionUnits(0.0)
-                .avgPreBolusPauseMinutes(null)
-                .predictedGlucose2h(latest)
-                .build();
+        assertThat(service.retrieve(null, ctx(6, 0, null, null))).isEmpty();
+        ArgumentCaptor<List<String>> texts = ArgumentCaptor.forClass(List.class);
+        verify(embeddings).embed(texts.capture());
+        assertThat(texts.getValue().get(0)).startsWith("Current situation");
     }
 }

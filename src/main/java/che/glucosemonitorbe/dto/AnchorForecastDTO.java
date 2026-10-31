@@ -9,8 +9,8 @@ import java.util.List;
  * The empirical twin's 4 h forecast from one logged note, beside what the CGM actually did.
  * Times are the user's local wall time; glucose is mmol/L.
  *
- * <p>The forecast is computed when asked, with today's twin parameters, from the notes logged up
- * to 20 min after the anchor. It is not a frozen snapshot of what the app showed at the time.</p>
+ * <p>The forecast is the snapshot frozen when the note was logged: every 5 min from +5, with
+ * lower and upper equal to glucose (no cone) and coverage 0.</p>
  *
  * @param startGlucose CGM value at the anchor; null when there is none, and then no forecast
  * @param forecast     every 5 min from the anchor to +240, with the likely-range cone

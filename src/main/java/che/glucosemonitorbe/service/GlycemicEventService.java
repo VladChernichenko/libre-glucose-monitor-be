@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
 import che.glucosemonitorbe.config.GlycemicEventProperties;
 import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.ConfirmGlycemicEventRequest;
@@ -47,6 +48,8 @@ public class GlycemicEventService {
     private final GlycemicEventProperties props;
     private final GlycemicEventHistoryRecorder historyRecorder;
     private final GlycemicLearnerTrainingCache trainingCache;
+    private final ForecastSnapshotTrigger forecastSnapshotTrigger;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
     public List<GlycemicEventDTO> listRange(UUID userId, LocalDateTime from, LocalDateTime to, State state) {
@@ -200,7 +203,14 @@ public class GlycemicEventService {
         note.setType(Note.TYPE_NORMAL);
         note.setCreatedAt(LocalDateTime.now());
         note.setUpdatedAt(LocalDateTime.now());
-        noteRepository.save(note);
+        Note saved = noteRepository.save(note);
+        // Backfills are timed at the event onset, so normally backdated (no snapshot); the
+        // freezer decides, after commit, never blocking the confirm.
+        if (saved != null) forecastSnapshotTrigger.noteSaved(userId, saved.getId());
+        // A backfilled dose was missing from every PLANNED plan's IOB: supersede them (stacking guard).
+        if (saved != null && che.glucosemonitorbe.domain.RapidInsulinLogged.isRapidDose(saved)) {
+            eventPublisher.publishEvent(new che.glucosemonitorbe.domain.RapidInsulinLogged(userId, saved.getId(), null));
+        }
     }
 
     private static Category parseCategory(String raw) {

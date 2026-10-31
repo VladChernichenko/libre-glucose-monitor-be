@@ -13,39 +13,35 @@ import static org.mockito.Mockito.mock;
 class LlmGatewayServiceTest {
 
     @Test
-    void streamingMarkdownReturnsNonEmptyFallbackWhenProvidersDisabled() {
-        LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), mock(QwenGatewayService.class));
-        ReflectionTestUtils.setField(service, "ollamaEnabled", false);
-        ReflectionTestUtils.setField(service, "remoteEnabled", false);
+    void chatReplyClientAbortIsNotRetriedOnAnotherProvider() throws Exception {
+        QwenGatewayService qwen = mock(QwenGatewayService.class);
+        LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), qwen);
+        ReflectionTestUtils.setField(service, "ollamaEnabled", true);
+        ReflectionTestUtils.setField(service, "ollamaUrl", "http://127.0.0.1:1/api/generate");
         ReflectionTestUtils.setField(service, "ollamaModel", "llama3.1:8b");
         ReflectionTestUtils.setField(service, "ollamaNumCtx", 4096);
+        org.mockito.Mockito.when(qwen.isAvailable()).thenReturn(true);
+        org.mockito.Mockito.when(qwen.streamMarkdown(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(i -> {
+                    java.util.function.Consumer<String> c = i.getArgument(2);
+                    c.accept("first");
+                    c.accept("second");
+                    return null;
+                });
+        int[] calls = {0};
+        java.util.function.Consumer<String> deadClient = t -> {
+            calls[0]++;
+            throw new java.io.UncheckedIOException(new java.io.IOException("Broken pipe"));
+        };
 
-        List<String> tokens = new ArrayList<>();
-        LlmGatewayService.GatewayResult result = service.generateStreamingMarkdown(
-                null, List.of(), tokens::add, null, null, null, null
-        );
+        assertThrows(java.io.UncheckedIOException.class, () -> service.streamChatReply(
+                AnalysisContext.builder().notes(List.of()).build(), List.of(), "hi", List.of(), "en", deadClient));
 
-        assertNotNull(result);
-        assertNotNull(result.getRawOutput());
-        assertFalse(result.getRawOutput().isBlank());
-        assertTrue(result.getRawOutput().contains("AI provider is currently unavailable"));
-        assertFalse(tokens.isEmpty());
-        assertTrue(tokens.get(0).contains("## Summary"));
-    }
-
-    @Test
-    void streamingMarkdownClampsNumCtxFromOverride() {
-        LlmGatewayService service = new LlmGatewayService(new ObjectMapper(), mock(QwenGatewayService.class));
-        ReflectionTestUtils.setField(service, "ollamaEnabled", false);
-        ReflectionTestUtils.setField(service, "remoteEnabled", false);
-        ReflectionTestUtils.setField(service, "ollamaModel", "llama3.1:8b");
-        ReflectionTestUtils.setField(service, "ollamaNumCtx", 4096);
-
-        LlmGatewayService.GatewayResult result = service.generateStreamingMarkdown(
-                null, List.of(), null, null, null, null, 999999
-        );
-
-        assertNotNull(result);
-        assertTrue(result.getContextWindow() <= 32768);
+        // one token attempt only: no Ollama retry and no canned fallback written to the dead stream
+        assertEquals(1, calls[0]);
+        org.mockito.Mockito.verify(qwen, org.mockito.Mockito.times(1))
+                .streamMarkdown(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.isNull(),
+                        org.mockito.ArgumentMatchers.any());
     }
 }

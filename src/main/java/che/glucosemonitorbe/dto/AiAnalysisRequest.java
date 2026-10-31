@@ -1,28 +1,9 @@
 package che.glucosemonitorbe.dto;
 
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import lombok.Data;
 
-import java.util.List;
-
-@Data
+/** Holder for the chat-turn DTO the assistant passes to the LLM prompt builder. */
 public class AiAnalysisRequest {
-    @Min(1)
-    @Max(72)
-    private Integer windowHours = 12;
-
-    private String followUpQuestion;
-
-    private List<AiChatTurnDto> conversationTurns;
-
-    private String model;
-
-    private String provider;
-
-    @Min(512)
-    @Max(32768)
-    private Integer numCtx;
 
     @Data
     public static class AiChatTurnDto {

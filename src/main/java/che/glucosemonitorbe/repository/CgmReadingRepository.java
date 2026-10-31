@@ -48,6 +48,9 @@ public interface CgmReadingRepository extends JpaRepository<CgmReading, UUID> {
 
     List<CgmReading> findByUserIdOrderByDateTimestampAsc(UUID userId);
 
+    /** The user's most recent stored reading, from any data source. */
+    Optional<CgmReading> findFirstByUserIdOrderByDateTimestampDesc(UUID userId);
+
     /** Paginated overload to avoid loading the whole CGM history into memory. */
     Page<CgmReading> findByUserIdOrderByDateTimestampAsc(UUID userId, Pageable pageable);
 
@@ -57,7 +60,7 @@ public interface CgmReadingRepository extends JpaRepository<CgmReading, UUID> {
 
     /**
      * Readings whose epoch-ms timestamp falls within {@code [startTimestamp, endTimestamp]}, oldest
-     * first. Used to locate the CGM reading nearest a target time (e.g. verification baseline / +2h)
+     * first. Used to locate the CGM reading nearest a target time (e.g. a baseline or +2h point)
      * via a small indexed window rather than scanning the user's whole history.
      */
     List<CgmReading> findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(

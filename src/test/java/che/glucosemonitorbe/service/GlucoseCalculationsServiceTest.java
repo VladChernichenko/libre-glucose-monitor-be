@@ -172,6 +172,25 @@ class GlucoseCalculationsServiceTest {
     }
 
     @Test
+    void prospectiveHypoTreatmentNoteUsesTheRescueProfile() {
+        UUID userId = UUID.randomUUID();
+        stubDashboardCall(userId, "alice", "Asia/Tbilisi", 240);
+        ArgumentCaptor<List<CarbsEntry>> carbs = ArgumentCaptor.forClass(List.class);
+        when(cobService.calculateTotalCarbsOnBoard(carbs.capture(), any(), any(UserSettingsDTO.class))).thenReturn(0.0);
+        GlucoseCalculationsRequest req = requestWithOffset("alice", 240);
+        req.setProspectiveNotes(List.of(ProspectiveNoteDTO.builder()
+                .carbs(15.0).type(Note.TYPE_HYPO_TREATMENT).minutesAgo(0).build()));
+
+        service.calculateGlucoseData(req);
+
+        assertThat(carbs.getAllValues()).flatExtracting(l -> l)
+                .anySatisfy(e -> {
+                    assertThat(e.getCarbs()).isEqualTo(15.0);
+                    assertThat(che.glucosemonitorbe.domain.RescueCarbProfile.isRescue(e.getAbsorptionMode())).isTrue();
+                });
+    }
+
+    @Test
     void trendFollowsThePredictionPathNotTheCarbRatioFormula() throws Exception {
         GlucoseCalculationsService svc = new GlucoseCalculationsService(null, null, null, null, null, null, null, null, null);
         Method method = GlucoseCalculationsService.class.getDeclaredMethod(
@@ -647,14 +666,14 @@ class GlucoseCalculationsServiceTest {
         Method method = GlucoseCalculationsService.class.getDeclaredMethod(
                 "buildPredictionPath",
                 double.class, LocalDateTime.class, List.class, List.class, UUID.class,
-                UserSettingsDTO.class, Double.class, RapidInsulinIobParameters.class, Double.class);
+                UserSettingsDTO.class, Double.class, RapidInsulinIobParameters.class, Double.class, Integer.class);
         method.setAccessible(true);
 
         @SuppressWarnings("unchecked")
         List<che.glucosemonitorbe.dto.PredictionPointDTO> points =
                 (List<che.glucosemonitorbe.dto.PredictionPointDTO>) method.invoke(
                         service, 8.0, currentTime, List.<CarbsEntry>of(), List.<InsulinDose>of(),
-                        userId, userSettings, null, new RapidInsulinIobParameters(4.0, 75.0), null);
+                        userId, userSettings, null, new RapidInsulinIobParameters(4.0, 75.0), null, null);
 
         // minute=5 -> 10:55, still BREAKFAST: step delta 0.05 U * isfBreakfast(1.0) = -0.05
         assertThat(points.get(0).getInsulinActivityEffect()).isCloseTo(-0.05, within(0.001));

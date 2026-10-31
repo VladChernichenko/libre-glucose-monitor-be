@@ -59,4 +59,17 @@ public class ClinicalKnowledgeChunk {
 
     @Column(length = 32)
     private String sourceType;
+
+    /** Display citation for the chip, e.g. "ADA. Diabetes Care 2025;48(Suppl 1):S1-S2". */
+    @Column(columnDefinition = "TEXT")
+    private String citation;
+
+    /** Position of this passage within its source document; unique with {@code sourceDocId}. */
+    private Integer chunkIndex;
+
+    /** Stable id of the source document (DOI, PMID, guideline section key) the ingestion script upserts by. */
+    @Column(length = 128)
+    private String sourceDocId;
+
+    // The vector(1536) embedding column is not mapped: it is written and read with native SQL only.
 }

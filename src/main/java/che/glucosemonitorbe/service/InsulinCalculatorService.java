@@ -272,7 +272,7 @@ public class InsulinCalculatorService {
     }
 
     /** Weight-scaled ceiling, so the bound is sane for a child and for an adult alike. */
-    private double maxBolusUnits(UserSettingsDTO settings) {
+    public double maxBolusUnits(UserSettingsDTO settings) {
         Double weight = settings.getBodyWeightKg();
         double effectiveWeight = (weight != null && Double.isFinite(weight) && weight > 0)
                 ? weight : DEFAULT_BODY_WEIGHT_KG;

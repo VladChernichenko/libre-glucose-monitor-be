@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotRepository;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.GlucoseConversion;
@@ -48,7 +49,8 @@ class TwinForecastHistoryServiceTest {
     void setUp() {
         FeatureToggleConfig toggles = new FeatureToggleConfig();
         service = new TwinForecastHistoryService(notes, cgm, settings,
-                new NoteToCarbsEntryMapper(toggles, new ObjectMapper()), toggles);
+                new NoteToCarbsEntryMapper(toggles, new ObjectMapper()), toggles,
+                mock(ForecastSnapshotRepository.class), new ObjectMapper());
 
         dose = note(T0, 0.0, 2.0, Note.TYPE_NORMAL);
         dose.setComment("correction");
@@ -82,7 +84,7 @@ class TwinForecastHistoryServiceTest {
 
     @Test
     void anchorsAreDosesAndMealsOldestFirst() {
-        List<ForecastAnchorDTO> anchors = service.anchors(USER, 14);
+        List<ForecastAnchorDTO> anchors = service.recomputedAnchors(USER, 14);
 
         assertThat(anchors).extracting(ForecastAnchorDTO::label).containsExactly("Lunch", "correction");
         assertThat(anchors.get(0).carbs()).isEqualTo(30.0);
@@ -92,7 +94,7 @@ class TwinForecastHistoryServiceTest {
 
     @Test
     void forecastStartsFromTheCgmOnTheUsersWallClock() {
-        AnchorForecastDTO f = service.forecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
+        AnchorForecastDTO f = service.recomputedForecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
 
         // 17:00 wall is reading #12 (112 mg/dL). Misreading UTC as wall time would give #60 (160).
         assertThat(f.startGlucose()).isCloseTo(112 / GlucoseConversion.MGDL_PER_MMOL, within(0.1));
@@ -101,7 +103,7 @@ class TwinForecastHistoryServiceTest {
 
     @Test
     void forecastFallsWithTheDoseInsideAWideningCone() {
-        AnchorForecastDTO f = service.forecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
+        AnchorForecastDTO f = service.recomputedForecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
 
         assertThat(f.forecast()).hasSize(49);
         AnchorForecastDTO.Point first = f.forecast().get(0), last = f.forecast().get(48);
@@ -119,7 +121,7 @@ class TwinForecastHistoryServiceTest {
 
     @Test
     void checksCompareTheForecastWithTheCgm() {
-        AnchorForecastDTO f = service.forecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
+        AnchorForecastDTO f = service.recomputedForecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
 
         assertThat(f.checks()).extracting(AnchorForecastDTO.Check::minute).containsExactly(60, 120, 240);
         AnchorForecastDTO.Check h1 = f.checks().get(0);
@@ -133,7 +135,7 @@ class TwinForecastHistoryServiceTest {
 
     @Test
     void markersShowDosesBasalAndActivityAroundTheAnchor() {
-        AnchorForecastDTO f = service.forecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
+        AnchorForecastDTO f = service.recomputedForecast(USER, dose.getId(), DUBAI, T0.plusDays(1));
 
         // The 15:00 meal is before the chart window (anchor - 60 min), so it has no marker.
         assertThat(f.markers()).extracting(AnchorForecastDTO.Marker::kind)
@@ -142,7 +144,7 @@ class TwinForecastHistoryServiceTest {
 
     @Test
     void aForecastStillRunningIsPending() {
-        AnchorForecastDTO f = service.forecast(USER, dose.getId(), DUBAI, T0.plusHours(1));
+        AnchorForecastDTO f = service.recomputedForecast(USER, dose.getId(), DUBAI, T0.plusHours(1));
 
         assertThat(f.pending()).isTrue();
     }
@@ -150,9 +152,9 @@ class TwinForecastHistoryServiceTest {
     @Test
     void basalNotesAndOtherUsersNotesAreNotAnchors() {
         assertThrows(ResourceNotFoundException.class,
-                () -> service.forecast(USER, basal.getId(), DUBAI, T0));
+                () -> service.recomputedForecast(USER, basal.getId(), DUBAI, T0));
         assertThrows(ResourceNotFoundException.class,
-                () -> service.forecast(USER, UUID.randomUUID(), DUBAI, T0));
+                () -> service.recomputedForecast(USER, UUID.randomUUID(), DUBAI, T0));
     }
 
     private static Note note(LocalDateTime t, double carbs, double insulin, String type) {

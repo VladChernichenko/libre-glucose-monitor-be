@@ -124,7 +124,7 @@ public class HovorkaGlucosePredictionService {
 
     /**
      * Build the full prediction path using the Hovorka ODE model.
-     * Parameters are loaded from the user's COB settings and experiments.
+     * Parameters are loaded from the user's COB settings.
      *
      * @param currentGlucose         current CGM reading [mmol/L]
      * @param currentTime            client-side "now"
@@ -179,8 +179,8 @@ public class HovorkaGlucosePredictionService {
     /**
      * Build the prediction path with pre-built (possibly macro-modulated) parameters.
      *
-     * <p>Used by the {@code /api/predict} endpoint where
-     * {@link MacroNutrientGastricModel} has already computed a meal-specific tMaxG.</p>
+     * <p>For callers that built the parameters themselves (e.g. a meal-specific tMaxG from
+     * {@link MacroNutrientGastricModel}).</p>
      *
      * @param customParams           pre-built HovorkaParameters (tMaxG may be overridden)
      * @param currentGlucose         current CGM reading [mmol/L]

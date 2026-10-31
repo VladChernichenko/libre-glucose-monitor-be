@@ -22,8 +22,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -441,8 +439,11 @@ class IsfMealWindowProfileServiceTest {
                 TimeZone.setDefault(tokyo);
                 when(userSettingsService.getUserSettings(userId)).thenReturn(berlinSettings());
                 stub(List.of(), List.of());
-                expected = Instant.now().minus(Duration.ofDays(IsfMealWindowProfileService.HISTORY_DAYS))
-                        .toEpochMilli();
+                // HISTORY_DAYS calendar days on the user's clock (same window as the notes query), so
+                // a DST change inside the window makes it 1 h shorter or longer than 14 x 24 h.
+                expected = java.time.ZonedDateTime.now(berlin)
+                        .minusDays(IsfMealWindowProfileService.HISTORY_DAYS)
+                        .toInstant().toEpochMilli();
 
                 service.recomputeForUser(userId);
             } finally {

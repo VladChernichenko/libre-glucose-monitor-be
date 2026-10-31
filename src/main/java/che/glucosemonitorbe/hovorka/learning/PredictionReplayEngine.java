@@ -38,7 +38,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     private static final long BASAL_LOOKBACK_MS =
             che.glucosemonitorbe.hovorka.BasalInsulinResolver.LOOKBACK_HOURS * 3600_000L;
 
-    // -- FPU constants (mirror GlucosePredictService / BacktestHarness) ----------
+    // -- FPU constants (mirror BacktestHarness) ----------
     private static final int    FPU_ONSET_MIN     = 90;
     private static final double FPU_CARB_EQUIV_G  = 10.0;
     private static final double FPU_MIN_EQUIV_G   = 2.0;
@@ -82,9 +82,9 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         public long   alignToleranceMs = 300_000; // ±5 min
         /** Hard cap on anchors; if the window yields more they are evenly subsampled. */
         public int    maxAnchors      = 250;
-        /** Apply per-meal macro-modulated tMaxG (mirrors GlucosePredictService). */
+        /** Apply per-meal macro-modulated tMaxG (as the removed /api/predict did). */
         public boolean macroTMaxG     = true;
-        /** Add FPU-equivalent slow-carb entries from protein/fat (mirrors GlucosePredictService). */
+        /** Add FPU-equivalent slow-carb entries from protein/fat (as the removed /api/predict did). */
         public boolean fpuEquiv       = true;
         /** Duration of action of the user's long-acting insulin [hours] (mirrors the live forecast). */
         public double basalDurationHours = che.glucosemonitorbe.hovorka.BasalInsulinResolver.DEFAULT_DURATION_HOURS;

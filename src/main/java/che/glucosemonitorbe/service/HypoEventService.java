@@ -1,6 +1,9 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
+import che.glucosemonitorbe.domain.UserZones;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.dto.HypoEventDTO;
 import che.glucosemonitorbe.entity.HypoEvent;
 import che.glucosemonitorbe.entity.HypoEvent.State;
@@ -17,6 +20,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,6 +41,8 @@ public class HypoEventService {
     private final HypoEventRepository repository;
     private final NoteRepository noteRepository;
     private final FeatureToggleConfig featureToggleConfig;
+    private final ForecastSnapshotTrigger forecastSnapshotTrigger;
+    private final UserSettingsService userSettingsService;
 
     /**
      * Advance the hypo lifecycle for one user given their latest CGM reading.
@@ -268,11 +275,38 @@ public class HypoEventService {
      */
     @Transactional
     public HypoEventDTO confirm(UUID userId, UUID eventId, Double grams) {
-        HypoEvent event = requireOwnEvent(userId, eventId);
-
-        if (event.getState() == State.CONFIRMED) {
-            return HypoEventDTO.from(event);
+        HypoEvent existing = requireOwnEvent(userId, eventId);
+        if (existing.getState() == State.CONFIRMED) {
+            return HypoEventDTO.from(existing);
         }
+        return logRescue(existing, userId, eventId, grams, null);
+    }
+
+    /**
+     * The user's newest still-live OPEN event, for callers (the assistant) that log rescue carbs
+     * without having the prompt's event id. Applies the same age-out as {@link #list}'s callers.
+     */
+    @Transactional(readOnly = true)
+    public Optional<HypoEventDTO> findOpenEvent(UUID userId) {
+        return list(userId, State.OPEN).stream()
+                .filter(e -> e.detectedAt() != null
+                        && Duration.between(e.detectedAt(), LocalDateTime.now()).toMinutes()
+                                < HypoThresholds.MAX_OPEN_MINUTES)
+                .findFirst();
+    }
+
+    /**
+     * As {@link #confirm(UUID, UUID, Double)}, tagging the rescue note with the originating chat
+     * message. Strict: it always logs a new note or throws 409 - an already-CONFIRMED event is NOT
+     * returned idempotently, so the caller never mistakes an earlier note for its own.
+     */
+    @Transactional
+    public HypoEventDTO confirm(UUID userId, UUID eventId, Double grams, UUID chatMessageId) {
+        return logRescue(requireOwnEvent(userId, eventId), userId, eventId, grams, chatMessageId);
+    }
+
+    private HypoEventDTO logRescue(HypoEvent event, UUID userId, UUID eventId, Double grams, UUID chatMessageId) {
+
         // A prompt the client held on to past its useful life must not be able to write a note at
         // now() for a hypo that ended hours ago - the phantom-carb path this age-out exists to
         // close. Checked here as well as on read: the client may be acting on a cached event.
@@ -286,14 +320,19 @@ public class HypoEventService {
 
         Note note = new Note();
         note.setUserId(userId);
-        note.setTimestamp(LocalDateTime.now());
+        // notes.timestamp is the user's wall time everywhere else (and what the forecast freezer
+        // judges backdating against); the JVM clock is only right when the server shares the zone.
+        note.setTimestamp(userWallNow(userId));
         note.setCarbs(amount);
         note.setInsulin(0.0);
         note.setMeal("Hypo treatment");
         note.setType(Note.TYPE_HYPO_TREATMENT);
+        note.setChatMessageId(chatMessageId);
         note.setCreatedAt(LocalDateTime.now());
         note.setUpdatedAt(LocalDateTime.now());
         Note saved = noteRepository.save(note);
+        // Rescue carbs are fast sugar: an anchor. Frozen after commit, never blocks the confirm.
+        forecastSnapshotTrigger.noteSaved(userId, saved.getId());
 
         event.setState(State.CONFIRMED);
         event.setNoteId(saved.getId());
@@ -301,6 +340,13 @@ public class HypoEventService {
         event.setUpdatedAt(LocalDateTime.now());
         log.info("Hypo event {} confirmed with {} g rescue carbs", eventId, amount);
         return HypoEventDTO.from(repository.save(event));
+    }
+
+    /** Now on the user's wall clock: their stored zone, else their last offset, else UTC. */
+    private LocalDateTime userWallNow(UUID userId) {
+        UserSettingsDTO s = userSettingsService.getUserSettings(userId);
+        ZoneId zone = s == null ? ZoneOffset.UTC : UserZones.resolve(s.getTimezone(), s.getUtcOffsetMinutes());
+        return LocalDateTime.now(zone);
     }
 
     @Transactional

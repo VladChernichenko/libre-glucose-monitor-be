@@ -79,6 +79,14 @@ public class UserSettings {
     @Column(name = "prediction_engine", nullable = false, length = 16)
     private PredictionEngine predictionEngine = PredictionEngine.HOVORKA;
 
+    /** Correction target glucose (mmol/L). */
+    @Column(name = "target_glucose_mmol", nullable = false)
+    private Double targetGlucoseMmol = 5.55;
+
+    /** Rescue carbs (g) suggested when treating a hypo. */
+    @Column(name = "rescue_carbs_g", nullable = false)
+    private Integer rescueCarbsG = 15;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

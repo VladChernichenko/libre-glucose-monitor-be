@@ -126,6 +126,27 @@ class DashboardMealMacrosWiringTest {
                 .allSatisfy(list -> assertThat(list).containsExactly(entriesByNote.get(steak.getId())));
     }
 
+    @Test
+    @DisplayName("path length: default 240 without the override; the override only lengthens it, capped at 480")
+    void predictionPathMinutesOverride() {
+        when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(), any())).thenReturn(List.of());
+
+        assertThat(pathMinutesFor(null)).as("no override: unchanged dashboard path").isEqualTo(240);
+        assertThat(pathMinutesFor(270)).isEqualTo(270);
+        assertThat(pathMinutesFor(100)).as("never shorter than the default").isEqualTo(240);
+        assertThat(pathMinutesFor(900)).as("capped at 8 h").isEqualTo(480);
+    }
+
+    private int pathMinutesFor(Integer override) {
+        clearInvocations(hovorkaService);
+        service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(8.0).userId("u").predictionPathMinutes(override).build());
+        ArgumentCaptor<Integer> minutes = ArgumentCaptor.forClass(Integer.class);
+        verify(hovorkaService).buildPredictionPath(anyDouble(), any(LocalDateTime.class), anyList(),
+                anyList(), anyList(), any(UUID.class), minutes.capture(), any(ActivityProvider.class));
+        return minutes.getValue();
+    }
+
     private Note note(LocalDateTime when, double carbs, double fiber, double protein) {
         Note n = new Note();
         n.setId(UUID.randomUUID());

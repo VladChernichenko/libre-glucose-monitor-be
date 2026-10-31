@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -42,7 +43,7 @@ public class UserSettingsController {
     @PostMapping
     public ResponseEntity<UserSettingsDTO> saveUserSettings(
             Authentication authentication,
-            @RequestBody UserSettingsDTO settingsDTO) {
+            @Valid @RequestBody UserSettingsDTO settingsDTO) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
             UserSettingsDTO savedSettings = userSettingsService.saveUserSettings(userId, settingsDTO);
@@ -61,7 +62,7 @@ public class UserSettingsController {
     @PutMapping
     public ResponseEntity<UserSettingsDTO> updateUserSettings(
             Authentication authentication,
-            @RequestBody UserSettingsDTO settingsDTO) {
+            @Valid @RequestBody UserSettingsDTO settingsDTO) {
         try {
             UUID userId = getUserIdFromAuthentication(authentication);
             UserSettingsDTO updatedSettings = userSettingsService.saveUserSettings(userId, settingsDTO);

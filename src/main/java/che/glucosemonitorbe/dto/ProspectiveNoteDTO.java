@@ -38,4 +38,10 @@ public class ProspectiveNoteDTO {
      */
     @Builder.Default
     private Integer minutesAgo = 0;
+
+    /**
+     * Note type, as {@code Note.type}. {@code "hypo_treatment"} makes the carbs a fast-sugar
+     * rescue (RescueCarbProfile) instead of a meal; null or anything else is a meal.
+     */
+    private String type;
 }

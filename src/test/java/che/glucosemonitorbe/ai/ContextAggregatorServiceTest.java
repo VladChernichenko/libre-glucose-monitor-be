@@ -244,6 +244,23 @@ class ContextAggregatorServiceTest {
     }
 
     @Test
+    @DisplayName("the correction target comes from the user's targetGlucoseMmol setting")
+    void buildContext_correctionUsesUserTargetSetting() {
+        LocalDateTime now = LocalDateTime.of(2026, 8, 23, 12, 0);
+        defaultUserSettings.setTargetGlucoseMmol(5.0);
+        when(chartDataRepository.findByUserIdOrderByDateTimestampAsc(userId))
+                .thenReturn(List.of(chartRowAt(11.5, now.minusMinutes(1))));
+        when(insulinCalculatorService.calculateRecommendedInsulin(any()))
+                .thenReturn(InsulinCalculationResponse.builder().recommendedInsulin(1.0).build());
+
+        service.buildContext(userId, 12, now);
+
+        ArgumentCaptor<InsulinCalculationRequest> req = ArgumentCaptor.forClass(InsulinCalculationRequest.class);
+        verify(insulinCalculatorService).calculateRecommendedInsulin(req.capture());
+        assertThat(req.getValue().getTargetGlucose()).isEqualTo(5.0);
+    }
+
+    @Test
     @DisplayName("#22: a dosing refusal yields no correction guidance rather than failing the analysis")
     void buildContext_dosingRefusalSuppressesGuidance() {
         LocalDateTime now = LocalDateTime.of(2026, 8, 23, 12, 0);

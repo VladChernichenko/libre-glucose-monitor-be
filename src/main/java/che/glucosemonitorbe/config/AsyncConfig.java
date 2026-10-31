@@ -23,7 +23,7 @@ public class AsyncConfig {
      * which would serialise every scheduler onto one thread. The nightly
      * {@code DigitalTwinCalibrationScheduler} replays the Hovorka ODE over 30 days of CGM for every
      * user and can run for minutes; on a single thread it would starve the frequent jobs - the 5-min
-     * Nightscout/LibreLinkUp CGM syncs, the 5-min anomaly detector, and the 15-min verification poll
+     * Nightscout/LibreLinkUp CGM syncs, the 5-min anomaly detector, and other frequent jobs
      * - stalling CGM ingestion and alerting for all users while it runs.
      *
      * <p>Pool size = the number of distinct scheduled methods (6) so each can run on its own thread

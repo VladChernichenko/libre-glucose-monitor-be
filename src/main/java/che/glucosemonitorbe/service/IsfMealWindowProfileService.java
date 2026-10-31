@@ -41,7 +41,7 @@ import java.util.*;
  *
  * <p>Per-meal-window result is the weighted mean of all per-event ISF estimates in that bucket.
  * Buckets with weighted-sample-sum &lt; {@link #MIN_WEIGHTED_SAMPLES} return {@code null} so
- * the front-end can render a gap with a "Run ISF experiment" CTA.</p>
+ * the front-end can render a gap.</p>
  */
 @Service
 @Slf4j

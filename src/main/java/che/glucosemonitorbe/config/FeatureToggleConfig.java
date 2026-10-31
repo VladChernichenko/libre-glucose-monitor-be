@@ -13,9 +13,6 @@ public class FeatureToggleConfig {
     private boolean glucoseCalculationsEnabled = false;
     private boolean nutritionAwarePredictionEnabled = false;
 
-    // Experiments - ISF / Carb Ratio determination (on by default)
-    private boolean experimentsEnabled = true;
-
     // Hovorka 2-compartment ODE model (replaces OpenAPS exponential path when enabled)
     // Off by default - toggle on per-environment after validation
     private boolean hovorkaModelEnabled = false;
@@ -45,5 +42,9 @@ public class FeatureToggleConfig {
     // Its parameters were hand-tuned on one person's data, so it stays off until validated more
     // widely: when off, every user forecasts with Hovorka and the setting can only be HOVORKA.
     private boolean empiricalTwinEnabled = false;
+
+    // History dose and the 20% banner on the chat meal card (spec 2026-10-30 6.6): median units/gram of
+    // similar past meals vs the calculator. Advisory only, never changes settings. Default on.
+    private boolean historyDoseEnabled = true;
 
 }

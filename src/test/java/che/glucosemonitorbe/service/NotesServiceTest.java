@@ -49,6 +49,12 @@ class NotesServiceTest {
     @Mock
     private NotePhotoStorageService notePhotoStorageService;
 
+    @Mock
+    private che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger forecastSnapshotTrigger;
+
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
     @InjectMocks
     private NotesService notesService;
 

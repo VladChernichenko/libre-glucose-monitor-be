@@ -112,6 +112,12 @@ app:
       model: ${QWEN_MODEL:gpt-4o-mini}
       vision-model: ${QWEN_VISION_MODEL:gpt-4o-mini}
       api-key: ${QWEN_API_KEY:}
+    embeddings:
+      url: ${OPENAI_EMBEDDINGS_URL:https://api.openai.com/v1}
+      model: ${OPENAI_EMBEDDINGS_MODEL:text-embedding-3-small}
+      dimensions: 1536
+      timeout-ms: ${OPENAI_EMBEDDINGS_TIMEOUT_MS:8000}
+      api-key: ${OPENAI_API_KEY:}
     yolo:
       url: ${YOLO_SERVICE_URL:http://localhost:8001}
       confidence-threshold: ${YOLO_CONFIDENCE_THRESHOLD:0.35}
@@ -158,6 +164,8 @@ app:
     empirical-twin-enabled: ${APP_FEATURES_EMPIRICAL_TWIN_ENABLED:false}
     # Activity logging: logged activity notes feed the model's activity signal a(t).
     activity-logging-enabled: ${APP_FEATURES_ACTIVITY_LOGGING_ENABLED:true}
+    # History dose + 20% banner on the chat meal card (advisory; never changes settings).
+    history-dose-enabled: ${APP_FEATURES_HISTORY_DOSE_ENABLED:true}
 
   # Glycemic event engine (spec 2026-09-30). All keys optional - defaults live in GlycemicEventProperties.
   glycemic-events:

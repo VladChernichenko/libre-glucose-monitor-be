@@ -205,7 +205,6 @@ class GlycemicPatternMatchingServiceTest {
         assertThat(enriched.getSuggestedDurationHours()).isNotNull();
         assertThat(enriched.getMealSequencingPriority()).isNotNull();
         assertThat(enriched.getCurveDescription()).isNotNull();
-        assertThat(enriched.getPreBolusPauseMinutes()).isNotNull();
     }
 
     @Test
@@ -217,61 +216,24 @@ class GlycemicPatternMatchingServiceTest {
         assertThat(enriched.getBolusStrategy()).isNull();
     }
 
-    // -- pre-bolus pause computation -------------------------------------------
+    // -- bolus strategy label (the pause itself comes from the forecast: PreBolusPauseOptimizer) --
 
     @Test
-    void extendedBolusStrategy_preBolusPauseIsZero() {
-        // flatPlateau uses Extended -> bolus at/after meal start, no pre-bolus wait
-        NutritionSnapshot s = snapshot(45.0, 10.0, 1.0, 25.0, 5.0);
-        NutritionSnapshot enriched = service.enrich(s);
+    void flatPlateau_extendedBolusStrategy() {
+        NutritionSnapshot enriched = service.enrich(snapshot(45.0, 10.0, 1.0, 25.0, 5.0));
         assertThat(enriched.getBolusStrategy()).isEqualTo("Extended");
-        assertThat(enriched.getPreBolusPauseMinutes()).isEqualTo(0);
     }
 
     @Test
-    void dualWaveBolusStrategy_preBolusPauseIs15Min() {
-        // doubleWave uses Dual Wave -> upfront portion covers fast-carb spike -> 15 min
-        NutritionSnapshot s = snapshot(58.0, 40.0, 2.0, 22.0, 35.0);
-        NutritionSnapshot enriched = service.enrich(s);
+    void doubleWave_dualWaveBolusStrategy() {
+        NutritionSnapshot enriched = service.enrich(snapshot(58.0, 40.0, 2.0, 22.0, 35.0));
         assertThat(enriched.getBolusStrategy()).isEqualTo("Dual Wave");
-        assertThat(enriched.getPreBolusPauseMinutes()).isEqualTo(15);
     }
 
     @Test
-    void normalBolus_highGI_preBolusPauseIs20Min() {
-        // Fast Spike: Normal bolus, GI=75 >= 70 -> 20 min pre-bolus
-        NutritionSnapshot s = snapshot(75.0, 20.0, 0.0, 2.0, 1.0);
-        NutritionSnapshot enriched = service.enrich(s);
+    void fastSpike_normalBolusStrategy() {
+        NutritionSnapshot enriched = service.enrich(snapshot(75.0, 20.0, 0.0, 2.0, 1.0));
         assertThat(enriched.getBolusStrategy()).isEqualTo("Normal");
-        assertThat(enriched.getPreBolusPauseMinutes()).isEqualTo(20);
-    }
-
-    @Test
-    void normalBolus_mediumGI_preBolusPauseIs15Min() {
-        // Slow Climb: Normal bolus, GI=45 (55 <= 45? No. Let's use GI=60)
-        // Fast Spike GI>=55: GI=60, 55 <= gi < 70 -> 15 min
-        NutritionSnapshot s = snapshot(60.0, 12.0, 0.0, 2.0, 1.0);
-        NutritionSnapshot enriched = service.enrich(s);
-        assertThat(enriched.getBolusStrategy()).isEqualTo("Normal");
-        assertThat(enriched.getPreBolusPauseMinutes()).isEqualTo(15);
-    }
-
-    @Test
-    void normalBolus_lowMediumGI_preBolusPauseIs10Min() {
-        // Slow Climb (GI=40): 40 <= gi < 55 -> 10 min
-        NutritionSnapshot s = snapshot(40.0, 12.0, 1.0, 2.0, 1.0);
-        NutritionSnapshot enriched = service.enrich(s);
-        assertThat(enriched.getBolusStrategy()).isEqualTo("Normal");
-        assertThat(enriched.getPreBolusPauseMinutes()).isEqualTo(10);
-    }
-
-    @Test
-    void normalBolus_veryLowGI_preBolusPauseIs5Min() {
-        // Slow Climb (GI=25): gi < 40 -> 5 min
-        NutritionSnapshot s = snapshot(25.0, 8.0, 1.0, 2.0, 1.0);
-        NutritionSnapshot enriched = service.enrich(s);
-        assertThat(enriched.getBolusStrategy()).isEqualTo("Normal");
-        assertThat(enriched.getPreBolusPauseMinutes()).isEqualTo(5);
     }
 
     // -- helpers ---------------------------------------------------------------

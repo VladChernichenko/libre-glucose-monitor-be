@@ -1,5 +1,8 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshot;
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotRepository;
+import che.glucosemonitorbe.assistant.snapshot.SnapshotForecaster;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.GlucoseConversion;
@@ -19,6 +22,9 @@ import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine.Reading;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,15 +34,21 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * "Forecast at each log": the empirical twin's forecast from each logged dose, meal or fast sugar,
- * beside what the CGM actually did, so the user can step through their history (spec F2.3).
+ * "Forecast at each log": the forecast frozen when each dose, meal or fast sugar was logged
+ * ({@link ForecastSnapshot}), beside what the CGM actually did, so the user can step through their
+ * history. A note without a snapshot (older, backdated, or excluded after a late edit) is not an
+ * anchor. The frozen points carry no cone: lower and upper equal the forecast.
  *
- * <p>Forecasts are recomputed on request with today's parameters; they are not the frozen,
- * honestly scored snapshots of spec F2.1. Notes hold local wall time and CGM readings true UTC,
- * so readings are moved onto the user's wall clock before the engine sees them.</p>
+ * <p>The engine recompute of spec F2.3 ({@code recomputedAnchors} / {@code recomputedForecast}) stays
+ * for tests and backtests only. Notes hold local wall time and CGM readings true UTC, so readings
+ * are moved onto the user's wall clock before use.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -51,6 +63,8 @@ public class TwinForecastHistoryService {
     private static final int CONTEXT_BEFORE_MIN = 60;
     /** Horizons compared with the CGM [min]. */
     private static final int[] CHECK_MINUTES = {60, 120, 240};
+    /** Frozen forecasts have no likely-range cone. */
+    private static final double NO_CONE_COVERAGE = 0.0;
     private static final EmpiricalForecastCone CONE = EmpiricalForecastCone.defaults();
 
     private final NoteRepository noteRepository;
@@ -58,9 +72,94 @@ public class TwinForecastHistoryService {
     private final UserSettingsService userSettingsService;
     private final NoteToCarbsEntryMapper noteToCarbsEntryMapper;
     private final FeatureToggleConfig featureToggleConfig;
+    private final ForecastSnapshotRepository snapshotRepository;
+    private final ObjectMapper objectMapper;
 
-    /** Anchors logged in the last {@code days} days, oldest first. */
+    /** Notes with a live snapshot, logged in the last {@code days} days, oldest first. */
     public List<ForecastAnchorDTO> anchors(UUID userId, int days) {
+        int d = Math.max(1, Math.min(MAX_DAYS, days));
+        LocalDateTime now = LocalDateTime.now(zone(userId));
+        List<Note> inWindow = noteRepository.findByUserIdAndTimestampBetween(userId, now.minusDays(d), now);
+        if (inWindow.isEmpty()) return List.of();
+        List<UUID> withSnapshot = snapshotRepository
+                .findByNoteIdInAndExcludedFalse(inWindow.stream().map(Note::getId).toList()).stream()
+                .filter(s -> userId.equals(s.getUserId()))
+                .map(ForecastSnapshot::getNoteId)
+                .toList();
+        return inWindow.stream()
+                .filter(n -> n.getTimestamp() != null && withSnapshot.contains(n.getId()))
+                .sorted(Comparator.comparing(Note::getTimestamp))
+                .map(TwinForecastHistoryService::toAnchor)
+                .toList();
+    }
+
+    /** The frozen forecast of one of the user's notes; 404 when it has no live snapshot. */
+    public AnchorForecastDTO forecast(UUID userId, UUID noteId) {
+        ZoneId zone = zone(userId);
+        LocalDateTime now = LocalDateTime.now(zone);
+        Note anchor = noteRepository.findByIdAndUserId(noteId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("No forecast anchor " + noteId));
+        ForecastSnapshot snap = snapshotRepository.findByNoteId(noteId)
+                .filter(s -> userId.equals(s.getUserId()) && !s.isExcluded())
+                .orElseThrow(() -> new ResourceNotFoundException("No forecast anchor " + noteId));
+        LocalDateTime t0 = anchor.getTimestamp();
+        LocalDateTime chartEnd = t0.plusMinutes(EmpiricalTwinEngine.HORIZON_MIN);
+        LocalDateTime savedAt = LocalDateTime.ofInstant(snap.getMadeAt(), zone);
+
+        List<SnapshotForecaster.Point> frozen = points(snap);
+        List<AnchorForecastDTO.Point> forecast = frozen.stream()
+                .map(p -> new AnchorForecastDTO.Point(p.minute(), savedAt.plusMinutes(p.minute()),
+                        round1(p.mmol()), round1(p.mmol()), round1(p.mmol())))
+                .toList();
+
+        Map<Integer, Double> predicted = frozen.stream()
+                .collect(Collectors.toMap(SnapshotForecaster.Point::minute, SnapshotForecaster.Point::mmol, (x, y) -> x));
+        List<AnchorForecastDTO.Check> checks = List.of(
+                check(60, predicted, snap.getCheck60Actual(), snap.getCheck60Hit()),
+                check(120, predicted, snap.getCheck120Actual(), snap.getCheck120Hit()),
+                check(240, predicted, snap.getCheck240Actual(), snap.getCheck240Hit()));
+
+        List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(
+                userId, t0.minusHours(EVENT_LOOKBACK_HOURS), chartEnd);
+        return new AnchorForecastDTO(
+                toAnchor(anchor),
+                snap.getStartGlucose() != null ? round1(snap.getStartGlucose()) : null,
+                forecast,
+                cgmReadings(userId, t0, chartEnd, zone).stream()
+                        .map(r -> new AnchorForecastDTO.Reading(wallTime(r.epochMs()), round1(r.mmol()))).toList(),
+                markers(notes, t0.minusMinutes(CONTEXT_BEFORE_MIN)),
+                checks,
+                NO_CONE_COVERAGE,
+                chartEnd.isAfter(now));
+    }
+
+    private static AnchorForecastDTO.Check check(int minute, Map<Integer, Double> predicted, Double actual, Boolean hit) {
+        Double p = predicted.get(minute);
+        return new AnchorForecastDTO.Check(minute, p != null ? round1(p) : null,
+                actual != null ? round1(actual) : null, hit);
+    }
+
+    private List<SnapshotForecaster.Point> points(ForecastSnapshot snap) {
+        try {
+            return objectMapper.readValue(snap.getPoints(), new TypeReference<>() {});
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Unreadable forecast snapshot " + snap.getId(), e);
+        }
+    }
+
+    private List<Reading> cgmReadings(UUID userId, LocalDateTime t0, LocalDateTime chartEnd, ZoneId zone) {
+        return cgmReadingRepository.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                        userId,
+                        UserZones.toEpochMs(t0.minusMinutes(CONTEXT_BEFORE_MIN), zone),
+                        UserZones.toEpochMs(chartEnd, zone))
+                .stream()
+                .filter(r -> r.getSgv() != null && r.getDateTimestamp() != null)
+                .map(r -> toWallReading(r, zone))
+                .toList();
+    }
+
+    /** Engine recompute with today's parameters, oldest first. Tests and backtests only. */
+    List<ForecastAnchorDTO> recomputedAnchors(UUID userId, int days) {
         int d = Math.max(1, Math.min(MAX_DAYS, days));
         LocalDateTime now = LocalDateTime.now(zone(userId));
         return noteRepository.findByUserIdAndTimestampBetween(userId, now.minusDays(d), now).stream()
@@ -70,13 +169,8 @@ public class TwinForecastHistoryService {
                 .toList();
     }
 
-    /** The forecast from one of the user's anchor notes; 404 for someone else's note or a non-anchor. */
-    public AnchorForecastDTO forecast(UUID userId, UUID noteId) {
-        ZoneId zone = zone(userId);
-        return forecast(userId, noteId, zone, LocalDateTime.now(zone));
-    }
-
-    AnchorForecastDTO forecast(UUID userId, UUID noteId, ZoneId zone, LocalDateTime now) {
+    /** Engine recompute for one anchor note; 404 for someone else's note or a non-anchor. Tests and backtests only. */
+    AnchorForecastDTO recomputedForecast(UUID userId, UUID noteId, ZoneId zone, LocalDateTime now) {
         Note anchor = noteRepository.findByIdAndUserId(noteId, userId)
                 .filter(TwinForecastHistoryService::isAnchor)
                 .orElseThrow(() -> new ResourceNotFoundException("No forecast anchor " + noteId));
@@ -85,14 +179,7 @@ public class TwinForecastHistoryService {
 
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(
                 userId, t0.minusHours(EVENT_LOOKBACK_HOURS), chartEnd);
-        List<Reading> cgm = cgmReadingRepository.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                        userId,
-                        UserZones.toEpochMs(t0.minusMinutes(CONTEXT_BEFORE_MIN), zone),
-                        UserZones.toEpochMs(chartEnd, zone))
-                .stream()
-                .filter(r -> r.getSgv() != null && r.getDateTimestamp() != null)
-                .map(r -> toWallReading(r, zone))
-                .toList();
+        List<Reading> cgm = cgmReadings(userId, t0, chartEnd, zone);
 
         long anchorMs = EmpiricalEventMapper.epochMs(t0);
         List<EmpiricalTwinEngine.Point> path =

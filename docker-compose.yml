@@ -1,7 +1,7 @@
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     container_name: glucose-monitor-postgres
     environment:
       POSTGRES_DB: glucose_monitor

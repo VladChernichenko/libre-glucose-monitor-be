@@ -58,10 +58,21 @@ public class NutritionVisionService {
     }
 
     public NutritionSnapshot analyzeImage(MultipartFile photo) {
+        byte[] bytes;
         try {
-            byte[] bytes = photo.getBytes();
+            bytes = photo.getBytes();
+        } catch (Exception e) {
+            log.warn("Vision analysis could not read the upload. reason={}", e.getMessage());
+            return fallbackSnapshot();
+        }
+        return analyzeImage(bytes, photo.getContentType());
+    }
+
+    /** Same as {@link #analyzeImage(MultipartFile)} for an image already in memory (e.g. from storage). */
+    public NutritionSnapshot analyzeImage(byte[] bytes, String contentType) {
+        try {
             String base64 = Base64.getEncoder().encodeToString(bytes);
-            String mimeType = photo.getContentType() != null ? photo.getContentType() : "image/jpeg";
+            String mimeType = contentType != null ? contentType : "image/jpeg";
             if (qwenGatewayService.isAvailable()) {
                 log.info("[QwenVision] Qwen available - using Qwen vision for image analysis mimeType={} imageBytes={}", mimeType, bytes.length);
                 try {
@@ -80,18 +91,22 @@ public class NutritionVisionService {
             return callVisionLlm(base64);
         } catch (Exception e) {
             log.warn("Vision LLM analysis failed, falling back to empty snapshot. reason={}", e.getMessage());
-            return NutritionSnapshot.builder()
-                    .absorptionMode("DEFAULT_DECAY")
-                    .source("VISION_FALLBACK")
-                    .confidence(0.1)
-                    .totalCarbs(0.0)
-                    .fiber(0.0)
-                    .protein(0.0)
-                    .fat(0.0)
-                    .absorptionSpeedClass("DEFAULT")
-                    .normalizedFoods(List.of())
-                    .build();
+            return fallbackSnapshot();
         }
+    }
+
+    private static NutritionSnapshot fallbackSnapshot() {
+        return NutritionSnapshot.builder()
+                .absorptionMode("DEFAULT_DECAY")
+                .source("VISION_FALLBACK")
+                .confidence(0.1)
+                .totalCarbs(0.0)
+                .fiber(0.0)
+                .protein(0.0)
+                .fat(0.0)
+                .absorptionSpeedClass("DEFAULT")
+                .normalizedFoods(List.of())
+                .build();
     }
 
     private NutritionSnapshot callVisionLlm(String base64Image) throws Exception {
