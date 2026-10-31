@@ -2,6 +2,7 @@
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 
 try:
     import yaml  # noqa: F401
@@ -10,8 +11,7 @@ except ImportError:
     HAVE_YAML = False
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import clinical_ingest as ci
-from pathlib import Path
+import clinical_ingest as ci  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 
@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 class DryRunTest(unittest.TestCase):
     def test_dry_run_chunk_counts(self):
         out = subprocess.run(
-            [sys.executable, "-I", str(HERE / "clinical_ingest.py"), "--dry-run",
+            [sys.executable, str(HERE / "clinical_ingest.py"), "--dry-run",
              "--sources", str(HERE / "fixtures" / "clinical_sources_fixture.yaml")],
             capture_output=True, text=True, check=True).stdout
         self.assertIn("fixture-guideline: 2 chunks", out)
