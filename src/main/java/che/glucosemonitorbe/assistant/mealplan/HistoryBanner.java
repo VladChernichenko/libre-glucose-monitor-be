@@ -11,7 +11,7 @@ import java.util.UUID;
  * dose goes through the low re-check ({@code POST /api/assistant/plans/{id}/recheck}).
  *
  * @param pauseMinutes  the pause both curves use: the plan's pause, or 0 (eat now) when the plan has none
- * @param modelCurve    the plan's own forecast (its {@link PauseChoice} curve) for {@code modelUnits}
+ * @param modelCurve    {@link PreBolusPauseOptimizer#forecastDose} for {@code modelUnits} with the meal and pause
  * @param historyCurve  the same dashboard forecast for {@code historyUnits} with the same meal and pause
  * @param historyLevel  {@link DoseRecheck#level} of {@code historyMin}; null when the curve is empty
  */

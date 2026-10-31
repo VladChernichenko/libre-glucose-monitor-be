@@ -113,6 +113,7 @@ class PreBolusPauseOptimizerTest {
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
             assertThat(choice.pauseMinutes()).isEqualTo(30);
+            assertThat(choice.inFlight()).isFalse();
             assertThat(choice.peak()).isCloseTo(8.0 - 30 * 0.08, within(1e-9));
             assertThat(choice.min()).isCloseTo(5.6, within(1e-9));
         }
@@ -184,6 +185,7 @@ class PreBolusPauseOptimizerTest {
 
             assertThat(choice.pauseMinutes()).isNull();
             assertThat(choice.reason()).isEqualTo("No carbs, so no pre-bolus pause.");
+            assertThat(choice.inFlight()).isFalse();
             ArgumentCaptor<GlucoseCalculationsRequest> req = ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
             verify(calculations, times(1)).calculateGlucoseData(req.capture());
             assertThat(req.getValue().getProspectiveNotes()).singleElement()
@@ -211,6 +213,7 @@ class PreBolusPauseOptimizerTest {
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
             assertThat(choice.pauseMinutes()).isNull();
+            assertThat(choice.inFlight()).isFalse(); // all-low/empty is not "in flight"
             assertThat(choice.reason()).contains("Every pause").doesNotContain("NaN");
         }
 
@@ -225,6 +228,7 @@ class PreBolusPauseOptimizerTest {
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
             assertThat(choice.pauseMinutes()).isNull();
+            assertThat(choice.inFlight()).isTrue();
             assertThat(choice.reason()).containsIgnoringCase("pre-bolus");
             ArgumentCaptor<GlucoseCalculationsRequest> req = ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
             verify(calculations, times(1)).calculateGlucoseData(req.capture());

@@ -18,9 +18,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Turns a plan's {@link HistoryDose} into the banner as shown (spec 6.6): the model curve is the plan's
- * own pause curve; the history curve is {@link PreBolusPauseOptimizer#forecastDose} for the history dose
- * with the same meal and pause. Advisory: any failure (stale CGM, forecast error) gives no banner and
+ * Turns a plan's {@link HistoryDose} into the banner as shown (spec 6.6): both curves come from
+ * {@link PreBolusPauseOptimizer#forecastDose} with the same glucose, meal and pause, one for the model
+ * dose and one for the history dose. No banner while a pre-bolus is in flight. Advisory: any failure (stale CGM, forecast error) gives no banner and
  * never fails the meal card; a failed episode lookup only drops the episodes line's aggregates.
  */
 @Slf4j
@@ -53,21 +53,26 @@ public class HistoryBannerService {
      */
     public Optional<HistoryBanner> build(UUID userId, MealPlan plan, MealMacros macros, LocalDateTime now) {
         HistoryDose h = plan.history();
-        if (h == null || plan.pause() == null) return Optional.empty();
+        // In flight, the plan's curve has the meal now and no new dose: no like-for-like comparison.
+        if (h == null || plan.pause() == null || plan.pause().inFlight()) return Optional.empty();
         try {
             Optional<CgmReadingDTO> reading = freshness.freshReading(userId, clock.instant());
             if (reading.isEmpty()) {
                 log.info("History banner skipped for userId={}: no fresh CGM reading", userId);
                 return Optional.empty();
             }
-            PauseChoice model = plan.pause();
-            int pause = model.pauseMinutes() != null ? model.pauseMinutes() : 0;
-            List<PredictionPointDTO> curve = optimizer.forecastDose(userId, now, reading.get().mmol(), h.units(),
+            Integer planned = plan.pause().pauseMinutes();
+            int pause = planned != null ? planned : 0;
+            double glucose = reading.get().mmol();
+            // Both curves through one path; only the dose differs.
+            List<PredictionPointDTO> modelCurve = optimizer.forecastDose(userId, now, glucose, h.modelUnits(),
                     macros, pause);
+            List<PredictionPointDTO> curve = optimizer.forecastDose(userId, now, glucose, h.units(), macros, pause);
             double min = PreBolusPauseOptimizer.min(curve);
             return Optional.of(new HistoryBanner(h.modelUnits(), h.units(), h.deltaPct(), pause,
                     episodesLine(h.episodeIds()), h.pendingIsfNote(),
-                    model.curve(), finite(model.min()), finite(model.peak()),
+                    modelCurve, finite(PreBolusPauseOptimizer.min(modelCurve)),
+                    finite(PreBolusPauseOptimizer.peak(modelCurve)),
                     curve, finite(min), finite(PreBolusPauseOptimizer.peak(curve)),
                     Double.isNaN(min) ? null : DoseRecheck.level(min)));
         } catch (RuntimeException e) {

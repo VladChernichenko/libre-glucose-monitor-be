@@ -72,6 +72,33 @@ class MealActionRecheckGuardsTest {
         return m;
     }
 
+    @Test
+    void storedPlanRefusalOrStaleIsReturnedAsIs() {
+        ChatMessage refused = planned();
+        ObjectNode p = (ObjectNode) readTree(refused);
+        ((ObjectNode) p.get("plan")).put("refusalCode", "GLUCOSE_BELOW_SAFE_THRESHOLD");
+        refused.setPayload(p.toString());
+        assertEquals("GLUCOSE_BELOW_SAFE_THRESHOLD",
+                service.recheck(user, refused.getId(), 5.0, NOW, SERVER).refusalCode());
+
+        ChatMessage stale = planned();
+        ObjectNode q = (ObjectNode) readTree(stale);
+        ((ObjectNode) q.get("plan")).put("stale", true);
+        stale.setPayload(q.toString());
+        DoseRecheck r = service.recheck(user, stale.getId(), 5.0, NOW, SERVER);
+        assertEquals(DoseRecheck.CGM_STALE, r.refusalCode());
+        assertTrue(r.curve().isEmpty() && r.level() == null);
+        verifyNoInteractions(optimizer);
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode readTree(ChatMessage m) {
+        try {
+            return objectMapper.readTree(m.getPayload());
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private ChatMessage planned() {
         return plan(MealActionService.PLANNED, user, MealActionService.INTENT_MEAL_PLAN);
     }

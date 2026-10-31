@@ -237,7 +237,8 @@ public class MealActionService {
      * Low re-check of a dose the user is about to choose (spec 6.6), e.g. the history banner's dose:
      * the dashboard forecast with that dose now and the planned meal at now + the planned pause (0 when
      * the plan has none), cropped as the pause search crops. Only a PLANNED plan (else 409) up to its
-     * {@code doseValidUntil} ({@link DoseRecheck#PLAN_EXPIRED} after). The max-bolus and below-3.9
+     * {@code doseValidUntil} ({@link DoseRecheck#PLAN_EXPIRED} after). A plan made stale or refused
+     * returns that ({@link DoseRecheck#CGM_STALE} or its refusalCode), as for the advised dose. The max-bolus and below-3.9
      * refusals apply exactly as to the model dose, and a stale CGM refuses. Writes nothing.
      *
      * @param now           the assistant's server-now in the user's zone
@@ -252,6 +253,9 @@ public class MealActionService {
         ChatMessage m = owned(repository.findById(messageId), userId, messageId, INTENT_MEAL_PLAN);
         ObjectNode p = history.readPayload(m);
         requireState(p, Set.of(PLANNED));
+        JsonNode stored = p.path("plan");
+        if (stored.path("stale").asBoolean(false)) return DoseRecheck.refused(DoseRecheck.CGM_STALE);
+        if (stored.hasNonNull("refusalCode")) return DoseRecheck.refused(stored.get("refusalCode").asText());
         if (!p.hasNonNull("doseValidUntil") || now.isAfter(LocalDateTime.parse(p.get("doseValidUntil").asText()))) {
             return DoseRecheck.refused(DoseRecheck.PLAN_EXPIRED);
         }

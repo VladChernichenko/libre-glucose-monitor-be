@@ -99,9 +99,9 @@ public class PreBolusPauseOptimizer {
         if (inFlight.isPresent()) {
             PreBolusContext ctx = inFlight.get();
             List<PredictionPointDTO> curve = forecast(username, now, currentGlucose, null, meal, nutritionJson, 0);
-            return choice(null, curve, String.format(Locale.ROOT,
+            return new PauseChoice(null, curve, peak(curve), min(curve), String.format(Locale.ROOT,
                     "A pre-bolus of %.1f U is already in flight (%d min ago), so no new pause; the forecast has the meal now.",
-                    ctx.units(), ctx.elapsedMinutes()));
+                    ctx.units(), ctx.elapsedMinutes()), true);
         }
 
         List<PredictionPointDTO> eatNow = null;

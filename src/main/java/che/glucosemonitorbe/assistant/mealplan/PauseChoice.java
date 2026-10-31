@@ -14,7 +14,14 @@ import java.util.List;
  * @param peak         highest point of {@code curve} [mmol/L]
  * @param min          lowest point of {@code curve} [mmol/L]
  * @param reason       one sentence on why this pause (or none)
+ * @param inFlight     true only when a pre-bolus is already in flight: the curve then has the meal now
+ *                     and no new dose, so it is not comparable with a forecast for another dose
  */
 public record PauseChoice(Integer pauseMinutes, List<PredictionPointDTO> curve, double peak, double min,
-                          String reason) {
+                          String reason, boolean inFlight) {
+
+    /** A choice made without a pre-bolus in flight. */
+    public PauseChoice(Integer pauseMinutes, List<PredictionPointDTO> curve, double peak, double min, String reason) {
+        this(pauseMinutes, curve, peak, min, reason, false);
+    }
 }
