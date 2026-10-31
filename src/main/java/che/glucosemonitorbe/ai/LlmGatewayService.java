@@ -65,8 +65,16 @@ public class LlmGatewayService {
             String language,
             Consumer<String> tokenConsumer
     ) {
+        return streamPromptReply(buildChatPrompt(context, chunks, question, conversationTurns, language),
+                language, tokenConsumer);
+    }
+
+    /**
+     * Streams a reply to a ready-made {@code prompt} through the same provider chain as
+     * {@link #streamChatReply} (Qwen when available, else Ollama, else a fixed fallback line).
+     */
+    public GatewayResult streamPromptReply(String prompt, String language, Consumer<String> tokenConsumer) {
         long start = System.currentTimeMillis();
-        String prompt = buildChatPrompt(context, chunks, question, conversationTurns, language);
         ClientSink sink = new ClientSink(tokenConsumer);
         if (qwenGatewayService.isAvailable()) {
             try {
@@ -102,6 +110,46 @@ public class LlmGatewayService {
                 .contextWindow(ollamaNumCtx)
                 .latencyMs(System.currentTimeMillis() - start)
                 .build();
+    }
+
+    /**
+     * One non-streaming completion asking for a JSON object, from the configured provider (Qwen when
+     * available, else Ollama with {@code format: json}). The text is returned as-is: callers must
+     * treat it as untrusted input.
+     *
+     * @throws IllegalStateException when no provider is configured or every provider failed
+     */
+    public String completeJson(String prompt) {
+        if (qwenGatewayService.isAvailable()) {
+            try {
+                return qwenGatewayService.completeSync(prompt);
+            } catch (Exception e) {
+                log.warn("[Qwen] JSON completion failed, falling back to Ollama. reason={}", e.getMessage());
+            }
+        }
+        if (ollamaEnabled) {
+            try {
+                return completeOllamaJson(prompt);
+            } catch (Exception e) {
+                log.warn("[Ollama] JSON completion failed. reason={}", e.getMessage());
+            }
+        }
+        throw new IllegalStateException("No LLM provider available for a JSON completion");
+    }
+
+    private String completeOllamaJson(String prompt) throws Exception {
+        String payload = buildOllamaPayload(prompt, false, true, ollamaModel, ollamaNumCtx);
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(ollamaUrl))
+                .header("Content-Type", "application/json")
+                .timeout(java.time.Duration.ofSeconds(60));
+        applyOllamaAuth(requestBuilder);
+        HttpResponse<String> response = HttpClient.newHttpClient().send(
+                requestBuilder.POST(HttpRequest.BodyPublishers.ofString(payload)).build(),
+                HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 400) {
+            throw new IllegalStateException("Ollama HTTP " + response.statusCode());
+        }
+        return objectMapper.readTree(response.body()).path("response").asText("");
     }
 
     /**

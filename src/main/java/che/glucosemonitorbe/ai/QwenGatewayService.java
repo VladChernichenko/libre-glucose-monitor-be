@@ -127,6 +127,18 @@ public class QwenGatewayService {
                 .build();
     }
 
+    /** One non-streaming chat completion; returns the message content (untrusted text). */
+    public String completeSync(String prompt) throws Exception {
+        String payload = buildChatPayload(prompt, qwenModel, false);
+        log.info("[Qwen] SYNC REQUEST model={} promptChars={}", qwenModel, prompt.length());
+        JsonNode root = objectMapper.readTree(sendRequestSync(payload).body());
+        JsonNode choices = root.get("choices");
+        if (choices == null || !choices.isArray() || choices.isEmpty()) {
+            throw new RuntimeException("Qwen returned no choices");
+        }
+        return choices.get(0).path("message").path("content").asText("");
+    }
+
     /**
      * Analyze a base64-encoded image with qwen-vl (vision model).
      * Returns the model's text response (expected JSON nutrition data).

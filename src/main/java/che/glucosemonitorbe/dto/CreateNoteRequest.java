@@ -45,6 +45,16 @@ public class CreateNoteRequest {
     @com.fasterxml.jackson.annotation.JsonIgnore
     public void setChatMessageId(java.util.UUID chatMessageId) { this.chatMessageId = chatMessageId; }
 
+    /** Server-side only: JSON array of ContextTag names set by the assistant. Never read from client JSON. */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String contextTags;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public String getContextTags() { return contextTags; }
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public void setContextTags(String contextTags) { this.contextTags = contextTags; }
+
     // Constructors
     public CreateNoteRequest() {}
     

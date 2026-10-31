@@ -51,6 +51,7 @@ class AssistantServiceTest {
     private final CgmFreshnessService freshness = mock(CgmFreshnessService.class);
     private final UserService userService = mock(UserService.class);
 
+    private final MealPrepFlow mealPrepFlow = mock(MealPrepFlow.class);
     private AssistantService service;
     private final UUID user = UUID.randomUUID();
     private final List<AssistantEvent> events = new ArrayList<>();
@@ -77,7 +78,8 @@ class AssistantServiceTest {
 
         ChatHistoryService history = new ChatHistoryService(repository, objectMapper);
         service = new AssistantService(new QuickLogParser(), writer, history, aiInsightService,
-                calculations, insulinCalculator, freshness, userService, objectMapper);
+                calculations, insulinCalculator, freshness, userService, objectMapper,
+                new IntentClassifier(llm, objectMapper), mealPrepFlow);
     }
 
     private IncomingMessage text(String t) {
@@ -218,17 +220,49 @@ class AssistantServiceTest {
     }
 
     @Test
-    void photoOnlyMessageGoesToQuestionPath() {
+    void photoOnlyMessageGoesToMealPrepWithoutClassifying() {
+        IncomingMessage msg = new IncomingMessage(null, "notes/u/x/photo.jpg", NOW, ZONE);
+        service.handle(user, msg, sink);
+
+        verifyNoInteractions(writer);
+        verify(llm, never()).completeJson(anyString());
+        verify(mealPrepFlow).mealPrep(eq(user), same(saved.get(0)), eq(msg), eq(List.of()), eq("en"), same(sink));
+        assertEquals("notes/u/x/photo.jpg", saved.get(0).getPhotoKey());
+    }
+
+    @Test
+    void mealPrepIntentGoesToMealPrepFlowWithItems() {
+        when(llm.completeJson(anyString())).thenReturn(
+                "{\"intent\":\"MEAL_PREP\",\"items\":[{\"name\":\"rye bread\",\"grams\":40}]}");
+        IncomingMessage msg = text("prepare me for 40 g rye bread");
+        service.handle(user, msg, sink);
+
+        verify(mealPrepFlow).mealPrep(eq(user), any(), eq(msg),
+                eq(List.of(new IntentClassifier.FoodItem("rye bread", 40.0))), eq("en"), same(sink));
+        verify(llm, never()).streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any());
+    }
+
+    @Test
+    void eventIntentWithTagsIsProposed() {
+        when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"EVENT\",\"tags\":[\"HOT_SHOWER\"]}");
+        service.handle(user, text("hot shower"), sink);
+
+        verify(mealPrepFlow).proposeEvent(any(), eq("hot shower"),
+                eq(List.of(che.glucosemonitorbe.assistant.common.ContextTag.HOT_SHOWER)), eq("en"), same(sink));
+    }
+
+    @Test
+    void eventIntentWithoutKnownTagsGoesToQuestionPath() {
+        when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"EVENT\",\"tags\":[\"JUGGLING\"]}");
         AnalysisContext ctx = AnalysisContext.builder().notes(List.of()).build();
         when(contextAggregator.buildContext(eq(user), anyInt())).thenReturn(ctx);
         when(llm.streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any()))
                 .thenReturn(LlmGatewayService.GatewayResult.builder().modelId("m").rawOutput("ok").build());
 
-        service.handle(user, new IncomingMessage(null, "notes/u/x/photo.jpg", NOW, ZONE), sink);
+        service.handle(user, text("juggled for an hour"), sink);
 
-        verifyNoInteractions(writer);
+        verifyNoInteractions(mealPrepFlow);
         verify(llm).streamChatReply(any(), anyList(), anyString(), anyList(), anyString(), any());
-        assertEquals("notes/u/x/photo.jpg", saved.get(0).getPhotoKey());
     }
 
     @Test

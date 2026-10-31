@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.assistant.chat;
 
+import che.glucosemonitorbe.assistant.mealplan.MealActionService;
 import che.glucosemonitorbe.assistant.snapshot.HitRateService;
 import che.glucosemonitorbe.service.UserService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
@@ -29,6 +30,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -37,7 +39,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-@Tag(name = "Assistant", description = "AI assistant chat: quick-log, questions, history and undo")
+@Tag(name = "Assistant", description = "AI assistant chat: quick-log, meal prep, questions, history and undo")
 @RestController
 @RequestMapping("/api/assistant")
 @Slf4j
@@ -53,6 +55,7 @@ public class AssistantController {
     private final NotePhotoStorageService photoStorage;
     private final UserService userService;
     private final HitRateService hitRateService;
+    private final MealActionService mealActionService;
     private final ObjectMapper objectMapper;
 
     @Operation(summary = "Send a chat message; the reply streams as NDJSON AssistantEvents")
@@ -119,6 +122,62 @@ public class AssistantController {
     @PostMapping("/messages/{id}/undo")
     public AssistantService.UndoResult undo(Authentication authentication, @PathVariable("id") UUID id) {
         return assistantService.undo(userId(authentication), id);
+    }
+
+    /** Took it: {@code doseUnits} as injected, {@code pauseMinutes} 0-60; times are the user's wall clock. */
+    public record TookRequest(Double doseUnits, Integer pauseMinutes, String clientTime, String timezone) {}
+
+    /** Eating now: any macro left null is taken from the planned meal. */
+    public record EatingRequest(Double carbs, Double fat, Double protein, Double fiber, Double gi,
+                                String clientTime, String timezone) {}
+
+    public record ClientTimeRequest(String clientTime, String timezone) {}
+
+    @Operation(summary = "Meal card: Took it - saves the dose note now and starts the pause (409 unless PLANNED)")
+    @PostMapping("/plans/{messageId}/took")
+    public MealActionService.ActionResult took(Authentication authentication, @PathVariable("messageId") UUID messageId,
+                                               @RequestBody TookRequest body) {
+        if (body == null || body.doseUnits() == null || body.pauseMinutes() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "doseUnits and pauseMinutes are required");
+        }
+        LocalDateTime now = wallTime(body.clientTime(), body.timezone());
+        return mealActionService.took(userId(authentication), messageId, body.doseUnits(), body.pauseMinutes(), now);
+    }
+
+    @Operation(summary = "Meal card: Eating now - saves the meal note now with the (edited) macros (409 unless TOOK)")
+    @PostMapping("/plans/{messageId}/eating")
+    public MealActionService.ActionResult eating(Authentication authentication,
+                                                 @PathVariable("messageId") UUID messageId,
+                                                 @RequestBody EatingRequest body) {
+        if (body == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Body required");
+        LocalDateTime now = wallTime(body.clientTime(), body.timezone());
+        return mealActionService.eating(userId(authentication), messageId, body.carbs(), body.fat(), body.protein(),
+                body.fiber(), body.gi(), now);
+    }
+
+    @Operation(summary = "Meal card: Not eating - ends the plan; a taken dose stays logged (409 unless PLANNED or TOOK)")
+    @PostMapping("/plans/{messageId}/skip")
+    public MealActionService.ActionResult skip(Authentication authentication, @PathVariable("messageId") UUID messageId,
+                                               @RequestBody ClientTimeRequest body) {
+        if (body == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Body required");
+        return mealActionService.skip(userId(authentication), messageId, wallTime(body.clientTime(), body.timezone()));
+    }
+
+    @Operation(summary = "Confirm a proposed event: saves the tagged note now (409 unless PROPOSED)")
+    @PostMapping("/events/{messageId}/confirm")
+    public MealActionService.ActionResult confirmEvent(Authentication authentication,
+                                                       @PathVariable("messageId") UUID messageId,
+                                                       @RequestBody ClientTimeRequest body) {
+        if (body == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Body required");
+        return mealActionService.confirmEvent(userId(authentication), messageId,
+                wallTime(body.clientTime(), body.timezone()));
+    }
+
+    private static LocalDateTime wallTime(String clientTime, String timezone) {
+        if (clientTime == null || timezone == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "clientTime and timezone are required");
+        }
+        return parseClientTime(clientTime, parseZone(timezone));
     }
 
     @Operation(summary = "Forecast hit rate over the last 14 days (+60 and +120 min checks)")

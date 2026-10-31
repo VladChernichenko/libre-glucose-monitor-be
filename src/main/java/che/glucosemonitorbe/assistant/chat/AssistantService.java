@@ -39,8 +39,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * Routes one chat message: quick-log shorthand (no LLM) first, then (Task 15) meal prep, then the
- * LLM question path. Persists the user message and the assistant reply and emits NDJSON events.
+ * Routes one chat message: quick-log shorthand (no LLM) first; then a photo, or text the
+ * {@link IntentClassifier} calls MEAL_PREP, goes to {@link MealPrepFlow}; a recognised free-text event
+ * is proposed as a tagged note; everything else takes the LLM question path. Persists the user message and the assistant reply and emits NDJSON events.
  */
 @Slf4j
 @Service
@@ -78,6 +79,8 @@ public class AssistantService {
     private final CgmFreshnessService cgmFreshnessService;
     private final UserService userService;
     private final ObjectMapper objectMapper;
+    private final IntentClassifier intentClassifier;
+    private final MealPrepFlow mealPrepFlow;
     /** Overridable in tests. */
     Duration forecastBudget = FORECAST_BUDGET;
 
@@ -99,7 +102,19 @@ public class AssistantService {
                 return;
             }
         }
-        // (Task 15: meal prep is routed here.)
+        if (msg.hasPhoto()) {
+            mealPrepFlow.mealPrep(userId, userMessage, msg, List.of(), language, sink);
+            return;
+        }
+        IntentClassifier.Classification c = intentClassifier.classify(msg.text());
+        if (c.intent() == IntentClassifier.Intent.MEAL_PREP) {
+            mealPrepFlow.mealPrep(userId, userMessage, msg, c.items(), language, sink);
+            return;
+        }
+        if (c.intent() == IntentClassifier.Intent.EVENT && !c.tags().isEmpty()) {
+            mealPrepFlow.proposeEvent(userMessage, msg.text(), c.tags(), language, sink);
+            return;
+        }
         question(userId, userMessage, msg, language, sink);
     }
 

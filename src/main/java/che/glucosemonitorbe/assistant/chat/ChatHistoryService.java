@@ -81,6 +81,11 @@ public class ChatHistoryService {
         return repository.save(m);
     }
 
+    /** Fills in a streamed reply's text after the fact; leaves the payload alone. */
+    public void updateReplyText(UUID id, String text, String modelId, Long latencyMs) {
+        repository.updateReplyText(id, text, modelId, latencyMs);
+    }
+
     public ChatMessage save(ChatMessage m) {
         return repository.save(m);
     }

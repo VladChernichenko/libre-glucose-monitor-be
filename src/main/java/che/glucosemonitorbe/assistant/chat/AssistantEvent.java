@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.assistant.chat;
 
+import che.glucosemonitorbe.assistant.common.ContextTag;
+import che.glucosemonitorbe.assistant.mealplan.MealPlan;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
@@ -9,12 +11,13 @@ import java.util.UUID;
 
 /**
  * One NDJSON line of an assistant reply stream. Serialised with a {@code "type"} discriminator:
- * {@code logged, plan, episodes, banner, token, citations, done, error}.
+ * {@code logged, plan, proposal, episodes, banner, token, citations, done, error}.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
         @JsonSubTypes.Type(value = AssistantEvent.Logged.class, name = "logged"),
         @JsonSubTypes.Type(value = AssistantEvent.Plan.class, name = "plan"),
+        @JsonSubTypes.Type(value = AssistantEvent.Proposal.class, name = "proposal"),
         @JsonSubTypes.Type(value = AssistantEvent.Episodes.class, name = "episodes"),
         @JsonSubTypes.Type(value = AssistantEvent.Banner.class, name = "banner"),
         @JsonSubTypes.Type(value = AssistantEvent.Token.class, name = "token"),
@@ -22,7 +25,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = AssistantEvent.Done.class, name = "done"),
         @JsonSubTypes.Type(value = AssistantEvent.Error.class, name = "error")
 })
-public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantEvent.Plan,
+public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantEvent.Plan, AssistantEvent.Proposal,
         AssistantEvent.Episodes, AssistantEvent.Banner, AssistantEvent.Token, AssistantEvent.Citations,
         AssistantEvent.Done, AssistantEvent.Error {
 
@@ -32,6 +35,7 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
         return switch (this) {
             case Logged l -> "logged";
             case Plan p -> "plan";
+            case Proposal p -> "proposal";
             case Episodes e -> "episodes";
             case Banner b -> "banner";
             case Token t -> "token";
@@ -44,8 +48,17 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
     /** Quick-log notes were written. {@code forecastMin} is the lowest 4 h forecast value, or null. */
     record Logged(List<UUID> noteIds, String summary, double iob, Double forecastMin) implements AssistantEvent {}
 
-    /** Structured meal-prep card (Task 15). */
-    record Plan(Map<String, Object> plan) implements AssistantEvent {}
+    /**
+     * Structured meal-prep card. {@code messageId} is the assistant chat message that holds the
+     * plan's state; the card's Took it / Eating now / Not eating actions post to it.
+     */
+    record Plan(UUID messageId, MealPlan plan) implements AssistantEvent {}
+
+    /**
+     * A free-text event proposed as a note with context tags; saved only when the user confirms
+     * ({@code POST /api/assistant/events/{messageId}/confirm}).
+     */
+    record Proposal(UUID messageId, List<ContextTag> tags, String comment) implements AssistantEvent {}
 
     /** Similar past episodes with outcomes (later task). */
     record Episodes(List<Map<String, Object>> episodes) implements AssistantEvent {}
