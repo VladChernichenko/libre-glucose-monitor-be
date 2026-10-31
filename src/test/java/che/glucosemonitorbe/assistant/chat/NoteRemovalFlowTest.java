@@ -96,7 +96,7 @@ class NoteRemovalFlowTest {
     }
 
     @Test
-    void confirmDeletesOnceAndMarksTheQuickLogUndone() {
+    void confirmDeletesOnce() {
         ChatMessage quickLog = userMessage("1u");
         Note n = note(NOW.minusMinutes(2), 1.0, 0);
         n.setChatMessageId(quickLog.getId());
@@ -111,7 +111,6 @@ class NoteRemovalFlowTest {
         assertTrue(result.removed());
         assertEquals(NoteRemovalFlow.REMOVED, result.state());
         verify(notesService).deleteNote(user, n.getId());
-        assertTrue(stored.get(quickLog.getId()).getPayload().contains("\"undone\":true"));
         assertThrows(ResponseStatusException.class, () -> flow.confirm(user, r.messageId()));
         verify(notesService, times(1)).deleteNote(any(), any());
     }

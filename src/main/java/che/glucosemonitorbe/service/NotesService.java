@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.ApplicationEventPublisher;
+import che.glucosemonitorbe.domain.NoteDeleted;
 import che.glucosemonitorbe.domain.RapidInsulinLogged;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -261,6 +262,7 @@ public class NotesService {
         }
         notePhotoStorageService.delete(note.getPhotoKey());
         forecastSnapshotTrigger.noteDeleted(noteId);
+        eventPublisher.publishEvent(new NoteDeleted(userId, noteId, note.getChatMessageId()));
         return true;
     }
     
