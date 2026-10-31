@@ -47,7 +47,8 @@ public record FactsPayload(String language, String now, State state, PlanFacts p
     /**
      * A retrieved clinical passage (spec §6.9). {@code ref} is its citation id: the reply cites it as
      * {@code [ref]}, and numbers from this passage (excerpt, title, year, citation) are quotable only in a
-     * sentence carrying that marker, never as an insulin dose. {@code id} is the clinical_knowledge_chunk id
+     * sentence carrying that marker, never as an insulin dose. The GENERAL disclaimer has no {@code ref}
+     * (background only, not citable). {@code id} is the clinical_knowledge_chunk id
      * (trace); {@code url} goes to the citation chip only, not to the LLM.
      */
     @Builder

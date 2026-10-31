@@ -119,18 +119,18 @@ class AssistantCitationsTest {
         assertEquals(List.of(
                 new AssistantEvent.Citation(1, libId.toString(),
                         "Standards of Care in Diabetes - 2025: Glycemic Goals and Hypoglycemia", "ADA", 2024,
-                        "https://doi.org/10.2337/dc25-S006", "ADA. Diabetes Care 2025;48(Suppl 1):S128"),
-                new AssistantEvent.Citation(2, generalId.toString(), "General safety disclaimer", null, null, null,
-                        null)), c.citations());
+                        "https://doi.org/10.2337/dc25-S006", "ADA. Diabetes Care 2025;48(Suppl 1):S128")),
+                c.citations()); // GENERAL is never a chip
         assertInstanceOf(AssistantEvent.Token.class, events.get(2));
         assertEquals(List.of("Guidelines suggest 15 g of fast carbs for a low [1]."), tokens());
-        // the LLM sees the passages with their citation ids, not the URL
-        verify(llm).streamPromptReply(argThat(p -> p.contains("\"ref\":1") && p.contains("\"ref\":2")
-                && p.contains("fast-acting carbohydrate") && !p.contains("doi.org")), eq("en"), any());
+        // the LLM sees the passage with its citation id, GENERAL without one, and no URL
+        verify(llm).streamPromptReply(argThat(p -> p.contains("\"ref\":1") && !p.contains("\"ref\":2")
+                && p.contains("fast-acting carbohydrate") && p.contains("General safety disclaimer")
+                && !p.contains("doi.org")), eq("en"), any());
         JsonNode wire = objectMapper.readTree(objectMapper.writeValueAsString((AssistantEvent) c));
         assertEquals("citations", wire.path("type").asText());
         assertEquals(1, wire.path("citations").get(0).path("ref").asInt());
-        assertFalse(wire.path("citations").get(1).has("url"));
+        assertEquals(1, wire.path("citations").size());
         assertEquals(libId.toString(),
                 objectMapper.readTree(saved.get(1).getPayload()).path("citations").get(0).path("id").asText());
         verify(traces).save(argThat((AiAnalysisTrace t) -> t.getEvidenceChunkIds().contains(libId.toString())
@@ -148,5 +148,21 @@ class AssistantCitationsTest {
 
         verify(llm).streamPromptReply(contains("not in the facts: 15"), eq("en"), any());
         assertEquals(List.of("Fast carbs treat a low [1]."), tokens());
+    }
+
+    @Test
+    void emptyLibrarySendsNoCitationsEventAndGeneralIsUncitableBackground() throws Exception {
+        llmReplies("ok");
+        when(rag.retrieve(anyString(), any())).thenReturn(List.of(
+                che.glucosemonitorbe.domain.ClinicalKnowledgeChunk.builder().id(UUID.randomUUID())
+                        .title("General safety disclaimer").content("Educational only.").conditionTag("GENERAL")
+                        .build()));
+
+        service.handle(user, text("How do I treat a low?"), sink);
+
+        assertTrue(events.stream().noneMatch(e -> e instanceof AssistantEvent.Citations), events.toString());
+        assertFalse(objectMapper.readTree(saved.get(1).getPayload()).has("citations"));
+        verify(llm).streamPromptReply(argThat(p -> p.contains("General safety disclaimer") && !p.contains("\"ref\"")),
+                eq("en"), any());
     }
 }

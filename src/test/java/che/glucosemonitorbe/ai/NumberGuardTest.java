@@ -216,6 +216,24 @@ class NumberGuardTest {
     }
 
     @Test
+    void citedNumbersInEarlierAssistantTurnsDoNotLeak() {
+        FactsPayload cited = FactsPayload.builder()
+                .turns(List.of(new FactsPayload.TurnFacts("assistant", "Treat with 15 g fast carbs [1]. IOB was 2.5."),
+                        new FactsPayload.TurnFacts("user", "And now?")))
+                .build();
+        assertEquals(List.of("15"), NumberGuard.check("Take 15 now.", cited).offending());
+        assertEquals(List.of("15"), NumberGuard.check("That was 15 then.", cited).offending());
+        assertTrue(NumberGuard.check("IOB was 2.5 then.", cited).ok()); // uncited sentence still harvested
+
+        FactsPayload uncited = FactsPayload.builder()
+                .turns(List.of(new FactsPayload.TurnFacts("assistant", "You had 15 g at lunch."))).build();
+        assertTrue(NumberGuard.check("That was 15 then.", uncited).ok());
+        FactsPayload user = FactsPayload.builder()
+                .turns(List.of(new FactsPayload.TurnFacts("user", "I read 15 g somewhere [1]."))).build();
+        assertTrue(NumberGuard.check("That was 15 then.", user).ok()); // user turns unchanged
+    }
+
+    @Test
     void citationTitleAndYearQuotableOnlyWhenCited() {
         FactsPayload f = hypoPassage();
         assertTrue(NumberGuard.check("The ADA 2025 standards cover this [1].", f).ok());

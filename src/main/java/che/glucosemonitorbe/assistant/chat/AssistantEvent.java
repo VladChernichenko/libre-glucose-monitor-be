@@ -80,10 +80,11 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
     record Token(String text) implements AssistantEvent {}
 
     /**
-     * Clinical passages behind a question reply, shown as tappable chips under it (spec §6.9). Sent after
-     * {@code episodes} and before {@code token}. {@code ref} is the number the reply text cites as
-     * {@code [ref]}; {@code id} is the clinical_knowledge_chunk id; {@code year}, {@code url}, {@code source}
-     * and {@code citation} may be absent (the GENERAL disclaimer has no URL). Null fields are omitted.
+     * Library passages behind a question reply, shown as tappable chips under it (spec §6.9). Sent after
+     * {@code episodes} and before {@code token}, only when at least one retrieved passage has a URL (the GENERAL
+     * disclaimer is never a chip). {@code ref} is the number the reply text cites as {@code [ref]}; {@code id}
+     * is the clinical_knowledge_chunk id; {@code url} is always present; {@code year}, {@code source} and
+     * {@code citation} may be absent. Null fields are omitted.
      */
     record Citations(List<Citation> citations) implements AssistantEvent {}
 

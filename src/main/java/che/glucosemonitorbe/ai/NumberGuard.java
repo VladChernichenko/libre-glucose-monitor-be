@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
  *       only in a sentence that cites the passage with its marker {@code [ref]} (also {@code [1, 2]},
  *       {@code [1][2]}, or a marker right after the full stop), with rounding and mmol↔mg/dL conversion, and
  *       never for a number tagged as insulin units: a guideline number must not become a dose. Markers are not
- *       numbers; a marker naming no passage fails.</li>
+ *       numbers; a marker naming no passage fails. Sentences of earlier assistant turns that carry a marker
+ *       whitelist nothing, so a cited number does not leak into later replies via the chat history.</li>
  *   <li>Digits glued to a preceding letter (T1D, B12) and "type 1" / "1 типа" are not numbers.</li>
  *   <li>A number followed by a unit is checked against that unit's payload fields only, never against
  *       free text (turns, food text, reasons): {@code U/units/ЕД} against insulin fields within ±0.05 and
@@ -153,6 +154,18 @@ public final class NumberGuard {
         }
         if (from < text.length()) out.add(text.substring(from));
         return out;
+    }
+
+    /**
+     * An earlier assistant reply without its sentences that cite a passage: numbers quoted there with
+     * {@code [ref]} came from a passage and must not become quotable without a citation in a later reply.
+     */
+    static String withoutCitedSentences(String text) {
+        StringBuilder out = new StringBuilder();
+        for (String sentence : sentences(text)) {
+            if (!CITE.matcher(sentence).find()) out.append(sentence);
+        }
+        return out.toString();
     }
 
     /** Per citation {@code ref}: the numbers of its excerpt, title, source, year and display citation. */
@@ -300,6 +313,11 @@ public final class NumberGuard {
             if (GLUCOSE_FIELDS.contains(key)) a.glucose.add(v);
         } else if (node.isTextual()) {
             harvestText(node.asText(), a);
+        } else if (node.isArray() && "turns".equals(key)) {
+            node.forEach(turn -> {
+                String text = turn.path("text").asText("");
+                harvestText("assistant".equals(turn.path("role").asText()) ? withoutCitedSentences(text) : text, a);
+            });
         } else if (node.isArray()) {
             node.forEach(child -> walk(child, key, a));
         } else if (node.isObject()) {

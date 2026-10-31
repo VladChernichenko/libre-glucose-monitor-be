@@ -23,7 +23,7 @@ import java.util.List;
 public class RagRetrieverService {
 
     static final int TOP_K = 4;
-    static final String GENERAL = "GENERAL";
+    public static final String GENERAL = "GENERAL";
     private static final double HYPO_THRESHOLD_MMOL = 3.9;
     private static final double HYPER_THRESHOLD_MMOL = 10.0;
     private static final double STRONG_DELTA_THRESHOLD_MMOL = 2.0;

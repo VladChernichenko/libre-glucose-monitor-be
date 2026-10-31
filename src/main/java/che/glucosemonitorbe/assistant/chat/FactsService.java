@@ -61,8 +61,9 @@ public class FactsService {
     }
 
     /**
-     * Clinical passages for the question and the current state (spec §6.9), numbered {@code ref} 1..n in
-     * retrieval order (library passages by cosine, then the GENERAL disclaimer). Failure means none.
+     * Clinical passages for the question and the current state (spec §6.9). Library passages are numbered
+     * {@code ref} 1..n in cosine order; the GENERAL disclaimer is background without a {@code ref}, so it
+     * can never be cited. Failure means none.
      */
     public List<FactsPayload.CitationFacts> citations(String question, FactsPayload.State s) {
         AnalysisContext ctx = AnalysisContext.builder()
@@ -74,11 +75,13 @@ public class FactsService {
         List<ClinicalKnowledgeChunk> chunks = rag.retrieve(question, ctx);
         if (chunks == null) return List.of();
         List<FactsPayload.CitationFacts> out = new ArrayList<>();
+        int ref = 0;
         for (ClinicalKnowledgeChunk c : chunks) {
             if (out.size() >= MAX_CITATIONS) break;
+            boolean general = RagRetrieverService.GENERAL.equals(c.getConditionTag());
             out.add(FactsPayload.CitationFacts.builder()
                     .id(String.valueOf(c.getId()))
-                    .ref(out.size() + 1)
+                    .ref(general ? null : ++ref)
                     .title(c.getSourceTitle() == null || c.getSourceTitle().isBlank() ? c.getTitle() : c.getSourceTitle())
                     .source(c.getSourceName())
                     .year(c.getSourcePublishedAt() == null ? null : c.getSourcePublishedAt().getYear())
@@ -90,10 +93,13 @@ public class FactsService {
         return out;
     }
 
-    /** The chips of the {@code citations} event: the payload passages without their text. */
+    /**
+     * The chips of the {@code citations} event: the citable payload passages with a source URL (library
+     * passages), without their text. The GENERAL disclaimer is never a chip.
+     */
     public static List<AssistantEvent.Citation> chips(List<FactsPayload.CitationFacts> citations) {
         if (citations == null) return List.of();
-        return citations.stream().map(c -> new AssistantEvent.Citation(c.ref(), c.id(), c.title(), c.source(),
+        return citations.stream().filter(c -> c.ref() != null && c.url() != null && !c.url().isBlank()).map(c -> new AssistantEvent.Citation(c.ref(), c.id(), c.title(), c.source(),
                 c.year(), c.url(), c.citation())).toList();
     }
 
