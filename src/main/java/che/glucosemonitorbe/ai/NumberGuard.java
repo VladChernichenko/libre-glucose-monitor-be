@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.DateTimeException;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -47,11 +48,12 @@ public final class NumberGuard {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> SKIPPED_FIELDS = Set.of("id", "excerpt", "citations");
     static final double INSULIN_TOLERANCE = 0.05;
-    private static final Set<String> INSULIN_FIELDS = Set.of("doseUnits", "iob", "insulin", "insulinUnits");
+    private static final Set<String> INSULIN_FIELDS = Set.of("doseUnits", "iob", "insulin", "insulinUnits",
+            "modelUnits", "historyUnits", "typicalDoseUnits");
     private static final Set<String> CARB_FIELDS = Set.of("carbs", "carbsLow", "carbsHigh", "fat", "protein",
             "fiber", "cob");
     private static final Set<String> GLUCOSE_FIELDS = Set.of("glucose", "startGlucose", "peak", "nadir", "g60",
-            "g120", "g240", "forecastPeak", "forecastLowest");
+            "g120", "g240", "forecastPeak", "forecastLowest", "peakLow", "peakHigh", "landing");
 
     enum Unit { NONE, INSULIN, CARBS, MMOL, MGDL }
 
@@ -110,9 +112,12 @@ public final class NumberGuard {
             m.appendTail(rest);
             checkSentence(rest.toString(), allowed, cited, offending);
         }
-        Double planDose = facts == null || facts.plan() == null ? null : facts.plan().doseUnits();
+        // The plan card's doses: the model's and, with a history banner, the history dose (spec §6.6).
+        List<Double> planDoses = new ArrayList<>();
+        if (facts != null && facts.plan() != null) planDoses.add(facts.plan().doseUnits());
+        if (facts != null && facts.history() != null) planDoses.add(facts.history().historyUnits());
         offending.addAll(DosingPhraseGuard.offending(reply == null ? "" : reply, facts != null && facts.plan() != null,
-                planDose));
+                planDoses));
         return new GuardResult(offending.isEmpty(), List.copyOf(offending));
     }
 

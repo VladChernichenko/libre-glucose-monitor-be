@@ -27,6 +27,12 @@ final class AssistantPrompts {
                 + "Never issue imperative dosing commands; give cautious decision-support wording. "
                 + "'state' is now; 'episodes' are the user's own past events with their outcomes "
                 + "(minutes are counted from 'at'); refer to them when they help answer. "
+                + "'plan' (if present) is the meal plan card shown earlier in this chat: 'doseUnits' is the "
+                + "model's dose. 'history' (if present) is that card's history dose: 'historyUnits' comes from "
+                + "the similar past meals in 'history.episodes' - for each, the insulin per gram it implies "
+                + "(the dose taken, adjusted for where glucose landed at +4 h and for any low), the median of "
+                + "those times this meal's carbs, plus today's correction minus IOB, rounded to 0.5 U. Use it "
+                + "to explain why the two doses differ; neither is preferred. "
                 + retry(offending)
                 + "\nFacts JSON:\n" + json(facts)
                 + "\nUser message:\n" + question;
@@ -59,6 +65,13 @@ final class AssistantPrompts {
                 .append(", COB ").append(fmt(s.cob())).append(ru ? " г." : " g.");
         if (f.episodes() != null && !f.episodes().isEmpty()) {
             sb.append(ru ? " Похожие эпизоды из вашей истории показаны выше." : " Similar past episodes are shown above.");
+        }
+        FactsPayload.HistoryFacts h = f.history();
+        if (h != null && h.historyUnits() != null && h.modelUnits() != null && h.episodeCount() != null) {
+            sb.append(ru ? " Доза модели " : " The model's dose was ").append(fmt(h.modelUnits()))
+                    .append(ru ? " ЕД; доза по истории " : " U; the history dose ").append(fmt(h.historyUnits()))
+                    .append(ru ? " ЕД получена из " : " U comes from ").append(h.episodeCount())
+                    .append(ru ? " похожих прошлых приёмов пищи." : " similar past meals.");
         }
         sb.append(ru ? " Надёжно ответить по вашим данным не получилось; проверьте детали в приложении."
                 : " I could not answer this reliably from your data; please check the details in the app.");

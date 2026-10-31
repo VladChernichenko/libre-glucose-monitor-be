@@ -23,8 +23,9 @@ import java.util.regex.Pattern;
  * </ul>
  * Lowercase {@code u} and Latin {@code me} count as units only right after a number (so "give me" or "u"
  * as "you" do not trigger).
- * On the plan-explanation path a phrase whose numeric dose equals the plan's dose (±0.05) is tied to the
- * plan and allowed; on the question path every phrase is reported.
+ * When the facts carry a plan, a phrase whose numeric dose equals one of the plan card's doses (±0.05) -
+ * the model's, or the history dose of its banner - is tied to the plan and allowed; otherwise every phrase
+ * is reported.
  */
 final class DosingPhraseGuard {
 
@@ -75,10 +76,10 @@ final class DosingPhraseGuard {
     private record WordNumber(double value, int firstToken) {}
 
     /**
-     * @param planPath true for the plan explanation (a phrase naming {@code planDose} is allowed)
-     * @param planDose the plan's dose in units, or null
+     * @param planPath  true when the facts carry a plan (a phrase naming one of {@code planDoses} is allowed)
+     * @param planDoses the doses the plan card shows: the model's and, with a banner, the history dose
      */
-    static List<String> offending(String reply, boolean planPath, Double planDose) {
+    static List<String> offending(String reply, boolean planPath, List<Double> planDoses) {
         List<Tok> toks = new ArrayList<>();
         Matcher m = TOKEN.matcher(reply);
         while (m.find()) toks.add(new Tok(m.group(), m.start(), m.end()));
@@ -91,7 +92,7 @@ final class DosingPhraseGuard {
                 for (int j = i + 1; j <= Math.min(toks.size() - 1, i + WINDOW + 1); j++) {
                     if (!isUnit(reply, toks, j)) continue;
                     handledUnits.add(j);
-                    if (!(planPath && tiedToPlan(unitDose(reply, toks, j), planDose))) {
+                    if (!(planPath && tiedToPlan(unitDose(reply, toks, j), planDoses))) {
                         out.add(reply.substring(t.start, toks.get(j).end));
                     }
                     break;
@@ -100,11 +101,11 @@ final class DosingPhraseGuard {
             if (!handledUnits.contains(i) && isUnit(reply, toks, i)) {
                 Tok unit = toks.get(i);
                 if (HALF_UNIT.matcher(unit.text).matches()) {
-                    if (!(planPath && tiedToPlan(0.5, planDose))) out.add(unit.text);
+                    if (!(planPath && tiedToPlan(0.5, planDoses))) out.add(unit.text);
                     continue;
                 }
                 WordNumber w = wordsBefore(reply, toks, i);
-                if (w != null && !(planPath && tiedToPlan(w.value, planDose))) {
+                if (w != null && !(planPath && tiedToPlan(w.value, planDoses))) {
                     out.add(reply.substring(toks.get(w.firstToken).start, unit.end));
                 }
             }
@@ -153,8 +154,9 @@ final class DosingPhraseGuard {
         return new WordNumber(v, j - 1);
     }
 
-    private static boolean tiedToPlan(Double dose, Double planDose) {
-        return dose != null && planDose != null && Math.abs(dose - planDose) <= NumberGuard.INSULIN_TOLERANCE + 1e-9;
+    private static boolean tiedToPlan(Double dose, List<Double> planDoses) {
+        return dose != null && planDoses.stream().anyMatch(p ->
+                p != null && Math.abs(dose - p) <= NumberGuard.INSULIN_TOLERANCE + 1e-9);
     }
 
     static Double numberWord(String token) {

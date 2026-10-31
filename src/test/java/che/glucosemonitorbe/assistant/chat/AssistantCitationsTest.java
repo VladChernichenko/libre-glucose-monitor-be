@@ -71,7 +71,7 @@ class AssistantCitationsTest {
                 freshness, rag);
         service = new AssistantService(new QuickLogParser(), mock(AssistantNoteWriter.class), history,
                 calculations, insulinCalculator, freshness, mock(UserService.class), objectMapper,
-                new IntentClassifier(llm, objectMapper), mock(MealPrepFlow.class), facts, retrieval,
+                new IntentClassifier(llm, objectMapper), mock(MealPrepFlow.class), facts, retrieval, mock(RecentPlanFacts.class),
                 new GuardedReplyService(llm, traces, objectMapper));
     }
 

@@ -91,6 +91,7 @@ public class AssistantService {
     private final MealPrepFlow mealPrepFlow;
     private final FactsService factsService;
     private final EpisodeRetrieval episodeRetrieval;
+    private final RecentPlanFacts recentPlanFacts;
     private final GuardedReplyService guardedReply;
     /** Overridable in tests. */
     Duration forecastBudget = FORECAST_BUDGET;
@@ -180,10 +181,13 @@ public class AssistantService {
             FactsPayload.State state = factsService.state(userId, msg.clientNow(), msg.zone());
             List<FactsPayload.EpisodeFacts> episodes = optional("episodes", userId, () ->
                     episodeRetrieval.forQuestion(userId, question, filters, state, msg.clientNow(), msg.zone()));
+            RecentPlanFacts.Context recentPlan = recentPlan(userId, userMessage.getCreatedAt());
             FactsPayload facts = FactsPayload.builder()
                     .language(language)
                     .now(FactsService.wall(msg.clientNow()))
                     .state(state)
+                    .plan(recentPlan == null ? null : recentPlan.plan())
+                    .history(recentPlan == null ? null : recentPlan.history())
                     .episodes(episodes)
                     .citations(optional("citations", userId, () -> factsService.citations(question, state)))
                     .turns(turns)
@@ -218,6 +222,16 @@ public class AssistantService {
         ChatMessage reply = history.appendAssistant(userMessage, seen.toString(), INTENT_QUESTION, payload,
                 result.modelId(), System.currentTimeMillis() - start);
         sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_QUESTION));
+    }
+
+    /** The recent meal plan the question may refer to; optional like the other retrieval context. */
+    private RecentPlanFacts.Context recentPlan(UUID userId, java.time.Instant before) {
+        try {
+            return recentPlanFacts.load(userId, before).orElse(null);
+        } catch (RuntimeException e) {
+            log.warn("Assistant recent plan unavailable for userId={}: {}", userId, e.toString());
+            return null;
+        }
     }
 
     /** Retrieval context is optional: a failure means "none", never a failed reply. */

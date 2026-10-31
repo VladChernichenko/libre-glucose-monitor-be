@@ -43,6 +43,7 @@ class AssistantServiceTest {
     private final RagRetrieverService rag = mock(RagRetrieverService.class);
     private final CarbsOnBoardService carbsOnBoard = mock(CarbsOnBoardService.class);
     private final AiAnalysisTraceRepository traces = mock(AiAnalysisTraceRepository.class);
+    private final RecentPlanFacts recentPlan = mock(RecentPlanFacts.class);
     private final EpisodeRetrieval retrieval = mock(EpisodeRetrieval.class);
 
     private final AssistantNoteWriter writer = mock(AssistantNoteWriter.class);
@@ -81,7 +82,7 @@ class AssistantServiceTest {
         GuardedReplyService guarded = new GuardedReplyService(llm, traces, objectMapper);
         service = new AssistantService(new QuickLogParser(), writer, history,
                 calculations, insulinCalculator, freshness, userService, objectMapper,
-                new IntentClassifier(llm, objectMapper), mealPrepFlow, facts, retrieval, guarded);
+                new IntentClassifier(llm, objectMapper), mealPrepFlow, facts, retrieval, recentPlan, guarded);
     }
 
     private IncomingMessage text(String t) {

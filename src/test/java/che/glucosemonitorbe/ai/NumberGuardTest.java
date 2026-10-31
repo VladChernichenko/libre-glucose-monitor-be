@@ -61,6 +61,25 @@ class NumberGuardTest {
     }
 
     @Test
+    void historyDoseOfTheRecentPlanIsAllowed() {
+        FactsPayload f = FactsPayload.builder()
+                .plan(FactsPayload.PlanFacts.builder().doseUnits(2.5).build())
+                .history(FactsPayload.HistoryFacts.builder().modelUnits(2.5).historyUnits(7.5).episodeCount(4)
+                        .typicalDoseUnits(7.0).peakLow(8.1).peakHigh(9.4).landing(6.2).build())
+                .turns(List.of(new FactsPayload.TurnFacts("user", "Why history shows 7.5u?")))
+                .build();
+        NumberGuard.GuardResult ok = NumberGuard.check("The history dose of 7.5 U comes from 4 similar meals "
+                + "where you took about 7 U and peaked 8.1-9.4 mmol/L; the model suggests 2.5 U.", f);
+        assertTrue(ok.ok(), ok.offending().toString());
+        // Any other dose stays a dosing phrase.
+        assertFalse(NumberGuard.check("Take 5 U instead.", f).ok());
+        // Without the banner facts the same answer is rejected: the user's turn never whitelists a dose.
+        FactsPayload noHistory = FactsPayload.builder().turns(f.turns()).build();
+        assertEquals(List.of("7.5", "dose is 7.5 U"),
+                NumberGuard.check("The history dose is 7.5 U.", noHistory).offending());
+    }
+
+    @Test
     void planDoseInUnitsIsAllowed() {
         assertTrue(NumberGuard.check("The model suggests 4 U.", planFacts()).ok());
         assertTrue(NumberGuard.check("Модель предлагает 4 ЕД.", planFacts()).ok());

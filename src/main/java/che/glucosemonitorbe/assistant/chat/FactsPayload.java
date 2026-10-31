@@ -13,8 +13,9 @@ import lombok.Builder;
  */
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record FactsPayload(String language, String now, State state, PlanFacts plan, List<EpisodeFacts> episodes,
-                           BannerFacts banner, List<CitationFacts> citations, List<TurnFacts> turns) {
+public record FactsPayload(String language, String now, State state, PlanFacts plan, HistoryFacts history,
+                           List<EpisodeFacts> episodes, BannerFacts banner, List<CitationFacts> citations,
+                           List<TurnFacts> turns) {
 
     /** Current state on the assistant clock. {@code glucose} is null without a fresh CGM reading. */
     @Builder
@@ -41,6 +42,16 @@ public record FactsPayload(String language, String now, State state, PlanFacts p
                                Double peak, Integer peakMinute, Double nadir, Integer nadirMinute, Double g60,
                                Double g120, Double g240, Integer minutesBelow39, Integer minutesAbove10,
                                Integer activityMinutes, Boolean contaminated, Double score) {}
+
+    /**
+     * The history-dose banner of {@link #plan} (spec §6.6): the dose the user's similar past meals imply,
+     * the aggregates the banner line shows, and the qualifying episodes behind it.
+     */
+    @Builder
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record HistoryFacts(Double modelUnits, Double historyUnits, Double deltaPct, Integer episodeCount,
+                               Double typicalDoseUnits, Double peakLow, Double peakHigh, Double landing,
+                               String pendingIsfNote, List<EpisodeFacts> episodes) {}
 
     public record BannerFacts(String level, String text) {}
 
