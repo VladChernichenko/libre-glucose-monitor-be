@@ -24,7 +24,8 @@ import java.util.UUID;
 /**
  * History dose and the 20% banner (spec 6.6). Backend arithmetic only, never the LLM.
  *
- * <p>Per qualifying episode i (not contaminated, own dose > 0, a start reading, complete 4 h CGM):
+ * <p>The top {@value #QUALIFYING_LIMIT} qualifying similar episodes are used (not contaminated, own
+ * dose > 0, a start reading, complete 4 h CGM, a valid ISF at their time); per episode i:
  * <pre>
  * ideal_i = dose_i + (g240_i - target) / ISF_i
  * if nadir_i &lt; 3.9: ideal_i = min(ideal_i, dose_i - (target - nadir_i) / ISF_i)
@@ -43,7 +44,14 @@ import java.util.UUID;
 public class HistoryDoseService {
 
     public static final String TOGGLE = "history-dose-enabled";
-    static final int SEARCH_LIMIT = 10;
+    /** The history check uses the top 10 QUALIFYING episodes (spec 6.7), in similarity order. */
+    static final int QUALIFYING_LIMIT = 10;
+    /**
+     * Candidates requested from the search before filtering: covers the whole scored pool (the union of
+     * the cosine and macro top-50 lists), so contaminated, undosed or gappy meals do not crowd out
+     * qualifying ones further down.
+     */
+    static final int CANDIDATE_LIMIT = 100;
     static final int MIN_EPISODES = 3;
     /** "Complete 4 h CGM": g240 present and no CGM gap longer than this in the window [min]. */
     static final int MAX_CGM_GAP_MIN = 30;
@@ -89,11 +97,14 @@ public class HistoryDoseService {
 
         List<Double> upg = new ArrayList<>();
         List<UUID> ids = new ArrayList<>();
-        for (ScoredEpisode se : search.similar(userId, s, SEARCH_LIMIT)) {
+        int taken = 0;
+        for (ScoredEpisode se : search.similar(userId, s, CANDIDATE_LIMIT)) {
+            if (taken >= QUALIFYING_LIMIT) break;
             MealEpisode e = se.episode();
             if (!qualifies(e)) continue;
             Double isf = settings.getEffectiveIsf(e.getMealAt());
             if (isf == null || !Double.isFinite(isf) || isf <= 0) continue;
+            taken++; // one of the top 10 qualifying; the meal <= 0 drop applies within them
             double dose = e.getDoseUnits();
             double ideal = dose + (e.getG240() - target) / isf;
             if (e.getNadir() != null && e.getNadir() < HYPO_MMOL) {

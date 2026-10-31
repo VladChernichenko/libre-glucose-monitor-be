@@ -76,7 +76,7 @@ class HistoryDoseServiceTest {
     private void found(MealEpisode... eps) {
         List<ScoredEpisode> list = new ArrayList<>();
         for (MealEpisode e : eps) list.add(new ScoredEpisode(e, 0.8));
-        when(search.similar(eq(USER), any(), eq(HistoryDoseService.SEARCH_LIMIT))).thenReturn(list);
+        when(search.similar(eq(USER), any(), eq(HistoryDoseService.CANDIDATE_LIMIT))).thenReturn(list);
     }
 
     @Test
@@ -343,5 +343,46 @@ class HistoryDoseServiceTest {
         return IsfMealWindowSuggestionDTO.builder().show(show).windows(List.of(
                 IsfMealWindowSuggestionDTO.WindowProposal.builder().mealWindow(window)
                         .proposedIsf(proposed).currentIsf(current).hasData(true).build())).build();
+    }
+
+    @Test
+    void topTenQualifyingAreTakenFromBeyondTheFirstTenCandidates() {
+        // 12 candidates: first 5 contaminated, then 4 not qualifying (gap 45), then 3 qualifying at
+        // indexes 9..11 (0.08, 0.10, 0.12) -> median 0.10 x 50 = 5.0 U vs model 4.0 -> show.
+        List<MealEpisode> all = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            MealEpisode c = ep(50, 9, 5.5, 5.5);
+            c.setContaminated(true);
+            all.add(c);
+        }
+        for (int i = 0; i < 4; i++) {
+            MealEpisode g = ep(50, 9, 5.5, 5.5);
+            g.setCgmMaxGapMin(45);
+            all.add(g);
+        }
+        MealEpisode q1 = ep(50, 4, 5.5, 5.5), q2 = ep(50, 5, 5.5, 5.5), q3 = ep(50, 6, 5.5, 5.5);
+        all.addAll(List.of(q1, q2, q3));
+        found(all.toArray(MealEpisode[]::new));
+
+        HistoryDose h = service.evaluate(USER, situation, 4.0, 0.0, 0.0, 50).orElseThrow();
+
+        assertThat(h.units()).isEqualTo(5.0);
+        assertThat(h.episodeIds()).containsExactly(q1.getId(), q2.getId(), q3.getId());
+    }
+
+    @Test
+    void onlyTheTopTenQualifyingAreUsed() {
+        // 10 qualifying at 0.10 (5 U / 50 g), then 11 more at 0.20 (10 U / 50 g).
+        // Top 10 only -> median 0.10 x 50 = 5.0 U vs model 4.0 -> show.
+        // Uncapped: 21 values, median (11th) = 0.20 -> 10.0 U.
+        List<MealEpisode> all = new ArrayList<>();
+        for (int i = 0; i < 10; i++) all.add(ep(50, 5, 5.5, 5.5));
+        for (int i = 0; i < 11; i++) all.add(ep(50, 10, 5.5, 5.5));
+        found(all.toArray(MealEpisode[]::new));
+
+        HistoryDose h = service.evaluate(USER, situation, 4.0, 0.0, 0.0, 50).orElseThrow();
+
+        assertThat(h.units()).isEqualTo(5.0);
+        assertThat(h.episodeIds()).hasSize(10);
     }
 }
