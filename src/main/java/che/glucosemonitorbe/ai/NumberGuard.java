@@ -25,6 +25,12 @@ import java.util.regex.Pattern;
  *       name in English/Russian) must equal a payload date (day and month when the reply gives no year).</li>
  *   <li>Digits inside ids ({@code id}, {@code *Id}) and in citation excerpts are not quotable (§6.9).</li>
  *   <li>Digits glued to a preceding letter (T1D, B12) and "type 1" / "1 типа" are not numbers.</li>
+ *   <li>A number followed by a unit is checked against that unit's payload fields only, never against
+ *       free text (turns, food text, reasons): {@code U/units/ЕД} against insulin fields within ±0.05 and
+ *       no conversion; {@code g/г} against carb and macro fields; {@code mmol/ммоль} against glucose
+ *       fields; {@code mg/dL/мг/дл} against glucose fields × 18.016.</li>
+ *   <li>Imperative dosing phrases fail (see {@link DosingPhraseGuard}); on the plan path a phrase naming
+ *       exactly the plan's dose is allowed.</li>
  * </ul>
  */
 public final class NumberGuard {
@@ -34,6 +40,20 @@ public final class NumberGuard {
     static final double MGDL_PER_MMOL = 18.016;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> SKIPPED_FIELDS = Set.of("id", "excerpt");
+    static final double INSULIN_TOLERANCE = 0.05;
+    private static final Set<String> INSULIN_FIELDS = Set.of("doseUnits", "iob", "insulin", "insulinUnits");
+    private static final Set<String> CARB_FIELDS = Set.of("carbs", "carbsLow", "carbsHigh", "fat", "protein",
+            "fiber", "cob");
+    private static final Set<String> GLUCOSE_FIELDS = Set.of("glucose", "startGlucose", "peak", "nadir", "g60",
+            "g120", "g240", "forecastPeak", "forecastLowest");
+
+    enum Unit { NONE, INSULIN, CARBS, MMOL, MGDL }
+
+    private static final Pattern INSULIN_UNIT = Pattern.compile(
+            "^(?:\\s*U|u|\\s*(?iu:units?|ед|единиц\\p{L}*))(?!\\p{L})");
+    private static final Pattern CARB_UNIT = Pattern.compile("^\\s*(?iu:g|г|grams?|грамм\\p{L}*)(?!\\p{L})");
+    private static final Pattern MGDL_UNIT = Pattern.compile("^\\s*(?iu:mg\\s*/\\s*dl|мг\\s*/\\s*дл)");
+    private static final Pattern MMOL_UNIT = Pattern.compile("^\\s*(?iu:mmol|ммоль)");
 
     private static final Pattern TYPE_ONE = Pattern.compile(
             "(?iu)\\btype\\s*1\\b|(?<![\\p{L}\\d])1(\\s*-?\\s*го)?\\s+типа");
@@ -73,9 +93,58 @@ public final class NumberGuard {
 
         Matcher n = NUMBER.matcher(rest);
         while (n.find()) {
-            if (!numberAllowed(n.group(), allowed.numbers)) offending.add(n.group());
+            String after = rest.substring(n.end(), Math.min(rest.length(), n.end() + 24));
+            boolean ok = switch (unitAfter(after)) {
+                case INSULIN -> matches(n.group(), allowed.insulin, INSULIN_TOLERANCE, false);
+                case CARBS -> matches(n.group(), allowed.carbs, null, false);
+                case MMOL -> matches(n.group(), allowed.glucose, null, false);
+                case MGDL -> matches(n.group(), scaled(allowed.glucose), null, false);
+                case NONE -> numberAllowed(n.group(), allowed.numbers);
+            };
+            if (!ok) offending.add(n.group());
         }
+        Double planDose = facts == null || facts.plan() == null ? null : facts.plan().doseUnits();
+        offending.addAll(DosingPhraseGuard.offending(reply == null ? "" : reply, facts != null && facts.plan() != null,
+                planDose));
         return new GuardResult(offending.isEmpty(), List.copyOf(offending));
+    }
+
+    static Unit unitAfter(String after) {
+        if (MGDL_UNIT.matcher(after).find()) return Unit.MGDL;
+        if (MMOL_UNIT.matcher(after).find()) return Unit.MMOL;
+        if (INSULIN_UNIT.matcher(after).find()) return Unit.INSULIN;
+        if (CARB_UNIT.matcher(after).find()) return Unit.CARBS;
+        return Unit.NONE;
+    }
+
+    private static Set<Double> scaled(Set<Double> mmol) {
+        Set<Double> out = new HashSet<>();
+        mmol.forEach(v -> out.add(v * MGDL_PER_MMOL));
+        return out;
+    }
+
+    /**
+     * @param fixedTolerance null = the rounding tolerance of the reply number (±0.5 × 10^-d)
+     * @param convert        also accept ×/÷ 18.016
+     */
+    private static boolean matches(String raw, Set<Double> payload, Double fixedTolerance, boolean convert) {
+        String s = raw.replace(',', '.');
+        double r;
+        try {
+            r = Double.parseDouble(s);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        int dot = s.indexOf('.');
+        int decimals = dot < 0 ? 0 : s.length() - dot - 1;
+        double tol = (fixedTolerance != null ? fixedTolerance : 0.5 * Math.pow(10, -decimals)) + 1e-9;
+        for (double p : payload) {
+            if (Math.abs(r - p) <= tol) return true;
+            if (convert && (Math.abs(r - p * MGDL_PER_MMOL) <= tol || Math.abs(r - p / MGDL_PER_MMOL) <= tol)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String consumeDates(String text, Allowed allowed, Set<String> offending) {
@@ -128,49 +197,39 @@ public final class NumberGuard {
     }
 
     static boolean numberAllowed(String raw, Set<Double> payload) {
-        String s = raw.replace(',', '.');
-        double r;
-        try {
-            r = Double.parseDouble(s);
-        } catch (NumberFormatException e) {
-            return false;
-        }
-        int dot = s.indexOf('.');
-        int decimals = dot < 0 ? 0 : s.length() - dot - 1;
-        double tol = 0.5 * Math.pow(10, -decimals) + 1e-9;
-        for (double p : payload) {
-            if (Math.abs(r - p) <= tol
-                    || Math.abs(r - p * MGDL_PER_MMOL) <= tol
-                    || Math.abs(r - p / MGDL_PER_MMOL) <= tol) {
-                return true;
-            }
-        }
-        return false;
+        return matches(raw, payload, null, true);
     }
 
     // --- payload whitelist ---
 
-    private record Allowed(Set<Double> numbers, Set<String> times, Set<LocalDate> dates) {}
+    /** {@code numbers}: every payload number (untagged reply numbers); the others: typed fields only. */
+    private record Allowed(Set<Double> numbers, Set<String> times, Set<LocalDate> dates, Set<Double> insulin,
+                           Set<Double> carbs, Set<Double> glucose) {}
 
     private static Allowed allowed(FactsPayload facts) {
-        Allowed a = new Allowed(new HashSet<>(), new HashSet<>(), new HashSet<>());
-        if (facts != null) walk(JSON.valueToTree(facts), a);
+        Allowed a = new Allowed(new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(),
+                new HashSet<>());
+        if (facts != null) walk(JSON.valueToTree(facts), null, a);
         return a;
     }
 
-    private static void walk(JsonNode node, Allowed a) {
+    private static void walk(JsonNode node, String key, Allowed a) {
         if (node == null) return;
         if (node.isNumber()) {
-            a.numbers.add(node.asDouble());
+            double v = node.asDouble();
+            a.numbers.add(v);
+            if (INSULIN_FIELDS.contains(key)) a.insulin.add(v);
+            if (CARB_FIELDS.contains(key)) a.carbs.add(v);
+            if (GLUCOSE_FIELDS.contains(key)) a.glucose.add(v);
         } else if (node.isTextual()) {
             harvestText(node.asText(), a);
         } else if (node.isArray()) {
-            node.forEach(child -> walk(child, a));
+            node.forEach(child -> walk(child, key, a));
         } else if (node.isObject()) {
             node.fields().forEachRemaining(e -> {
-                String key = e.getKey();
-                if (SKIPPED_FIELDS.contains(key) || key.endsWith("Id")) return;
-                walk(e.getValue(), a);
+                String k = e.getKey();
+                if (SKIPPED_FIELDS.contains(k) || k.endsWith("Id")) return;
+                walk(e.getValue(), k, a);
             });
         }
     }

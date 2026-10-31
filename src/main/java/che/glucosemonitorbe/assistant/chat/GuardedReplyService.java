@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +30,8 @@ import org.springframework.stereotype.Component;
  * <p>Trace fields: {@code window_hours} = 0 (the payload is not a time window), {@code context_hash} =
  * SHA-256 of the facts JSON, {@code evidence_chunk_ids} = {@code {"episodes":["KIND:id"],"citations":[id]}},
  * {@code confidence} = 1.0 first reply passed, 0.5 the regenerated reply passed, 0.0 template used.
- * Provider failures propagate to the caller.
+ * Provider failures propagate to the caller. When {@code clientGone} reports a closed stream before a
+ * generation (first or regenerate), no LLM call is made and {@link ClientGoneException} is thrown.
  */
 @Slf4j
 @Component
@@ -46,13 +48,22 @@ public class GuardedReplyService {
 
     public record Result(String text, String modelId, long latencyMs, double confidence) {}
 
+    /** The client closed the stream before an LLM call; nothing more will be sent. */
+    public static final class ClientGoneException extends RuntimeException {
+        ClientGoneException() {
+            super("Assistant client gone before the LLM call");
+        }
+    }
+
     /**
      * @param promptFor builds the prompt; its argument is the offending numbers of the previous try (empty first)
      * @param template  the plain reply built from {@code facts}, used after two failed tries
+     * @param clientGone true once the reply stream is known to be closed
      */
     public Result reply(UUID userId, FactsPayload facts, Function<List<String>, String> promptFor,
-                        Supplier<String> template, String language) {
+                        Supplier<String> template, String language, BooleanSupplier clientGone) {
         long start = System.currentTimeMillis();
+        if (clientGone.getAsBoolean()) throw new ClientGoneException();
         Attempt first = generate(promptFor.apply(List.of()), language);
         String modelId = first.modelId;
         String text;
@@ -64,6 +75,7 @@ public class GuardedReplyService {
         } else {
             log.info("Assistant reply failed the number guard for userId={}, offending={}; regenerating",
                     userId, g.offending());
+            if (clientGone.getAsBoolean()) throw new ClientGoneException();
             Attempt second = generate(promptFor.apply(g.offending()), language);
             if (second.modelId != null) modelId = second.modelId;
             NumberGuard.GuardResult g2 = NumberGuard.check(second.text, facts);

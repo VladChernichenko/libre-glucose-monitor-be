@@ -91,8 +91,9 @@ final class AssistantPrompts {
 
     private static String retry(List<String> offending) {
         if (offending == null || offending.isEmpty()) return "";
-        return "Your previous answer used numbers not in the facts: " + String.join(", ", offending)
-                + ". Answer again without them, using only numbers from the facts. ";
+        return "Your previous answer used numbers or dosing commands not in the facts: " + String.join(", ", offending)
+                + ". Answer again without them, using only numbers from the facts and never telling the user "
+                + "to take, inject or add insulin. ";
     }
 
     static String json(FactsPayload facts) {

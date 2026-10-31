@@ -32,17 +32,89 @@ class NumberGuardTest {
     }
 
     @Test
-    void allowsMmolFromMgdlPayload() {
+    void unitTaggedGlucoseUsesGlucoseFields() {
         FactsPayload f = FactsPayload.builder()
-                .turns(List.of(new FactsPayload.TurnFacts("user", "my meter says 180"))).build();
-        assertTrue(NumberGuard.check("180 mg/dL is 10.0 mmol/L", f).ok());
+                .state(FactsPayload.State.builder().glucose(10.0).build()).build();
+        assertTrue(NumberGuard.check("10.0 mmol/L is 180 mg/dL", f).ok());
+        assertEquals(List.of("10"), NumberGuard.check("about 10 mg/dL", f).offending());
+    }
+
+    @Test
+    void glucoseNearAnIntegerDoesNotWhitelistADose() {
+        FactsPayload f = FactsPayload.builder()
+                .state(FactsPayload.State.builder().glucose(7.1).iob(0.5).build()).build();
+        NumberGuard.GuardResult r = NumberGuard.check("take 7 U", f);
+        assertFalse(r.ok());
+        assertTrue(r.offending().contains("7"), r.offending().toString());
+        // 9 = 0.5 x 18.016 would pass untagged; tagged as units it must match an insulin field.
+        assertEquals(List.of("9"), NumberGuard.check("you had 9 U on board", f).offending());
+    }
+
+    @Test
+    void numbersFromTheUserTurnDoNotWhitelistADose() {
+        FactsPayload f = FactsPayload.builder()
+                .turns(List.of(new FactsPayload.TurnFacts("user", "Should I take 8 units?"))).build();
+        NumberGuard.GuardResult r = NumberGuard.check("take 8 U", f);
+        assertFalse(r.ok());
+        assertTrue(r.offending().contains("8"), r.offending().toString());
+        assertEquals(List.of("8"), NumberGuard.check("you asked about 8 units", f).offending());
+    }
+
+    @Test
+    void planDoseInUnitsIsAllowed() {
+        assertTrue(NumberGuard.check("The model suggests 4 U.", planFacts()).ok());
+        assertTrue(NumberGuard.check("Модель предлагает 4 ЕД.", planFacts()).ok());
+        assertEquals(List.of("4.2"), NumberGuard.check("about 4.2 U", planFacts()).offending());
+    }
+
+    @Test
+    void gramsMustMatchCarbFields() {
+        FactsPayload f = FactsPayload.builder()
+                .plan(FactsPayload.PlanFacts.builder().carbs(40.0).doseUnits(4.0).build()).build();
+        assertTrue(NumberGuard.check("about 40 g of carbs", f).ok());
+        assertEquals(List.of("4"), NumberGuard.check("about 4 g of fat", f).offending());
+    }
+
+    // --- imperative dosing phrases ---
+
+    @Test
+    void imperativeDoseFailsOnQuestionPath() {
+        FactsPayload f = FactsPayload.builder()
+                .state(FactsPayload.State.builder().iob(4.0).build()).build();
+        assertEquals(List.of("Take 4 U"), NumberGuard.check("Take 4 U now.", f).offending());
+        assertEquals(List.of("inject two more units"),
+                NumberGuard.check("You could inject two more units.", f).offending());
+        assertEquals(List.of("two units"), NumberGuard.check("It was two units.", f).offending());
+        assertTrue(NumberGuard.check("You have 4 U on board.", f).ok());
+    }
+
+    @Test
+    void imperativeDoseFailsOnQuestionPathInRussian() {
+        FactsPayload f = FactsPayload.builder()
+                .state(FactsPayload.State.builder().iob(4.0).build()).build();
+        assertEquals(List.of("Введите 4 ЕД"), NumberGuard.check("Введите 4 ЕД сейчас.", f).offending());
+        assertEquals(List.of("сделайте ещё две единицы"),
+                NumberGuard.check("Можно сделайте ещё две единицы.", f).offending());
+        assertEquals(List.of("пять единиц"), NumberGuard.check("Было пять единиц.", f).offending());
+        assertTrue(NumberGuard.check("Активного инсулина 4 ЕД.", f).ok());
+    }
+
+    @Test
+    void planPathAllowsOnlyThePlanDoseAsImperative() {
+        assertTrue(NumberGuard.check("Inject 4 U, then wait 15 min.", planFacts()).ok());
+        assertTrue(NumberGuard.check("Введите 4 ЕД и подождите 15 мин.", planFacts()).ok());
+        assertTrue(NumberGuard.check("Take four units.", planFacts()).ok());
+        NumberGuard.GuardResult r = NumberGuard.check("Inject 5 U.", planFacts());
+        assertTrue(r.offending().contains("Inject 5 U"), r.offending().toString());
+        assertTrue(NumberGuard.check("Добавьте ещё единицу.", planFacts()).offending().contains("Добавьте ещё единицу"));
     }
 
     @Test
     void flagsInventedDose() {
-        NumberGuard.GuardResult r = NumberGuard.check("take 6 U", planFacts());
+        NumberGuard.GuardResult r = NumberGuard.check("you had 6 U", planFacts());
         assertFalse(r.ok());
         assertEquals(List.of("6"), r.offending());
+        assertEquals(List.of("6", "take 6 U"), NumberGuard.check("take 6 U", planFacts()).offending());
     }
 
     @Test

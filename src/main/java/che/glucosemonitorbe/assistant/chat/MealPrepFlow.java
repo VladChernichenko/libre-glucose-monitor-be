@@ -101,11 +101,11 @@ public class MealPrepFlow {
             // Episodes and state are context for the explanation; their absence must not fail the card.
             log.warn("Meal-prep facts incomplete for userId={}: {}", userId, e.toString());
         }
-        if (!episodes.isEmpty()) sink.accept(new AssistantEvent.Episodes(episodes));
-
+        TrackingSink tracked = new TrackingSink(sink);
         StringBuilder seen = new StringBuilder();
         String modelId = null;
         try {
+            if (!episodes.isEmpty()) tracked.accept(new AssistantEvent.Episodes(episodes));
             FactsPayload facts = FactsPayload.builder()
                     .language(language)
                     .now(FactsService.wall(msg.clientNow()))
@@ -115,12 +115,12 @@ public class MealPrepFlow {
                     .build();
             GuardedReplyService.Result r = guardedReply.reply(userId, facts,
                     offending -> AssistantPrompts.plan(facts, offending),
-                    () -> AssistantPrompts.planTemplate(facts), language);
+                    () -> AssistantPrompts.planTemplate(facts), language, tracked::gone);
             modelId = r.modelId();
-            sink.accept(new AssistantEvent.Token(r.text()));
+            tracked.accept(new AssistantEvent.Token(r.text()));
             seen.append(r.text());
         } catch (RuntimeException e) {
-            // The card already went out; a missing explanation must not fail it.
+            // The card already went out; a missing explanation (or a closed stream) must not fail it.
             log.warn("Meal-prep explanation failed for userId={}: {}", userId, e.toString());
         }
         history.updateReplyText(reply.getId(), seen.toString(), modelId, System.currentTimeMillis() - start);

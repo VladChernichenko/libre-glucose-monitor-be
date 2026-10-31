@@ -170,6 +170,7 @@ public class AssistantService {
         StringBuilder seen = new StringBuilder();
         ObjectNode payload = history.newPayload().put("language", language);
         GuardedReplyService.Result result;
+        TrackingSink tracked = new TrackingSink(sink);
         try {
             String question = msg.hasText() ? msg.text().trim() : "(The user sent a photo without text.)";
             List<FactsPayload.TurnFacts> turns = new ArrayList<>(FactsService.turns(
@@ -189,11 +190,11 @@ public class AssistantService {
             List<FactsPayload.EpisodeFacts> shown = shown(episodes);
             if (!shown.isEmpty()) {
                 payload.set("episodes", objectMapper.valueToTree(shown));
-                sink.accept(new AssistantEvent.Episodes(shown));
+                tracked.accept(new AssistantEvent.Episodes(shown));
             }
             result = guardedReply.reply(userId, facts, offending -> AssistantPrompts.question(facts, question, offending),
-                    () -> AssistantPrompts.questionTemplate(facts), language);
-            sink.accept(new AssistantEvent.Token(result.text()));
+                    () -> AssistantPrompts.questionTemplate(facts), language, tracked::gone);
+            tracked.accept(new AssistantEvent.Token(result.text()));
             seen.append(result.text()); // only what actually reached the client
         } catch (RuntimeException e) {
             log.warn("Assistant question path failed for userId={}", userId, e);

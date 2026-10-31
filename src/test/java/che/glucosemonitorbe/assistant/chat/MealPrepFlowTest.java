@@ -90,6 +90,24 @@ class MealPrepFlowTest {
     }
 
     @Test
+    void closedStreamAtEpisodesSkipsTheLlmButStillFinishesTheReply() {
+        when(retrieval.forPlan(any(), any(), any(), any(), any(), anyDouble())).thenReturn(List.of(
+                FactsPayload.EpisodeFacts.builder().id("e1").kind("MEAL").build()));
+        Consumer<AssistantEvent> closing = e -> {
+            if (e instanceof AssistantEvent.Episodes) throw new java.io.UncheckedIOException(new java.io.IOException("gone"));
+            events.add(e);
+        };
+
+        flow.mealPrep(user, userMessage, new IncomingMessage("40 g rye bread", null, NOW, ZONE),
+                List.of(new IntentClassifier.FoodItem("rye bread", 40.0)), "en", closing);
+
+        verifyNoInteractions(llm);
+        verify(repository).updateReplyText(any(), eq(""), isNull(), anyLong());
+        assertEquals(List.of(AssistantEvent.Plan.class, AssistantEvent.Done.class),
+                events.stream().map(Object::getClass).toList());
+    }
+
+    @Test
     void inventedNumberInExplanationFallsBackToPlanTemplate() {
         llmSays("Take 3 U."); // 7 would pass: within ±0.5 of glucose 7.1
 
