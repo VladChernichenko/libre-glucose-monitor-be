@@ -128,41 +128,40 @@ sources:
       insulin plan should be reviewed.
 
   # ------------------------------------------------------------------ PubMed (abstracts only)
-  # TODO(user): PMIDs left null on purpose - none were verifiable offline. Fill `pmid:` (preferred) or let the
-  # script resolve via `doi:`. Title-only entries are skipped until a pmid/doi is added.
+  # PMIDs verified against PubMed on 2026-11-01 (title, authors, journal and DOI match).
   - id: pubmed-trend-arrow-dosing
     kind: pubmed
-    pmid: null
-    doi: 10.1177/19322968211043162    # trend-arrow dosing risk (given in the task brief)
-    title: "Trend-arrow based insulin dosing (verify title on PubMed)"
+    pmid: "34486426"   # Noaro et al., J Diabetes Sci Technol 2023;17(1):107-116
+    doi: 10.1177/19322968211043162
+    title: "Methods for Insulin Bolus Adjustment Based on the Continuous Glucose Monitoring Trend Arrows in Type 1 Diabetes: Performance and Safety Assessment in an In Silico Clinical Trial"
     topic: trend arrows
   - id: pubmed-riddell-2017-exercise-t1d
     kind: pubmed
-    pmid: null
-    doi: 10.1016/S2213-8587(17)30014-1   # Riddell et al. 2017, exercise management in T1D consensus statement
+    pmid: "28126459"   # Riddell et al., Lancet Diabetes Endocrinol 2017;5(5):377-390
+    doi: 10.1016/S2213-8587(17)30014-1
     title: "Exercise management in type 1 diabetes: a consensus statement"
     topic: exercise mdi
   - id: pubmed-wolpert-2013-fat-protein
     kind: pubmed
-    pmid: null    # TODO: add pmid or doi
-    doi: null
+    pmid: "23193216"   # Wolpert et al., Diabetes Care 2013;36(4):810-6
+    doi: 10.2337/dc12-0092
     title: "Dietary fat acutely increases glucose concentrations and insulin requirements in patients with type 1 diabetes (Wolpert 2013)"
     topic: fat protein dosing
   - id: pubmed-cobry-2010-prebolus
     kind: pubmed
-    pmid: null    # TODO: add pmid or doi
-    doi: null
+    pmid: "20151766"   # Cobry et al., Diabetes Technol Ther 2010;12(3):173-7
+    doi: 10.1089/dia.2009.0112
     title: "Timing of meal insulin boluses to achieve optimal postprandial glycemic control in patients with type 1 diabetes (Cobry 2010)"
     topic: pre bolus timing
   - id: pubmed-turner-2001-alcohol
     kind: pubmed
-    pmid: null    # TODO: add pmid or doi
-    doi: null
+    pmid: "11679452"   # Turner et al., Diabetes Care 2001;24(11):1888-93
+    doi: 10.2337/diacare.24.11.1888
     title: "The effect of evening alcohol consumption on next-morning glucose control in type 1 diabetes (Turner 2001)"
     topic: alcohol
   - id: pubmed-hypo-treatment
     kind: pubmed
-    pmid: null    # TODO: pick a hypoglycemia-treatment (oral glucose dose / rule of 15) paper and add pmid/doi
-    doi: null
-    title: "TODO: hypoglycemia treatment trial or review"
+    pmid: "25683747"   # McTavish et al., Diabet Med 2015;32(9):1143-8 (adults; 15 g vs 0.2 / 0.3 g/kg glucose)
+    doi: 10.1111/dme.12730
+    title: "Weight-based hypoglycaemia treatment protocol for adults with Type 1 diabetes: a randomized crossover clinical trial (McTavish 2015)"
     topic: hypo treatment
