@@ -5,6 +5,7 @@ import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.dto.ClientTimeInfo;
 import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
+import che.glucosemonitorbe.exception.DosingRefusalReason;
 import che.glucosemonitorbe.exception.DosingRefusedException;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
@@ -27,8 +28,6 @@ import java.util.UUID;
 @Service
 public class MealPlanService {
 
-    /** Used only when the user has no target setting. */
-    static final double DEFAULT_TARGET_MMOL = 5.5;
     /** The dose is rounded DOWN to this step: never more insulin than the calculator asked for. */
     static final double DOSE_STEP = 0.5;
 
@@ -65,6 +64,9 @@ public class MealPlanService {
             patterns.enrich(n);
         }
         Double conf = n.getConfidence();
+        if (conf != null && (!Double.isFinite(conf) || conf < 0.0 || conf > 1.0)) {
+            conf = null; // unusable confidence = widest band
+        }
         double carbs = v(n.getTotalCarbs());
         double fat = v(n.getFat());
         double protein = v(n.getProtein());
@@ -75,6 +77,13 @@ public class MealPlanService {
         NutritionRange rfi = NutritionRange.of(fiber, conf);
         String label = n.getPatternName();
 
+        if (invalid(n.getTotalCarbs()) || invalid(n.getFat()) || invalid(n.getProtein()) || invalid(n.getFiber())) {
+            // A negative meal would cancel a correction; never reach the calculator with it.
+            NutritionRange zero = new NutritionRange(0, 0, 0);
+            return new MealPlan(zero, zero, zero, zero, n.getEstimatedGi(), label, null,
+                    DosingRefusalReason.INVALID_INPUT.name(), null, false);
+        }
+
         Optional<CgmReadingDTO> reading = freshness.freshReading(userId, clock.instant());
         if (reading.isEmpty()) {
             return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, null, null, null, true);
@@ -82,7 +91,8 @@ public class MealPlanService {
         double glucose = reading.get().mmol();
 
         UserSettingsDTO s = settings.getUserSettings(userId);
-        double target = s != null && s.getTargetGlucoseMmol() != null ? s.getTargetGlucoseMmol() : DEFAULT_TARGET_MMOL;
+        double target = s != null && s.getTargetGlucoseMmol() != null ? s.getTargetGlucoseMmol()
+                : UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL;
 
         GlucoseCalculationsService.ActiveCobIobInputs inputs = calculations.activeCobIobInputs(userId, now);
         double iob = calculator.calculateTotalActiveInsulin(inputs.insulinEntries(), now,
@@ -107,6 +117,10 @@ public class MealPlanService {
         PauseChoice pause = optimizer.choose(userId, now, glucose, dose,
                 new MealMacros(carbs, fat, protein, fiber, n.getEstimatedGi()));
         return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, dose, null, pause, false);
+    }
+
+    private static boolean invalid(Double d) {
+        return d != null && (!Double.isFinite(d) || d < 0.0);
     }
 
     private static double v(Double d) {

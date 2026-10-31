@@ -145,4 +145,32 @@ class MealPlanServiceTest {
         dose(3.5);
         assertThat(service.plan(USER, nutrition, NOW).doseUnits()).isEqualTo(3.5);
     }
+
+    @Test
+    void negativeCarbsRefusedWithoutCalculator() {
+        nutrition.setTotalCarbs(-10.0);
+        MealPlan plan = service.plan(USER, nutrition, NOW);
+        assertThat(plan.refusalCode()).isEqualTo("INVALID_INPUT");
+        assertThat(plan.doseUnits()).isNull();
+        assertThat(plan.pause()).isNull();
+        verifyNoInteractions(calculator, optimizer);
+    }
+
+    @Test
+    void nanConfidenceTreatedAsNull() {
+        nutrition.setConfidence(Double.NaN);
+        dose(3.0);
+        assertThat(service.plan(USER, nutrition, NOW).carbs().low()).isCloseTo(24, within(1e-9));
+        nutrition.setConfidence(1.5);
+        assertThat(service.plan(USER, nutrition, NOW).carbs().high()).isCloseTo(56, within(1e-9));
+    }
+
+    @Test
+    void zeroDoseIsNotARefusal() {
+        dose(0.4);
+        MealPlan plan = service.plan(USER, nutrition, NOW);
+        assertThat(plan.doseUnits()).isEqualTo(0.0);
+        assertThat(plan.refusalCode()).isNull();
+        verify(optimizer).choose(eq(USER), eq(NOW), eq(8.0), eq(0.0), any());
+    }
 }
