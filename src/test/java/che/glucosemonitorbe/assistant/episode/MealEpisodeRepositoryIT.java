@@ -78,18 +78,22 @@ class MealEpisodeRepositoryIT {
         v[1535] = -0.25f;
 
         assertThat(repository.findEmbeddingText(saved.getId())).isNull();
-        assertThat(repository.findIdsWithoutEmbedding(10)).containsExactly(saved.getId());
+        assertThat(repository.findIdsWithoutEmbedding(10, java.time.Instant.now().minusSeconds(86400))).containsExactly(saved.getId());
 
         repository.setEmbedding(saved.getId(), MealEpisodeScheduler.toLiteral(v));
 
         String text = repository.findEmbeddingText(saved.getId());
         assertThat(text).startsWith("[0.5,0,").endsWith(",-0.25]");
         assertThat(text.split(",")).hasSize(1536);
-        assertThat(repository.findIdsWithoutEmbedding(10)).isEmpty();
+        assertThat(repository.findIdsWithoutEmbedding(10, java.time.Instant.now().minusSeconds(86400))).isEmpty();
         MealEpisode back = repository.findById(saved.getId()).orElseThrow();
         assertThat(back.getFoodText()).isEqualTo("lunch, chicken soup");
         assertThat(back.getContextTags()).contains("CAFFEINE");
+        repository.markEmbeddingFailed(saved.getId(), java.time.Instant.now());
+        assertThat(repository.findIdsWithoutEmbedding(10, java.time.Instant.now().minusSeconds(86400))).isEmpty();
+        repository.clearEmbedding(saved.getId());
+        assertThat(repository.findEmbeddingText(saved.getId())).isNull();
         assertThat(repository.findNoteIdsByUserId(userId)).containsExactly(saved.getNoteId());
-        assertThat(repository.findWithoutEmbedding(10)).isEqualTo(List.of());
+        assertThat(repository.findWithoutEmbedding(10, java.time.Instant.now())).hasSize(1);
     }
 }

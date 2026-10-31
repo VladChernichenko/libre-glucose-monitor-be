@@ -40,17 +40,17 @@ public class MealEpisodeBuilder {
     private static final long MAX_GAP_MS = Duration.ofMinutes(15).toMillis();
     private static final double LOW_MMOL = 3.9;
     private static final double HIGH_MMOL = 10.0;
-    private static final double IOB_HOURS = 4.0;
-    private static final double COB_HOURS = 3.0;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
+     * @param load IOB/COB at the meal excluding the meal's own notes (computed by the caller from the
+     *             dashboard's single source); null leaves both unset
      * @return empty when carbs are below 10 g, the note is not an ordinary meal, or no CGM reading
      *         lies within 10 min of the meal
      */
     public Optional<MealEpisode> build(Note meal, List<Note> surrounding, List<CgmReading> cgm,
-                                       UserSettingsDTO s) {
+                                       UserSettingsDTO s, MealLoad load) {
         if (meal.getCarbs() == null || meal.getCarbs() < MIN_CARBS || meal.getTimestamp() == null) {
             return Optional.empty();
         }
@@ -80,7 +80,10 @@ public class MealEpisodeBuilder {
 
         List<Note> others = surrounding.stream().filter(n -> n != meal && !sameNote(n, meal)).toList();
         applyDoseAndContamination(e, meal, others, at);
-        applyLoad(e, others, at);
+        if (load != null) {
+            e.setIob(load.iob());
+            e.setCob(load.cob());
+        }
         applyActivity(e, others, at);
         applyOutcome(e, readings, mealMs);
         return Optional.of(e);
@@ -94,7 +97,15 @@ public class MealEpisodeBuilder {
             String noun = activityNoun(e.getActivityType());
             parts.add(Boolean.FALSE.equals(e.getActivityBefore()) ? "before a " + noun : "after a " + noun);
         }
+        if (parts.isEmpty()) parts.add(fallbackText(e.getLocalMinuteOfDay(), e.getCarbs()));
         return String.join(", ", parts);
+    }
+
+    /** Never-empty rendering from time of day and carbs, e.g. {@code "lunch, 45 g carbs"}. */
+    static String fallbackText(int minuteOfDay, double carbs) {
+        int h = minuteOfDay / 60;
+        String band = h >= 5 && h < 11 ? "breakfast" : h >= 11 && h < 16 ? "lunch" : h >= 16 && h < 22 ? "dinner" : "night";
+        return band + ", " + Math.round(carbs) + " g carbs";
     }
 
     private static String activityNoun(String type) {
@@ -133,7 +144,8 @@ public class MealEpisodeBuilder {
                 log.debug("Unreadable nutrition profile on note {}: {}", meal.getId(), ex.getMessage());
             }
         }
-        e.setFoodText(food.stream().distinct().collect(Collectors.joining(", ")));
+        String text = food.stream().distinct().collect(Collectors.joining(", "));
+        e.setFoodText(text.isBlank() ? fallbackText(e.getLocalMinuteOfDay(), e.getCarbs()) : text);
     }
 
     private static void addIfText(List<String> out, String t) {
@@ -148,16 +160,22 @@ public class MealEpisodeBuilder {
         return n.getCarbs() != null && n.getCarbs() > 0;
     }
 
+    /** The meal's separately logged pre-bolus: latest rapid-only note in the 30 min up to the meal. */
+    static Optional<Note> ownPreDose(List<Note> others, LocalDateTime at) {
+        LocalDateTime windowStart = at.minus(OWN_DOSE_LOOKBACK);
+        return others.stream()
+                .filter(n -> n.getTimestamp() != null && isRapidDose(n) && !hasCarbs(n) && !n.isActivity()
+                        && !n.getTimestamp().isBefore(windowStart) && !n.getTimestamp().isAfter(at))
+                .max(Comparator.comparing(Note::getTimestamp));
+    }
+
     private void applyDoseAndContamination(MealEpisode e, Note meal, List<Note> others, LocalDateTime at) {
         double dose = meal.getInsulin() == null || meal.isLongActing() ? 0 : meal.getInsulin();
         Integer pause = null;
         LocalDateTime windowStart = at.minus(OWN_DOSE_LOOKBACK);
         LocalDateTime windowEnd = at.plus(OUTCOME_WINDOW);
 
-        Note pre = others.stream()
-                .filter(n -> isRapidDose(n) && !hasCarbs(n) && !n.isActivity()
-                        && !n.getTimestamp().isBefore(windowStart) && !n.getTimestamp().isAfter(at))
-                .max(Comparator.comparing(Note::getTimestamp)).orElse(null);
+        Note pre = ownPreDose(others, at).orElse(null);
         if (pre != null) {
             dose += pre.getInsulin();
             pause = (int) Duration.between(pre.getTimestamp(), at).toMinutes();
@@ -175,19 +193,6 @@ public class MealEpisodeBuilder {
         e.setDoseUnits(dose > 0 ? dose : null);
         e.setPauseMinutes(dose > 0 ? (pause != null ? pause : 0) : null);
         e.setContaminated(contaminated);
-    }
-
-    private void applyLoad(MealEpisode e, List<Note> others, LocalDateTime at) {
-        double iob = 0;
-        double cob = 0;
-        for (Note n : others) {
-            if (n.getTimestamp() == null || n.isActivity() || n.getTimestamp().isAfter(at)) continue;
-            double hours = Duration.between(n.getTimestamp(), at).toMinutes() / 60.0;
-            if (isRapidDose(n) && hours < IOB_HOURS) iob += n.getInsulin() * (1 - hours / IOB_HOURS);
-            if (hasCarbs(n) && hours < COB_HOURS) cob += n.getCarbs() * (1 - hours / COB_HOURS);
-        }
-        e.setIob(iob);
-        e.setCob(cob);
     }
 
     private void applyActivity(MealEpisode e, List<Note> others, LocalDateTime at) {
@@ -232,8 +237,21 @@ public class MealEpisodeBuilder {
             if (g < LOW_MMOL) below += gap;
             if (g > HIGH_MMOL) above += gap;
         }
+        e.setCgmMaxGapMin(maxGapMinutes(window, mealMs, endMs));
         e.setMinutesBelow39((int) Math.round(below / 60_000.0));
         e.setMinutesAbove10((int) Math.round(above / 60_000.0));
+    }
+
+    /** Largest gap in [meal, meal+4h], counting from the meal to the first and from the last to +4h. */
+    private static int maxGapMinutes(List<CgmReading> window, long startMs, long endMs) {
+        long prev = startMs;
+        long max = 0;
+        for (CgmReading r : window) {
+            max = Math.max(max, r.getDateTimestamp() - prev);
+            prev = r.getDateTimestamp();
+        }
+        max = Math.max(max, endMs - prev);
+        return (int) Math.round(max / 60_000.0);
     }
 
     private static int minutesFrom(long mealMs, CgmReading r) {

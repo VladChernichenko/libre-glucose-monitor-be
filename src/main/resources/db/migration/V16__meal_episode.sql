@@ -35,9 +35,12 @@ CREATE TABLE IF NOT EXISTS meal_episode (
     minutes_above_10       INT,
     hit60                  BOOLEAN,
     hit120                 BOOLEAN,
+    cgm_max_gap_min        INT,
     contaminated           BOOLEAN          NOT NULL DEFAULT FALSE,
     embedding              vector(1536),
+    embedding_failed_at    TIMESTAMPTZ,
     created_at             TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ      NOT NULL DEFAULT now(),
     CONSTRAINT fk_meal_episode_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_meal_episode_note FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
     CONSTRAINT uq_meal_episode_note UNIQUE (note_id)
@@ -50,3 +53,5 @@ CREATE INDEX IF NOT EXISTS idx_meal_episode_embedding
 COMMENT ON TABLE meal_episode IS 'Derived meal outcome record for similarity search; meal_at is user wall time.';
 COMMENT ON COLUMN meal_episode.embedding IS 'text-embedding-3-small of the food/context rendering; NULL until the scheduler fills it.';
 COMMENT ON COLUMN meal_episode.contaminated IS 'Other rapid dose or carbs inside the 4 h after (or 30 min before) the meal.';
+COMMENT ON COLUMN meal_episode.cgm_max_gap_min IS 'Largest CGM gap in [meal, meal+4h] in minutes; consumers needing complete CGM filter on it.';
+COMMENT ON COLUMN meal_episode.embedding_failed_at IS 'Last time embedding this row alone failed; retried after a day so one bad row cannot stall the queue.';

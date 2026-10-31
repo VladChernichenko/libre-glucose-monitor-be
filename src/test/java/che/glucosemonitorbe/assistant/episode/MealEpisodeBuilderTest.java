@@ -65,7 +65,7 @@ class MealEpisodeBuilderTest {
     private Optional<MealEpisode> build(Note meal, List<Note> others) {
         List<Note> all = new ArrayList<>(others);
         all.add(meal);
-        return builder.build(meal, all, curve(), settings());
+        return builder.build(meal, all, curve(), settings(), new MealLoad(0, 0));
     }
 
     @Test
@@ -125,6 +125,7 @@ class MealEpisodeBuilderTest {
         assertThat(e.isContaminated()).isFalse();
         assertThat(e.getDoseUnits()).isEqualTo(5.0);
         assertThat(e.getPauseMinutes()).isEqualTo(20);
+        assertThat(e.getIob()).isZero();
     }
 
     @Test
@@ -132,7 +133,7 @@ class MealEpisodeBuilderTest {
     void under10gIgnored() {
         assertThat(build(note(MEAL_AT, 9, 1, "snack"), List.of())).isEmpty();
         Note meal = note(MEAL_AT, 40, 4, "lunch");
-        assertThat(builder.build(meal, List.of(meal), List.of(), settings())).isEmpty();
+        assertThat(builder.build(meal, List.of(meal), List.of(), settings(), null)).isEmpty();
     }
 
     @Test
@@ -152,5 +153,48 @@ class MealEpisodeBuilderTest {
         assertThat(e.getActivityMinutesAround()).isEqualTo(30);
         assertThat(MealEpisodeBuilder.foodText(e))
                 .isEqualTo("lunch, chicken soup with potato, rye bread 40 g, after a walk");
+    }
+
+    @Test
+    @DisplayName("IOB and COB are the caller's values, not recomputed from the notes")
+    void usesPassedLoad() {
+        Note meal = note(MEAL_AT, 40, 4, "lunch");
+        Note earlier = note(MEAL_AT.minusHours(1), 0, 3, "bolus");
+        MealEpisode e = builder.build(meal, List.of(meal, earlier), curve(), settings(), new MealLoad(1.5, 12)).orElseThrow();
+        assertThat(e.getIob()).isEqualTo(1.5);
+        assertThat(e.getCob()).isEqualTo(12);
+    }
+
+    @Test
+    @DisplayName("a meal with no text still gets a non-empty food text from time band and carbs")
+    void emptyFoodTextFallsBack() {
+        Note meal = note(MEAL_AT, 45, 4, "");
+        MealEpisode e = build(meal, List.of()).orElseThrow();
+        assertThat(e.getFoodText()).isEqualTo("lunch, 45 g carbs");
+        assertThat(MealEpisodeBuilder.foodText(e)).isEqualTo("lunch, 45 g carbs");
+        assertThat(MealEpisodeBuilder.fallbackText(23 * 60, 10)).isEqualTo("night, 10 g carbs");
+        assertThat(MealEpisodeBuilder.fallbackText(7 * 60, 10)).startsWith("breakfast");
+        assertThat(MealEpisodeBuilder.fallbackText(18 * 60, 10)).startsWith("dinner");
+    }
+
+    @Test
+    @DisplayName("cgm_max_gap_min is the largest gap including the edges of the window")
+    void cgmMaxGap() {
+        Note meal = note(MEAL_AT, 40, 4, "lunch");
+        assertThat(build(meal, List.of()).orElseThrow().getCgmMaxGapMin()).isEqualTo(5);
+
+        List<CgmReading> holed = new ArrayList<>(curve());
+        holed.removeIf(r -> {
+            long m = (r.getDateTimestamp() - MEAL_AT.toInstant(ZoneOffset.UTC).toEpochMilli()) / 60_000;
+            return m > 60 && m < 100;       // gap +60 .. +100 = 40 min
+        });
+        assertThat(builder.build(meal, List.of(meal), holed, settings(), null).orElseThrow().getCgmMaxGapMin())
+                .isEqualTo(40);
+
+        List<CgmReading> truncated = curve().stream()
+                .filter(r -> r.getDateTimestamp() <= MEAL_AT.plusMinutes(150).toInstant(ZoneOffset.UTC).toEpochMilli())
+                .toList();
+        assertThat(builder.build(meal, List.of(meal), truncated, settings(), null).orElseThrow().getCgmMaxGapMin())
+                .isEqualTo(90);             // last reading +150 to +240
     }
 }

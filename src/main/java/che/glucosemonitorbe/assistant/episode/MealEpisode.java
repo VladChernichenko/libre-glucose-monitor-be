@@ -109,9 +109,17 @@ public class MealEpisode {
     @Column(name = "hit120")
     private Boolean hit120;
 
+    /** Largest gap between consecutive CGM readings across the 4 h window, in minutes. */
+    @Column(name = "cgm_max_gap_min")
+    private Integer cgmMaxGapMin;
+
     @Column(name = "contaminated", nullable = false)
     private boolean contaminated;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
+
+    /** Last build/rebuild; a note changed after this makes the episode stale. */
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt = Instant.now();
 }
