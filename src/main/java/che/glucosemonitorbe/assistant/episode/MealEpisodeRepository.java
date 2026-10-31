@@ -54,4 +54,27 @@ public interface MealEpisodeRepository extends JpaRepository<MealEpisode, UUID> 
     /** The stored embedding in pgvector text form, or null when none. */
     @Query(value = "SELECT CAST(embedding AS text) FROM meal_episode WHERE id = :id", nativeQuery = true)
     String findEmbeddingText(@Param("id") UUID id);
+
+    /** Ids of the user's embedded episodes closest to the query vector (cosine), best first. */
+    @Query(value = "SELECT id FROM meal_episode WHERE user_id = :userId AND embedding IS NOT NULL "
+            + "ORDER BY embedding <=> CAST(:vector AS vector) LIMIT :limit", nativeQuery = true)
+    List<UUID> topIdsByCosine(@Param("userId") UUID userId, @Param("vector") String vector,
+                              @Param("limit") int limit);
+
+    /** Ids of the user's episodes with the smallest macro distance (same formula as the service), best first. */
+    @Query(value = "SELECT id FROM meal_episode WHERE user_id = :userId ORDER BY ("
+            + "ABS(carbs - :carbs) / GREATEST(carbs, :carbs, 10.0) "
+            + "+ ABS(COALESCE(fat, 0) - :fat) / GREATEST(COALESCE(fat, 0), :fat, 10.0) "
+            + "+ ABS(COALESCE(protein, 0) - :protein) / GREATEST(COALESCE(protein, 0), :protein, 10.0) "
+            + "+ ABS(COALESCE(fiber, 0) - :fiber) / GREATEST(COALESCE(fiber, 0), :fiber, 10.0)) / 4.0, "
+            + "meal_at DESC LIMIT :limit", nativeQuery = true)
+    List<UUID> topIdsByMacroDistance(@Param("userId") UUID userId, @Param("carbs") double carbs,
+                                     @Param("fat") double fat, @Param("protein") double protein,
+                                     @Param("fiber") double fiber, @Param("limit") int limit);
+
+    /** Rows of (id, cosine similarity) for the user's embedded episodes among {@code ids}. */
+    @Query(value = "SELECT id, 1 - (embedding <=> CAST(:vector AS vector)) FROM meal_episode "
+            + "WHERE user_id = :userId AND embedding IS NOT NULL AND id IN (:ids)", nativeQuery = true)
+    List<Object[]> cosines(@Param("userId") UUID userId, @Param("vector") String vector,
+                           @Param("ids") Collection<UUID> ids);
 }
