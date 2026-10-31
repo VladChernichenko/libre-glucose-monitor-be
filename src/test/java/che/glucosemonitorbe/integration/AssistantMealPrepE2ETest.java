@@ -190,6 +190,10 @@ class AssistantMealPrepE2ETest {
         assertEquals("done", types.get(types.size() - 1));
         JsonNode planEvent = events.get(0);
         String messageId = planEvent.get("messageId").asText();
+        // "now" is the server clock in the user's zone, checked against the client's clock
+        LocalDateTime plannedAt = LocalDateTime.parse(planEvent.get("plannedAt").asText());
+        assertFalse(plannedAt.isBefore(clientNow.minusMinutes(2)) || plannedAt.isAfter(localNow().plusSeconds(1)));
+        assertEquals(plannedAt.plusMinutes(15), LocalDateTime.parse(planEvent.get("doseValidUntil").asText()));
         JsonNode plan = planEvent.get("plan");
         assertFalse(plan.get("stale").asBoolean());
         assertEquals(45.0, plan.get("carbs").get("mid").asDouble(), 1e-9);
@@ -198,7 +202,7 @@ class AssistantMealPrepE2ETest {
         double raw = insulinCalculator.calculateRecommendedInsulin(InsulinCalculationRequest.builder()
                 .carbs(45.0).currentGlucose(GLUCOSE_MGDL / 18.0).targetGlucose(TARGET).activeInsulin(0.0)
                 .userId(userId.toString())
-                .clientTimeInfo(ClientTimeInfo.builder().timestamp(clientNow.toString()).build())
+                .clientTimeInfo(ClientTimeInfo.builder().timestamp(plannedAt.toString()).build())
                 .build()).getRecommendedInsulin();
         double dose = Math.floor(Math.max(0, raw) / 0.5 + 1e-9) * 0.5;
         assertTrue(dose > 0, "test setup should produce a dose");
@@ -212,14 +216,14 @@ class AssistantMealPrepE2ETest {
         List<PredictionPointDTO> dashboard = calculations.calculateGlucoseData(GlucoseCalculationsRequest.builder()
                 .userId(username)
                 .currentGlucose(GLUCOSE_MGDL / 18.0)
-                .clientTimeInfo(ClientTimeInfo.builder().timestamp(clientNow.toString()).build())
+                .clientTimeInfo(ClientTimeInfo.builder().timestamp(plannedAt.toString()).build())
                 .prospectiveNotes(List.of(
                         ProspectiveNoteDTO.builder().insulin(dose).minutesAgo(0).build(),
                         ProspectiveNoteDTO.builder().carbs(45.0).nutritionProfileJson(nutritionJson)
                                 .minutesAgo(-pauseMinutes).build()))
                 .predictionPathMinutes(270)
                 .build()).getPredictionPath();
-        LocalDateTime until = clientNow.plusMinutes(pauseMinutes + 240);
+        LocalDateTime until = plannedAt.plusMinutes(pauseMinutes + 240);
         List<PredictionPointDTO> expected = dashboard.stream()
                 .filter(p -> p.getTimestamp() == null || !p.getTimestamp().isAfter(until)).toList();
         JsonNode curve = pause.get("curve");
@@ -230,19 +234,33 @@ class AssistantMealPrepE2ETest {
         }
         assertTrue(notes().isEmpty(), "planning writes no note");
 
-        // Took it: dose note only, at the tap moment
+        // a phone clock 3 min fast is rejected before anything is written
+        ResponseEntity<String> fast = action(token, "/api/assistant/plans/" + messageId + "/took",
+                Map.of("doseUnits", dose, "pauseMinutes", 15,
+                        "clientTime", localNow().plusMinutes(3).toString(), "timezone", ZONE));
+        assertEquals(HttpStatus.BAD_REQUEST, fast.getStatusCode());
+        assertTrue(fast.getBody().contains("clock is off"), fast.getBody());
+        assertTrue(notes().isEmpty());
+
+        // Took it with the clock 1 min fast: dose note only, dated at server-now-in-zone, never ahead
+        LocalDateTime beforeTook = localNow();
         Map<String, Object> took = Map.of("doseUnits", dose, "pauseMinutes", 15,
-                "clientTime", clientNow.toString(), "timezone", ZONE);
+                "clientTime", localNow().plusMinutes(1).toString(), "timezone", ZONE);
         ResponseEntity<String> tookResp = action(token, "/api/assistant/plans/" + messageId + "/took", took);
+        LocalDateTime afterTookAt = localNow().plusSeconds(1);
         assertEquals(HttpStatus.OK, tookResp.getStatusCode(), tookResp.getBody());
         JsonNode tookBody = objectMapper.readTree(tookResp.getBody());
         assertEquals("TOOK", tookBody.get("state").asText());
-        assertEquals(clientNow.toString(), tookBody.get("payload").get("tookAt").asText());
+        assertEquals("PLAN", tookBody.get("payload").get("doseSource").asText());
+        assertEquals(dose, tookBody.get("payload").get("advisedDoseUnits").asDouble(), 1e-9);
+        LocalDateTime tookAt = LocalDateTime.parse(tookBody.get("payload").get("tookAt").asText());
         List<NoteDto> afterTook = notes();
         assertEquals(1, afterTook.size());
         assertEquals(dose, afterTook.get(0).getInsulin(), 1e-9);
         assertEquals(0.0, afterTook.get(0).getCarbs(), 1e-9);
-        assertEquals(clientNow, afterTook.get(0).getTimestamp());
+        assertEquals(tookAt, afterTook.get(0).getTimestamp());
+        assertFalse(tookAt.isBefore(beforeTook) || tookAt.isAfter(afterTookAt),
+                "the dose is dated at the server's now in the user's zone, not the phone's");
 
         // a second Took is a conflict, and another user cannot act on my plan
         assertEquals(HttpStatus.CONFLICT,
@@ -253,9 +271,10 @@ class AssistantMealPrepE2ETest {
                         Map.of("clientTime", clientNow.toString(), "timezone", ZONE)).getStatusCode());
 
         // Eating now with edited carbs: the meal note at the tap time, and its forecast is frozen
-        LocalDateTime eatAt = localNow();
+        LocalDateTime beforeEat = localNow();
         ResponseEntity<String> eatResp = action(token, "/api/assistant/plans/" + messageId + "/eating",
-                Map.of("carbs", 50.0, "clientTime", eatAt.toString(), "timezone", ZONE));
+                Map.of("carbs", 50.0, "clientTime", localNow().minusMinutes(5).toString(), "timezone", ZONE));
+        LocalDateTime afterEat = localNow().plusSeconds(1);
         assertEquals(HttpStatus.OK, eatResp.getStatusCode(), eatResp.getBody());
         JsonNode eatBody = objectMapper.readTree(eatResp.getBody());
         assertEquals("EATEN", eatBody.get("state").asText());
@@ -263,7 +282,9 @@ class AssistantMealPrepE2ETest {
         NoteDto meal = notes().stream().filter(n -> n.getId().equals(mealNoteId)).findFirst().orElseThrow();
         assertEquals(50.0, meal.getCarbs(), 1e-9);
         assertEquals(0.0, meal.getInsulin(), 1e-9);
-        assertEquals(eatAt, meal.getTimestamp());
+        assertEquals(LocalDateTime.parse(eatBody.get("payload").get("eatenAt").asText()), meal.getTimestamp());
+        assertFalse(meal.getTimestamp().isBefore(beforeEat) || meal.getTimestamp().isAfter(afterEat),
+                "the meal is dated at the server's now in the user's zone, not the phone's (5 min slow)");
         JsonNode profile = objectMapper.readTree(meal.getNutritionProfile());
         assertEquals(8.0, profile.get("fat").asDouble(), 1e-9, "unedited macros come from the plan");
         awaitSnapshot(mealNoteId);
@@ -298,7 +319,8 @@ class AssistantMealPrepE2ETest {
         List<NoteDto> notes = notes();
         assertEquals(1, notes.size());
         assertEquals("[\"HOT_SHOWER\"]", objectMapper.readTree(notes.get(0).getContextTags()).toString());
-        assertEquals(clientNow, notes.get(0).getTimestamp());
+        LocalDateTime saved = notes.get(0).getTimestamp();
+        assertFalse(saved.isBefore(clientNow) || saved.isAfter(localNow().plusSeconds(1)));
         assertEquals(HttpStatus.CONFLICT,
                 action(token, "/api/assistant/events/" + messageId + "/confirm", body).getStatusCode());
     }

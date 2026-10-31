@@ -50,9 +50,11 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
 
     /**
      * Structured meal-prep card. {@code messageId} is the assistant chat message that holds the
-     * plan's state; the card's Took it / Eating now / Not eating actions post to it.
+     * plan's state; the card's Took it / Eating now / Not eating actions post to it. Times are the
+     * user's wall clock (ISO, no offset). After {@code doseValidUntil} the card must not prefill or
+     * show the planned dose (re-plan or manual entry).
      */
-    record Plan(UUID messageId, MealPlan plan) implements AssistantEvent {}
+    record Plan(UUID messageId, MealPlan plan, String plannedAt, String doseValidUntil) implements AssistantEvent {}
 
     /**
      * A free-text event proposed as a note with context tags; saved only when the user confirms

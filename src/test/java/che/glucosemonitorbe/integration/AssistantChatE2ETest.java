@@ -167,6 +167,37 @@ class AssistantChatE2ETest {
     }
 
     @Test
+    @DisplayName("a phone clock 3 min fast is rejected with 400 and nothing is written")
+    void clientClockTooFarAheadIs400() {
+        String token = login();
+        String fast = LocalDateTime.now(ZoneId.of(ZONE)).plusMinutes(3).truncatedTo(ChronoUnit.SECONDS).toString();
+        ResponseEntity<String> resp = post(token, "5u", fast, ZONE);
+        assertEquals(HttpStatus.BAD_REQUEST, resp.getStatusCode());
+        assertTrue(resp.getBody().contains("clock is off"), resp.getBody());
+        List<NoteDto> notes = rest.exchange("/api/notes", HttpMethod.GET, new HttpEntity<>(bearer(token)),
+                new ParameterizedTypeReference<List<NoteDto>>() {}).getBody();
+        assertTrue(notes.isEmpty());
+    }
+
+    @Test
+    @DisplayName("a phone clock 1 min fast is accepted; the note is dated at server-now in the user's zone")
+    void clientClockSlightlyAheadUsesServerNow() throws Exception {
+        String token = login();
+        ZoneId zone = ZoneId.of(ZONE);
+        LocalDateTime before = LocalDateTime.now(zone).truncatedTo(ChronoUnit.SECONDS);
+        String ahead = before.plusMinutes(1).toString();
+        ResponseEntity<String> resp = post(token, "5u", ahead, ZONE);
+        LocalDateTime after = LocalDateTime.now(zone).plusSeconds(1);
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        List<NoteDto> notes = rest.exchange("/api/notes", HttpMethod.GET, new HttpEntity<>(bearer(token)),
+                new ParameterizedTypeReference<List<NoteDto>>() {}).getBody();
+        assertEquals(1, notes.size());
+        LocalDateTime ts = notes.get(0).getTimestamp();
+        assertFalse(ts.isBefore(before) || ts.isAfter(after), ts + " not in [" + before + ", " + after + "]");
+        assertFalse(ts.isAfter(before.plusMinutes(2)));
+    }
+
+    @Test
     @DisplayName("another user cannot undo my message")
     void undoByOtherUserIs404() throws Exception {
         String mine = login();

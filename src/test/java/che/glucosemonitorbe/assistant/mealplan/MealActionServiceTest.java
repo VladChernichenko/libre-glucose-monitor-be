@@ -46,6 +46,11 @@ class MealActionServiceTest {
     }
 
     private ChatMessage planMessage() {
+        return planMessage(4.5, null, false);
+    }
+
+    /** A plan made at NOW (dose valid until NOW + 15 min) advising {@code advised} U, or refused / stale. */
+    private ChatMessage planMessage(Double advised, String refusalCode, boolean stale) {
         ChatMessage m = new ChatMessage();
         m.setId(UUID.randomUUID());
         m.setUserId(user);
@@ -54,6 +59,10 @@ class MealActionServiceTest {
         ObjectNode payload = objectMapper.createObjectNode().put("state", MealActionService.PLANNED)
                 .put("description", "chicken soup, rye bread 40 g");
         payload.set("meal", objectMapper.valueToTree(new MealMacros(45.0, 12.0, 30.0, 4.0, 50.0)));
+        payload.put("plannedAt", "2026-10-31T12:00:00").put("doseValidUntil", "2026-10-31T12:15:00");
+        ObjectNode plan = payload.putObject("plan").put("stale", stale);
+        if (advised != null) plan.put("doseUnits", advised); else plan.putNull("doseUnits");
+        if (refusalCode != null) plan.put("refusalCode", refusalCode); else plan.putNull("refusalCode");
         m.setPayload(payload.toString());
         when(repository.findForUpdate(m.getId())).thenReturn(Optional.of(m));
         return m;
@@ -93,13 +102,51 @@ class MealActionServiceTest {
         assertEquals(doseNote, r.noteId());
         JsonNode p = objectMapper.readTree(m.getPayload().toString());
         assertEquals("TOOK", p.get("state").asText());
-        assertEquals(NOW.toString(), p.get("tookAt").asText());
+        assertEquals("2026-10-31T12:00:00", p.get("tookAt").asText());
         assertEquals(15, p.get("pauseMinutes").asInt());
         assertEquals(4.5, p.get("doseUnits").asDouble());
         assertEquals(doseNote.toString(), p.get("doseNoteId").asText());
-        assertEquals(NOW.plusMinutes(15).toString(), p.get("eatAt").asText());
-        assertEquals(NOW.plusMinutes(60).toString(), p.get("overdueAt").asText());
+        assertEquals("2026-10-31T12:15:00", p.get("eatAt").asText());
+        assertEquals("2026-10-31T13:00:00", p.get("overdueAt").asText());
         assertEquals(45.0, p.get("meal").get("carbs").asDouble(), "planned meal is kept on the message");
+    }
+
+    private JsonNode tookPayload(ChatMessage m, double dose, LocalDateTime at) throws Exception {
+        stubDoseNote();
+        service.took(user, m.getId(), dose, 15, at);
+        return objectMapper.readTree(m.getPayload());
+    }
+
+    @Test
+    void doseSourceIsPlanWhenTheFreshAdvisedDoseIsTaken() throws Exception {
+        JsonNode p = tookPayload(planMessage(), 4.5, NOW.plusMinutes(15)); // doseValidUntil itself still counts
+        assertEquals("PLAN", p.get("doseSource").asText());
+        assertEquals(4.5, p.get("advisedDoseUnits").asDouble());
+    }
+
+    @Test
+    void doseSourceIsUserEnteredWhenTheDoseDiffers() throws Exception {
+        JsonNode p = tookPayload(planMessage(), 5.0, NOW);
+        assertEquals("USER_ENTERED", p.get("doseSource").asText());
+        assertEquals(4.5, p.get("advisedDoseUnits").asDouble());
+    }
+
+    @Test
+    void doseSourceIsUserEnteredAfterDoseValidUntil() throws Exception {
+        JsonNode p = tookPayload(planMessage(), 4.5, NOW.plusMinutes(16));
+        assertEquals("USER_ENTERED", p.get("doseSource").asText(), "a Took after expiry still logs, but not as advice");
+        assertEquals("TOOK", p.get("state").asText());
+    }
+
+    @Test
+    void doseSourceIsUserEnteredForRefusedOrStalePlans() throws Exception {
+        JsonNode refused = tookPayload(planMessage(null, "BELOW_MIN_GLUCOSE", false), 2.0, NOW);
+        assertEquals("USER_ENTERED", refused.get("doseSource").asText());
+        assertTrue(refused.get("advisedDoseUnits").isNull());
+
+        JsonNode stale = tookPayload(planMessage(null, null, true), 2.0, NOW);
+        assertEquals("USER_ENTERED", stale.get("doseSource").asText());
+        assertTrue(stale.get("advisedDoseUnits").isNull());
     }
 
     @Test
@@ -128,7 +175,7 @@ class MealActionServiceTest {
         assertEquals(mealNote, r.noteId());
         JsonNode p = objectMapper.readTree(m.getPayload());
         assertEquals("EATEN", p.get("state").asText());
-        assertEquals(tap.toString(), p.get("eatenAt").asText());
+        assertEquals(MealActionService.iso(tap), p.get("eatenAt").asText());
         assertEquals(mealNote.toString(), p.get("mealNoteId").asText());
     }
 
@@ -244,7 +291,7 @@ class MealActionServiceTest {
         verify(noteWriter, never()).undo(any(), any());
         assertThrows(ResponseStatusException.class, () -> service.eating(user, m.getId(), null, NOW.plusMinutes(6)));
         assertFalse(service.overdue(m, NOW.plusHours(3)));
-        assertEquals(NOW.plusMinutes(5).toString(), objectMapper.readTree(m.getPayload()).get("skippedAt").asText());
+        assertEquals("2026-10-31T12:05:00", objectMapper.readTree(m.getPayload()).get("skippedAt").asText());
     }
 
     @Test

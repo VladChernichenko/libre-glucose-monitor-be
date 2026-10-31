@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -47,8 +48,10 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 public class AssistantController {
 
     static final int MAX_TEXT_LENGTH = 4000;
-    /** How far the client's wall clock may be from the server's clock in the client's zone. */
-    private static final Duration MAX_CLOCK_SKEW = Duration.ofHours(24);
+    /** The client's clock may run at most this far ahead of the server clock in the user's zone. */
+    static final Duration MAX_CLIENT_AHEAD = Duration.ofMinutes(2);
+    /** ... and at most this far behind (request latency, a slow phone clock). */
+    static final Duration MAX_CLIENT_BEHIND = Duration.ofMinutes(10);
 
     private final AssistantService assistantService;
     private final ChatHistoryService chatHistoryService;
@@ -69,7 +72,7 @@ public class AssistantController {
     ) {
         UUID userId = userId(authentication);
         ZoneId zone = parseZone(timezone);
-        LocalDateTime clientNow = parseClientTime(clientTime, zone);
+        LocalDateTime clientNow = assistantNow(clientTime, zone, Instant.now());
         boolean hasPhoto = photo != null && !photo.isEmpty();
         boolean hasText = text != null && !text.isBlank();
         if (!hasText && !hasPhoto) {
@@ -177,7 +180,7 @@ public class AssistantController {
         if (clientTime == null || timezone == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "clientTime and timezone are required");
         }
-        return parseClientTime(clientTime, parseZone(timezone));
+        return assistantNow(clientTime, parseZone(timezone), Instant.now());
     }
 
     @Operation(summary = "Forecast hit rate over the last 14 days (+60 and +120 min checks)")
@@ -198,19 +201,27 @@ public class AssistantController {
         }
     }
 
-    private static LocalDateTime parseClientTime(String clientTime, ZoneId zone) {
-        LocalDateTime t;
+    /**
+     * The assistant's "now": the server clock in the user's zone, to the second. The client's
+     * {@code clientTime} is only a check: a phone clock more than {@link #MAX_CLIENT_AHEAD} ahead or
+     * {@link #MAX_CLIENT_BEHIND} behind is rejected, so no note is ever dated in the future (a dose
+     * invisible to IOB) or silently backdated.
+     */
+    static LocalDateTime assistantNow(String clientTime, ZoneId zone, Instant serverInstant) {
+        LocalDateTime client;
         try {
-            t = LocalDateTime.parse(clientTime.trim());
+            client = LocalDateTime.parse(clientTime.trim());
         } catch (DateTimeParseException | NullPointerException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "clientTime must be a local ISO date-time without offset, e.g. 2026-10-30T12:00:00");
         }
-        Duration skew = Duration.between(Instant.now(), t.atZone(zone).toInstant()).abs();
-        if (skew.compareTo(MAX_CLOCK_SKEW) > 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "clientTime is too far from the current time");
+        LocalDateTime serverNow = LocalDateTime.ofInstant(serverInstant, zone).truncatedTo(ChronoUnit.SECONDS);
+        if (client.isAfter(serverNow.plus(MAX_CLIENT_AHEAD)) || client.isBefore(serverNow.minus(MAX_CLIENT_BEHIND))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Your phone's clock is off: it says " + client + " but it is " + serverNow + " in " + zone
+                            + ". Set the time automatically and try again.");
         }
-        return t;
+        return serverNow;
     }
 
     private void write(BufferedWriter writer, AssistantEvent event) {

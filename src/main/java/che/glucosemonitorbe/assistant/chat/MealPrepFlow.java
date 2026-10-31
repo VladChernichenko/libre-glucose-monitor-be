@@ -72,7 +72,8 @@ public class MealPrepFlow {
                 .put("language", language)
                 .put("state", MealActionService.PLANNED)
                 .put("description", description)
-                .put("plannedAt", msg.clientNow().toString());
+                .put("plannedAt", MealActionService.iso(msg.clientNow()))
+                .put("doseValidUntil", MealActionService.iso(msg.clientNow().plus(MealActionService.DOSE_VALIDITY)));
         payload.set("meal", objectMapper.valueToTree(new MealMacros(plan.carbs().mid(), plan.fat().mid(),
                 plan.protein().mid(), plan.fiber().mid(), plan.gi())));
         ArrayNode itemsNode = payload.putArray("items");
@@ -83,7 +84,8 @@ public class MealPrepFlow {
         payload.set("plan", objectMapper.valueToTree(plan));
         ChatMessage reply = history.appendAssistant(userMessage, "", MealActionService.INTENT_MEAL_PLAN, payload,
                 null, System.currentTimeMillis() - start);
-        sink.accept(new AssistantEvent.Plan(reply.getId(), plan));
+        sink.accept(new AssistantEvent.Plan(reply.getId(), plan, payload.get("plannedAt").asText(),
+                payload.get("doseValidUntil").asText()));
 
         StringBuilder seen = new StringBuilder();
         String modelId = null;

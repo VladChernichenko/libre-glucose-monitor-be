@@ -4,7 +4,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 /**
- * A validated chat message from the client. {@code clientNow} is the user's local wall time (used as
+ * A validated chat message from the client. {@code clientNow} is the user's local wall time: the
+ * server clock in the user's zone, after the client's clock was checked against it (used as
  * "now" by the quick-log parser and for note timestamps); {@code photoKey} is the storage key of an
  * already-uploaded photo, or null.
  */

@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -49,6 +50,11 @@ public class MealActionService {
     public static final String PROPOSED = "PROPOSED";
     public static final String CONFIRMED = "CONFIRMED";
 
+    public static final String DOSE_SOURCE_PLAN = "PLAN";
+    public static final String DOSE_SOURCE_USER_ENTERED = "USER_ENTERED";
+
+    /** A plan's dose may be prefilled on the card only until plannedAt + this. */
+    public static final Duration DOSE_VALIDITY = Duration.ofMinutes(15);
     /** The card turns amber when the meal is not logged within pause + this. */
     static final Duration OVERDUE_GRACE = Duration.ofMinutes(45);
     static final int MAX_PAUSE_MINUTES = 60;
@@ -85,12 +91,16 @@ public class MealActionService {
         } catch (QuickLogRejectedException e) {
             throw badRequest(e.getMessage()); // e.g. above the user's max bolus
         }
+        JsonNode advised = p.path("plan").path("doseUnits");
         p.put("state", TOOK);
-        p.put("tookAt", now.toString());
+        p.put("tookAt", iso(now));
         p.put("doseUnits", doseUnits);
+        if (advised.isNumber()) p.put("advisedDoseUnits", advised.asDouble());
+        else p.putNull("advisedDoseUnits");
+        p.put("doseSource", advisedDoseTaken(p, doseUnits, now) ? DOSE_SOURCE_PLAN : DOSE_SOURCE_USER_ENTERED);
         p.put("pauseMinutes", pauseMinutes);
-        p.put("eatAt", now.plusMinutes(pauseMinutes).toString());
-        p.put("overdueAt", now.plusMinutes(pauseMinutes).plus(OVERDUE_GRACE).toString());
+        p.put("eatAt", iso(now.plusMinutes(pauseMinutes)));
+        p.put("overdueAt", iso(now.plusMinutes(pauseMinutes).plus(OVERDUE_GRACE)));
         p.put("doseNoteId", noteId.toString());
         return save(m, p, noteId);
     }
@@ -135,7 +145,7 @@ public class MealActionService {
         UUID noteId = notesService.createNote(userId, req).getId();
 
         p.put("state", EATEN);
-        p.put("eatenAt", now.toString());
+        p.put("eatenAt", iso(now));
         p.put("mealNoteId", noteId.toString());
         p.set("eatenMeal", objectMapper.valueToTree(meal));
         return save(m, p, noteId);
@@ -148,7 +158,7 @@ public class MealActionService {
         ObjectNode p = history.readPayload(m);
         requireState(p, Set.of(PLANNED, TOOK));
         p.put("state", SKIPPED);
-        p.put("skippedAt", now.toString());
+        p.put("skippedAt", iso(now));
         return save(m, p, null);
     }
 
@@ -169,7 +179,7 @@ public class MealActionService {
         req.setChatMessageId(m.getId());
         UUID noteId = notesService.createNote(userId, req).getId();
         p.put("state", CONFIRMED);
-        p.put("confirmedAt", now.toString());
+        p.put("confirmedAt", iso(now));
         p.put("noteId", noteId.toString());
         return save(m, p, noteId);
     }
@@ -182,7 +192,28 @@ public class MealActionService {
         return now.isAfter(tookAt.plusMinutes(p.path("pauseMinutes").asInt(0)).plus(OVERDUE_GRACE));
     }
 
+    /** Local wall time as ISO-8601 with seconds always present, e.g. {@code 2026-10-31T12:00:00}. */
+    public static String iso(LocalDateTime t) {
+        return t.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+    }
+
     // -- helpers -------------------------------------------------------------------------------
+
+    /**
+     * The injected dose is the plan's advice only when the plan had a dose (fresh CGM, no refusal),
+     * the Took is not past {@code doseValidUntil}, and the entered dose equals the advised one.
+     */
+    private static boolean advisedDoseTaken(ObjectNode p, double doseUnits, LocalDateTime now) {
+        JsonNode plan = p.path("plan");
+        JsonNode advised = plan.path("doseUnits");
+        if (!advised.isNumber() || plan.path("stale").asBoolean(false) || plan.hasNonNull("refusalCode")) {
+            return false;
+        }
+        if (!p.hasNonNull("doseValidUntil") || now.isAfter(LocalDateTime.parse(p.get("doseValidUntil").asText()))) {
+            return false;
+        }
+        return Math.abs(advised.asDouble() - doseUnits) < 1e-9;
+    }
 
     private ChatMessage locked(UUID userId, UUID messageId, String intent) {
         ChatMessage m = repository.findForUpdate(messageId)
