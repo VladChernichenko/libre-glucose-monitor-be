@@ -1,6 +1,8 @@
 package che.glucosemonitorbe.assistant.chat;
 
 import che.glucosemonitorbe.assistant.common.ContextTag;
+import che.glucosemonitorbe.assistant.mealplan.HistoryBanner;
+import che.glucosemonitorbe.assistant.mealplan.HistoryBannerService;
 import che.glucosemonitorbe.assistant.mealplan.MealActionService;
 import che.glucosemonitorbe.assistant.mealplan.MealMacros;
 import che.glucosemonitorbe.assistant.mealplan.MealNutritionResolver;
@@ -22,7 +24,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * The meal-prep route (spec §6.4) and the free-text event proposal (§6.1 path 3):
- * nutrition -> {@link MealPlanService} -> {@code plan} event -> {@code episodes} event (top similar meals)
+ * nutrition -> {@link MealPlanService} -> {@code plan} event -> {@code banner} event (history dose, when the
+ * plan has one) -> {@code episodes} event (top similar meals)
  * -> explanation (facts payload, number-guarded, sent as one token); or a
  * {@code proposal} event whose note is saved only on Confirm. The plan's state lives on the
  * assistant message's payload and is advanced by {@link MealActionService}.
@@ -45,6 +48,7 @@ public class MealPrepFlow {
     private final FactsService factsService;
     private final EpisodeRetrieval episodeRetrieval;
     private final GuardedReplyService guardedReply;
+    private final HistoryBannerService bannerService;
 
     public void mealPrep(UUID userId, ChatMessage userMessage, IncomingMessage msg,
                          List<IntentClassifier.FoodItem> items, String language, Consumer<AssistantEvent> sink) {
@@ -84,12 +88,17 @@ public class MealPrepFlow {
             if (i.grams() != null) item.put("grams", i.grams());
         }
         payload.set("plan", objectMapper.valueToTree(plan));
+        // Both curves for the history banner; persisted so the chat history renders it too.
+        HistoryBanner banner = plan.history() == null ? null
+                : bannerService.build(userId, plan, macros, msg.clientNow()).orElse(null);
+        if (banner != null) payload.set("banner", objectMapper.valueToTree(banner));
         ChatMessage reply = history.appendAssistant(userMessage, "", MealActionService.INTENT_MEAL_PLAN, payload,
                 null, System.currentTimeMillis() - start);
         // Only the newest plan can be acted on; older PLANNED cards turn SUPERSEDED (TOOK ones never).
         mealActions.supersedeOlderPlans(userId, reply.getId(), msg.clientNow());
         sink.accept(new AssistantEvent.Plan(reply.getId(), plan, payload.get("plannedAt").asText(),
                 payload.get("doseValidUntil").asText()));
+        if (banner != null) sink.accept(new AssistantEvent.Banner(reply.getId(), banner));
 
         FactsPayload.State state = null;
         List<FactsPayload.EpisodeFacts> episodes = List.of();

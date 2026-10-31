@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.assistant.chat;
 
+import che.glucosemonitorbe.assistant.mealplan.DoseRecheck;
 import che.glucosemonitorbe.assistant.mealplan.MealActionService;
 import che.glucosemonitorbe.assistant.snapshot.HitRateService;
 import che.glucosemonitorbe.service.UserService;
@@ -139,6 +140,9 @@ public class AssistantController {
 
     public record ClientTimeRequest(String clientTime, String timezone) {}
 
+    /** Low re-check of a dose the user is about to choose (e.g. the history banner's). */
+    public record RecheckRequest(Double doseUnits, String clientTime, String timezone) {}
+
     @Operation(summary = "Meal card: Took it - saves the dose note now and starts the pause (409 unless PLANNED)")
     @PostMapping("/plans/{messageId}/took")
     public MealActionService.ActionResult took(Authentication authentication, @PathVariable("messageId") UUID messageId,
@@ -176,6 +180,21 @@ public class AssistantController {
                                                @RequestBody ClientTimeRequest body) {
         if (body == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Body required");
         return mealActionService.skip(userId(authentication), messageId, wallTime(body.clientTime(), body.timezone()));
+    }
+
+    @Operation(summary = "Meal card: low re-check of a chosen dose - forecast, min, level OK|AMBER|RED or a refusalCode (409 unless PLANNED; read-only)")
+    @PostMapping("/plans/{messageId}/recheck")
+    public DoseRecheck recheck(Authentication authentication, @PathVariable("messageId") UUID messageId,
+                               @RequestBody RecheckRequest body) {
+        if (body == null || body.doseUnits() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "doseUnits is required");
+        }
+        if (body.clientTime() == null || body.timezone() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "clientTime and timezone are required");
+        }
+        Instant server = Instant.now();
+        LocalDateTime now = assistantNow(body.clientTime(), parseZone(body.timezone()), server);
+        return mealActionService.recheck(userId(authentication), messageId, body.doseUnits(), now, server);
     }
 
     @Operation(summary = "Confirm a proposed event: saves the tagged note now (409 unless PROPOSED)")

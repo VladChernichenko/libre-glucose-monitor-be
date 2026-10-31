@@ -3,23 +3,33 @@ package che.glucosemonitorbe.assistant.mealplan;
 import che.glucosemonitorbe.assistant.chat.ChatHistoryService;
 import che.glucosemonitorbe.assistant.chat.ChatMessage;
 import che.glucosemonitorbe.assistant.chat.ChatMessageRepository;
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
+import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.assistant.quicklog.AssistantNoteWriter;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogCommand;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogRejectedException;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
+import che.glucosemonitorbe.dto.PredictionPointDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.exception.DosingRefusalReason;
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
+import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.NotesService;
+import che.glucosemonitorbe.service.UserSettingsService;
+import che.glucosemonitorbe.service.observer.HypoThresholds;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +45,7 @@ import org.springframework.web.server.ResponseStatusException;
  * only the dose note; Eating saves the meal note at the tap moment or a validated earlier {@code ateAt}. No action ever writes a note dated
  * after {@code now}, so a skipped or late meal never leaves a phantom meal in COB. Event proposals:
  * {@code PROPOSED -> CONFIRMED}. Each action row-locks the message, so a double tap acts once
- * (the second gets 409).
+ * (the second gets 409). The low re-check of a chosen dose ({@link #recheck}) is read-only.
  */
 @Service
 @RequiredArgsConstructor
@@ -70,6 +80,10 @@ public class MealActionService {
     private final AssistantNoteWriter noteWriter;
     private final NotesService notesService;
     private final ObjectMapper objectMapper;
+    private final PreBolusPauseOptimizer optimizer;
+    private final CgmFreshnessService freshness;
+    private final UserSettingsService settings;
+    private final InsulinCalculatorService calculator;
 
     /** Outcome of a card action: the new state, the note it saved, and the message's full payload. */
     public record ActionResult(UUID messageId, String state, UUID noteId, JsonNode payload) {}
@@ -219,6 +233,50 @@ public class MealActionService {
         return save(m, p, noteId);
     }
 
+    /**
+     * Low re-check of a dose the user is about to choose (spec 6.6), e.g. the history banner's dose:
+     * the dashboard forecast with that dose now and the planned meal at now + the planned pause (0 when
+     * the plan has none), cropped as the pause search crops. Only a PLANNED plan (else 409) up to its
+     * {@code doseValidUntil} ({@link DoseRecheck#PLAN_EXPIRED} after). The max-bolus and below-3.9
+     * refusals apply exactly as to the model dose, and a stale CGM refuses. Writes nothing.
+     *
+     * @param now           the assistant's server-now in the user's zone
+     * @param serverInstant the same moment as an instant, for the CGM freshness check
+     */
+    @Transactional(readOnly = true)
+    public DoseRecheck recheck(UUID userId, UUID messageId, double doseUnits, LocalDateTime now,
+                               Instant serverInstant) {
+        if (!Double.isFinite(doseUnits) || doseUnits <= 0) {
+            throw badRequest("doseUnits must be greater than 0");
+        }
+        ChatMessage m = owned(repository.findById(messageId), userId, messageId, INTENT_MEAL_PLAN);
+        ObjectNode p = history.readPayload(m);
+        requireState(p, Set.of(PLANNED));
+        if (!p.hasNonNull("doseValidUntil") || now.isAfter(LocalDateTime.parse(p.get("doseValidUntil").asText()))) {
+            return DoseRecheck.refused(DoseRecheck.PLAN_EXPIRED);
+        }
+        UserSettingsDTO s = settings.getUserSettings(userId);
+        if (s == null) return DoseRecheck.refused(DosingRefusalReason.SETTINGS_INVALID.name());
+        if (doseUnits > calculator.maxBolusUnits(s)) {
+            return DoseRecheck.refused(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS.name());
+        }
+        Optional<CgmReadingDTO> reading = freshness.freshReading(userId, serverInstant);
+        if (reading.isEmpty()) return DoseRecheck.refused(DoseRecheck.CGM_STALE);
+        double glucose = reading.get().mmol();
+        if (glucose < HypoThresholds.HYPO_MMOL) {
+            return DoseRecheck.refused(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD.name());
+        }
+        JsonNode planned = p.path("meal");
+        MealMacros meal = new MealMacros(planned.path("carbs").asDouble(0.0), planned.path("fat").asDouble(0.0),
+                planned.path("protein").asDouble(0.0), planned.path("fiber").asDouble(0.0), nullable(planned, "gi"));
+        JsonNode pause = p.path("plan").path("pause").path("pauseMinutes");
+        List<PredictionPointDTO> curve = optimizer.forecastDose(userId, now, glucose, doseUnits, meal,
+                pause.isNumber() ? pause.asInt() : 0);
+        double min = PreBolusPauseOptimizer.min(curve);
+        if (Double.isNaN(min)) return DoseRecheck.refused(DoseRecheck.FORECAST_UNAVAILABLE);
+        return new DoseRecheck(curve, min, DoseRecheck.level(min), null);
+    }
+
     /** The dose was taken but the meal is not logged by tookAt + pause + 45 min. */
     public boolean overdue(ChatMessage m, LocalDateTime now) {
         ObjectNode p = history.readPayload(m);
@@ -251,7 +309,11 @@ public class MealActionService {
     }
 
     private ChatMessage locked(UUID userId, UUID messageId, String intent) {
-        ChatMessage m = repository.findForUpdate(messageId)
+        return owned(repository.findForUpdate(messageId), userId, messageId, intent);
+    }
+
+    private static ChatMessage owned(Optional<ChatMessage> found, UUID userId, UUID messageId, String intent) {
+        ChatMessage m = found
                 .filter(x -> userId.equals(x.getUserId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Chat message not found: " + messageId));
         if (m.getRole() != ChatMessage.Role.ASSISTANT || !intent.equals(m.getIntent())) {

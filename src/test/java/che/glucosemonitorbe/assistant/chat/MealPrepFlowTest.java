@@ -6,7 +6,11 @@ import static org.mockito.Mockito.*;
 
 import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.ai.NumberGuard;
+import che.glucosemonitorbe.assistant.mealplan.HistoryBanner;
+import che.glucosemonitorbe.assistant.mealplan.HistoryBannerService;
+import che.glucosemonitorbe.assistant.mealplan.HistoryDose;
 import che.glucosemonitorbe.assistant.mealplan.MealActionService;
+import che.glucosemonitorbe.assistant.mealplan.MealMacros;
 import che.glucosemonitorbe.assistant.mealplan.MealNutritionResolver;
 import che.glucosemonitorbe.assistant.mealplan.MealPlan;
 import che.glucosemonitorbe.assistant.mealplan.MealPlanService;
@@ -25,6 +29,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class MealPrepFlowTest {
 
@@ -40,6 +45,7 @@ class MealPrepFlowTest {
     private final EpisodeRetrieval retrieval = mock(EpisodeRetrieval.class);
     private final LlmGatewayService llm = mock(LlmGatewayService.class);
     private final AiAnalysisTraceRepository traces = mock(AiAnalysisTraceRepository.class);
+    private final HistoryBannerService banners = mock(HistoryBannerService.class);
     private final UUID user = UUID.randomUUID();
     private final List<AssistantEvent> events = new ArrayList<>();
     private MealPrepFlow flow;
@@ -54,7 +60,7 @@ class MealPrepFlowTest {
         });
         ChatHistoryService history = new ChatHistoryService(repository, objectMapper);
         flow = new MealPrepFlow(history, nutrition, planService, actions, objectMapper, facts, retrieval,
-                new GuardedReplyService(llm, traces, objectMapper));
+                new GuardedReplyService(llm, traces, objectMapper), banners);
         userMessage = history.appendUser(user, "40 g rye bread", null, Instant.now());
         when(nutrition.resolve(any(), anyList())).thenReturn(Optional.of(NutritionSnapshot.builder().totalCarbs(40.0).build()));
         when(planService.plan(eq(user), any(), eq(NOW))).thenReturn(new MealPlan(
@@ -125,5 +131,49 @@ class MealPrepFlowTest {
                         new NutritionRange(5, 5, 5), new NutritionRange(4, 4, 4), null, null, 4.0, null,
                         new PauseChoice(15, List.of(), 10.37, 5.6, "x"), false), "rye bread 40 g")).build()).ok());
         verify(repository).updateReplyText(any(), eq(text), eq("m"), anyLong());
+    }
+
+    @Test
+    void historyBannerIsEmittedRightAfterThePlanAndPersistedOnThePlanMessage() throws Exception {
+        HistoryDose hd = new HistoryDose(5.0, 4.0, 25.0, List.of(UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID()), null);
+        MealPlan withHistory = new MealPlan(new NutritionRange(36, 40, 44), new NutritionRange(2, 2, 2),
+                new NutritionRange(5, 5, 5), new NutritionRange(4, 4, 4), null, null, 4.0, null,
+                new PauseChoice(15, List.of(), 10.37, 5.6, "peak stays lower"), false, hd);
+        when(planService.plan(eq(user), any(), eq(NOW))).thenReturn(withHistory);
+        HistoryBanner banner = new HistoryBanner(4.0, 5.0, 25.0, 15,
+                new HistoryBanner.EpisodesLine(3, hd.episodeIds(), 4.0, 11.9, 13.3, 9.4), null,
+                List.of(), 5.6, 10.37, List.of(), 4.8, 9.1, "OK");
+        when(banners.build(user, withHistory, new MealMacros(40, 2, 5, 4, null), NOW)).thenReturn(Optional.of(banner));
+        llmSays("4 U with a 15 min pause.");
+
+        flow.mealPrep(user, userMessage, new IncomingMessage("40 g rye bread", null, NOW, ZONE),
+                List.of(new IntentClassifier.FoodItem("rye bread", 40.0)), "en", events::add);
+
+        assertEquals(List.of(AssistantEvent.Plan.class, AssistantEvent.Banner.class, AssistantEvent.Token.class,
+                AssistantEvent.Done.class), events.stream().map(Object::getClass).toList());
+        AssistantEvent.Plan plan = (AssistantEvent.Plan) events.get(0);
+        AssistantEvent.Banner b = (AssistantEvent.Banner) events.get(1);
+        assertEquals(plan.messageId(), b.messageId());
+        assertSame(banner, b.banner());
+        String wire = objectMapper.writeValueAsString(b);
+        assertTrue(wire.startsWith("{\"type\":\"banner\""), wire);
+        ArgumentCaptor<ChatMessage> saved = ArgumentCaptor.forClass(ChatMessage.class);
+        verify(repository, atLeastOnce()).save(saved.capture());
+        ChatMessage reply = saved.getAllValues().stream().filter(m -> plan.messageId().equals(m.getId()))
+                .reduce((a, c) -> c).orElseThrow();
+        com.fasterxml.jackson.databind.JsonNode p = objectMapper.readTree(reply.getPayload());
+        assertEquals(5.0, p.get("banner").get("historyUnits").asDouble());
+        assertEquals(4.8, p.get("banner").get("historyMin").asDouble());
+        assertEquals(3, p.get("banner").get("episodes").get("count").asInt());
+    }
+
+    @Test
+    void noBannerEventWithoutAHistoryDose() {
+        llmSays("4 U with a 15 min pause.");
+        flow.mealPrep(user, userMessage, new IncomingMessage("40 g rye bread", null, NOW, ZONE),
+                List.of(new IntentClassifier.FoodItem("rye bread", 40.0)), "en", events::add);
+        assertTrue(events.stream().noneMatch(e -> e instanceof AssistantEvent.Banner));
+        verifyNoInteractions(banners);
     }
 }

@@ -139,6 +139,29 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
+        @DisplayName("forecastDose: one forecast with the dose now and the meal at now + pause, cropped to pause + 240")
+        void forecastDoseSendsDoseNowMealAtPauseAndCrops() {
+            when(calculations.calculateGlucoseData(any())).thenReturn(GlucoseCalculationsResponse.builder()
+                    .predictionPath(path(270, m -> 6.0)).build());
+
+            List<PredictionPointDTO> curve = optimizer.forecastDose(USER, NOW, 7.2, 5.0, FAST_CARBS, 15);
+
+            ArgumentCaptor<GlucoseCalculationsRequest> req = ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
+            verify(calculations, times(1)).calculateGlucoseData(req.capture());
+            verifyNoInteractions(resolver); // no pause search, no in-flight lookup
+            assertThat(req.getValue().getCurrentGlucose()).isEqualTo(7.2);
+            assertThat(req.getValue().getPredictionPathMinutes()).isEqualTo(PreBolusPauseOptimizer.PATH_MINUTES);
+            List<ProspectiveNoteDTO> p = req.getValue().getProspectiveNotes();
+            assertThat(p).hasSize(2);
+            assertThat(p.get(0).getInsulin()).isEqualTo(5.0);
+            assertThat(p.get(0).getMinutesAgo()).isZero();
+            assertThat(p.get(1).getCarbs()).isEqualTo(60.0);
+            assertThat(p.get(1).getMinutesAgo()).isEqualTo(-15);
+            assertThat(curve).hasSize(255 / 5); // +5..+255 = pause 15 + 240
+            assertThat(curve.get(curve.size() - 1).getTimestamp()).isEqualTo(NOW.plusMinutes(255));
+        }
+
+        @Test
         @DisplayName("a low after now+240 but within pause+240 rejects that pause; each curve is cropped to pause+240")
         void lowAfterNowPlus240_rejectsLongPause() {
             // Cost prefers longer pauses; a dip at +265 lies inside the 25- and 30-min windows only.

@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.assistant.chat;
 
 import che.glucosemonitorbe.assistant.common.ContextTag;
+import che.glucosemonitorbe.assistant.mealplan.HistoryBanner;
 import che.glucosemonitorbe.assistant.mealplan.MealPlan;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
@@ -67,8 +68,12 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
      */
     record Episodes(List<FactsPayload.EpisodeFacts> episodes) implements AssistantEvent {}
 
-    /** A warning banner, e.g. the 20% history-dose banner (later task). */
-    record Banner(String level, String text) implements AssistantEvent {}
+    /**
+     * The 20% history-dose banner (spec 6.6), right after {@code plan} when the plan has a history dose.
+     * {@code messageId} is the plan's message; the same banner is persisted on its payload as
+     * {@code banner}. Choosing the history dose goes through {@code POST /api/assistant/plans/{messageId}/recheck}.
+     */
+    record Banner(UUID messageId, HistoryBanner banner) implements AssistantEvent {}
 
     /** A chunk of reply text. */
     record Token(String text) implements AssistantEvent {}

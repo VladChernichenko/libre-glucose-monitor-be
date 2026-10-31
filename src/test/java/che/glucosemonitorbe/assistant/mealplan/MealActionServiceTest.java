@@ -7,16 +7,23 @@ import static org.mockito.Mockito.*;
 import che.glucosemonitorbe.assistant.chat.ChatHistoryService;
 import che.glucosemonitorbe.assistant.chat.ChatMessage;
 import che.glucosemonitorbe.assistant.chat.ChatMessageRepository;
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
+import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.assistant.quicklog.AssistantNoteWriter;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogCommand;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogRejectedException;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.NoteDto;
+import che.glucosemonitorbe.dto.PredictionPointDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
+import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.NotesService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -35,6 +42,10 @@ class MealActionServiceTest {
     private final ChatMessageRepository repository = mock(ChatMessageRepository.class);
     private final AssistantNoteWriter noteWriter = mock(AssistantNoteWriter.class);
     private final NotesService notesService = mock(NotesService.class);
+    private final PreBolusPauseOptimizer optimizer = mock(PreBolusPauseOptimizer.class);
+    private final CgmFreshnessService freshness = mock(CgmFreshnessService.class);
+    private final UserSettingsService settings = mock(UserSettingsService.class);
+    private final InsulinCalculatorService calculator = mock(InsulinCalculatorService.class);
     private final UUID user = UUID.randomUUID();
     private MealActionService service;
 
@@ -42,7 +53,7 @@ class MealActionServiceTest {
     void setUp() {
         when(repository.save(any(ChatMessage.class))).thenAnswer(i -> i.getArgument(0));
         service = new MealActionService(repository, new ChatHistoryService(repository, objectMapper),
-                noteWriter, notesService, objectMapper);
+                noteWriter, notesService, objectMapper, optimizer, freshness, settings, calculator);
     }
 
     private ChatMessage planMessage() {
@@ -65,6 +76,7 @@ class MealActionServiceTest {
         if (refusalCode != null) plan.put("refusalCode", refusalCode); else plan.putNull("refusalCode");
         m.setPayload(payload.toString());
         when(repository.findForUpdate(m.getId())).thenReturn(Optional.of(m));
+        when(repository.findById(m.getId())).thenReturn(Optional.of(m));
         return m;
     }
 
@@ -438,5 +450,50 @@ class MealActionServiceTest {
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
                 () -> service.took(user, m.getId(), 3.0, 10, NOW));
         assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
+    }
+
+    private static final Instant SERVER = Instant.parse("2026-10-31T11:00:00Z");
+
+    /** Fresh CGM at {@code glucose}, max bolus 10 U, a forecast whose lowest point is {@code min}. */
+    private void recheckWorld(double glucose, double min) {
+        when(settings.getUserSettings(user)).thenReturn(new UserSettingsDTO());
+        when(calculator.maxBolusUnits(any())).thenReturn(10.0);
+        when(freshness.freshReading(user, SERVER)).thenReturn(Optional.of(new CgmReadingDTO(glucose, NOW, null, null)));
+        when(optimizer.forecastDose(eq(user), eq(NOW), eq(glucose), anyDouble(), any(), anyInt())).thenReturn(List.of(
+                PredictionPointDTO.builder().timestamp(NOW.plusMinutes(60)).predictedGlucose(7.0).build(),
+                PredictionPointDTO.builder().timestamp(NOW.plusMinutes(150)).predictedGlucose(min).build()));
+    }
+
+    @Test
+    void recheckRedBelow3_9() {
+        ChatMessage m = planMessage();
+        recheckWorld(7.2, 3.8);
+        DoseRecheck r = service.recheck(user, m.getId(), 6.0, NOW, SERVER);
+        assertEquals(DoseRecheck.RED, r.level());
+        assertEquals(3.8, r.min());
+        assertNull(r.refusalCode(), "a forecast low warns (second tap); it is not a refusal");
+        verify(optimizer).forecastDose(user, NOW, 7.2, 6.0, new MealMacros(45.0, 12.0, 30.0, 4.0, 50.0), 0);
+        verifyNoInteractions(noteWriter, notesService);
+    }
+
+    @Test
+    void recheckAmberBelow4_5() {
+        ChatMessage m = planMessage();
+        recheckWorld(7.2, 4.4);
+        assertEquals(DoseRecheck.AMBER, service.recheck(user, m.getId(), 5.5, NOW, SERVER).level());
+        recheckWorld(7.2, 4.5); // exactly 4.5 is not under 4.5
+        assertEquals(DoseRecheck.OK, service.recheck(user, m.getId(), 5.5, NOW, SERVER).level());
+        recheckWorld(7.2, 3.9); // exactly 3.9 is amber, not red
+        assertEquals(DoseRecheck.AMBER, service.recheck(user, m.getId(), 5.5, NOW, SERVER).level());
+    }
+
+    @Test
+    void recheckRefusesAboveMaxBolus() {
+        ChatMessage m = planMessage();
+        recheckWorld(7.2, 6.0);
+        DoseRecheck r = service.recheck(user, m.getId(), 10.5, NOW, SERVER);
+        assertEquals("DOSE_EXCEEDS_MAX_BOLUS", r.refusalCode());
+        assertTrue(r.level() == null && r.min() == null && r.curve().isEmpty());
+        verify(optimizer, never()).forecastDose(any(), any(), anyDouble(), anyDouble(), any(), anyInt());
     }
 }

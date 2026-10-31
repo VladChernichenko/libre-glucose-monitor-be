@@ -146,6 +146,22 @@ public class PreBolusPauseOptimizer {
     // -- forecast ----------------------------------------------------------------------------
 
     /**
+     * The forecast for one given dose and pause, with no pause search and no in-flight lookup: the
+     * dose now (none if 0 or less), the meal at now + {@code pauseMinutes} (none without carbs), cropped
+     * to now + pause + {@link #POST_MEAL_MINUTES} exactly as each candidate in {@link #choose} is.
+     * Used for the history banner's second curve and the low re-check of a chosen dose.
+     */
+    public List<PredictionPointDTO> forecastDose(UUID userId, LocalDateTime now, double currentGlucose,
+                                                 double doseUnits, MealMacros meal, int pauseMinutes) {
+        String username = users.getUserById(userId).getUsername();
+        Double dose = doseUnits > 0 ? doseUnits : null;
+        if (meal == null || meal.carbs() <= 0) {
+            return forecast(username, now, currentGlucose, dose, null, null, 0);
+        }
+        return forecast(username, now, currentGlucose, dose, meal, nutritionJson(meal), pauseMinutes);
+    }
+
+    /**
      * The dashboard forecast with {@code dose} now (none if null) and the meal (none if null) at
      * now + pause, asked for {@link #PATH_MINUTES} and cropped to now + pause + {@link #POST_MEAL_MINUTES},
      * so each candidate is scored and floor-checked over the same 240 min after its own meal.
@@ -197,12 +213,14 @@ public class PreBolusPauseOptimizer {
         return new PauseChoice(pause, curve, peak(curve), min(curve), reason);
     }
 
-    private static double min(List<PredictionPointDTO> curve) {
+    /** Lowest predicted point; NaN for an empty curve. */
+    static double min(List<PredictionPointDTO> curve) {
         return curve.stream().map(PredictionPointDTO::getPredictedGlucose).filter(g -> g != null)
                 .mapToDouble(Double::doubleValue).min().orElse(Double.NaN);
     }
 
-    private static double peak(List<PredictionPointDTO> curve) {
+    /** Highest predicted point; NaN for an empty curve. */
+    static double peak(List<PredictionPointDTO> curve) {
         return curve.stream().map(PredictionPointDTO::getPredictedGlucose).filter(g -> g != null)
                 .mapToDouble(Double::doubleValue).max().orElse(Double.NaN);
     }
