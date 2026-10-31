@@ -244,9 +244,17 @@ CREATE TABLE IF NOT EXISTS clinical_knowledge_chunk (
     source_topic        VARCHAR(128),
     source_published_at TIMESTAMPTZ,
     source_type         VARCHAR(32)  DEFAULT 'INTERNAL',
-    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    -- Clinical library (spec 6.9): chunked guideline/abstract passages, upserted by source_doc_id + chunk_index.
+    embedding           vector(1536),
+    citation            TEXT,
+    chunk_index         INT,
+    source_doc_id       VARCHAR(128),
+    CONSTRAINT uq_clinical_knowledge_chunk_doc_chunk UNIQUE (source_doc_id, chunk_index)
 );
 CREATE INDEX IF NOT EXISTS idx_clinical_knowledge_chunk_condition    ON clinical_knowledge_chunk(condition_tag);
+CREATE INDEX IF NOT EXISTS idx_clinical_knowledge_chunk_embedding
+    ON clinical_knowledge_chunk USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_clinical_knowledge_chunk_source_type  ON clinical_knowledge_chunk(source_type);
 CREATE INDEX IF NOT EXISTS idx_clinical_knowledge_chunk_source_topic ON clinical_knowledge_chunk(source_topic);
 

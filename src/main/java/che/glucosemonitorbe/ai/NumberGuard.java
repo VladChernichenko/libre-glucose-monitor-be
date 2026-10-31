@@ -23,7 +23,12 @@ import java.util.regex.Pattern;
  *       (±0.05 for one decimal, ±0.5 for an integer), directly or via ×/÷ 18.016 (mmol/L ↔ mg/dL).</li>
  *   <li>Times ({@code HH:mm}) must equal a payload time; dates (ISO, {@code dd.MM.yyyy}, or day + month
  *       name in English/Russian) must equal a payload date (day and month when the reply gives no year).</li>
- *   <li>Digits inside ids ({@code id}, {@code *Id}) and in citation excerpts are not quotable (§6.9).</li>
+ *   <li>Digits inside ids ({@code id}, {@code *Id}) are not quotable.</li>
+ *   <li>Clinical passages ({@code citations}, §6.9): their numbers (excerpt, title, year, citation) are quotable
+ *       only in a sentence that cites the passage with its marker {@code [ref]} (also {@code [1, 2]},
+ *       {@code [1][2]}, or a marker right after the full stop), with rounding and mmol↔mg/dL conversion, and
+ *       never for a number tagged as insulin units: a guideline number must not become a dose. Markers are not
+ *       numbers; a marker naming no passage fails.</li>
  *   <li>Digits glued to a preceding letter (T1D, B12) and "type 1" / "1 типа" are not numbers.</li>
  *   <li>A number followed by a unit is checked against that unit's payload fields only, never against
  *       free text (turns, food text, reasons): {@code U/units/ЕД} against insulin fields within ±0.05 and
@@ -39,7 +44,7 @@ public final class NumberGuard {
 
     static final double MGDL_PER_MMOL = 18.016;
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Set<String> SKIPPED_FIELDS = Set.of("id", "excerpt");
+    private static final Set<String> SKIPPED_FIELDS = Set.of("id", "excerpt", "citations");
     static final double INSULIN_TOLERANCE = 0.05;
     private static final Set<String> INSULIN_FIELDS = Set.of("doseUnits", "iob", "insulin", "insulinUnits");
     private static final Set<String> CARB_FIELDS = Set.of("carbs", "carbsLow", "carbsHigh", "fat", "protein",
@@ -68,6 +73,11 @@ public final class NumberGuard {
     private static final Pattern MONTH_DAY = Pattern.compile("(?iu)(?<!\\p{L})" + MONTH + "\\s+(\\d{1,2})(?!\\d)");
     private static final Pattern TIME = Pattern.compile("(?<!\\d)([01]?\\d|2[0-3]):([0-5]\\d)(?!\\d)");
     private static final Pattern NUMBER = Pattern.compile("(?<![\\p{L}\\d.,])\\d+(?:[.,]\\d+)?");
+    private static final String MARKER = "\\[(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)]";
+    private static final Pattern CITE = Pattern.compile(MARKER);
+    /** End of a sentence: terminal punctuation (plus any citation markers right after it) before a space. */
+    private static final Pattern SENTENCE_END = Pattern.compile(
+            "[.!?…]+(?:\\s*" + MARKER + ")*(?=\\s|$)|\\n+");
     private static final Map<String, Integer> MONTHS = Map.ofEntries(
             Map.entry("jan", 1), Map.entry("feb", 2), Map.entry("mar", 3), Map.entry("apr", 4),
             Map.entry("may", 5), Map.entry("jun", 6), Map.entry("jul", 7), Map.entry("aug", 8),
@@ -81,10 +91,33 @@ public final class NumberGuard {
 
     public static GuardResult check(String reply, FactsPayload facts) {
         Allowed allowed = allowed(facts);
+        Map<Integer, Set<Double>> passages = passageNumbers(facts);
         Set<String> offending = new LinkedHashSet<>();
         String text = TYPE_ONE.matcher(reply == null ? "" : reply).replaceAll(" ");
+        for (String sentence : sentences(text)) {
+            Set<Double> cited = new HashSet<>();
+            Matcher m = CITE.matcher(sentence);
+            StringBuilder rest = new StringBuilder();
+            while (m.find()) {
+                for (String ref : m.group(1).split(",")) {
+                    Set<Double> numbers = passages.get(Integer.parseInt(ref.strip()));
+                    if (numbers == null) offending.add("[" + ref.strip() + "]");
+                    else cited.addAll(numbers);
+                }
+                m.appendReplacement(rest, " ");
+            }
+            m.appendTail(rest);
+            checkSentence(rest.toString(), allowed, cited, offending);
+        }
+        Double planDose = facts == null || facts.plan() == null ? null : facts.plan().doseUnits();
+        offending.addAll(DosingPhraseGuard.offending(reply == null ? "" : reply, facts != null && facts.plan() != null,
+                planDose));
+        return new GuardResult(offending.isEmpty(), List.copyOf(offending));
+    }
 
-        text = consumeDates(text, allowed, offending);
+    /** @param cited numbers of the passages this sentence cites (never used for insulin-tagged numbers) */
+    private static void checkSentence(String sentence, Allowed allowed, Set<Double> cited, Set<String> offending) {
+        String text = consumeDates(sentence, allowed, offending);
         Matcher t = TIME.matcher(text);
         StringBuilder rest = new StringBuilder();
         while (t.find()) {
@@ -96,19 +129,47 @@ public final class NumberGuard {
 
         Matcher n = NUMBER.matcher(rest);
         while (n.find()) {
-            boolean ok = switch (unitFor(rest, n.end())) {
+            Unit unit = unitFor(rest, n.end());
+            boolean ok = switch (unit) {
                 case INSULIN -> matches(n.group(), allowed.insulin, INSULIN_TOLERANCE, false);
                 case CARBS -> matches(n.group(), allowed.carbs, null, false);
                 case MMOL -> matches(n.group(), allowed.glucose, null, false);
                 case MGDL -> matches(n.group(), scaled(allowed.glucose), null, false);
                 case NONE -> numberAllowed(n.group(), allowed.numbers);
             };
+            if (!ok && unit != Unit.INSULIN) ok = numberAllowed(n.group(), cited);
             if (!ok) offending.add(n.group());
         }
-        Double planDose = facts == null || facts.plan() == null ? null : facts.plan().doseUnits();
-        offending.addAll(DosingPhraseGuard.offending(reply == null ? "" : reply, facts != null && facts.plan() != null,
-                planDose));
-        return new GuardResult(offending.isEmpty(), List.copyOf(offending));
+    }
+
+    /** Splits a reply into sentences; a citation marker right after the full stop stays with its sentence. */
+    static List<String> sentences(String text) {
+        List<String> out = new java.util.ArrayList<>();
+        Matcher end = SENTENCE_END.matcher(text);
+        int from = 0;
+        while (end.find()) {
+            out.add(text.substring(from, end.end()));
+            from = end.end();
+        }
+        if (from < text.length()) out.add(text.substring(from));
+        return out;
+    }
+
+    /** Per citation {@code ref}: the numbers of its excerpt, title, source, year and display citation. */
+    private static Map<Integer, Set<Double>> passageNumbers(FactsPayload facts) {
+        Map<Integer, Set<Double>> out = new java.util.HashMap<>();
+        if (facts == null || facts.citations() == null) return out;
+        for (FactsPayload.CitationFacts c : facts.citations()) {
+            if (c == null || c.ref() == null) continue;
+            Allowed a = new Allowed(new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>(),
+                    new HashSet<>(), new HashSet<>());
+            for (String s : new String[]{c.excerpt(), c.title(), c.source(), c.citation()}) {
+                if (s != null) harvestText(s, a);
+            }
+            if (c.year() != null) a.numbers.add(c.year().doubleValue());
+            out.computeIfAbsent(c.ref(), k -> new HashSet<>()).addAll(a.numbers);
+        }
+        return out;
     }
 
     /** The unit after the number ending at {@code end}, carried back across range links ("7-8 U"). */

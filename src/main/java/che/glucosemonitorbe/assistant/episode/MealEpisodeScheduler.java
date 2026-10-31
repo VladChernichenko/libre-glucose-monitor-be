@@ -230,11 +230,6 @@ public class MealEpisodeScheduler {
 
     /** pgvector text form {@code [a,b,...]}. */
     static String toLiteral(float[] v) {
-        StringBuilder sb = new StringBuilder(v.length * 9).append('[');
-        for (int i = 0; i < v.length; i++) {
-            if (i > 0) sb.append(',');
-            sb.append(Float.toString(v[i]));
-        }
-        return sb.append(']').toString();
+        return EmbeddingGateway.toLiteral(v);
     }
 }

@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.assistant.chat;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 import lombok.Builder;
@@ -43,8 +44,16 @@ public record FactsPayload(String language, String now, State state, PlanFacts p
 
     public record BannerFacts(String level, String text) {}
 
-    /** A retrieved clinical passage. Its {@code excerpt} numbers are background, never quotable. */
-    public record CitationFacts(String id, String title, String source, String excerpt) {}
+    /**
+     * A retrieved clinical passage (spec §6.9). {@code ref} is its citation id: the reply cites it as
+     * {@code [ref]}, and numbers from this passage (excerpt, title, year, citation) are quotable only in a
+     * sentence carrying that marker, never as an insulin dose. {@code id} is the clinical_knowledge_chunk id
+     * (trace); {@code url} goes to the citation chip only, not to the LLM.
+     */
+    @Builder
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record CitationFacts(String id, Integer ref, String title, String source, Integer year,
+                                @JsonIgnore String url, String citation, String excerpt) {}
 
     public record TurnFacts(String role, String text) {}
 }

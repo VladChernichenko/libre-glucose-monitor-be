@@ -4,6 +4,7 @@ import che.glucosemonitorbe.assistant.common.ContextTag;
 import che.glucosemonitorbe.assistant.mealplan.HistoryBanner;
 import che.glucosemonitorbe.assistant.mealplan.MealPlan;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.List;
@@ -78,8 +79,18 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
     /** A chunk of reply text. */
     record Token(String text) implements AssistantEvent {}
 
-    /** Ids of clinical passages cited by the reply (later task). */
-    record Citations(List<String> ids) implements AssistantEvent {}
+    /**
+     * Clinical passages behind a question reply, shown as tappable chips under it (spec §6.9). Sent after
+     * {@code episodes} and before {@code token}. {@code ref} is the number the reply text cites as
+     * {@code [ref]}; {@code id} is the clinical_knowledge_chunk id; {@code year}, {@code url}, {@code source}
+     * and {@code citation} may be absent (the GENERAL disclaimer has no URL). Null fields are omitted.
+     */
+    record Citations(List<Citation> citations) implements AssistantEvent {}
+
+    /** One citation chip. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record Citation(Integer ref, String id, String title, String source, Integer year, String url,
+                    String citation) {}
 
     /** End of the reply. Ids of the persisted user and assistant chat messages. */
     record Done(UUID userMessageId, UUID assistantMessageId, String intent) implements AssistantEvent {}

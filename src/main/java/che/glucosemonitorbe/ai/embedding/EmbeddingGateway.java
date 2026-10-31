@@ -15,4 +15,14 @@ public interface EmbeddingGateway {
 
     /** Dimensionality of the vectors returned by {@link #embed(List)}. */
     int dimensions();
+
+    /** The pgvector text form {@code [a,b,...]} of a vector, for native {@code CAST(? AS vector)} SQL. */
+    static String toLiteral(float[] v) {
+        StringBuilder sb = new StringBuilder(v.length * 9).append('[');
+        for (int i = 0; i < v.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(Float.toString(v[i]));
+        }
+        return sb.append(']').toString();
+    }
 }

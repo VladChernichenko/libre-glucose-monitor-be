@@ -157,9 +157,70 @@ class NumberGuardTest {
     @Test
     void citationExcerptNumbersAreNotQuotable() {
         FactsPayload f = FactsPayload.builder()
-                .citations(List.of(new FactsPayload.CitationFacts("c1", "ADA 2025", "ADA", "Treat with 15 g carbs")))
+                .citations(List.of(passage(1, "Treat with 15 g carbs")))
                 .build();
         assertEquals(List.of("15"), NumberGuard.check("eat 15 g", f).offending());
+    }
+
+    private static FactsPayload.CitationFacts passage(int ref, String excerpt) {
+        return new FactsPayload.CitationFacts("c" + ref, ref, "Standards of Care in Diabetes 2025", "ADA", 2025,
+                "https://doi.org/10.2337/dc25-S006", "ADA. Diabetes Care 2025;48(Suppl 1)", excerpt);
+    }
+
+    private static FactsPayload hypoPassage() {
+        return FactsPayload.builder()
+                .state(FactsPayload.State.builder().glucose(3.6).iob(0.4).build())
+                .citations(List.of(passage(1, "Treat a low with 15 g of fast-acting carbohydrate and recheck after "
+                        + "15 minutes; a level below 3.9 mmol/L (70 mg/dL) is a low.")))
+                .build();
+    }
+
+    @Test
+    void passageNumberNeedsCitation() {
+        FactsPayload f = hypoPassage();
+        assertTrue(NumberGuard.check("Guidelines suggest 15 g of fast carbs, then a recheck after 15 minutes [1].", f)
+                .ok());
+        assertTrue(NumberGuard.check("Below 3.9 mmol/L counts as low [1]. You are at 3.6 now.", f).ok());
+        assertTrue(NumberGuard.check("Below 70 mg/dL counts as low [1].", f).ok());
+        // the marker after the full stop still belongs to that sentence
+        assertTrue(NumberGuard.check("Guidelines suggest 15 g of fast carbs. [1] You are at 3.6.", f).ok());
+        assertEquals(List.of("15"), NumberGuard.check("Guidelines suggest 15 g of fast carbs.", f).offending());
+        assertEquals(List.of("15"), NumberGuard.check("Eat 15 g now. Lows need treatment [1].", f).offending());
+    }
+
+    @Test
+    void passageNumberNeedsTheRightCitation() {
+        FactsPayload f = FactsPayload.builder()
+                .citations(List.of(passage(1, "Treat with 15 g carbs."), passage(2, "Exercise lowers glucose.")))
+                .build();
+        assertEquals(List.of("15"), NumberGuard.check("Treat with 15 g carbs [2].", f).offending());
+        assertTrue(NumberGuard.check("Treat with 15 g carbs [1, 2].", f).ok());
+        assertTrue(NumberGuard.check("Treat with 15 g carbs [2][1].", f).ok());
+    }
+
+    @Test
+    void passageNeverSatisfiesAnInsulinNumber() {
+        FactsPayload f = FactsPayload.builder()
+                .citations(List.of(passage(1, "A typical correction is 2 units for every 3 mmol/L above target.")))
+                .build();
+        assertEquals(List.of("2"), NumberGuard.check("A typical correction is 2 units [1].", f).offending());
+        assertEquals(List.of("2"), NumberGuard.check("В рекомендациях упомянуты 2 ЕД [1].", f).offending());
+        assertTrue(NumberGuard.check("It is about every 3 mmol/L above target [1].", f).ok());
+    }
+
+    @Test
+    void citationMarkersAreNotNumbersButUnknownOnesFail() {
+        FactsPayload f = hypoPassage();
+        assertTrue(NumberGuard.check("Lows need treatment [1].", f).ok());
+        assertEquals(List.of("[3]"), NumberGuard.check("Lows need treatment [3].", f).offending());
+    }
+
+    @Test
+    void citationTitleAndYearQuotableOnlyWhenCited() {
+        FactsPayload f = hypoPassage();
+        assertTrue(NumberGuard.check("The ADA 2025 standards cover this [1].", f).ok());
+        assertEquals(List.of("2025"), NumberGuard.check("The ADA 2025 standards cover this.", f).offending());
+        assertEquals(List.of("48"), NumberGuard.check("It is 48.", f).offending());
     }
 
     @Test

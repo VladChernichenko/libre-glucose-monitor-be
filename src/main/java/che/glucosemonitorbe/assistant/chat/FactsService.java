@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -31,7 +32,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class FactsService {
 
-    static final int MAX_CITATIONS = 4;
+    /** Top 4 library passages plus the GENERAL disclaimer. */
+    static final int MAX_CITATIONS = 5;
     static final int MAX_EXCERPT = 600;
     static final int FORECAST_HOURS = 4;
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
@@ -58,21 +60,41 @@ public class FactsService {
                 .build();
     }
 
-    /** Clinical passages for the current state (citation ids feed the trace). Failure means none. */
-    public List<FactsPayload.CitationFacts> citations(FactsPayload.State s) {
+    /**
+     * Clinical passages for the question and the current state (spec §6.9), numbered {@code ref} 1..n in
+     * retrieval order (library passages by cosine, then the GENERAL disclaimer). Failure means none.
+     */
+    public List<FactsPayload.CitationFacts> citations(String question, FactsPayload.State s) {
         AnalysisContext ctx = AnalysisContext.builder()
-                .latestGlucose(s.glucose() == null ? 0.0 : s.glucose())
-                .activeIob(s.iob())
-                .activeCob(s.cob())
+                .latestGlucose(s == null || s.glucose() == null ? 0.0 : s.glucose())
+                .activeIob(s == null ? null : s.iob())
+                .activeCob(s == null ? null : s.cob())
                 .notes(List.of())
                 .build();
-        List<ClinicalKnowledgeChunk> chunks = rag.retrieve(ctx);
+        List<ClinicalKnowledgeChunk> chunks = rag.retrieve(question, ctx);
         if (chunks == null) return List.of();
-        return chunks.stream().limit(MAX_CITATIONS).map(c -> new FactsPayload.CitationFacts(
-                String.valueOf(c.getId()),
-                c.getSourceTitle() == null || c.getSourceTitle().isBlank() ? c.getTitle() : c.getSourceTitle(),
-                c.getSourceName(),
-                excerpt(c.getContent()))).toList();
+        List<FactsPayload.CitationFacts> out = new ArrayList<>();
+        for (ClinicalKnowledgeChunk c : chunks) {
+            if (out.size() >= MAX_CITATIONS) break;
+            out.add(FactsPayload.CitationFacts.builder()
+                    .id(String.valueOf(c.getId()))
+                    .ref(out.size() + 1)
+                    .title(c.getSourceTitle() == null || c.getSourceTitle().isBlank() ? c.getTitle() : c.getSourceTitle())
+                    .source(c.getSourceName())
+                    .year(c.getSourcePublishedAt() == null ? null : c.getSourcePublishedAt().getYear())
+                    .url(c.getSourceUrl())
+                    .citation(c.getCitation())
+                    .excerpt(excerpt(c.getContent()))
+                    .build());
+        }
+        return out;
+    }
+
+    /** The chips of the {@code citations} event: the payload passages without their text. */
+    public static List<AssistantEvent.Citation> chips(List<FactsPayload.CitationFacts> citations) {
+        if (citations == null) return List.of();
+        return citations.stream().map(c -> new AssistantEvent.Citation(c.ref(), c.id(), c.title(), c.source(),
+                c.year(), c.url(), c.citation())).toList();
     }
 
     public static List<FactsPayload.TurnFacts> turns(List<AiAnalysisRequest.AiChatTurnDto> turns) {

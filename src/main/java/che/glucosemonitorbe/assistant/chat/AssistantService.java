@@ -47,8 +47,9 @@ import org.springframework.stereotype.Service;
  * is proposed as a tagged note; everything else takes the LLM question path. Persists the user message and the assistant reply and emits NDJSON events.
  *
  * <p>Question path (spec §6.7-6.8): a {@link FactsPayload} (state on the assistant clock, retrieved episodes,
- * citations, recent turns) goes to the LLM; the {@code episodes} event (top {@link #EPISODES_SHOWN}) is sent
- * before the reply; the reply is buffered behind the number guard and sent as one {@code token} event.
+ * clinical passages with citation ids, recent turns) goes to the LLM. Events in order: {@code episodes} (top
+ * {@link #EPISODES_SHOWN}), {@code citations} (the passages' chips), then the reply, buffered behind the
+ * number guard and sent as one {@code token} event, then {@code done}.
  */
 @Slf4j
 @Service
@@ -184,13 +185,18 @@ public class AssistantService {
                     .now(FactsService.wall(msg.clientNow()))
                     .state(state)
                     .episodes(episodes)
-                    .citations(optional("citations", userId, () -> factsService.citations(state)))
+                    .citations(optional("citations", userId, () -> factsService.citations(question, state)))
                     .turns(turns)
                     .build();
             List<FactsPayload.EpisodeFacts> shown = shown(episodes);
             if (!shown.isEmpty()) {
                 payload.set("episodes", objectMapper.valueToTree(shown));
                 tracked.accept(new AssistantEvent.Episodes(shown));
+            }
+            List<AssistantEvent.Citation> chips = FactsService.chips(facts.citations());
+            if (!chips.isEmpty()) {
+                payload.set("citations", objectMapper.valueToTree(chips));
+                tracked.accept(new AssistantEvent.Citations(chips));
             }
             result = guardedReply.reply(userId, facts, offending -> AssistantPrompts.question(facts, question, offending),
                     () -> AssistantPrompts.questionTemplate(facts), language, tracked::gone);

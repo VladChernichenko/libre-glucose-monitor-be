@@ -256,7 +256,7 @@ class AssistantServiceTest {
     void retrievalFailureStillAnswers() {
         llmReplies("ok");
         when(retrieval.forQuestion(any(), anyString(), any(), any(), any(), any())).thenThrow(new RuntimeException("db"));
-        when(rag.retrieve(any())).thenThrow(new RuntimeException("db"));
+        when(rag.retrieve(any(), any())).thenThrow(new RuntimeException("db"));
 
         service.handle(user, text("Anything?"), sink);
 
