@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.UUID;
 
 /**
@@ -52,7 +53,7 @@ public class HistoryDoseService {
      * qualifying ones further down.
      */
     static final int CANDIDATE_LIMIT = 100;
-    static final int MIN_EPISODES = 3;
+    public static final int MIN_EPISODES = 3;
     /** "Complete 4 h CGM": g240 present and no CGM gap longer than this in the window [min]. */
     static final int MAX_CGM_GAP_MIN = 30;
     static final double HYPO_MMOL = 3.9;
@@ -105,31 +106,49 @@ public class HistoryDoseService {
             Double isf = settings.getEffectiveIsf(e.getMealAt());
             if (isf == null || !Double.isFinite(isf) || isf <= 0) continue;
             taken++; // one of the top 10 qualifying; the meal <= 0 drop applies within them
-            double dose = e.getDoseUnits();
-            double ideal = dose + (e.getG240() - target) / isf;
-            if (e.getNadir() != null && e.getNadir() < HYPO_MMOL) {
-                ideal = Math.min(ideal, dose - (target - e.getNadir()) / isf);
-            }
-            double iob = e.getIob() != null && Double.isFinite(e.getIob()) ? e.getIob() : 0.0;
-            double meal = ideal - (e.getStartGlucose() - target) / isf + iob;
-            if (!(meal > 0)) continue; // unreliable episode
-            upg.add(meal / e.getCarbs());
+            OptionalDouble u = unitsPerGram(e, isf, target);
+            if (u.isEmpty()) continue; // unreliable episode
+            upg.add(u.getAsDouble());
             ids.add(e.getId());
         }
         if (upg.size() < MIN_EPISODES) return Optional.empty();
 
-        double raw = median(upg) * carbs + todayCorrection - todayIob;
-        double units = Math.max(0.0, roundHalf(raw));
-        double diff = Math.abs(units - modelDose);
-        if (diff / modelDose <= BANNER_MIN_RELATIVE || diff < BANNER_MIN_UNITS) return Optional.empty();
-        if (units > calculator.maxBolusUnits(settings)) return Optional.empty();
+        double units = historyUnits(upg, carbs, todayCorrection, todayIob);
+        if (!bannerShows(units, modelDose, calculator.maxBolusUnits(settings))) return Optional.empty();
 
         double deltaPct = Math.round((units - modelDose) / modelDose * 1000.0) / 10.0;
         return Optional.of(new HistoryDose(units, modelDose, deltaPct, List.copyOf(ids),
                 pendingIsfNote(userId, s.minuteOfDay())));
     }
 
-    static boolean qualifies(MealEpisode e) {
+    /**
+     * Units of insulin per gram of carbs that one past episode implies (the per-episode formula in the
+     * class doc), or empty when the episode is unreliable (meal part &lt;= 0). Shared with the backtest.
+     */
+    public static OptionalDouble unitsPerGram(MealEpisode e, double isf, double target) {
+        double dose = e.getDoseUnits();
+        double ideal = dose + (e.getG240() - target) / isf;
+        if (e.getNadir() != null && e.getNadir() < HYPO_MMOL) {
+            ideal = Math.min(ideal, dose - (target - e.getNadir()) / isf);
+        }
+        double iob = e.getIob() != null && Double.isFinite(e.getIob()) ? e.getIob() : 0.0;
+        double meal = ideal - (e.getStartGlucose() - target) / isf + iob;
+        return meal > 0 ? OptionalDouble.of(meal / e.getCarbs()) : OptionalDouble.empty();
+    }
+
+    /** The history dose: median units/g times carbs plus today's correction less IOB, half-unit rounded, floored at 0. */
+    public static double historyUnits(List<Double> unitsPerGram, double carbs, double todayCorrection, double todayIob) {
+        double raw = median(unitsPerGram) * carbs + todayCorrection - todayIob;
+        return Math.max(0.0, roundHalf(raw));
+    }
+
+    /** Banner rule: more than 20% and at least 0.5 U away from the model dose, within the max bolus. */
+    public static boolean bannerShows(double units, double modelDose, double maxBolus) {
+        double diff = Math.abs(units - modelDose);
+        return !(diff / modelDose <= BANNER_MIN_RELATIVE || diff < BANNER_MIN_UNITS) && units <= maxBolus;
+    }
+
+    public static boolean qualifies(MealEpisode e) {
         return !e.isContaminated()
                 && e.getDoseUnits() != null && e.getDoseUnits() > 0
                 && e.getStartGlucose() > 0 && Double.isFinite(e.getStartGlucose())
