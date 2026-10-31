@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -88,8 +87,8 @@ public class NoteRemovalFlow {
     }
 
     /**
-     * Deletes the proposed note (owner only; 409 unless PROPOSED). A quick-log message that created it
-     * is marked undone so its Undo button turns off.
+     * Deletes the proposed note (owner only; 409 unless PROPOSED). The quick log that wrote it is marked
+     * undone by {@link QuickLogDeletionListener} on the delete's {@code NoteDeleted} event.
      */
     @Transactional
     public Result confirm(UUID userId, UUID messageId) {
@@ -106,7 +105,6 @@ public class NoteRemovalFlow {
         UUID noteId = UUID.fromString(p.path("noteId").asText());
         Optional<Note> note = notes.findByIdAndUserId(noteId, userId);
         boolean removed = note.isPresent() && notesService.deleteNote(userId, noteId);
-        note.map(Note::getChatMessageId).ifPresent(source -> markQuickLogUndone(userId, source, noteId));
         p.put("state", REMOVED);
         m.setPayload(p.toString());
         history.save(m);
@@ -122,20 +120,6 @@ public class NoteRemovalFlow {
                 .filter(n -> t.insulin() == null || close(n.getInsulin(), t.insulin(), INSULIN_TOLERANCE))
                 .filter(n -> t.carbs() == null || close(n.getCarbs(), t.carbs(), CARBS_TOLERANCE))
                 .max(Comparator.comparing(Note::getTimestamp));
-    }
-
-    private void markQuickLogUndone(UUID userId, UUID sourceMessageId, UUID noteId) {
-        history.find(sourceMessageId)
-                .filter(s -> userId.equals(s.getUserId()) && history.readNoteIds(s).contains(noteId))
-                .ifPresent(s -> {
-                    List<UUID> left = new ArrayList<>(history.readNoteIds(s));
-                    left.remove(noteId);
-                    if (!left.isEmpty()) return; // other notes of that log are still there; Undo stays useful
-                    ObjectNode sp = history.readPayload(s);
-                    sp.put("undone", true);
-                    s.setPayload(sp.toString());
-                    history.save(s);
-                });
     }
 
     static String label(Note n, boolean ru) {
