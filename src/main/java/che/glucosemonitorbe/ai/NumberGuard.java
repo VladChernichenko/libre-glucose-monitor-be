@@ -50,7 +50,10 @@ public final class NumberGuard {
     enum Unit { NONE, INSULIN, CARBS, MMOL, MGDL }
 
     private static final Pattern INSULIN_UNIT = Pattern.compile(
-            "^(?:\\s*U|u|\\s*(?iu:units?|ед|единиц\\p{L}*))(?!\\p{L})");
+            "^\\s*(?iu:u|iu|me|ме|units?|ед|единиц\\p{L}*)(?!\\p{L})");
+    /** A range link to the next number: "7-8", "7 to 8", "7 or 9", "от 7 до 8", "7 или 8". */
+    private static final Pattern RANGE_LINK = Pattern.compile(
+            "\\s*(?:[-–—]|(?iu:to|or|до|или)(?!\\p{L}))\\s*\\d+(?:[.,]\\d+)?");
     private static final Pattern CARB_UNIT = Pattern.compile("^\\s*(?iu:g|г|grams?|грамм\\p{L}*)(?!\\p{L})");
     private static final Pattern MGDL_UNIT = Pattern.compile("^\\s*(?iu:mg\\s*/\\s*dl|мг\\s*/\\s*дл)");
     private static final Pattern MMOL_UNIT = Pattern.compile("^\\s*(?iu:mmol|ммоль)");
@@ -93,8 +96,7 @@ public final class NumberGuard {
 
         Matcher n = NUMBER.matcher(rest);
         while (n.find()) {
-            String after = rest.substring(n.end(), Math.min(rest.length(), n.end() + 24));
-            boolean ok = switch (unitAfter(after)) {
+            boolean ok = switch (unitFor(rest, n.end())) {
                 case INSULIN -> matches(n.group(), allowed.insulin, INSULIN_TOLERANCE, false);
                 case CARBS -> matches(n.group(), allowed.carbs, null, false);
                 case MMOL -> matches(n.group(), allowed.glucose, null, false);
@@ -107,6 +109,20 @@ public final class NumberGuard {
         offending.addAll(DosingPhraseGuard.offending(reply == null ? "" : reply, facts != null && facts.plan() != null,
                 planDose));
         return new GuardResult(offending.isEmpty(), List.copyOf(offending));
+    }
+
+    /** The unit after the number ending at {@code end}, carried back across range links ("7-8 U"). */
+    static Unit unitFor(CharSequence text, int end) {
+        int pos = end;
+        for (int hop = 0; hop < 4; hop++) {
+            Unit u = unitAfter(text.subSequence(pos, Math.min(text.length(), pos + 24)).toString());
+            if (u != Unit.NONE) return u;
+            Matcher link = RANGE_LINK.matcher(text);
+            link.region(pos, text.length());
+            if (!link.lookingAt()) return Unit.NONE;
+            pos = link.end();
+        }
+        return Unit.NONE;
     }
 
     static Unit unitAfter(String after) {
