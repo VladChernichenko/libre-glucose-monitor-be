@@ -1,0 +1,168 @@
+# Sources for scripts/clinical_ingest.py (spec 6.9).
+# - kind: guideline  -> `text` (full text, only if licence allows) or `summary` (paraphrased, written
+#   by us; guideline text is copyrighted so we store short summaries + the link, summary_only: true).
+# - kind: pubmed     -> abstract fetched via NCBI efetch by `pmid`; if pmid is null and `doi` is set the
+#   script resolves the DOI through esearch and logs the PMID (verify it, then pin it here).
+#   Entries with pmid null and no doi are skipped with a warning.
+# - topic            -> source_topic; condition_tag = topic in UPPER_SNAKE_CASE (never GENERAL).
+# These summaries are general background for retrieval; they never set doses (clinical passages never set a number).
+# TODO(user): verify every url/edition below against the current publication before the real run.
+sources:
+  # ------------------------------------------------------------------ guidelines (summaries)
+  - id: ada-soc-hypoglycemia
+    kind: guideline
+    org: ADA
+    title: "Standards of Care in Diabetes - Glycemic Goals and Hypoglycemia"
+    year: 2026   # TODO: confirm current edition year
+    url: https://professional.diabetes.org/standards-of-care
+    topic: hypo treatment
+    summary_only: true
+    summary: |
+      For a person who is awake and able to swallow, mild to moderate hypoglycemia is treated with fast-acting
+      carbohydrate, commonly about 15 to 20 grams of glucose, taken as tablets, gel or juice. Glucose is the
+      preferred form because it acts predictably; foods that also contain fat or protein raise glucose more slowly.
+
+      The glucose reading is rechecked after about 15 minutes. If it is still low, the same treatment is repeated,
+      and this cycle (often called the rule of 15) continues until glucose is back in range. Once it has recovered,
+      a snack or meal should follow if the next meal is more than an hour away, to prevent a second drop.
+
+      Severe hypoglycemia, where the person cannot safely take sugar by mouth, needs glucagon or emergency help.
+      Repeated or unexplained lows call for reviewing insulin doses, meal timing and activity with the care team.
+  - id: ada-soc-physical-activity-alcohol
+    kind: guideline
+    org: ADA
+    title: "Standards of Care in Diabetes - Lifestyle: Physical Activity and Alcohol"
+    year: 2026   # TODO: confirm current edition year
+    url: https://professional.diabetes.org/standards-of-care
+    topic: alcohol
+    summary_only: true
+    summary: |
+      Alcohol can cause hypoglycemia in people using insulin, because the liver prioritises clearing alcohol over
+      releasing glucose. The risk can last many hours after drinking, including overnight and into the next morning,
+      and low symptoms can be mistaken for intoxication.
+
+      General advice is to drink in moderation, never on an empty stomach, to monitor glucose more often during and
+      after drinking and before bed, and to be aware that sugary mixers can raise glucose at first while the later
+      effect is a drop. Others around the person should know how to recognise and respond to a low.
+  - id: ada-soc-diabetes-technology-cgm
+    kind: guideline
+    org: ADA
+    title: "Standards of Care in Diabetes - Diabetes Technology: CGM and Trend Arrows"
+    year: 2026   # TODO: confirm current edition year
+    url: https://professional.diabetes.org/standards-of-care
+    topic: trend arrows
+    summary_only: true
+    summary: |
+      Continuous glucose monitors report not only the current value but also the direction and speed of change,
+      shown as trend arrows. Guidance for people using them is to consider the arrow together with the reading
+      and recent insulin and food, rather than to react to the number alone.
+
+      Rapidly rising or falling arrows suggest that glucose will be noticeably different within the next half hour.
+      Dosing decisions based on arrows should be conservative and individualised, since overlapping insulin action
+      can turn an aggressive correction into a later low. Sensor readings lag blood glucose, particularly when
+      glucose is changing quickly.
+  - id: ispad-2022-exercise
+    kind: guideline
+    org: ISPAD
+    title: "ISPAD Clinical Practice Consensus Guidelines 2022 - Exercise in Children and Adolescents with Diabetes"
+    year: 2022
+    url: https://www.ispad.org/page/ISPADGuidelines2022   # TODO: verify
+    topic: exercise mdi
+    summary_only: true
+    summary: |
+      Aerobic exercise tends to lower glucose during and after activity, while short intense or competitive exercise
+      can raise it temporarily. For people on multiple daily injections, the main tools are adjusting the meal
+      insulin that precedes exercise, taking extra carbohydrate before or during activity, and avoiding activity
+      when insulin on board is at its peak.
+
+      Starting exercise with glucose in a safe range, carrying fast-acting carbohydrate, and checking glucose
+      before, during and after sessions are standard advice. Late-onset lows can occur many hours after
+      exercise, including overnight, so bedtime insulin and snacks may need review after a very active day.
+  - id: ispad-2022-nutrition-fat-protein
+    kind: guideline
+    org: ISPAD
+    title: "ISPAD Clinical Practice Consensus Guidelines 2022 - Nutritional Management in Children and Adolescents with Diabetes"
+    year: 2022
+    url: https://www.ispad.org/page/ISPADGuidelines2022   # TODO: verify
+    topic: fat protein dosing
+    summary_only: true
+    summary: |
+      Meals high in fat or protein delay gastric emptying and can raise glucose several hours after eating, beyond
+      what the carbohydrate alone would predict. Insulin matched only to carbohydrate may therefore cover the early
+      rise but leave a late rise.
+
+      Approaches discussed include splitting or extending the meal insulin, or adding a later correction, with the
+      pattern learned from glucose data over several similar meals. Evidence for exact adjustments is limited,
+      so any change is made cautiously and reviewed with the care team, watching for lows when the effect is
+      smaller than expected.
+  - id: ispad-2022-insulin-prebolus
+    kind: guideline
+    org: ISPAD
+    title: "ISPAD Clinical Practice Consensus Guidelines 2022 - Insulin Treatment in Children and Adolescents with Diabetes"
+    year: 2022
+    url: https://www.ispad.org/page/ISPADGuidelines2022   # TODO: verify
+    topic: pre bolus timing
+    summary_only: true
+    summary: |
+      Rapid-acting insulin works best when given ahead of eating, so that insulin action overlaps with the glucose
+      from the meal. Giving it before the meal, rather than after, generally reduces the after-meal glucose peak.
+
+      The ideal lead time depends on the insulin, the starting glucose, and how fast the meal is absorbed. A lower
+      starting glucose or a meal that may not be finished argues for a shorter lead or dosing closer to the meal,
+      while a high starting glucose and a slowly absorbed meal allow a longer one.
+  - id: ispad-2022-hypoglycemia
+    kind: guideline
+    org: ISPAD
+    title: "ISPAD Clinical Practice Consensus Guidelines 2022 - Assessment and Management of Hypoglycemia in Children and Adolescents with Diabetes"
+    year: 2022
+    url: https://www.ispad.org/page/ISPADGuidelines2022   # TODO: verify
+    topic: hypo treatment
+    summary_only: true
+    summary: |
+      Mild hypoglycemia is treated with a small amount of fast-acting carbohydrate by mouth, with glucose rechecked
+      about 15 minutes later and treatment repeated if still low. Treating with large amounts of sugar can lead to
+      a rebound high, so the amount is kept proportionate.
+
+      Severe hypoglycemia with altered consciousness is an emergency treated with glucagon and medical help, and
+      nothing is put in the mouth of someone who cannot swallow safely. After any severe event the causes and
+      insulin plan should be reviewed.
+
+  # ------------------------------------------------------------------ PubMed (abstracts only)
+  # TODO(user): PMIDs left null on purpose - none were verifiable offline. Fill `pmid:` (preferred) or let the
+  # script resolve via `doi:`. Title-only entries are skipped until a pmid/doi is added.
+  - id: pubmed-trend-arrow-dosing
+    kind: pubmed
+    pmid: null
+    doi: 10.1177/19322968211043162    # trend-arrow dosing risk (given in the task brief)
+    title: "Trend-arrow based insulin dosing (verify title on PubMed)"
+    topic: trend arrows
+  - id: pubmed-riddell-2017-exercise-t1d
+    kind: pubmed
+    pmid: null
+    doi: 10.1016/S2213-8587(17)30014-1   # Riddell et al. 2017, exercise management in T1D consensus statement
+    title: "Exercise management in type 1 diabetes: a consensus statement"
+    topic: exercise mdi
+  - id: pubmed-wolpert-2013-fat-protein
+    kind: pubmed
+    pmid: null    # TODO: add pmid or doi
+    doi: null
+    title: "Dietary fat acutely increases glucose concentrations and insulin requirements in patients with type 1 diabetes (Wolpert 2013)"
+    topic: fat protein dosing
+  - id: pubmed-cobry-2010-prebolus
+    kind: pubmed
+    pmid: null    # TODO: add pmid or doi
+    doi: null
+    title: "Timing of meal insulin boluses to achieve optimal postprandial glycemic control in patients with type 1 diabetes (Cobry 2010)"
+    topic: pre bolus timing
+  - id: pubmed-turner-2001-alcohol
+    kind: pubmed
+    pmid: null    # TODO: add pmid or doi
+    doi: null
+    title: "The effect of evening alcohol consumption on next-morning glucose control in type 1 diabetes (Turner 2001)"
+    topic: alcohol
+  - id: pubmed-hypo-treatment
+    kind: pubmed
+    pmid: null    # TODO: pick a hypoglycemia-treatment (oral glucose dose / rule of 15) paper and add pmid/doi
+    doi: null
+    title: "TODO: hypoglycemia treatment trial or review"
+    topic: hypo treatment
