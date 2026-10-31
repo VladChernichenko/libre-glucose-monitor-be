@@ -44,7 +44,7 @@ class AssistantChatE2ETest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(che.glucosemonitorbe.TestPostgres.IMAGE)
             .withDatabaseName("testdb").withUsername("test").withPassword("test");
 
     @Autowired private TestRestTemplate rest;

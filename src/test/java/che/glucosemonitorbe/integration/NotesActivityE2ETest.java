@@ -34,7 +34,7 @@ class NotesActivityE2ETest {
     @Container
     @ServiceConnection
     static PostgreSQLContainer<?> postgres =
-            new PostgreSQLContainer<>("postgres:16-alpine")
+            new PostgreSQLContainer<>(che.glucosemonitorbe.TestPostgres.IMAGE)
                     .withDatabaseName("testdb").withUsername("test").withPassword("test");
 
     @Autowired private TestRestTemplate rest;

@@ -47,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 abstract class AbstractGlycemicEventE2ETest {
 
     @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(che.glucosemonitorbe.TestPostgres.IMAGE)
             .withDatabaseName("testdb").withUsername("test").withPassword("test");
 
     static { POSTGRES.start(); }
