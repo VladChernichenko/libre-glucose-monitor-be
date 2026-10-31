@@ -162,6 +162,39 @@ class ForecastSnapshotServiceTest {
     }
 
     @Test
+    void excludeMarksSnapshotExcluded() {
+        ForecastSnapshot existing = existing();
+        when(repository.findByNoteId(NOTE)).thenReturn(Optional.of(existing));
+
+        service.onNoteExcluded(NOTE);
+
+        ArgumentCaptor<ForecastSnapshot> saved = ArgumentCaptor.forClass(ForecastSnapshot.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue().isExcluded()).isTrue();
+    }
+
+    @Test
+    void excludeWithoutSnapshotDoesNothing() {
+        service.onNoteExcluded(NOTE);
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void refreezeKeepsAnExcludedSnapshotExcluded() {
+        ForecastSnapshot existing = existing();
+        existing.setExcluded(true); // e.g. a pre-bolus dose whose meal was then eaten
+        when(repository.findByNoteId(NOTE)).thenReturn(Optional.of(existing));
+        stubNote(note(NOON, 0.0, 5.0, Note.TYPE_NORMAL));
+
+        service.onNoteUpdated(USER, NOTE, NOON, NOON.plusMinutes(5));
+
+        ArgumentCaptor<ForecastSnapshot> saved = ArgumentCaptor.forClass(ForecastSnapshot.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue().isExcluded()).isTrue();
+    }
+
+    @Test
     void deleteRemovesSnapshot() {
         service.onNoteDeleted(NOTE);
 
@@ -185,7 +218,8 @@ class ForecastSnapshotServiceTest {
         when(mapper.toDto(any(Note.class))).thenReturn(new NoteDto());
         NotesService notesService = new NotesService(notes, mapper, mock(NutritionEnrichmentService.class),
                 new ObjectMapper(), mock(GlucoseAlertService.class), mock(UserService.class),
-                mock(NotePhotoStorageService.class), trigger);
+                mock(NotePhotoStorageService.class), trigger,
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         CreateNoteRequest req = new CreateNoteRequest();
         req.setTimestamp(NOON);
         req.setCarbs(40.0);

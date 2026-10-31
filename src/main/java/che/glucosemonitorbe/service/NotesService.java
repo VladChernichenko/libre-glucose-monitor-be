@@ -25,6 +25,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
+import che.glucosemonitorbe.domain.RapidInsulinLogged;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
@@ -49,6 +51,7 @@ public class NotesService {
     private final UserService userService;
     private final NotePhotoStorageService notePhotoStorageService;
     private final ForecastSnapshotTrigger forecastSnapshotTrigger;
+    private final ApplicationEventPublisher eventPublisher;
     
     /**
      * Get all notes for a user.
@@ -134,6 +137,10 @@ public class NotesService {
                 savedNote.getCarbs(), savedNote.getInsulin());
         // Freeze the forecast after commit; never blocks or fails the save.
         forecastSnapshotTrigger.noteSaved(userId, savedNote.getId());
+        // Stacking guard: a PLANNED meal plan priced before this dose must not be Took (same transaction).
+        if (RapidInsulinLogged.isRapidDose(savedNote)) {
+            eventPublisher.publishEvent(new RapidInsulinLogged(userId, savedNote.getId(), savedNote.getChatMessageId()));
+        }
 
         // Fire over-injection check asynchronously - does not block the response.
         // Condition: note has insulin AND we have a current glucose reading to anchor the prediction.

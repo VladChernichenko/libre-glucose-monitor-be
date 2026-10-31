@@ -48,7 +48,7 @@ class MealActionRecheckGuardsTest {
     void setUp() {
         service = new MealActionService(repository, new ChatHistoryService(repository, objectMapper),
                 mock(AssistantNoteWriter.class), mock(NotesService.class), objectMapper, optimizer, freshness,
-                settings, calculator);
+                settings, calculator, mock(che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger.class));
         when(settings.getUserSettings(user)).thenReturn(new UserSettingsDTO());
         when(calculator.maxBolusUnits(any())).thenReturn(10.0);
         when(freshness.freshReading(user, SERVER)).thenReturn(Optional.of(new CgmReadingDTO(7.2, NOW, null, null)));

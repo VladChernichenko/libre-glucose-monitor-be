@@ -53,6 +53,11 @@ public class ForecastSnapshotTrigger {
                 service.wallTime(userId, original), service.wallTime(userId, at)));
     }
 
+    /** The note's snapshot must not be scored (e.g. a pre-bolus dose whose meal was then eaten). */
+    public void noteExcluded(UUID noteId) {
+        afterCommit("exclude", noteId, () -> service.onNoteExcluded(noteId));
+    }
+
     public void noteDeleted(UUID noteId) {
         afterCommit("delete", noteId, () -> service.onNoteDeleted(noteId));
     }

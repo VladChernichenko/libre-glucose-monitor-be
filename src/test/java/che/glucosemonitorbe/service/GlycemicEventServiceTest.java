@@ -33,13 +33,16 @@ class GlycemicEventServiceTest {
     private final UserSettingsService settings = mock(UserSettingsService.class);
     private final GlycemicEventHistoryRecorder recorder = mock(GlycemicEventHistoryRecorder.class);
     private final GlycemicLearnerTrainingCache cache = mock(GlycemicLearnerTrainingCache.class);
+    private final org.springframework.context.ApplicationEventPublisher publisher =
+            mock(org.springframework.context.ApplicationEventPublisher.class);
     private GlycemicEventService service;
     private final UUID user = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         service = new GlycemicEventService(events, history, notes, settings, new GlycemicEventProperties(), recorder, cache,
-                org.mockito.Mockito.mock(che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger.class));
+                org.mockito.Mockito.mock(che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger.class),
+                publisher);
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(events.findByLinkedEventId(any())).thenReturn(List.of());
     }
@@ -88,6 +91,23 @@ class GlycemicEventServiceTest {
         assertThat(status(() -> service.confirm(user, food.getId(), new ConfirmGlycemicEventRequest(null, null, 2.0))))
                 .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
         verify(notes, never()).save(any());
+    }
+    @Test void backfilledInsulinPublishesRapidInsulinLogged() {
+        GlycemicEvent e = stored(user, Category.UNLOGGED_INSULIN, Phase.FINAL, State.OPEN);
+        UUID noteId = UUID.randomUUID();
+        when(notes.save(any())).thenAnswer(inv -> {
+            che.glucosemonitorbe.entity.Note n = inv.getArgument(0);
+            n.setId(noteId);
+            return n;
+        });
+        service.confirm(user, e.getId(), new ConfirmGlycemicEventRequest(null, null, 2.0));
+        verify(publisher).publishEvent(new che.glucosemonitorbe.domain.RapidInsulinLogged(user, noteId, null));
+    }
+    @Test void backfilledCarbsPublishNothing() {
+        GlycemicEvent e = stored(user, Category.UNLOGGED_FOOD, Phase.FINAL, State.OPEN);
+        when(notes.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        service.confirm(user, e.getId(), new ConfirmGlycemicEventRequest(null, 20.0, null));
+        verify(publisher, never()).publishEvent(any(Object.class));
     }
     @Test void relabelSetsUserLabelKeepsDetectorCategoryAndFinalises() {
         GlycemicEvent e = stored(user, Category.STRESS, Phase.PROVISIONAL, State.OPEN);

@@ -53,7 +53,7 @@ class MealActionServiceTest {
     void setUp() {
         when(repository.save(any(ChatMessage.class))).thenAnswer(i -> i.getArgument(0));
         service = new MealActionService(repository, new ChatHistoryService(repository, objectMapper),
-                noteWriter, notesService, objectMapper, optimizer, freshness, settings, calculator);
+                noteWriter, notesService, objectMapper, optimizer, freshness, settings, calculator, mock(che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger.class));
     }
 
     private ChatMessage planMessage() {

@@ -8,6 +8,7 @@ import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.assistant.quicklog.AssistantNoteWriter;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogCommand;
 import che.glucosemonitorbe.assistant.quicklog.QuickLogRejectedException;
+import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -41,7 +42,8 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * The meal card's actions, as a state machine on the assistant plan message's payload:
  * {@code PLANNED -> TOOK -> EATEN | SKIPPED}, {@code PLANNED -> EATEN} (meal without insulin),
- * {@code PLANNED -> SKIPPED}, and {@code PLANNED -> SUPERSEDED} when a newer plan is made. Took saves
+ * {@code PLANNED -> SKIPPED}, and {@code PLANNED -> SUPERSEDED} when a newer plan is made or other
+ * rapid insulin is logged ({@link #supersedeForRapidInsulin}). Took saves
  * only the dose note; Eating saves the meal note at the tap moment or a validated earlier {@code ateAt}. No action ever writes a note dated
  * after {@code now}, so a skipped or late meal never leaves a phantom meal in COB. Event proposals:
  * {@code PROPOSED -> CONFIRMED}. Each action row-locks the message, so a double tap acts once
@@ -60,7 +62,7 @@ public class MealActionService {
     public static final String SKIPPED = "SKIPPED";
     public static final String PROPOSED = "PROPOSED";
     public static final String CONFIRMED = "CONFIRMED";
-    /** A PLANNED plan replaced by a newer plan for the same user; no action is allowed on it. */
+    /** A PLANNED plan replaced by a newer plan, or priced before other rapid insulin; no action is allowed on it. */
     public static final String SUPERSEDED = "SUPERSEDED";
 
     public static final String DOSE_SOURCE_PLAN = "PLAN";
@@ -84,6 +86,7 @@ public class MealActionService {
     private final CgmFreshnessService freshness;
     private final UserSettingsService settings;
     private final InsulinCalculatorService calculator;
+    private final ForecastSnapshotTrigger snapshots;
 
     /** Outcome of a card action: the new state, the note it saved, and the message's full payload. */
     public record ActionResult(UUID messageId, String state, UUID noteId, JsonNode payload) {}
@@ -143,6 +146,7 @@ public class MealActionService {
         ChatMessage m = locked(userId, messageId, INTENT_MEAL_PLAN);
         ObjectNode p = history.readPayload(m);
         requireState(p, Set.of(PLANNED, TOOK));
+        boolean preBolused = TOOK.equals(p.path("state").asText());
         LocalDateTime ate = ateAt != null ? ateAt : now;
         String lowerField = TOOK.equals(p.path("state").asText()) ? "tookAt" : "plannedAt";
         LocalDateTime lower = p.hasNonNull(lowerField) ? LocalDateTime.parse(p.get(lowerField).asText()) : null;
@@ -176,6 +180,10 @@ public class MealActionService {
         p.put("eatenAt", iso(ate));
         p.put("mealNoteId", noteId.toString());
         p.set("eatenMeal", objectMapper.valueToTree(meal));
+        if (preBolused && p.hasNonNull("doseNoteId")) {
+            // The dose note froze a dose-only forecast; with the meal eaten it would score as a miss.
+            snapshots.noteExcluded(UUID.fromString(p.get("doseNoteId").asText()));
+        }
         return save(m, p, noteId);
     }
 
@@ -204,6 +212,31 @@ public class MealActionService {
             if (!PLANNED.equals(p.path("state").asText())) continue;
             p.put("state", SUPERSEDED);
             p.put("supersededBy", newPlanId.toString());
+            p.put("supersededAt", iso(now));
+            save(m, p, null);
+            superseded.add(id);
+        }
+        return superseded;
+    }
+
+    /**
+     * Stacking guard: a rapid dose was logged, so every PLANNED plan of the user (priced without it) is
+     * row-locked and, if still PLANNED, marked SUPERSEDED; TOOK plans are never touched. The plan whose
+     * own Took wrote the dose ({@code excludePlanId}, the note's chat message) is skipped: it turns TOOK
+     * in that same transaction. Returns the superseded ids.
+     */
+    @Transactional
+    public List<UUID> supersedeForRapidInsulin(UUID userId, UUID noteId, UUID excludePlanId, LocalDateTime now) {
+        // "id <> NULL" matches nothing in SQL, so a dose without a chat message excludes the nil UUID.
+        UUID exclude = excludePlanId != null ? excludePlanId : new UUID(0L, 0L);
+        List<UUID> superseded = new ArrayList<>();
+        for (UUID id : repository.findPlannedPlanIds(userId, exclude)) {
+            ChatMessage m = repository.findForUpdate(id).filter(x -> userId.equals(x.getUserId())).orElse(null);
+            if (m == null || !INTENT_MEAL_PLAN.equals(m.getIntent())) continue;
+            ObjectNode p = history.readPayload(m);
+            if (!PLANNED.equals(p.path("state").asText())) continue;
+            p.put("state", SUPERSEDED);
+            p.put("supersededByNoteId", noteId.toString());
             p.put("supersededAt", iso(now));
             save(m, p, null);
             superseded.add(id);

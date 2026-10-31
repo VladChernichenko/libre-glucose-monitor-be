@@ -29,6 +29,7 @@ import java.util.UUID;
  *   <li>A note timed more than 10 min before its save is backdated: no snapshot.</li>
  *   <li>Dose/carbs/time edits within 15 min of the original save re-freeze; later ones mark the
  *       snapshot excluded.</li>
+ *   <li>A pre-bolus dose whose meal is then eaten is excluded ({@link #onNoteExcluded}).</li>
  * </ul>
  */
 @Slf4j
@@ -78,6 +79,18 @@ public class ForecastSnapshotService {
         freeze(userId, note.get(), now, existing.orElseGet(ForecastSnapshot::new));
     }
 
+    /**
+     * Marks the note's snapshot excluded from scoring, e.g. a pre-bolus dose whose meal was eaten:
+     * its frozen forecast had the dose alone, so it would score as a miss. A later in-window re-freeze
+     * keeps it excluded.
+     */
+    public void onNoteExcluded(UUID noteId) {
+        repository.findByNoteId(noteId).filter(s -> !s.isExcluded()).ifPresent(s -> {
+            s.setExcluded(true);
+            repository.save(s);
+        });
+    }
+
     public void onNoteDeleted(UUID noteId) {
         repository.deleteByNoteId(noteId);
     }
@@ -113,7 +126,8 @@ public class ForecastSnapshotService {
         snapshot.setModelVersion(f.modelVersion());
         snapshot.setStartGlucose(f.startGlucose());
         snapshot.setPoints(toJson(f));
-        snapshot.setExcluded(false);
+        // A new snapshot starts included; an excluded one stays excluded (an out-of-window edit or a
+        // pre-bolus whose meal was eaten), since an in-window edit cannot make its forecast scoreable.
         snapshot.setComplete(false);
         snapshot.setCheck60Actual(null);
         snapshot.setCheck60Hit(null);
