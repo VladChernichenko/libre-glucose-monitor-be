@@ -60,6 +60,7 @@ public class AssistantController {
     private final UserService userService;
     private final HitRateService hitRateService;
     private final MealActionService mealActionService;
+    private final NoteRemovalFlow noteRemovalFlow;
     private final ObjectMapper objectMapper;
 
     @Operation(summary = "Send a chat message; the reply streams as NDJSON AssistantEvents")
@@ -205,6 +206,13 @@ public class AssistantController {
         if (body == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Body required");
         return mealActionService.confirmEvent(userId(authentication), messageId,
                 wallTime(body.clientTime(), body.timezone()));
+    }
+
+    @Operation(summary = "Confirm a proposed removal: deletes the note (409 unless PROPOSED)")
+    @PostMapping("/removals/{messageId}/confirm")
+    public NoteRemovalFlow.Result confirmRemoval(Authentication authentication,
+                                                 @PathVariable("messageId") UUID messageId) {
+        return noteRemovalFlow.confirm(userId(authentication), messageId);
     }
 
     private static LocalDateTime wallTime(String clientTime, String timezone) {

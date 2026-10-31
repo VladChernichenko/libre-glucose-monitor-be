@@ -92,6 +92,7 @@ public class AssistantService {
     private final FactsService factsService;
     private final EpisodeRetrieval episodeRetrieval;
     private final RecentPlanFacts recentPlanFacts;
+    private final NoteRemovalFlow noteRemovalFlow;
     private final GuardedReplyService guardedReply;
     /** Overridable in tests. */
     Duration forecastBudget = FORECAST_BUDGET;
@@ -122,6 +123,10 @@ public class AssistantService {
                 msg.clientNow() == null ? null : msg.clientNow().toLocalDate());
         if (c.intent() == IntentClassifier.Intent.MEAL_PREP) {
             mealPrepFlow.mealPrep(userId, userMessage, msg, c.items(), language, sink);
+            return;
+        }
+        if (c.intent() == IntentClassifier.Intent.REMOVE) {
+            noteRemovalFlow.propose(userId, userMessage, c.remove(), msg.clientNow(), language, sink);
             return;
         }
         if (c.intent() == IntentClassifier.Intent.EVENT && !c.tags().isEmpty()) {

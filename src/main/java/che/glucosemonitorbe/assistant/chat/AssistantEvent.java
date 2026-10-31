@@ -12,13 +12,14 @@ import java.util.UUID;
 
 /**
  * One NDJSON line of an assistant reply stream. Serialised with a {@code "type"} discriminator:
- * {@code logged, plan, proposal, episodes, banner, token, citations, done, error}.
+ * {@code logged, plan, proposal, removal, episodes, banner, token, citations, done, error}.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
         @JsonSubTypes.Type(value = AssistantEvent.Logged.class, name = "logged"),
         @JsonSubTypes.Type(value = AssistantEvent.Plan.class, name = "plan"),
         @JsonSubTypes.Type(value = AssistantEvent.Proposal.class, name = "proposal"),
+        @JsonSubTypes.Type(value = AssistantEvent.Removal.class, name = "removal"),
         @JsonSubTypes.Type(value = AssistantEvent.Episodes.class, name = "episodes"),
         @JsonSubTypes.Type(value = AssistantEvent.Banner.class, name = "banner"),
         @JsonSubTypes.Type(value = AssistantEvent.Token.class, name = "token"),
@@ -27,7 +28,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = AssistantEvent.Error.class, name = "error")
 })
 public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantEvent.Plan, AssistantEvent.Proposal,
-        AssistantEvent.Episodes, AssistantEvent.Banner, AssistantEvent.Token, AssistantEvent.Citations,
+        AssistantEvent.Removal, AssistantEvent.Episodes, AssistantEvent.Banner, AssistantEvent.Token, AssistantEvent.Citations,
         AssistantEvent.Done, AssistantEvent.Error {
 
     /** The wire discriminator for this event. */
@@ -37,6 +38,7 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
             case Logged l -> "logged";
             case Plan p -> "plan";
             case Proposal p -> "proposal";
+            case Removal r -> "removal";
             case Episodes e -> "episodes";
             case Banner b -> "banner";
             case Token t -> "token";
@@ -62,6 +64,15 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
      * ({@code POST /api/assistant/events/{messageId}/confirm}).
      */
     record Proposal(UUID messageId, List<ContextTag> tags, String comment) implements AssistantEvent {}
+
+    /**
+     * A logged note proposed for removal; deleted only when the user taps Remove
+     * ({@code POST /api/assistant/removals/{messageId}/confirm}). {@code at} is the note's wall time
+     * {@code HH:mm}; {@code insulin} / {@code carbs} are null when zero; {@code label} names the kind.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record Removal(UUID messageId, UUID noteId, String at, Double insulin, Double carbs, String label)
+            implements AssistantEvent {}
 
     /**
      * Past episodes with outcomes shown as cards (at most 5): after {@code plan} for a meal plan, before the

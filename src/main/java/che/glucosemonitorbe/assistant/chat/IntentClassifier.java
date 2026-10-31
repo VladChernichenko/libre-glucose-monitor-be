@@ -32,7 +32,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class IntentClassifier {
 
-    public enum Intent { MEAL_PREP, EVENT, QUESTION }
+    public enum Intent { MEAL_PREP, EVENT, REMOVE, QUESTION }
 
     public record FoodItem(String name, Double grams) {}
 
@@ -44,7 +44,17 @@ public class IntentClassifier {
         public static final Filters NONE = new Filters(null, null, List.of(), null);
     }
 
-    public record Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags, Filters filters) {
+    /** What a REMOVE message names: the logged insulin units and/or carb grams; null = not stated. */
+    public record RemoveTarget(Double insulin, Double carbs) {
+        public static final RemoveTarget NONE = new RemoveTarget(null, null);
+    }
+
+    public record Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags, Filters filters,
+                                 RemoveTarget remove) {
+        public Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags, Filters filters) {
+            this(intent, items, tags, filters, RemoveTarget.NONE);
+        }
+
         public Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags) {
             this(intent, items, tags, Filters.NONE);
         }
@@ -60,6 +70,7 @@ public class IntentClassifier {
     static final int MAX_FOOD_WORDS = 10;
     static final int MAX_FOOD_WORD_LENGTH = 40;
     static final int MAX_RANGE_DAYS = 90;
+    static final double MAX_REMOVE_UNITS = 100.0;
     private static final String TAG_NAMES = Arrays.stream(ContextTag.values())
             .map(Enum::name).collect(Collectors.joining(", "));
 
@@ -92,10 +103,13 @@ public class IntentClassifier {
                 + "\"items\": [{\"name\": string, \"grams\": number (only if the user stated a weight)}], "
                 + "\"tags\": [string], "
                 + "\"filters\": {\"fromDate\": \"YYYY-MM-DD\", \"toDate\": \"YYYY-MM-DD\", \"foodWords\": [string], "
-                + "\"eventKind\": \"MEAL\" | \"CORRECTION\" | \"ACTIVITY\" | \"LOW\"}}. "
+                + "\"eventKind\": \"MEAL\" | \"CORRECTION\" | \"ACTIVITY\" | \"LOW\"}, "
+                + "\"remove\": {\"insulin\": number, \"carbs\": number}}. "
                 + "MEAL_PREP: the user is about to eat or asks to prepare for a meal; list each food item. "
                 + "EVENT: the user reports something that happened (not food); tags may only be from: "
                 + TAG_NAMES + ". "
+                + "REMOVE: the user asks to remove, delete or undo something they logged (a dose, carbs, a "
+                + "note); remove holds the insulin units and/or carb grams they name, omitted when not stated. "
                 + "QUESTION: anything else. Items are empty unless MEAL_PREP; tags are empty unless EVENT. "
                 + "filters only for a QUESTION about past events and only what the question states: a date "
                 + "range it mentions, food words it names, and the kind of past event it asks about; omit "
@@ -124,7 +138,19 @@ public class IntentClassifier {
             return Classification.question();
         }
         Filters filters = intent == Intent.QUESTION ? filters(root.path("filters"), today) : Filters.NONE;
-        return new Classification(intent, items(root.path("items")), tags(root.path("tags")), filters);
+        RemoveTarget remove = intent == Intent.REMOVE ? removeTarget(root.path("remove")) : RemoveTarget.NONE;
+        return new Classification(intent, items(root.path("items")), tags(root.path("tags")), filters, remove);
+    }
+
+    static RemoveTarget removeTarget(JsonNode node) {
+        if (!node.isObject()) return RemoveTarget.NONE;
+        return new RemoveTarget(positive(node.path("insulin"), MAX_REMOVE_UNITS), positive(node.path("carbs"), MAX_GRAMS));
+    }
+
+    private static Double positive(JsonNode n, double max) {
+        if (!n.isNumber()) return null;
+        double v = n.asDouble();
+        return Double.isFinite(v) && v > 0 && v <= max ? v : null;
     }
 
     static Filters filters(JsonNode node, LocalDate today) {

@@ -44,6 +44,7 @@ class AssistantServiceTest {
     private final CarbsOnBoardService carbsOnBoard = mock(CarbsOnBoardService.class);
     private final AiAnalysisTraceRepository traces = mock(AiAnalysisTraceRepository.class);
     private final RecentPlanFacts recentPlan = mock(RecentPlanFacts.class);
+    private final NoteRemovalFlow removalFlow = mock(NoteRemovalFlow.class);
     private final EpisodeRetrieval retrieval = mock(EpisodeRetrieval.class);
 
     private final AssistantNoteWriter writer = mock(AssistantNoteWriter.class);
@@ -82,7 +83,7 @@ class AssistantServiceTest {
         GuardedReplyService guarded = new GuardedReplyService(llm, traces, objectMapper);
         service = new AssistantService(new QuickLogParser(), writer, history,
                 calculations, insulinCalculator, freshness, userService, objectMapper,
-                new IntentClassifier(llm, objectMapper), mealPrepFlow, facts, retrieval, recentPlan, guarded);
+                new IntentClassifier(llm, objectMapper), mealPrepFlow, facts, retrieval, recentPlan, removalFlow, guarded);
     }
 
     private IncomingMessage text(String t) {
@@ -351,6 +352,17 @@ class AssistantServiceTest {
 
         verify(mealPrepFlow).proposeEvent(any(), eq("hot shower"),
                 eq(List.of(che.glucosemonitorbe.assistant.common.ContextTag.HOT_SHOWER)), eq("en"), same(sink));
+    }
+
+    @Test
+    void removeIntentGoesToRemovalFlowWithTheNamedDose() {
+        when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"REMOVE\",\"remove\":{\"insulin\":1}}");
+
+        service.handle(user, text("Remove 1u. It was for testing purposes"), sink);
+
+        verify(removalFlow).propose(eq(user), any(), eq(new IntentClassifier.RemoveTarget(1.0, null)), eq(NOW),
+                eq("en"), same(sink));
+        verify(llm, never()).streamPromptReply(anyString(), anyString(), any());
     }
 
     @Test
