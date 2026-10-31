@@ -130,9 +130,12 @@ public class AssistantController {
     /** Took it: {@code doseUnits} as injected, {@code pauseMinutes} 0-60; times are the user's wall clock. */
     public record TookRequest(Double doseUnits, Integer pauseMinutes, String clientTime, String timezone) {}
 
-    /** Eating now: any macro left null is taken from the planned meal. */
+    /**
+     * Eating: any macro left null is taken from the planned meal. {@code ateAt} (optional, local ISO
+     * wall time without offset) logs a late meal; default now.
+     */
     public record EatingRequest(Double carbs, Double fat, Double protein, Double fiber, Double gi,
-                                String clientTime, String timezone) {}
+                                String ateAt, String clientTime, String timezone) {}
 
     public record ClientTimeRequest(String clientTime, String timezone) {}
 
@@ -147,15 +150,24 @@ public class AssistantController {
         return mealActionService.took(userId(authentication), messageId, body.doseUnits(), body.pauseMinutes(), now);
     }
 
-    @Operation(summary = "Meal card: Eating now - saves the meal note now with the (edited) macros (409 unless TOOK)")
+    @Operation(summary = "Meal card: Eating - saves the meal note at ateAt (default now) with the (edited) macros (409 unless PLANNED or TOOK)")
     @PostMapping("/plans/{messageId}/eating")
     public MealActionService.ActionResult eating(Authentication authentication,
                                                  @PathVariable("messageId") UUID messageId,
                                                  @RequestBody EatingRequest body) {
         if (body == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Body required");
         LocalDateTime now = wallTime(body.clientTime(), body.timezone());
+        LocalDateTime ateAt = null;
+        if (body.ateAt() != null && !body.ateAt().isBlank()) {
+            try {
+                ateAt = LocalDateTime.parse(body.ateAt().trim());
+            } catch (DateTimeParseException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "ateAt must be a local ISO date-time without offset, e.g. 2026-10-30T12:00:00");
+            }
+        }
         return mealActionService.eating(userId(authentication), messageId, body.carbs(), body.fat(), body.protein(),
-                body.fiber(), body.gi(), now);
+                body.fiber(), body.gi(), ateAt, now);
     }
 
     @Operation(summary = "Meal card: Not eating - ends the plan; a taken dose stays logged (409 unless PLANNED or TOOK)")

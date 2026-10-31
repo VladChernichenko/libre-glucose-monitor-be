@@ -30,8 +30,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * The meal card's actions, as a state machine on the assistant plan message's payload:
- * {@code PLANNED -> TOOK -> EATEN | SKIPPED} (and {@code PLANNED -> SKIPPED}). Took saves only the
- * dose note; Eating now saves the meal note at the tap moment. No action ever writes a note dated
+ * {@code PLANNED -> TOOK -> EATEN | SKIPPED}, {@code PLANNED -> EATEN} (meal without insulin),
+ * {@code PLANNED -> SKIPPED}, and {@code PLANNED -> SUPERSEDED} when a newer plan is made. Took saves
+ * only the dose note; Eating saves the meal note at the tap moment or a validated earlier {@code ateAt}. No action ever writes a note dated
  * after {@code now}, so a skipped or late meal never leaves a phantom meal in COB. Event proposals:
  * {@code PROPOSED -> CONFIRMED}. Each action row-locks the message, so a double tap acts once
  * (the second gets 409).
@@ -49,6 +50,8 @@ public class MealActionService {
     public static final String SKIPPED = "SKIPPED";
     public static final String PROPOSED = "PROPOSED";
     public static final String CONFIRMED = "CONFIRMED";
+    /** A PLANNED plan replaced by a newer plan for the same user; no action is allowed on it. */
+    public static final String SUPERSEDED = "SUPERSEDED";
 
     public static final String DOSE_SOURCE_PLAN = "PLAN";
     public static final String DOSE_SOURCE_USER_ENTERED = "USER_ENTERED";
@@ -109,21 +112,32 @@ public class MealActionService {
     @Transactional
     public ActionResult eating(UUID userId, UUID messageId, MealMacros macros, LocalDateTime now) {
         return macros == null
-                ? eating(userId, messageId, null, null, null, null, null, now)
+                ? eating(userId, messageId, null, null, null, null, null, null, now)
                 : eating(userId, messageId, macros.carbs(), macros.fat(), macros.protein(), macros.fiber(),
-                        macros.gi(), now);
+                        macros.gi(), null, now);
     }
 
     /**
-     * Eating now: saves the meal note at {@code now}. Each null macro is taken from the planned meal,
-     * so the card may send only what the user edited.
+     * Eating: saves the meal note at {@code ateAt} (default {@code now}). Each null macro is taken from
+     * the planned meal, so the card may send only what the user edited. From TOOK (after the dose) or
+     * straight from PLANNED (meal without insulin: no dose note, no doseSource). {@code ateAt} must lie
+     * between tookAt (TOOK) or plannedAt (PLANNED) and {@code now}: never in the future.
      */
     @Transactional
     public ActionResult eating(UUID userId, UUID messageId, Double carbs, Double fat, Double protein, Double fiber,
-                               Double gi, LocalDateTime now) {
+                               Double gi, LocalDateTime ateAt, LocalDateTime now) {
         ChatMessage m = locked(userId, messageId, INTENT_MEAL_PLAN);
         ObjectNode p = history.readPayload(m);
-        requireState(p, Set.of(TOOK));
+        requireState(p, Set.of(PLANNED, TOOK));
+        LocalDateTime ate = ateAt != null ? ateAt : now;
+        String lowerField = TOOK.equals(p.path("state").asText()) ? "tookAt" : "plannedAt";
+        LocalDateTime lower = p.hasNonNull(lowerField) ? LocalDateTime.parse(p.get(lowerField).asText()) : null;
+        if (ate.isAfter(now)) {
+            throw badRequest("ateAt " + iso(ate) + " is in the future (now is " + iso(now) + ")");
+        }
+        if (lower != null && ate.isBefore(lower)) {
+            throw badRequest("ateAt " + iso(ate) + " is before " + lowerField + " " + iso(lower));
+        }
         JsonNode planned = p.path("meal");
         MealMacros meal = new MealMacros(
                 pick(carbs, planned, "carbs"), pick(fat, planned, "fat"), pick(protein, planned, "protein"),
@@ -131,7 +145,7 @@ public class MealActionService {
         validate(meal);
 
         CreateNoteRequest req = new CreateNoteRequest();
-        req.setTimestamp(now);
+        req.setTimestamp(ate);
         req.setCarbs(meal.carbs());
         req.setInsulin(0.0);
         req.setMeal("Meal");
@@ -145,7 +159,7 @@ public class MealActionService {
         UUID noteId = notesService.createNote(userId, req).getId();
 
         p.put("state", EATEN);
-        p.put("eatenAt", iso(now));
+        p.put("eatenAt", iso(ate));
         p.put("mealNoteId", noteId.toString());
         p.set("eatenMeal", objectMapper.valueToTree(meal));
         return save(m, p, noteId);
@@ -160,6 +174,27 @@ public class MealActionService {
         p.put("state", SKIPPED);
         p.put("skippedAt", iso(now));
         return save(m, p, null);
+    }
+
+    /**
+     * A new plan replaces the user's other PLANNED plans: each is row-locked and, if still PLANNED,
+     * marked SUPERSEDED (a plan that was meanwhile TOOK is left alone). Returns the superseded ids.
+     */
+    @Transactional
+    public List<UUID> supersedeOlderPlans(UUID userId, UUID newPlanId, LocalDateTime now) {
+        List<UUID> superseded = new ArrayList<>();
+        for (UUID id : repository.findPlannedPlanIds(userId, newPlanId)) {
+            ChatMessage m = repository.findForUpdate(id).filter(x -> userId.equals(x.getUserId())).orElse(null);
+            if (m == null || !INTENT_MEAL_PLAN.equals(m.getIntent())) continue;
+            ObjectNode p = history.readPayload(m);
+            if (!PLANNED.equals(p.path("state").asText())) continue;
+            p.put("state", SUPERSEDED);
+            p.put("supersededBy", newPlanId.toString());
+            p.put("supersededAt", iso(now));
+            save(m, p, null);
+            superseded.add(id);
+        }
+        return superseded;
     }
 
     /** Confirm a proposed event: saves a note at {@code now} with the proposal's context tags. */

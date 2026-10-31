@@ -26,6 +26,12 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, UUID> 
     @Query("select m from ChatMessage m where m.id = :id")
     Optional<ChatMessage> findForUpdate(@Param("id") UUID id);
 
+    /** Ids of the user's assistant meal plans still in state PLANNED, other than {@code excludeId}. */
+    @Query(value = "select id from chat_message where user_id = :userId and role = 'ASSISTANT' "
+            + "and intent = 'meal_plan' and payload ->> 'state' = 'PLANNED' and id <> :excludeId",
+            nativeQuery = true)
+    List<UUID> findPlannedPlanIds(@Param("userId") UUID userId, @Param("excludeId") UUID excludeId);
+
     /** Sets a reply's text without touching its payload (a card action may have changed it meanwhile). */
     @Transactional
     @Modifying

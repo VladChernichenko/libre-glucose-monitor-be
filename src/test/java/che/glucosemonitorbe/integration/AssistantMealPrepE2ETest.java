@@ -300,6 +300,75 @@ class AssistantMealPrepE2ETest {
         assertEquals("Bread is most of the carbs.", planMsg.get("text").asText());
     }
 
+    private JsonNode planState(String messageId) throws Exception {
+        JsonNode page = objectMapper.readTree(rest.exchange("/api/assistant/messages", HttpMethod.GET,
+                new HttpEntity<>(bearer(token)), String.class).getBody());
+        for (JsonNode m : page) if (m.get("id").asText().equals(messageId)) return m.get("payload");
+        return fail("plan message not in history: " + messageId);
+    }
+
+    private String plan() throws Exception {
+        List<JsonNode> events = send("prepare me for 40 g rye bread", localNow());
+        assertEquals("plan", events.get(0).get("type").asText());
+        return events.get(0).get("messageId").asText();
+    }
+
+    @Test
+    @DisplayName("a new plan supersedes the old PLANNED one but never a TOOK one; meal without insulin; late-meal ateAt bounds")
+    void supersedeMealWithoutInsulinAndAteAt() throws Exception {
+        when(llm.completeJson(anyString())).thenReturn(
+                "{\"intent\":\"MEAL_PREP\",\"items\":[{\"name\":\"rye bread\",\"grams\":40}]}");
+        Map<String, Object> clock = Map.of("clientTime", localNow().toString(), "timezone", ZONE);
+
+        String a = plan();
+        String b = plan();
+        assertEquals("SUPERSEDED", planState(a).get("state").asText());
+        assertEquals(b, planState(a).get("supersededBy").asText());
+        assertEquals(HttpStatus.CONFLICT, action(token, "/api/assistant/plans/" + a + "/took",
+                Map.of("doseUnits", 2.0, "pauseMinutes", 0, "clientTime", localNow().toString(), "timezone", ZONE))
+                .getStatusCode());
+        assertTrue(notes().isEmpty());
+
+        // b is TOOK, so the next plan leaves it alone
+        assertEquals(HttpStatus.OK, action(token, "/api/assistant/plans/" + b + "/took",
+                Map.of("doseUnits", 2.0, "pauseMinutes", 0, "clientTime", localNow().toString(), "timezone", ZONE))
+                .getStatusCode());
+        LocalDateTime tookAt = LocalDateTime.parse(planState(b).get("tookAt").asText());
+        String c = plan();
+        assertEquals("TOOK", planState(b).get("state").asText());
+
+        // ateAt bounds on b: before tookAt, or after server-now, is 400
+        ResponseEntity<String> early = action(token, "/api/assistant/plans/" + b + "/eating", Map.of(
+                "ateAt", tookAt.minusMinutes(1).toString(), "clientTime", localNow().toString(), "timezone", ZONE));
+        assertEquals(HttpStatus.BAD_REQUEST, early.getStatusCode());
+        ResponseEntity<String> future = action(token, "/api/assistant/plans/" + b + "/eating", Map.of(
+                "ateAt", localNow().plusMinutes(1).toString(), "clientTime", localNow().toString(), "timezone", ZONE));
+        assertEquals(HttpStatus.BAD_REQUEST, future.getStatusCode());
+        assertEquals(1, notes().size(), "only b's dose note so far");
+        // within the bounds: the meal note is dated at ateAt
+        ResponseEntity<String> ok = action(token, "/api/assistant/plans/" + b + "/eating", Map.of(
+                "ateAt", tookAt.toString(), "clientTime", localNow().toString(), "timezone", ZONE));
+        assertEquals(HttpStatus.OK, ok.getStatusCode(), ok.getBody());
+        UUID bMeal = UUID.fromString(objectMapper.readTree(ok.getBody()).get("noteId").asText());
+        assertEquals(tookAt, notes().stream().filter(n -> n.getId().equals(bMeal)).findFirst().orElseThrow().getTimestamp());
+
+        // c: PLANNED -> EATEN without insulin: exactly one meal note, no dose note, no doseSource
+        ResponseEntity<String> eatC = action(token, "/api/assistant/plans/" + c + "/eating", clock);
+        assertEquals(HttpStatus.OK, eatC.getStatusCode(), eatC.getBody());
+        JsonNode cPayload = objectMapper.readTree(eatC.getBody()).get("payload");
+        assertEquals("EATEN", cPayload.get("state").asText());
+        assertFalse(cPayload.has("doseSource"));
+        List<NoteDto> all = notes();
+        assertEquals(3, all.size());
+        List<NoteDto> fromC = all.stream()
+                .filter(n -> n.getId().toString().equals(cPayload.get("mealNoteId").asText())).toList();
+        assertEquals(1, fromC.size());
+        assertEquals(0.0, fromC.get(0).getInsulin(), 1e-9);
+        assertTrue(fromC.get(0).getCarbs() > 0);
+        assertEquals(1, all.stream().filter(n -> n.getInsulin() != null && n.getInsulin() > 0).count(),
+                "the only dose note is b's");
+    }
+
     @Test
     @DisplayName("a free-text event is proposed with tags and saved only on Confirm")
     void eventProposalConfirm() throws Exception {

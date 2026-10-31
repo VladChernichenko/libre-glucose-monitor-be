@@ -194,12 +194,117 @@ class MealActionServiceTest {
     }
 
     @Test
-    void eatingBeforeTookIsConflict() {
+    void eatingWithoutInsulinGoesPlannedToEatenWithOneMealNoteAndNoDose() throws Exception {
+        ChatMessage m = planMessage();
+        UUID mealNote = stubMealNote();
+
+        MealActionService.ActionResult r = service.eating(user, m.getId(), null, NOW.plusMinutes(3));
+
+        assertEquals(MealActionService.EATEN, r.state());
+        verify(notesService, times(1)).createNote(eq(user), any());
+        verifyNoInteractions(noteWriter);
+        JsonNode p = objectMapper.readTree(m.getPayload());
+        assertEquals(mealNote.toString(), p.get("mealNoteId").asText());
+        assertFalse(p.has("doseSource"), "no dose was taken");
+        assertFalse(p.has("doseNoteId"));
+    }
+
+    private MealActionService.ActionResult eatAt(ChatMessage m, LocalDateTime ateAt, LocalDateTime now) {
+        return service.eating(user, m.getId(), null, null, null, null, null, ateAt, now);
+    }
+
+    @Test
+    void lateMealIsSavedAtAteAtWithinTookAtAndNow() throws Exception {
+        ChatMessage m = planMessage();
+        stubDoseNote();
+        service.took(user, m.getId(), 4.5, 15, NOW);
+        stubMealNote();
+
+        LocalDateTime ateAt = NOW.plusMinutes(20);
+        eatAt(m, ateAt, NOW.plusMinutes(90));
+
+        ArgumentCaptor<CreateNoteRequest> req = ArgumentCaptor.forClass(CreateNoteRequest.class);
+        verify(notesService).createNote(eq(user), req.capture());
+        assertEquals(ateAt, req.getValue().getTimestamp());
+        assertEquals("2026-10-31T12:20:00", objectMapper.readTree(m.getPayload()).get("eatenAt").asText());
+    }
+
+    @Test
+    void ateAtBoundariesAreInclusive() {
+        ChatMessage tookPlan = planMessage();
+        stubDoseNote();
+        service.took(user, tookPlan.getId(), 4.5, 15, NOW);
+        stubMealNote();
+        assertEquals(MealActionService.EATEN, eatAt(tookPlan, NOW, NOW.plusMinutes(30)).state()); // == tookAt
+
+        ChatMessage planned = planMessage();
+        LocalDateTime now = NOW.plusMinutes(30);
+        assertEquals(MealActionService.EATEN, eatAt(planned, now, now).state()); // == now
+    }
+
+    @Test
+    void ateAtBeforeTookAtIsBadRequest() {
+        ChatMessage m = planMessage();
+        stubDoseNote();
+        service.took(user, m.getId(), 4.5, 15, NOW.plusMinutes(5));
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> eatAt(m, NOW.plusMinutes(4), NOW.plusMinutes(30)));
+        assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
+        assertTrue(e.getReason().contains("before tookAt"), e.getReason());
+        verify(notesService, never()).createNote(any(), any());
+    }
+
+    @Test
+    void ateAtBeforePlannedAtIsBadRequestForAPlannedPlan() {
+        ChatMessage m = planMessage(); // plannedAt = NOW
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> eatAt(m, NOW.minusMinutes(1), NOW.plusMinutes(30)));
+        assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
+        assertTrue(e.getReason().contains("before plannedAt"), e.getReason());
+    }
+
+    @Test
+    void ateAtAfterNowIsBadRequest() {
         ChatMessage m = planMessage();
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> service.eating(user, m.getId(), null, NOW));
-        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
+                () -> eatAt(m, NOW.plusMinutes(31), NOW.plusMinutes(30)));
+        assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
+        assertTrue(e.getReason().contains("future"), e.getReason());
         verify(notesService, never()).createNote(any(), any());
+    }
+
+    @Test
+    void newPlanSupersedesPlannedButNotTookPlans() throws Exception {
+        ChatMessage planned = planMessage();
+        ChatMessage took = planMessage();
+        stubDoseNote();
+        service.took(user, took.getId(), 4.5, 15, NOW);
+        UUID newPlan = UUID.randomUUID();
+        when(repository.findPlannedPlanIds(user, newPlan)).thenReturn(List.of(planned.getId(), took.getId()));
+
+        List<UUID> superseded = service.supersedeOlderPlans(user, newPlan, NOW.plusMinutes(2));
+
+        assertEquals(List.of(planned.getId()), superseded);
+        JsonNode p = objectMapper.readTree(planned.getPayload());
+        assertEquals("SUPERSEDED", p.get("state").asText());
+        assertEquals(newPlan.toString(), p.get("supersededBy").asText());
+        assertEquals("TOOK", objectMapper.readTree(took.getPayload()).get("state").asText());
+
+        for (Runnable action : List.<Runnable>of(
+                () -> service.took(user, planned.getId(), 4.5, 15, NOW.plusMinutes(3)),
+                () -> service.eating(user, planned.getId(), null, NOW.plusMinutes(3)))) {
+            ResponseStatusException e = assertThrows(ResponseStatusException.class, action::run);
+            assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
+        }
+    }
+
+    @Test
+    void supersedeIgnoresOtherUsersRows() {
+        ChatMessage planned = planMessage();
+        UUID other = UUID.randomUUID();
+        UUID newPlan = UUID.randomUUID();
+        when(repository.findPlannedPlanIds(other, newPlan)).thenReturn(List.of(planned.getId()));
+        assertTrue(service.supersedeOlderPlans(other, newPlan, NOW).isEmpty());
     }
 
     @Test

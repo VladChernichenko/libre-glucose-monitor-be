@@ -43,6 +43,7 @@ public class MealPrepFlow {
     private final MealNutritionResolver nutrition;
     private final MealPlanService planService;
     private final LlmGatewayService llm;
+    private final MealActionService mealActions;
     private final ObjectMapper objectMapper;
 
     public void mealPrep(UUID userId, ChatMessage userMessage, IncomingMessage msg,
@@ -84,6 +85,8 @@ public class MealPrepFlow {
         payload.set("plan", objectMapper.valueToTree(plan));
         ChatMessage reply = history.appendAssistant(userMessage, "", MealActionService.INTENT_MEAL_PLAN, payload,
                 null, System.currentTimeMillis() - start);
+        // Only the newest plan can be acted on; older PLANNED cards turn SUPERSEDED (TOOK ones never).
+        mealActions.supersedeOlderPlans(userId, reply.getId(), msg.clientNow());
         sink.accept(new AssistantEvent.Plan(reply.getId(), plan, payload.get("plannedAt").asText(),
                 payload.get("doseValidUntil").asText()));
 
