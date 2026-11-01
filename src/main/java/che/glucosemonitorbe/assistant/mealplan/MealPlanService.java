@@ -13,6 +13,7 @@ import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import che.glucosemonitorbe.service.nutrition.GlycemicPatternMatchingService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import che.glucosemonitorbe.service.observer.HypoThresholds;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +29,9 @@ import java.util.stream.Collectors;
  * Builds the meal card: nutrition ranges, the calculator's dose (target and IOB from the user's
  * own settings and logged insulin) and the dashboard-forecast pause. Without a fresh CGM reading
  * only the nutrition is returned. A calculator refusal surfaces as {@code refusalCode} with no pause.
+ * A dose whose own forecast (insulin on board + the meal + this dose) goes below
+ * {@link HypoThresholds#HYPO_MMOL} is withheld as {@link DosingRefusalReason#FORECAST_LOW}; the pause
+ * stays on the plan so the card and the reply can show how low it goes.
  * A plan with a dose may carry the history-dose banner (spec 6.6), priced with the calculator's own terms.
  */
 @Service
@@ -125,6 +129,11 @@ public class MealPlanService {
 
         MealMacros macros = new MealMacros(carbs, fat, protein, fiber, n.getEstimatedGi());
         PauseChoice pause = optimizer.choose(userId, now, glucose, dose, macros);
+        if (dose > 0 && pause != null && pause.min() != null && pause.min() < HypoThresholds.HYPO_MMOL) {
+            // The calculator only sees carbs, glucose and IOB; the forecast also sees when they act.
+            return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, null,
+                    DosingRefusalReason.FORECAST_LOW.name(), pause, false);
+        }
         HistoryDose banner = historyDose(userId, n, macros, now, glucose, target, iob, dose, s);
         return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, dose, null, pause, false, banner);
     }

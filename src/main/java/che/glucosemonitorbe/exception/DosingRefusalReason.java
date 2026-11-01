@@ -24,7 +24,10 @@ public enum DosingRefusalReason {
             "Glucose is outside the physiological range for mmol/L. Check that the value is not in mg/dL."),
 
     DOSE_EXCEEDS_MAX_BOLUS(
-            "The calculated dose exceeds the maximum safe bolus. Please check the inputs.");
+            "The calculated dose exceeds the maximum safe bolus. Please check the inputs."),
+
+    FORECAST_LOW(
+            "With this dose the forecast drops below 3.9 mmol/L. Eat or treat first, then plan again.");
 
     private final String message;
 

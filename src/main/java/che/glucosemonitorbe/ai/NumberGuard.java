@@ -53,7 +53,7 @@ public final class NumberGuard {
     private static final Set<String> CARB_FIELDS = Set.of("carbs", "carbsLow", "carbsHigh", "fat", "protein",
             "fiber", "cob");
     private static final Set<String> GLUCOSE_FIELDS = Set.of("glucose", "startGlucose", "peak", "nadir", "g60",
-            "g120", "g240", "forecastPeak", "forecastLowest", "peakLow", "peakHigh", "landing");
+            "g120", "g240", "forecastPeak", "forecastLowest", "lowThreshold", "peakLow", "peakHigh", "landing");
 
     enum Unit { NONE, INSULIN, CARBS, MMOL, MGDL }
 

@@ -11,6 +11,7 @@ import che.glucosemonitorbe.dto.AiAnalysisRequest;
 import che.glucosemonitorbe.service.CarbsOnBoardService;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
+import che.glucosemonitorbe.service.observer.HypoThresholds;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -124,7 +125,15 @@ public class FactsService {
                 .gi(plan.gi())
                 .pattern(plan.patternLabel());
         if (plan.stale()) return b.noFreshCgmReading(true).build();
-        if (plan.refusalCode() != null) return b.calculatorRefused(plan.refusalCode()).build();
+        if (plan.refusalCode() != null) {
+            b.calculatorRefused(plan.refusalCode());
+            // A dose withheld for a low forecast: the reply may quote how low (and when it would peak).
+            if (plan.pause() != null) {
+                b.forecastLowest(round1(plan.pause().min())).forecastHours(FORECAST_HOURS)
+                        .lowThreshold(HypoThresholds.HYPO_MMOL);
+            }
+            return b.build();
+        }
         b.doseUnits(plan.doseUnits());
         PauseChoice p = plan.pause();
         if (p != null) {
