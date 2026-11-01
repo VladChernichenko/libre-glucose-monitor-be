@@ -8,8 +8,11 @@ import che.glucosemonitorbe.dto.HypoEventDTO;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.exception.DosingRefusalReason;
+import che.glucosemonitorbe.exception.DosingRefusedException;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.HypoEventService;
+import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import che.glucosemonitorbe.service.observer.HypoThresholds;
 import che.glucosemonitorbe.watch.WatchStrip.ActivityEstimate;
@@ -42,6 +45,10 @@ public class WatchStripService {
     static final int HORIZON_MINUTES = 240;
     static final int HOLDING_MINUTES = 60;
     static final double DIP_MMOL = 4.5;
+    static final double HIGH_MMOL = 10.0;
+    static final double MIN_DOSE_UNITS = 0.5;
+    static final int RAPID_INSULIN_LOOKBACK_HOURS = 2;
+    static final int HIGH_CHECK_MINUTES = 60;
     static final double CALM_MIN_IOB = 0.3;
     static final double CALM_MIN_COB = 5.0;
     static final double CALM_MIN_CARBS_G = 10.0;
@@ -51,20 +58,29 @@ public class WatchStripService {
     private final HypoEventService hypoEvents;
     private final NoteRepository notes;
     private final UserSettingsService settings;
+    private final InsulinCalculatorService calculator;
+    private final TwinIsfService twinIsf;
+    private final WatchStateHold hold;
     private final Clock clock;
 
     @Autowired
     public WatchStripService(CgmFreshnessService cgmFreshness, HypoEventService hypoEvents,
-                             NoteRepository notes, UserSettingsService settings) {
-        this(cgmFreshness, hypoEvents, notes, settings, Clock.systemUTC());
+                             NoteRepository notes, UserSettingsService settings,
+                             InsulinCalculatorService calculator, TwinIsfService twinIsf, WatchStateHold hold) {
+        this(cgmFreshness, hypoEvents, notes, settings, calculator, twinIsf, hold, Clock.systemUTC());
     }
 
     WatchStripService(CgmFreshnessService cgmFreshness, HypoEventService hypoEvents,
-                      NoteRepository notes, UserSettingsService settings, Clock clock) {
+                      NoteRepository notes, UserSettingsService settings,
+                      InsulinCalculatorService calculator, TwinIsfService twinIsf, WatchStateHold hold,
+                      Clock clock) {
         this.cgmFreshness = cgmFreshness;
         this.hypoEvents = hypoEvents;
         this.notes = notes;
         this.settings = settings;
+        this.calculator = calculator;
+        this.twinIsf = twinIsf;
+        this.hold = hold;
         this.clock = clock;
     }
 
@@ -72,8 +88,16 @@ public class WatchStripService {
     public Optional<WatchStrip> evaluate(UUID userId, GlucoseCalculationsResponse resp) {
         // 1. Freshness is about the real clock, not the client's wall time.
         Optional<CgmReadingDTO> fresh = cgmFreshness.freshReading(userId, clock.instant());
-        if (fresh.isEmpty()) return Optional.empty();
-        double reading = fresh.get().mmol();
+        if (fresh.isEmpty()) {
+            hold.clear(userId);
+            return Optional.empty();
+        }
+        // The hold counts per stored reading, so repeated polls of one reading never count twice.
+        WatchStrip candidate = decide(userId, resp, fresh.get().mmol()).orElse(null);
+        return hold.apply(userId, fresh.get().timestamp(), candidate);
+    }
+
+    private Optional<WatchStrip> decide(UUID userId, GlucoseCalculationsResponse resp, double reading) {
         LocalDateTime now = resp.getCalculatedAt();
         List<PredictionPointDTO> forecast = resp.getPredictionPath();
         Double iob = resp.getActiveInsulinOnBoard();
@@ -109,7 +133,12 @@ public class WatchStripService {
                     lowPoint, advice.recheckAt(), iob, cob));
         }
 
-        // 5. (URGENT_HIGH slot: Task 3 adds the high rule here, between the low rules and CALM.)
+        // 5. High and staying high: both the 2 h and the 4 h forecast above the high threshold.
+        Double twoHour = resp.getTwoHourPrediction();
+        Double fourHour = resp.getFourHourPrediction();
+        if (twoHour != null && twoHour > HIGH_MMOL && fourHour != null && fourHour > HIGH_MMOL) {
+            return Optional.of(high(userId, now, reading, fourHour, iob, cob));
+        }
 
         // 6. Calm: a recent dose, meal or activity that is still acting.
         boolean acting = (iob != null && iob >= CALM_MIN_IOB) || (cob != null && cob >= CALM_MIN_COB);
@@ -119,6 +148,48 @@ public class WatchStripService {
 
         // 7.
         return Optional.empty();
+    }
+
+    /** Correction priced from where the forecast lands; no trend term enters the dose. */
+    private WatchStrip high(UUID userId, LocalDateTime now, double reading, double landing,
+                            Double iob, Double cob) {
+        GlucosePoint landingPoint = new GlucosePoint(now.plusMinutes(HORIZON_MINUTES), landing);
+        LocalDateTime next = now.plusMinutes(HIGH_CHECK_MINUTES);
+        boolean recentDose = notes.findByUserIdAndTimestampBetween(userId,
+                        now.minusHours(RAPID_INSULIN_LOOKBACK_HOURS), now).stream()
+                .anyMatch(n -> n.getInsulin() != null && n.getInsulin() > 0
+                        && !Note.TYPE_LONG_ACTING.equals(n.getType()));
+        if (recentDose) {
+            return highStrip(Reason.INSULIN_LANDING, noAction(), landingPoint, next, iob, cob);
+        }
+        try {
+            UserSettingsDTO s = settings.getUserSettings(userId);
+            if (s == null) {
+                throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID,
+                        "no user settings");
+            }
+            double target = s.getTargetGlucoseMmol() != null
+                    ? s.getTargetGlucoseMmol() : UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL;
+            double isf = twinIsf.effectiveIsf(userId, s, now);
+            double raw = calculator.calculateForecastCorrection(userId.toString(), reading, landing, target, isf);
+            double units = Math.floor(raw * 2) / 2;
+            if (units < MIN_DOSE_UNITS) {
+                return highStrip(Reason.SMALL_RISE, noAction(), landingPoint, next, iob, cob);
+            }
+            return highStrip(Reason.HIGH_FORECAST,
+                    new Suggestion(Kind.INSULIN, null, units, null, target, isf, null),
+                    landingPoint, next, iob, cob);
+        } catch (DosingRefusedException e) {
+            return highStrip(Reason.HIGH_FORECAST,
+                    new Suggestion(Kind.REFUSED, null, null, e.getReason().name(), null, null, null),
+                    landingPoint, next, iob, cob);
+        }
+    }
+
+    private static WatchStrip highStrip(Reason reason, Suggestion suggestion, GlucosePoint landing,
+                                        LocalDateTime nextCheckAt, Double iob, Double cob) {
+        return new WatchStrip(State.URGENT_HIGH, reason, suggestion, null, landing, iob, cob,
+                nextCheckAt, ActivityEstimate.DEFAULT);
     }
 
     private static WatchStrip low(Reason reason, Suggestion suggestion, GlucosePoint lowPoint,

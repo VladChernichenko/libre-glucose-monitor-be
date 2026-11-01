@@ -9,7 +9,10 @@ import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.exception.DosingRefusalReason;
+import che.glucosemonitorbe.exception.DosingRefusedException;
 import che.glucosemonitorbe.service.HypoEventService;
+import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import che.glucosemonitorbe.watch.WatchStrip.Kind;
 import che.glucosemonitorbe.watch.WatchStrip.Reason;
@@ -29,8 +32,11 @@ import java.util.function.IntToDoubleFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class WatchStripServiceTest {
@@ -43,11 +49,14 @@ class WatchStripServiceTest {
     private final HypoEventService hypoEvents = mock(HypoEventService.class);
     private final NoteRepository notes = mock(NoteRepository.class);
     private final UserSettingsService settings = mock(UserSettingsService.class);
+    private final InsulinCalculatorService calculator = mock(InsulinCalculatorService.class);
+    private final TwinIsfService twinIsf = mock(TwinIsfService.class);
     private WatchStripService service;
 
     @BeforeEach
     void setUp() {
-        service = new WatchStripService(cgm, hypoEvents, notes, settings, Clock.fixed(CLOCK_NOW, ZoneOffset.UTC));
+        service = new WatchStripService(cgm, hypoEvents, notes, settings, calculator, twinIsf,
+                new WatchStateHold(), Clock.fixed(CLOCK_NOW, ZoneOffset.UTC));
         reading(6.0);
         when(hypoEvents.findOpenEvent(USER)).thenReturn(Optional.empty());
         when(hypoEvents.findUnrecoveredConfirmed(USER)).thenReturn(Optional.empty());
@@ -55,6 +64,7 @@ class WatchStripServiceTest {
         UserSettingsDTO s = new UserSettingsDTO();
         s.setRescueCarbsG(20);
         when(settings.getUserSettings(USER)).thenReturn(s);
+        when(twinIsf.effectiveIsf(eq(USER), any(), any())).thenReturn(2.0);
     }
 
     // -- helpers -----------------------------------------------------------------------------
@@ -321,5 +331,76 @@ class WatchStripServiceTest {
         reading(4.6);
         assertThat(service.evaluate(USER, resp(null, 0.0, 0.0)).orElseThrow().reason()).isEqualTo(Reason.TREATING_LOW);
         assertThat(service.evaluate(USER, resp(List.of(), 0.0, 0.0)).orElseThrow().reason()).isEqualTo(Reason.TREATING_LOW);
+    }
+
+    // -- URGENT_HIGH -------------------------------------------------------------------------
+
+    private static GlucoseCalculationsResponse high(double twoHour, double fourHour) {
+        GlucoseCalculationsResponse r = flat();
+        r.setTwoHourPrediction(twoHour);
+        r.setFourHourPrediction(fourHour);
+        return r;
+    }
+
+    @Test
+    void high_correctionFromLanding_roundedDown() {
+        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 11.0, 5.55, 2.0)).thenReturn(2.75);
+        WatchStrip strip = service.evaluate(USER, high(10.5, 11.0)).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
+        assertThat(strip.reason()).isEqualTo(Reason.HIGH_FORECAST);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.INSULIN);
+        assertThat(strip.suggestion().units()).isEqualTo(2.5);
+        assertThat(strip.suggestion().targetMmol()).isEqualTo(5.55);
+        assertThat(strip.suggestion().isf()).isEqualTo(2.0);
+        assertThat(strip.landing()).isEqualTo(new WatchStrip.GlucosePoint(NOW.plusMinutes(240), 11.0));
+        assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(60));
+    }
+
+    @Test
+    void high_doseWithin2h_insulinLanding() {
+        notesAre(note(0, 3.0, Note.TYPE_NORMAL, 100));
+        WatchStrip strip = service.evaluate(USER, high(10.5, 11.0)).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
+        assertThat(strip.reason()).isEqualTo(Reason.INSULIN_LANDING);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+        assertThat(strip.landing().mmol()).isEqualTo(11.0);
+        assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(60));
+    }
+
+    @Test
+    void high_under05_smallRise() {
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(0.49);
+        WatchStrip strip = service.evaluate(USER, high(10.5, 10.6)).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.SMALL_RISE);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+    }
+
+    @Test
+    void high_refusal_surfacesCode() {
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenThrow(new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS, "too big"));
+        WatchStrip strip = service.evaluate(USER, high(12.0, 16.0)).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
+        assertThat(strip.reason()).isEqualTo(Reason.HIGH_FORECAST);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.REFUSED);
+        assertThat(strip.suggestion().refusalCode()).isEqualTo("DOSE_EXCEEDS_MAX_BOLUS");
+        assertThat(strip.suggestion().units()).isNull();
+    }
+
+    @Test
+    void high_needsBoth2hAnd4hAbove10() {
+        assertThat(service.evaluate(USER, high(10.5, 9.0))).isEmpty();
+    }
+
+    @Test
+    void high_usesStoredReadingForRefusalCheck() {
+        reading(7.2);
+        GlucoseCalculationsResponse r = high(10.5, 11.0);
+        r.setCurrentGlucose(3.0);
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(1.0);
+        service.evaluate(USER, r);
+        verify(calculator).calculateForecastCorrection(eq(USER.toString()), eq(7.2), eq(11.0), anyDouble(), eq(2.0));
     }
 }
