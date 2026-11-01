@@ -48,6 +48,8 @@ public class WatchStripService {
     static final double HIGH_MMOL = 10.0;
     static final double MIN_DOSE_UNITS = 0.5;
     static final int RAPID_INSULIN_LOOKBACK_HOURS = 2;
+    /** Tolerates a dose logged slightly ahead of the client clock. */
+    static final int RAPID_INSULIN_LOOKAHEAD_MINUTES = 15;
     static final int HIGH_CHECK_MINUTES = 60;
     static final double CALM_MIN_IOB = 0.3;
     static final double CALM_MIN_COB = 5.0;
@@ -94,7 +96,7 @@ public class WatchStripService {
         }
         // The hold counts per stored reading, so repeated polls of one reading never count twice.
         WatchStrip candidate = decide(userId, resp, fresh.get().mmol()).orElse(null);
-        return hold.apply(userId, fresh.get().timestamp(), candidate);
+        return hold.apply(userId, fresh.get().timestamp(), resp.getCalculatedAt(), candidate);
     }
 
     private Optional<WatchStrip> decide(UUID userId, GlucoseCalculationsResponse resp, double reading) {
@@ -156,7 +158,7 @@ public class WatchStripService {
         GlucosePoint landingPoint = new GlucosePoint(now.plusMinutes(HORIZON_MINUTES), landing);
         LocalDateTime next = now.plusMinutes(HIGH_CHECK_MINUTES);
         boolean recentDose = notes.findByUserIdAndTimestampBetween(userId,
-                        now.minusHours(RAPID_INSULIN_LOOKBACK_HOURS), now).stream()
+                        now.minusHours(RAPID_INSULIN_LOOKBACK_HOURS), now.plusMinutes(RAPID_INSULIN_LOOKAHEAD_MINUTES)).stream()
                 .anyMatch(n -> n.getInsulin() != null && n.getInsulin() > 0
                         && !Note.TYPE_LONG_ACTING.equals(n.getType()));
         if (recentDose) {

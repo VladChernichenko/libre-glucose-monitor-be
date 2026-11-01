@@ -69,6 +69,11 @@ class WatchStripServiceTest {
 
     // -- helpers -----------------------------------------------------------------------------
 
+    private void readingStoredAt(double mmol, int minutesAgo) {
+        when(cgm.freshReading(eq(USER), eq(CLOCK_NOW)))
+                .thenReturn(Optional.of(new CgmReadingDTO(mmol, NOW.minusMinutes(minutesAgo), 3, "Flat")));
+    }
+
     private void reading(double mmol) {
         when(cgm.freshReading(eq(USER), eq(CLOCK_NOW)))
                 .thenReturn(Optional.of(new CgmReadingDTO(mmol, NOW.minusMinutes(2), 3, "Flat")));
@@ -402,5 +407,47 @@ class WatchStripServiceTest {
                 .thenReturn(1.0);
         service.evaluate(USER, r);
         verify(calculator).calculateForecastCorrection(eq(USER.toString()), eq(7.2), eq(11.0), anyDouble(), eq(2.0));
+    }
+
+    @Test
+    void high_doseLoggedAheadOfClock_stillBlocksCorrection() {
+        notesAre(note(0, 3.0, Note.TYPE_NORMAL, -5));
+        assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().reason()).isEqualTo(Reason.INSULIN_LANDING);
+    }
+
+    @Test
+    void hold_calmSurvivesOneWeakerNewReading_thenDrops() {
+        notesAre(note(0, 4.0, Note.TYPE_NORMAL, 60));
+        readingStoredAt(6.0, 2);
+        assertThat(service.evaluate(USER, resp(path(m -> 6.0), 1.5, 0.0)).orElseThrow().state()).isEqualTo(State.CALM);
+
+        notesAre();
+        readingStoredAt(6.0, -3);
+        assertThat(service.evaluate(USER, flat()).orElseThrow().state()).isEqualTo(State.CALM);
+
+        readingStoredAt(6.0, -8);
+        assertThat(service.evaluate(USER, flat())).isEmpty();
+    }
+
+    @Test
+    void hold_missingFreshReadingClearsIt() {
+        notesAre(note(0, 4.0, Note.TYPE_NORMAL, 60));
+        assertThat(service.evaluate(USER, resp(path(m -> 6.0), 1.5, 0.0))).isPresent();
+
+        when(cgm.freshReading(eq(USER), eq(CLOCK_NOW))).thenReturn(Optional.empty());
+        assertThat(service.evaluate(USER, flat())).isEmpty();
+
+        notesAre();
+        readingStoredAt(6.0, -3);
+        assertThat(service.evaluate(USER, flat())).isEmpty();
+    }
+
+    @Test
+    void hold_doseStripNotKeptAfterForecastDrops() {
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+                .thenReturn(2.75);
+        assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().suggestion().kind()).isEqualTo(Kind.INSULIN);
+        readingStoredAt(6.0, -3);
+        assertThat(service.evaluate(USER, flat())).isEmpty();
     }
 }

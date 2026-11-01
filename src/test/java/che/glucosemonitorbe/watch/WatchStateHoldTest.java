@@ -19,58 +19,105 @@ class WatchStateHoldTest {
     private final WatchStateHold hold = new WatchStateHold();
 
     private static WatchStrip strip(State state) {
+        return strip(state, Kind.NO_ACTION, T0.plusMinutes(60));
+    }
+
+    private static WatchStrip strip(State state, Kind kind, LocalDateTime nextCheckAt) {
         Reason reason = switch (state) {
             case URGENT_LOW -> Reason.LOW_NOW;
             case URGENT_HIGH -> Reason.HIGH_FORECAST;
             case CALM -> Reason.WATCHING;
         };
-        return new WatchStrip(state, reason, new WatchStrip.Suggestion(Kind.NO_ACTION, null, null, null, null, null, null),
-                null, null, null, null, T0.plusMinutes(60), ActivityEstimate.DEFAULT);
+        return new WatchStrip(state, reason, new WatchStrip.Suggestion(kind, null, null, null, null, null, null),
+                null, null, null, null, nextCheckAt, ActivityEstimate.DEFAULT);
     }
 
     @Test
     void calmHeldForTwoNewReadings() {
         WatchStrip calm = strip(State.CALM);
-        assertThat(hold.apply(USER, T0, calm)).contains(calm);
-        assertThat(hold.apply(USER, T0.plusMinutes(5), null)).contains(calm);
-        assertThat(hold.apply(USER, T0.plusMinutes(10), null)).isEmpty();
+        assertThat(hold.apply(USER, T0, T0, calm)).contains(calm);
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), null)).contains(calm);
+        assertThat(hold.apply(USER, T0.plusMinutes(10), T0.plusMinutes(10), null)).isEmpty();
     }
 
     @Test
     void samePollingReading_doesNotCount() {
         WatchStrip calm = strip(State.CALM);
-        hold.apply(USER, T0, calm);
+        hold.apply(USER, T0, T0, calm);
         for (int i = 0; i < 5; i++) {
-            assertThat(hold.apply(USER, T0, null)).contains(calm);
+            assertThat(hold.apply(USER, T0, T0, null)).contains(calm);
         }
-        assertThat(hold.apply(USER, T0.plusMinutes(5), null)).contains(calm);
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), null)).contains(calm);
     }
 
     @Test
     void higherPriorityReplacesAtOnce() {
         WatchStrip high = strip(State.URGENT_HIGH);
-        hold.apply(USER, T0, strip(State.CALM));
-        assertThat(hold.apply(USER, T0.plusMinutes(5), high)).contains(high);
+        hold.apply(USER, T0, T0, strip(State.CALM));
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), high)).contains(high);
     }
 
     @Test
     void lowerPriorityDoesNotReplaceHeldHigh() {
         WatchStrip high = strip(State.URGENT_HIGH);
-        hold.apply(USER, T0, high);
-        assertThat(hold.apply(USER, T0.plusMinutes(5), strip(State.CALM))).contains(high);
+        hold.apply(USER, T0, T0, high);
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), strip(State.CALM))).contains(high);
     }
 
     @Test
     void lowClearsHold() {
         WatchStrip low = strip(State.URGENT_LOW);
-        hold.apply(USER, T0, strip(State.URGENT_HIGH));
-        assertThat(hold.apply(USER, T0.plusMinutes(5), low)).contains(low);
-        assertThat(hold.apply(USER, T0.plusMinutes(10), null)).isEmpty();
+        hold.apply(USER, T0, T0, strip(State.URGENT_HIGH));
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), low)).contains(low);
+        assertThat(hold.apply(USER, T0.plusMinutes(10), T0.plusMinutes(10), null)).isEmpty();
     }
 
     @Test
     void gapOverMaxAge_dropsHold() {
-        hold.apply(USER, T0, strip(State.CALM));
-        assertThat(hold.apply(USER, T0.plusMinutes(16), null)).isEmpty();
+        hold.apply(USER, T0, T0, strip(State.CALM));
+        assertThat(hold.apply(USER, T0.plusMinutes(16), T0.plusMinutes(16), null)).isEmpty();
+    }
+
+    @Test
+    void heldDoseStrip_isNeverHeld_weakerCandidateWins() {
+        WatchStrip calm = strip(State.CALM);
+        hold.apply(USER, T0, T0, strip(State.URGENT_HIGH, Kind.INSULIN, T0.plusMinutes(60)));
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), calm)).contains(calm);
+    }
+
+    @Test
+    void heldDoseStrip_isNeverHeld_nullOnNewReadingIsEmpty() {
+        hold.apply(USER, T0, T0, strip(State.URGENT_HIGH, Kind.INSULIN, T0.plusMinutes(60)));
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), null)).isEmpty();
+    }
+
+    @Test
+    void heldDoseStrip_isNeverHeld_nullOnSameReadingIsEmpty() {
+        hold.apply(USER, T0, T0, strip(State.URGENT_HIGH, Kind.INSULIN, T0.plusMinutes(60)));
+        assertThat(hold.apply(USER, T0, T0, null)).isEmpty();
+    }
+
+    @Test
+    void refusedStripIsHeld() {
+        WatchStrip refused = strip(State.URGENT_HIGH, Kind.REFUSED, T0.plusMinutes(60));
+        hold.apply(USER, T0, T0, refused);
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), null)).contains(refused);
+    }
+
+    @Test
+    void heldStrip_nextCheckIsAtLeastFifteenMinutesOut() {
+        WatchStrip calm = strip(State.CALM, Kind.NO_ACTION, T0.plusMinutes(10));
+        hold.apply(USER, T0, T0, calm);
+        WatchStrip held = hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), null).orElseThrow();
+        assertThat(held.nextCheckAt()).isEqualTo(T0.plusMinutes(20));
+        assertThat(held.state()).isEqualTo(State.CALM);
+    }
+
+    @Test
+    void heldStrip_laterNextCheckKept() {
+        WatchStrip calm = strip(State.CALM);
+        hold.apply(USER, T0, T0, calm);
+        assertThat(hold.apply(USER, T0.plusMinutes(5), T0.plusMinutes(5), null).orElseThrow().nextCheckAt())
+                .isEqualTo(T0.plusMinutes(60));
     }
 }
