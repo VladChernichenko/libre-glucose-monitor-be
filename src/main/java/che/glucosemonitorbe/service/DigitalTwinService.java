@@ -2,6 +2,7 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.entity.UserDigitalTwin;
+import che.glucosemonitorbe.hovorka.ActivityGains;
 import che.glucosemonitorbe.hovorka.learning.PredictionUncertaintyModel;
 import che.glucosemonitorbe.hovorka.learning.ResidualBiasModel;
 import che.glucosemonitorbe.hovorka.learning.TwinScales;
@@ -38,7 +39,8 @@ public class DigitalTwinService {
     private final ConcurrentHashMap<UUID, Cached> cache = new ConcurrentHashMap<>();
 
     private record Cached(TwinScales scales, ResidualBiasModel residual,
-                          PredictionUncertaintyModel uncertainty, boolean applied, long expiresAt) {
+                          PredictionUncertaintyModel uncertainty, boolean applied,
+                          ActivityGains activity, long expiresAt) {
         boolean fresh() { return System.currentTimeMillis() < expiresAt; }
     }
 
@@ -47,6 +49,15 @@ public class DigitalTwinService {
         if (!featureToggleConfig.isDigitalTwinEnabled()) return Optional.empty();
         Cached c = resolve(userId);
         return c.applied() ? Optional.of(c.scales()) : Optional.empty();
+    }
+
+    /**
+     * The learned activity gains for this user. Present only when the activity fit itself beat the
+     * population defaults out-of-sample - independent of whether the twin's scales were applied.
+     */
+    public Optional<ActivityGains> activeActivityGains(UUID userId) {
+        if (!featureToggleConfig.isDigitalTwinEnabled()) return Optional.empty();
+        return Optional.ofNullable(resolve(userId).activity());
     }
 
     /** The residual correction grid to apply to predictions for this user (neutral if no active twin). */
@@ -85,19 +96,31 @@ public class DigitalTwinService {
     private Cached load(UUID userId) {
         UserDigitalTwin twin = repository.findByUserId(userId).orElse(null);
         long expiry = System.currentTimeMillis() + CACHE_TTL_MS;
-        if (twin == null || !Boolean.TRUE.equals(twin.getApplied())) {
+        if (twin == null) {
             return new Cached(TwinScales.neutral(), ResidualBiasModel.neutral(),
-                    PredictionUncertaintyModel.populationDefault(), false, expiry);
+                    PredictionUncertaintyModel.populationDefault(), false, null, expiry);
+        }
+        ActivityGains activity = Boolean.TRUE.equals(twin.getActivityApplied())
+                ? new ActivityGains(orDefault(twin.getActivityGainScale(), ActivityGains.NEUTRAL.gainScale()),
+                        orDefault(twin.getActivityTailHalfLifeMin(), ActivityGains.NEUTRAL.tailHalfLifeMin())).clamped()
+                : null;
+        if (!Boolean.TRUE.equals(twin.getApplied())) {
+            return new Cached(TwinScales.neutral(), ResidualBiasModel.neutral(),
+                    PredictionUncertaintyModel.populationDefault(), false, activity, expiry);
         }
         TwinScales scales = new TwinScales(
                 orOne(twin.getIsfScale()), orOne(twin.getAgScale()),
                 orOne(twin.getTMaxGScale()), orOne(twin.getEgpScale())).clamped();
         ResidualBiasModel residual = ResidualBiasModel.fromCsv(twin.getResidualGrid());
         PredictionUncertaintyModel uncertainty = PredictionUncertaintyModel.fromCsv(twin.getUncertaintySdGrid());
-        return new Cached(scales, residual, uncertainty, true, expiry);
+        return new Cached(scales, residual, uncertainty, true, activity, expiry);
     }
 
     private static double orOne(Double v) {
-        return v == null ? 1.0 : v;
+        return orDefault(v, 1.0);
+    }
+
+    private static double orDefault(Double v, double fallback) {
+        return v == null ? fallback : v;
     }
 }

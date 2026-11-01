@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.hovorka.learning;
 
+import che.glucosemonitorbe.hovorka.ActivityGains;
+
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -30,6 +32,14 @@ public interface PredictionResidualProvider {
      */
     default double uncertaintySdMmol(UUID userId, int horizonMin) {
         return PredictionUncertaintyModel.populationDefault().sdAtHorizon(horizonMin);
+    }
+
+    /**
+     * The learned activity gains for the live forecast; population defaults unless the user's twin
+     * learned better ones. Replay never goes through this - it passes gains explicitly.
+     */
+    default ActivityGains activityGains(UUID userId) {
+        return ActivityGains.NEUTRAL;
     }
 
     /** No-op provider: no correction and no band. Used during calibration replay and in tests. */

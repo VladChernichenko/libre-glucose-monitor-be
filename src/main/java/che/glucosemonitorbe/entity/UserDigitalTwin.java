@@ -52,6 +52,17 @@ public class UserDigitalTwin {
     @Builder.Default @Column(name = "applied", nullable = false)
     private Boolean applied = false;
 
+    // -- Learned activity gains (neutral = population defaults) ----------------
+    @Builder.Default @Column(name = "activity_gain_scale", nullable = false)
+    private Double activityGainScale = 1.0;
+    @Builder.Default @Column(name = "activity_tail_half_life_min", nullable = false)
+    private Double activityTailHalfLifeMin = 120.0;
+    /** TRUE when the fitted activity gains improved out-of-sample; independent of {@link #applied}. */
+    @Builder.Default @Column(name = "activity_applied", nullable = false)
+    private Boolean activityApplied = false;
+    @Builder.Default @Column(name = "activity_samples", nullable = false)
+    private Integer activitySamples = 0;
+
     // -- Fit diagnostics (out-of-sample) ---------------------------------------
     @Column(name = "mae_baseline")    private Double maeBaseline;
     @Column(name = "mae_calibrated")  private Double maeCalibrated;

@@ -11,6 +11,8 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.exception.DosingRefusalReason;
 import che.glucosemonitorbe.exception.DosingRefusedException;
+import che.glucosemonitorbe.hovorka.ActivityGains;
+import che.glucosemonitorbe.service.DigitalTwinService;
 import che.glucosemonitorbe.service.HypoEventService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -51,12 +53,13 @@ class WatchStripServiceTest {
     private final UserSettingsService settings = mock(UserSettingsService.class);
     private final InsulinCalculatorService calculator = mock(InsulinCalculatorService.class);
     private final TwinIsfService twinIsf = mock(TwinIsfService.class);
+    private final DigitalTwinService digitalTwin = mock(DigitalTwinService.class);
     private WatchStripService service;
 
     @BeforeEach
     void setUp() {
         service = new WatchStripService(cgm, hypoEvents, notes, settings, calculator, twinIsf,
-                new WatchStateHold(), Clock.fixed(CLOCK_NOW, ZoneOffset.UTC));
+                new WatchStateHold(), digitalTwin, Clock.fixed(CLOCK_NOW, ZoneOffset.UTC));
         reading(6.0);
         when(hypoEvents.findOpenEvent(USER)).thenReturn(Optional.empty());
         when(hypoEvents.findUnrecoveredConfirmed(USER)).thenReturn(Optional.empty());
@@ -118,6 +121,14 @@ class WatchStripServiceTest {
     }
 
     // -- rules -------------------------------------------------------------------------------
+
+    @Test
+    void watch_activityEstimateLearned() {
+        when(digitalTwin.activeActivityGains(USER)).thenReturn(Optional.of(new ActivityGains(1.5, 180)));
+        reading(3.6);
+        WatchStrip strip = service.evaluate(USER, flat()).orElseThrow();
+        assertThat(strip.activityEstimate()).isEqualTo(WatchStrip.ActivityEstimate.LEARNED);
+    }
 
     @Test
     void noFreshReading_noStrip() {

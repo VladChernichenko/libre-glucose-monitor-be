@@ -193,7 +193,18 @@ public class DigitalTwinCalibrationService {
         // -- Fit -----------------------------------------------------------------
         DigitalTwinCalibrator.Result result = new DigitalTwinCalibrator().calibrate(train, val);
 
-        persist(userId, result, now);
+        // -- Activity gains: fitted on top of the twin, whether or not the twin itself was applied.
+        DigitalTwinCalibrator.ActivityFit activityFit = null;
+        if (activity != che.glucosemonitorbe.hovorka.ActivityProvider.NONE) {
+            long trainEndMs = trainCgm.isEmpty() ? Long.MIN_VALUE : trainCgm.get(trainCgm.size() - 1).epochMs();
+            int activityCount = (int) notes.stream()
+                    .filter(n -> n.isActivity() && n.getTimestamp() != null
+                            && PredictionReplayEngine.toEpochMs(n.getTimestamp(), userZone) <= trainEndMs)
+                    .count();
+            activityFit = new DigitalTwinCalibrator().fitActivity(train, val, result.scales(), activityCount);
+        }
+
+        persist(userId, result, activityFit, now);
         digitalTwinService.invalidate(userId);
         log.info("Digital-twin calibration user={} -> {} (isf×{}, aG×{})",
                 userId, result.status(),
@@ -247,7 +258,9 @@ public class DigitalTwinCalibrationService {
 
     // -- Persistence ----------------------------------------------------------
 
-    private void persist(UUID userId, DigitalTwinCalibrator.Result r, LocalDateTime now) {
+    /** @param activityFit the activity stage's outcome, or {@code null} when it did not run (stored as neutral) */
+    void persist(UUID userId, DigitalTwinCalibrator.Result r,
+                 DigitalTwinCalibrator.ActivityFit activityFit, LocalDateTime now) {
         UserDigitalTwin twin = twinRepository.findByUserId(userId)
                 .orElseGet(() -> UserDigitalTwin.builder().userId(userId).build());
 
@@ -265,6 +278,12 @@ public class DigitalTwinCalibrationService {
         twin.setValSamples(r.valSamples());
         twin.setConfidence(r.confidence());
         twin.setStatus(r.status());
+        che.glucosemonitorbe.hovorka.ActivityGains gains = activityFit != null && activityFit.applied()
+                ? activityFit.gains() : che.glucosemonitorbe.hovorka.ActivityGains.NEUTRAL;
+        twin.setActivityGainScale(gains.gainScale());
+        twin.setActivityTailHalfLifeMin(gains.tailHalfLifeMin());
+        twin.setActivityApplied(activityFit != null && activityFit.applied());
+        twin.setActivitySamples(activityFit != null ? activityFit.activityCount() : 0);
         twin.setFittedAt(now);
 
         twinRepository.save(twin);

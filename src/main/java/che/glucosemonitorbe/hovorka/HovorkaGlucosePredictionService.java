@@ -150,7 +150,8 @@ public class HovorkaGlucosePredictionService {
         return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
                 ActivityProvider.NONE,
-                insulinPrefsService.getLongActingDurationHours(userId));
+                insulinPrefsService.getLongActingDurationHours(userId),
+                residualProvider.activityGains(userId));
     }
 
     /**
@@ -173,7 +174,8 @@ public class HovorkaGlucosePredictionService {
         return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
                 activityProvider,
-                insulinPrefsService.getLongActingDurationHours(userId));
+                insulinPrefsService.getLongActingDurationHours(userId),
+                residualProvider.activityGains(userId));
     }
 
     /**
@@ -346,9 +348,10 @@ public class HovorkaGlucosePredictionService {
     }
 
     /**
-     * Core ODE integration - shared by all public overloads.
+     * Core ODE integration - shared by all public overloads. Package-private so tests can observe
+     * which gains a live overload resolved.
      */
-    private List<PredictionPointDTO> buildWithParams(
+    List<PredictionPointDTO> buildWithParams(
             HovorkaParameters p,
             RapidInsulinIobParameters rapidIob,
             UserSettingsDTO settings,

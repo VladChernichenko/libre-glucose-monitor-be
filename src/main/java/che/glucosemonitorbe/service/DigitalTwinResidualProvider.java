@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.hovorka.ActivityGains;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Primary;
@@ -28,6 +29,12 @@ public class DigitalTwinResidualProvider implements PredictionResidualProvider {
         // which previously produced vertical jumps in the prediction curve.
         return digitalTwinService.activeResidual(userId)
                 .correctionAt(pointTime.getHour(), pointTime.getMinute());
+    }
+
+    @Override
+    public ActivityGains activityGains(UUID userId) {
+        if (userId == null) return ActivityGains.NEUTRAL;
+        return digitalTwinService.activeActivityGains(userId).orElse(ActivityGains.NEUTRAL);
     }
 
     @Override

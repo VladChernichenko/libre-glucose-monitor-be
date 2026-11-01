@@ -11,6 +11,7 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.exception.DosingRefusalReason;
 import che.glucosemonitorbe.exception.DosingRefusedException;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.DigitalTwinService;
 import che.glucosemonitorbe.service.HypoEventService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -62,20 +63,22 @@ public class WatchStripService {
     private final UserSettingsService settings;
     private final InsulinCalculatorService calculator;
     private final TwinIsfService twinIsf;
+    private final DigitalTwinService digitalTwin;
     private final WatchStateHold hold;
     private final Clock clock;
 
     @Autowired
     public WatchStripService(CgmFreshnessService cgmFreshness, HypoEventService hypoEvents,
                              NoteRepository notes, UserSettingsService settings,
-                             InsulinCalculatorService calculator, TwinIsfService twinIsf, WatchStateHold hold) {
-        this(cgmFreshness, hypoEvents, notes, settings, calculator, twinIsf, hold, Clock.systemUTC());
+                             InsulinCalculatorService calculator, TwinIsfService twinIsf, WatchStateHold hold,
+                             DigitalTwinService digitalTwin) {
+        this(cgmFreshness, hypoEvents, notes, settings, calculator, twinIsf, hold, digitalTwin, Clock.systemUTC());
     }
 
     WatchStripService(CgmFreshnessService cgmFreshness, HypoEventService hypoEvents,
                       NoteRepository notes, UserSettingsService settings,
                       InsulinCalculatorService calculator, TwinIsfService twinIsf, WatchStateHold hold,
-                      Clock clock) {
+                      DigitalTwinService digitalTwin, Clock clock) {
         this.cgmFreshness = cgmFreshness;
         this.hypoEvents = hypoEvents;
         this.notes = notes;
@@ -83,6 +86,7 @@ public class WatchStripService {
         this.calculator = calculator;
         this.twinIsf = twinIsf;
         this.hold = hold;
+        this.digitalTwin = digitalTwin;
         this.clock = clock;
     }
 
@@ -95,7 +99,12 @@ public class WatchStripService {
             return Optional.empty();
         }
         // The hold counts per stored reading, so repeated polls of one reading never count twice.
-        WatchStrip candidate = decide(userId, resp, fresh.get().mmol()).orElse(null);
+        ActivityEstimate estimate = digitalTwin.activeActivityGains(userId).isPresent()
+                ? ActivityEstimate.LEARNED : ActivityEstimate.DEFAULT;
+        WatchStrip candidate = decide(userId, resp, fresh.get().mmol())
+                .map(st -> new WatchStrip(st.state(), st.reason(), st.suggestion(), st.low(), st.landing(),
+                        st.iob(), st.cob(), st.nextCheckAt(), estimate))
+                .orElse(null);
         return hold.apply(userId, fresh.get().timestamp(), resp.getCalculatedAt(), candidate);
     }
 

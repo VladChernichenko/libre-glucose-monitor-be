@@ -15,7 +15,15 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ActivityGainsForecastTest {
 
@@ -68,6 +76,32 @@ class ActivityGainsForecastTest {
         ActivityGains lo = new ActivityGains(0.0, 1.0).clamped();
         assertThat(lo.gainScale()).isEqualTo(0.5);
         assertThat(lo.tailHalfLifeMin()).isEqualTo(60.0);
+    }
+
+    @Test
+    @DisplayName("live overloads resolve the learned gains; the customParams overloads stay neutral")
+    void liveForecastUsesLearnedGains() {
+        ActivityGains learned = new ActivityGains(1.7, 200.0);
+        PredictionResidualProvider provider = mock(PredictionResidualProvider.class);
+        when(provider.activityGains(USER)).thenReturn(learned);
+        HovorkaParameterService params = mock(HovorkaParameterService.class);
+        UserInsulinPreferencesService prefs = mock(UserInsulinPreferencesService.class);
+        DallaManGutModel gut = new DallaManGutModel();
+        HovorkaGlucosePredictionService spied = spy(new HovorkaGlucosePredictionService(
+                params, new HovorkaOdeSolver(gut), new BasalInsulinResolver(), prefs, gut,
+                mock(UserSettingsService.class), provider));
+        doReturn(List.of()).when(spied).buildWithParams(any(), any(), any(), anyDouble(), any(), any(), any(),
+                any(), any(), anyInt(), any(), anyDouble(), any());
+
+        spied.buildPredictionPath(10.0, T0, List.of(), List.of(), List.of(), USER, 240);
+        spied.buildPredictionPath(10.0, T0, List.of(), List.of(), List.of(), USER, 240, WALK);
+        verify(spied, org.mockito.Mockito.times(2)).buildWithParams(any(), any(), any(), anyDouble(), any(),
+                any(), any(), any(), any(), anyInt(), any(), anyDouble(), eq(learned));
+
+        HovorkaParameters p = mock(HovorkaParameters.class);
+        spied.buildPredictionPath(p, 10.0, T0, List.of(), List.of(), List.of(), USER, 240);
+        verify(spied).buildWithParams(any(), any(), any(), anyDouble(), any(), any(), any(), any(), any(),
+                anyInt(), any(), anyDouble(), eq(ActivityGains.NEUTRAL));
     }
 
     // -- helpers ---------------------------------------------------------------

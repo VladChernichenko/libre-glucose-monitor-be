@@ -35,6 +35,13 @@ ALTER TABLE notes
     ADD COLUMN IF NOT EXISTS context_tags    JSONB,
     ADD COLUMN IF NOT EXISTS chat_message_id UUID;
 
+-- user_digital_twin: learned activity gains (V8 on this branch)
+ALTER TABLE user_digital_twin
+    ADD COLUMN IF NOT EXISTS activity_gain_scale         DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    ADD COLUMN IF NOT EXISTS activity_tail_half_life_min DOUBLE PRECISION NOT NULL DEFAULT 120,
+    ADD COLUMN IF NOT EXISTS activity_applied            BOOLEAN          NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS activity_samples            INTEGER          NOT NULL DEFAULT 0;
+
 -- clinical_knowledge_chunk: clinical library columns, upsert key and vector index (V1 on this branch)
 ALTER TABLE clinical_knowledge_chunk
     ADD COLUMN IF NOT EXISTS embedding     vector(1536),

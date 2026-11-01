@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS user_digital_twin (
     confidence        VARCHAR(10),
     status            TEXT,
 
+    -- Learned activity gains (see ActivityGains): scale on the exercise insulin-sensitivity gain and
+    -- the half-life of the post-exercise sensitivity tail. Gated independently of `applied`.
+    activity_gain_scale          DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    activity_tail_half_life_min  DOUBLE PRECISION NOT NULL DEFAULT 120,
+    activity_applied             BOOLEAN          NOT NULL DEFAULT FALSE,
+    activity_samples             INTEGER          NOT NULL DEFAULT 0,
+
     fitted_at         TIMESTAMPTZ,
     created_at        TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
@@ -53,3 +60,11 @@ COMMENT ON COLUMN user_digital_twin.uncertainty_sd_grid IS
     'Per-horizon predictive standard deviation [mmol/L] at 30/60/90/120 min (variance-shrunk, monotone), rendered as the confidence band around each predicted point.';
 COMMENT ON COLUMN user_digital_twin.applied IS
     'TRUE when the twin beat the un-calibrated model on the held-out validation window and is active for predictions.';
+COMMENT ON COLUMN user_digital_twin.activity_gain_scale IS
+    'Multiplier on the exercise insulin-sensitivity gain (1.0 = population default). Only used when activity_applied is TRUE.';
+COMMENT ON COLUMN user_digital_twin.activity_tail_half_life_min IS
+    'Half-life [min] of the post-exercise sensitivity tail (120 = population default). Only used when activity_applied is TRUE.';
+COMMENT ON COLUMN user_digital_twin.activity_applied IS
+    'TRUE when the fitted activity gains beat the population defaults on the held-out validation window. Independent of `applied`.';
+COMMENT ON COLUMN user_digital_twin.activity_samples IS
+    'Number of logged activity notes in the training window the activity gains were fitted on.';
