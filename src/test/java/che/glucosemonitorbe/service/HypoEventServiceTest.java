@@ -324,4 +324,29 @@ class HypoEventServiceTest {
         e.setDetectedAt(detectedAt);
         return e;
     }
+
+    private HypoEvent confirmedEvent(int detectedMinutesAgo, LocalDateTime recoveredAt) {
+        HypoEvent e = HypoEvent.builder().userId(USER_ID).triggerGlucoseMmol(3.5).state(State.CONFIRMED).build();
+        e.setDetectedAt(LocalDateTime.now().minusMinutes(detectedMinutesAgo));
+        e.setRecoveredAt(recoveredAt);
+        return e;
+    }
+
+    @Test
+    void findUnrecoveredConfirmed_returnsFreshUnrecovered() {
+        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.CONFIRMED))
+                .thenReturn(Optional.of(confirmedEvent(20, null)));
+        assertThat(service.findUnrecoveredConfirmed(USER_ID)).isPresent();
+    }
+
+    @Test
+    void findUnrecoveredConfirmed_ignoresRecoveredAndStale() {
+        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.CONFIRMED))
+                .thenReturn(Optional.of(confirmedEvent(20, LocalDateTime.now().minusMinutes(5))));
+        assertThat(service.findUnrecoveredConfirmed(USER_ID)).isEmpty();
+
+        when(repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(USER_ID, State.CONFIRMED))
+                .thenReturn(Optional.of(confirmedEvent(HypoThresholds.MAX_OPEN_MINUTES + 5, null)));
+        assertThat(service.findUnrecoveredConfirmed(USER_ID)).isEmpty();
+    }
 }

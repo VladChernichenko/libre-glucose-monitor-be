@@ -51,4 +51,7 @@ public class GlucoseCalculationsResponse {
 
     // Fast carbs in advance on a falling forecast (spec §6.13); null when there is no advice
     private CarbAdvice carbAdvice;
+
+    // Dashboard watch strip; null = no strip
+    private che.glucosemonitorbe.watch.WatchStrip watch;
 }

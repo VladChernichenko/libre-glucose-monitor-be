@@ -296,6 +296,21 @@ public class HypoEventService {
     }
 
     /**
+     * The user's newest CONFIRMED event that has not yet recovered ({@code recovered_at} null) and
+     * was detected within {@link HypoThresholds#MAX_OPEN_MINUTES}: the rescue carbs are logged but
+     * glucose has not been seen back up. Older ones are dead episodes, not live ones.
+     */
+    @Transactional(readOnly = true)
+    public Optional<HypoEventDTO> findUnrecoveredConfirmed(UUID userId) {
+        return repository.findFirstByUserIdAndStateOrderByDetectedAtDesc(userId, State.CONFIRMED)
+                .filter(e -> e.getRecoveredAt() == null)
+                .filter(e -> e.getDetectedAt() != null
+                        && Duration.between(e.getDetectedAt(), LocalDateTime.now()).toMinutes()
+                                < HypoThresholds.MAX_OPEN_MINUTES)
+                .map(HypoEventDTO::from);
+    }
+
+    /**
      * As {@link #confirm(UUID, UUID, Double)}, tagging the rescue note with the originating chat
      * message. Strict: it always logs a new note or throws 409 - an already-CONFIRMED event is NOT
      * returned idempotently, so the caller never mistakes an earlier note for its own.
