@@ -174,8 +174,9 @@ public final class DigitalTwinCalibrator {
      * Fit the personal activity gains on top of an already-fitted twin. The vector
      * {@code [gainScale, halfLife/120]} is fitted with the same robust LM (IRLS + Huber + ridge to
      * 1.0) while {@code fixed} is held constant, then scored on {@code val} against NEUTRAL gains
-     * (no residual model on either side). The fit is only {@code applied} when it beats NEUTRAL on at
-     * least {@code minValSamples} validation samples.
+     * (no residual model on either side). The fit is only {@code applied} when it beats NEUTRAL by at
+     * least {@code minImprovement} (fractional MAE) on at least {@code minValSamples} validation
+     * samples.
      */
     public ActivityFit fitActivity(AnchorSampleSource train, AnchorSampleSource val,
                                    TwinScales fixed, int activityCount) {
@@ -200,7 +201,10 @@ public final class DigitalTwinCalibrator {
         ActivityGains fitted = toGains(p, halfLifeUnit);
 
         double maeWith = RobustLoss.mae(val.replay(fixed, fitted));
-        boolean applied = maeWith < maeWithout;
+        // Same standard as the twin itself: a fractional out-of-sample gain of at least minImprovement,
+        // so a fit that only learned noise (a hair better by chance) is not applied.
+        boolean applied = maeWithout > 0
+                && (maeWithout - maeWith) / maeWithout >= cfg.minImprovement;
         String status = applied
                 ? String.format("activity applied: val MAE %.2f->%.2f mmol/L", maeWithout, maeWith)
                 : String.format("activity not applied: val MAE %.2f->%.2f mmol/L", maeWithout, maeWith);

@@ -51,17 +51,15 @@ class ActivityCalibrationTest {
 
     @Test
     void noImprovement_notApplied() {
-        // Noise-free: the gate is a strict MAE comparison, so with sensor noise a near-neutral fit can
-        // "beat" NEUTRAL on validation by a hair. Without noise NEUTRAL is already exact and the fit
-        // has nothing to gain.
-        AnchorSampleSource train = new ActivitySource(240, ActivityGains.NEUTRAL, 21L, 0.0);
-        AnchorSampleSource val   = new ActivitySource(120, ActivityGains.NEUTRAL, 22L, 0.0);
+        // Noisy NEUTRAL truth: the fit only learns noise and may "beat" NEUTRAL on validation by a
+        // hair (seen: 0.16377 -> 0.16342), which must not clear the minImprovement gate.
+        AnchorSampleSource train = new ActivitySource(240, ActivityGains.NEUTRAL, 21L);
+        AnchorSampleSource val   = new ActivitySource(120, ActivityGains.NEUTRAL, 22L);
 
         DigitalTwinCalibrator.ActivityFit fit =
                 new DigitalTwinCalibrator().fitActivity(train, val, FIXED, 8);
 
         assertThat(fit.applied()).isFalse();
-        assertThat(fit.maeWith()).isGreaterThanOrEqualTo(fit.maeWithout());
     }
 
     @Test
@@ -104,10 +102,6 @@ class ActivityCalibrationTest {
         final List<TwinScales> seenScales = new ArrayList<>();
 
         ActivitySource(int n, ActivityGains truth, long seed) {
-            this(n, truth, seed, 0.2);
-        }
-
-        ActivitySource(int n, ActivityGains truth, long seed, double noiseSd) {
             Random rnd = new Random(seed);
             this.truth = truth;
             base = new double[n];
@@ -115,7 +109,7 @@ class ActivityCalibrationTest {
             delay = new int[n];
             for (int i = 0; i < n; i++) {
                 base[i] = 6.0 + 4.0 * rnd.nextDouble();
-                noise[i] = noiseSd * rnd.nextGaussian();
+                noise[i] = 0.2 * rnd.nextGaussian();
                 delay[i] = 15 + 15 * (i % 20);   // 15..300 min after activity
             }
         }
