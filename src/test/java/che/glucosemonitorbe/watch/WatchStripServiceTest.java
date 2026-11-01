@@ -298,4 +298,28 @@ class WatchStripServiceTest {
         assertThat(service.evaluate(USER, resp(path(m -> 6.0), 2.0, 5.0)).orElseThrow().reason())
                 .isEqualTo(Reason.LOW_NOW);
     }
+
+    @Test
+    void calm_fallingForecast_nextCheckIsAnHour() {
+        notesAre(note(0, 4.0, Note.TYPE_NORMAL, 60));
+        WatchStrip strip = service.evaluate(USER, resp(path(m -> 6.0 - m * 0.005), 1.5, 0.0)).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.WATCHING);
+        assertThat(strip.landing().mmol()).isGreaterThan(4.5);
+        assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(60));
+    }
+
+    @Test
+    void calm_flatForecast_nextCheckIsAnHour() {
+        notesAre(note(0, 4.0, Note.TYPE_NORMAL, 60));
+        assertThat(service.evaluate(USER, resp(path(m -> 6.0), 1.5, 0.0)).orElseThrow().nextCheckAt())
+                .isEqualTo(NOW.plusMinutes(60));
+    }
+
+    @Test
+    void confirmedUnrecovered_noForecastEvidence_staysTreatingLow() {
+        when(hypoEvents.findUnrecoveredConfirmed(USER)).thenReturn(Optional.of(confirmed()));
+        reading(4.6);
+        assertThat(service.evaluate(USER, resp(null, 0.0, 0.0)).orElseThrow().reason()).isEqualTo(Reason.TREATING_LOW);
+        assertThat(service.evaluate(USER, resp(List.of(), 0.0, 0.0)).orElseThrow().reason()).isEqualTo(Reason.TREATING_LOW);
+    }
 }

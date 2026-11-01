@@ -114,7 +114,7 @@ public class WatchStripService {
         // 6. Calm: a recent dose, meal or activity that is still acting.
         boolean acting = (iob != null && iob >= CALM_MIN_IOB) || (cob != null && cob >= CALM_MIN_COB);
         if (acting && hasRecentTrigger(userId, now)) {
-            return Optional.of(calm(forecast, now, iob, cob));
+            return Optional.of(calm(forecast, now, reading, iob, cob));
         }
 
         // 7.
@@ -131,7 +131,8 @@ public class WatchStripService {
         return new Suggestion(Kind.NO_ACTION, null, null, null, null, null, null);
     }
 
-    private WatchStrip calm(List<PredictionPointDTO> forecast, LocalDateTime now, Double iob, Double cob) {
+    private WatchStrip calm(List<PredictionPointDTO> forecast, LocalDateTime now, double reading,
+                            Double iob, Double cob) {
         LocalDateTime hourAhead = now.plusMinutes(CALM_CHECK_MINUTES);
         List<PredictionPointDTO> valid = valid(forecast);
         GlucosePoint landing = valid.stream()
@@ -151,10 +152,15 @@ public class WatchStripService {
             LocalDateTime at = min.get().getTimestamp();
             return calmStrip(Reason.DIP_AHEAD, point(min.get()), landing, earlier(hourAhead, at), iob, cob);
         }
-        LocalDateTime next = window.stream()
-                .max(Comparator.comparingDouble(PredictionPointDTO::getPredictedGlucose))
-                .map(p -> earlier(hourAhead, p.getTimestamp()))
-                .orElse(hourAhead);
+        // A peak is only worth a sooner check when it is a real rise: above the stored reading and
+        // not the first window point. A flat or falling forecast has no peak, so check in an hour.
+        LocalDateTime next = hourAhead;
+        Optional<PredictionPointDTO> peak = window.stream()
+                .max(Comparator.comparingDouble(PredictionPointDTO::getPredictedGlucose));
+        if (peak.isPresent() && peak.get().getPredictedGlucose() > reading
+                && !peak.get().getTimestamp().equals(window.get(0).getTimestamp())) {
+            next = earlier(hourAhead, peak.get().getTimestamp());
+        }
         return calmStrip(Reason.WATCHING, null, landing, next, iob, cob);
     }
 
@@ -179,13 +185,15 @@ public class WatchStripService {
                 .toList();
     }
 
-    /** True when every forecast point in (now, now + minutes] is at or above {@code floor}. */
+    /** True when the window is non-empty and every forecast point in (now, now + minutes] is at or above {@code floor}. */
     private static boolean holdsAbove(List<PredictionPointDTO> forecast, LocalDateTime now,
                                       int minutes, double floor) {
         LocalDateTime until = now.plusMinutes(minutes);
-        return valid(forecast).stream()
+        List<PredictionPointDTO> window = valid(forecast).stream()
                 .filter(p -> p.getTimestamp().isAfter(now) && !p.getTimestamp().isAfter(until))
-                .allMatch(p -> p.getPredictedGlucose() >= floor);
+                .toList();
+        // No forecast evidence is not "holding".
+        return !window.isEmpty() && window.stream().allMatch(p -> p.getPredictedGlucose() >= floor);
     }
 
     /**
