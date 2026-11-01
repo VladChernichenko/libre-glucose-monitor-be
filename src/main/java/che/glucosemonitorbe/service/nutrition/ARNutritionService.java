@@ -26,6 +26,11 @@ public class ARNutritionService {
     private final GlycemicPatternMatchingService glycemicPatternMatchingService;
     private final OpenFoodFactsService openFoodFactsService;
 
+    /** Label of the dry rolled-oats entry; exact-match only (no other label contains it). */
+    public static final String DRY_OATS = "rolled oats (dry)";
+    /** OFF candidates fetched per label; the closest name with carbohydrate data wins. */
+    static final int OFF_CANDIDATES = 20;
+
     /**
      * USDA fresh-weight macros for common whole produce and proteins.
      * Values: [carbs, fiber, protein, fat, gi] per 100g fresh/cooked weight.
@@ -60,8 +65,18 @@ public class ARNutritionService {
         Map.entry("pork",        new double[]{ 0.0, 0.0,27.0,14.0,   0}),
         Map.entry("salmon",      new double[]{ 0.0, 0.0,25.4,13.4,   0}),
         Map.entry("tuna",        new double[]{ 0.0, 0.0,29.9, 6.3,   0}),
-        Map.entry("shrimp",      new double[]{ 0.9, 0.0,20.1, 1.7,   0})
+        Map.entry("shrimp",      new double[]{ 0.9, 0.0,20.1, 1.7,   0}),
+        // Dairy staples: substring search on OFF matched "milk" to milk chocolate biscuits.
+        Map.entry("milk",        new double[]{ 4.8, 0.0, 3.3, 3.2,  31}),
+        Map.entry("молоко",      new double[]{ 4.8, 0.0, 3.3, 3.2,  31}),
+        Map.entry("kefir",       new double[]{ 4.0, 0.0, 3.0, 2.5,  32}),
+        Map.entry("кефир",       new double[]{ 4.0, 0.0, 3.0, 2.5,  32}),
+        Map.entry("yogurt",      new double[]{ 4.7, 0.0, 3.5, 3.3,  35}),
+        Map.entry("йогурт",      new double[]{ 4.7, 0.0, 3.5, 3.3,  35}),
+        // Dry rolled oats; the chat maps "60 g porridge/oats" to this (see MealNutritionResolver).
+        Map.entry(DRY_OATS,      new double[]{66.0,10.0,13.0, 7.0,  55})
     );
+
 
     /**
      * Cooked-weight / dry-weight ratio per food label.
@@ -145,11 +160,10 @@ public class ARNutritionService {
         // Check fresh-produce table first — avoids OFF matching dried/processed variants
         double[] fresh = FRESH_NUTRITION_100G.get(label);
         if (fresh == null) {
-            // Try partial match: "ripe banana" → "banana"
-            fresh = FRESH_NUTRITION_100G.entrySet().stream()
-                    .filter(e -> label.contains(e.getKey()))
-                    .map(Map.Entry::getValue)
-                    .findFirst().orElse(null);
+            // Partial match on the head noun only: "ripe banana" -> "banana", but "milk chocolate"
+            // is chocolate, not milk, and "apple pie" is pie, not apple.
+            String head = lastWord(label);
+            fresh = FRESH_NUTRITION_100G.get(head);
         }
         if (fresh != null) {
             double scale = massG / 100.0;
@@ -167,11 +181,10 @@ public class ARNutritionService {
                     .build();
         }
 
-        List<OFFProductDocument> hits = offProductRepository.findByProductNameContaining(
-                label, PageRequest.of(0, 3));
+        OFFProductDocument doc = bestOffMatch(label, offProductRepository.findByProductNameContaining(
+                label, PageRequest.of(0, OFF_CANDIDATES)));
 
-        if (!hits.isEmpty()) {
-            OFFProductDocument doc = hits.get(0);
+        if (doc != null) {
             OFFProductDocument.Nutriments n = doc.getNutriments();
             if (n != null) {
                 double ratio = COOKED_RATIO.getOrDefault(label, 1.0);
@@ -220,6 +233,28 @@ public class ARNutritionService {
                 .offProductName(null)
                 .confidence(0.40)
                 .build();
+    }
+
+    /**
+     * The OFF product closest to the label: only products with carbohydrate data, then an exact name,
+     * then a name whose last word is the label ("whole milk" over "milk chocolate"), then the shortest
+     * name. Null when no candidate has carbohydrate data.
+     */
+    static OFFProductDocument bestOffMatch(String label, List<OFFProductDocument> hits) {
+        if (hits == null) return null;
+        return hits.stream()
+                .filter(d -> d.getProductName() != null && d.getNutriments() != null
+                        && d.getNutriments().getCarbohydrates100g() != null)
+                .min(java.util.Comparator
+                        .comparingInt((OFFProductDocument d) -> d.getProductName().trim().equalsIgnoreCase(label) ? 0
+                                : lastWord(d.getProductName().toLowerCase()).equals(lastWord(label)) ? 1 : 2)
+                        .thenComparingInt(d -> d.getProductName().length()))
+                .orElse(null);
+    }
+
+    private static String lastWord(String s) {
+        String[] words = s.trim().split("[^\\p{L}\\p{N}]+");
+        return words.length == 0 ? s.trim() : words[words.length - 1];
     }
 
     private static double safe(Double v)   { return v != null ? v : 0.0; }
