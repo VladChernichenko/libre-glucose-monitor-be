@@ -18,6 +18,7 @@ import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.learning.DigitalTwinCalibrator;
 import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
+import che.glucosemonitorbe.hovorka.learning.TwinScales;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.UserDigitalTwinRepository;
@@ -75,6 +76,9 @@ public class DigitalTwinCalibrationService {
 
     private final DigitalTwinService digitalTwinService;
     private final FeatureToggleConfig featureToggleConfig;
+
+    /** Seam so tests can stand in for the fitter; production always builds a fresh one. */
+    java.util.function.Supplier<DigitalTwinCalibrator> calibratorFactory = DigitalTwinCalibrator::new;
 
     /**
      * Seed users are non-loginable AZT1D dataset fixtures ({@code azt1d-subject-N@dataset.local}) -
@@ -191,9 +195,10 @@ public class DigitalTwinCalibrationService {
                 rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity, userZone);
 
         // -- Fit -----------------------------------------------------------------
-        DigitalTwinCalibrator.Result result = new DigitalTwinCalibrator().calibrate(train, val);
+        DigitalTwinCalibrator.Result result = calibratorFactory.get().calibrate(train, val);
 
-        // -- Activity gains: fitted on top of the twin, whether or not the twin itself was applied.
+        // -- Activity gains: fitted against the scales live forecasts will actually use - the
+        // twin's when it is applied, neutral when it is not (live then runs the raw model).
         DigitalTwinCalibrator.ActivityFit activityFit = null;
         if (activity != che.glucosemonitorbe.hovorka.ActivityProvider.NONE) {
             long trainEndMs = trainCgm.isEmpty() ? Long.MIN_VALUE : trainCgm.get(trainCgm.size() - 1).epochMs();
@@ -201,7 +206,8 @@ public class DigitalTwinCalibrationService {
                     .filter(n -> n.isActivity() && n.getTimestamp() != null
                             && PredictionReplayEngine.toEpochMs(n.getTimestamp(), userZone) <= trainEndMs)
                     .count();
-            activityFit = new DigitalTwinCalibrator().fitActivity(train, val, result.scales(), activityCount);
+            TwinScales fixed = result.improved() ? result.scales() : TwinScales.neutral();
+            activityFit = calibratorFactory.get().fitActivity(train, val, fixed, activityCount);
         }
 
         persist(userId, result, activityFit, now);

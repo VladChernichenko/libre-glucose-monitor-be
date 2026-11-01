@@ -151,7 +151,7 @@ public class HovorkaGlucosePredictionService {
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
                 ActivityProvider.NONE,
                 insulinPrefsService.getLongActingDurationHours(userId),
-                residualProvider.activityGains(userId));
+                Objects.requireNonNullElse(residualProvider.activityGains(userId), ActivityGains.NEUTRAL));
     }
 
     /**
@@ -175,7 +175,7 @@ public class HovorkaGlucosePredictionService {
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
                 activityProvider,
                 insulinPrefsService.getLongActingDurationHours(userId),
-                residualProvider.activityGains(userId));
+                Objects.requireNonNullElse(residualProvider.activityGains(userId), ActivityGains.NEUTRAL));
     }
 
     /**
