@@ -14,6 +14,27 @@ push needs the paid Apple Developer Program; the app is on a free team today. So
 in-app **watch strip** on the dashboard. The same backend output will later drive the Live Activity and
 notifications unchanged.
 
+## 1a. Rechecked against main (2026-11-01)
+
+The AI assistant work (`2026-10-30-ai-assistant-chat-and-retrieval-design.md`, merged as backend PRs
+#34–#37 and iOS PRs #6–#7) built part of this design already. The plan builds only what is still
+missing and reuses the rest; it must not create a second copy of anything below.
+
+| Piece of this design | State on main | What the strip does |
+|---|---|---|
+| `target_glucose_mmol` (5.55, 4.4–10.0) and `rescue_carbs_g` (15, 5–40) in V1, `UserSettingsDTO`, `UserSettingsService` | **Built** | Reuse. No migration work left |
+| AI assistant aims at the setting (`ContextAggregatorService`, `MealPlanService`, `HistoryDoseService`) | **Built** | Nothing |
+| 15-min / LibreLinkUp-down freshness rule: `assistant.common.CgmFreshnessService.freshReading(userId, Instant)` | **Built** | Use it for state 1 (§6.2) |
+| Forecast low → fast carbs: `assistant.advice.CarbAdviceService` → `carbAdvice` on `GlucoseCalculationsResponse`. Trigger: forecast min < 4.5 within 60 min, or trend ≤ −0.1 mmol/L/min and min < 5.0 within 90 min. Grams: smallest of 5…40 g whose re-run forecast stays ≥ 5.0 for 2 h; 15-min "still landing" after logged fast carbs; 2-new-reading hold (`CarbAdviceHold`) | **Built** | URGENT_LOW is driven by it, see §6.2–§6.3 |
+| Low happening (< 3.9 or open `hypo_events` row): `HypoPromptView` sheet | **Built** | URGENT_LOW mirrors it, adds no new low flow |
+| iOS red carb card with "Took" buttons in the dashboard chat (`Chat/CarbAdviceCardView.swift`), headline on the chat peek | **Built** | Strip shows a one-line summary; tap opens that card (§6.6) |
+| `watch` object, strip view, CALM state | Missing | Build |
+| URGENT_HIGH correction suggestion | Missing | Build |
+| Activity learning (§6.5) | Missing | Build |
+| iOS settings fields for target and rescue carbs | Missing (backend accepts them, no screen sends them) | Build |
+| `rescue_carbs_g` used anywhere | Stored only, nothing reads it | See §6.3 |
+| One "twin-scaled ISF" getter | Missing: the twin's `isfScale` is applied inside the Hovorka parameters only | Build a small helper, see §6.3 |
+
 ## 2. Goals
 
 1. A strip at the top of the dashboard appears only while something needs watching, and disappears
@@ -98,9 +119,11 @@ Evaluated in this order; the first match wins.
    - The app hides the whole strip whenever `calculationsStale` is true or the calculation was
      restored from `DashboardCache` and not yet refreshed. An old "take 1 U" must never stay on
      screen.
+   Implemented by `CgmFreshnessService.freshReading` (§1a); no new freshness code.
 2. **URGENT_LOW** when any of:
    - newest reading < `HypoThresholds.HYPO_MMOL` (3.9);
-   - forecast drops under 3.9 within 30 min;
+   - the response carries a `carbAdvice` (its trigger and hold replace the "under 3.9 within 30 min"
+     rule this section first had, so the strip and the chat card can never disagree);
    - a low is being handled: a `hypo_events` row that is `OPEN`, or `CONFIRMED` with no
      `recovered_at` (my call: confirming the rescue is when treatment starts, so it must not end the
      strip). It stays until the reading is ≥
@@ -116,25 +139,29 @@ To avoid flicker at the 10.0 and 30-min edges, a state that was shown stays unti
 **new CGM readings** no longer meet it, unless a higher-priority state replaces it (my call: counted
 per stored reading, not per API call, because the endpoint is called every minute while data is old
 and also by the Notes what-if forecast; the what-if calls must not touch the hold). The builder
-decides where the hold is stored (e.g. per-user last state in memory).
+decides where the hold is stored (e.g. per-user last state in memory). URGENT_LOW from `carbAdvice`
+already has its own hold (`CarbAdviceHold`); the new hold covers URGENT_HIGH and CALM only and should
+follow the same per-reading pattern.
 
 ### 6.3 What it suggests
 
-- **URGENT_LOW → CARBS, never insulin.**
-  grams = enough to lift the forecast minimum to 4.5 mmol/L plus a 0.5 margin, using
-  `user_settings.carb_ratio` (which is **mmol/L rise per 10 g**, not g/U):
-  `grams = ceil5(max(0, 5.0 − forecastMin) / carb_ratio × 10)`, at least the user's
-  `rescue_carbs_g` (default 15), at most 40 g. Basis shows the forecast minimum and when.
-  `nextCheckAt` = now + 15 min. Rescue carbs already logged are in COB and the forecast
-  (`RescueCarbProfile`), so they are **not** subtracted again. Within 15 min of a logged rescue the
-  strip suggests no more carbs and says "recheck, wait for the 15 g to act" (my call).
+- **URGENT_LOW → CARBS, never insulin.** (Rechecked 2026-11-01: the `carb_ratio` formula first
+  written here is dropped.) The strip copies `carbAdvice`: `TAKE_NOW` → `grams`, basis "low
+  {minWithout} at {minWithoutAt} without carbs, {minWith} with {grams} g", `nextCheckAt` =
+  `recheckAt`; `STILL_LANDING` → no grams, "wait for the {landingGrams} g to act", `nextCheckAt` =
+  `recheckAt`. A low already happening (< 3.9 or open hypo event, where `carbAdvice` is absent) →
+  "Low now, treat with {rescue_carbs_g} g" and the existing `HypoPromptView` flow; this is the one
+  place `rescue_carbs_g` is read (my call: the forecast search sizes pre-emptive carbs, the rule-of-15
+  setting sizes treatment of a low already under way).
 - **URGENT_HIGH → INSULIN** via the existing `InsulinCalculatorService` safety path, with these
   changes for a correction (no carbs):
   - aim from the forecast landing (`fourHourPrediction`), not the current reading. The forecast already
     counts IOB, COB and activity, so **active insulin is not subtracted again** (pass `activeInsulin = 0`
     or add a forecast-based entry point; builder's choice, but the double count must be impossible);
   - target = the user's `target_glucose_mmol`;
-  - ISF = the same time-of-day, twin-scaled ISF the forecast used, so dose and forecast agree;
+  - ISF = the same time-of-day, twin-scaled ISF the forecast used, so dose and forecast agree.
+    No getter for this exists: add one helper returning `UserSettingsDTO.getEffectiveIsf(time)` ×
+    the user's applied twin `isfScale` (1.0 when the twin is not applied), and use it here only;
   - keep every existing refusal (below 3.9, above 0.3 U/kg, implausible settings) and surface it as
     `REFUSED` with its code;
   - round down to 0.5 U; under 0.5 U → `NO_ACTION` ("small rise, recheck in 1 h");
@@ -152,6 +179,9 @@ Any missing input (no forecast, settings invalid) → `REFUSED`/no suggestion wi
 guess.
 
 ### 6.4 New settings
+
+**Built (§1a).** Both columns, the DTO, validation and the AI assistant's switch to the setting are
+on main; the only work left here is the iOS settings screen. The text below is kept as the record.
 
 Two columns on `user_settings`, added in `V1__baseline_schema.sql` per the schema rules (needs
 `flyway repair` on the dev DB, see memory note on the native Homebrew Postgres):
@@ -197,7 +227,11 @@ does not learn its strength.
 - The server sends mmol/L values; the app formats glucose numbers in the user's unit. The builder
   decides whether the server sends structured numbers plus a template, or the app composes the text;
   either way no glucose number may be shown in the wrong unit.
-- Tap scrolls to the forecast chart (my call).
+- Tap scrolls to the forecast chart (my call). Exception (rechecked 2026-11-01): on URGENT_LOW with a
+  `carbAdvice`, tap expands the dashboard chat to the existing carb card, which already has the
+  curves and the "Took" buttons; the strip never gets its own buttons, so one tap can't log twice.
+- Target glucose and rescue carbs fields in the iOS settings screen, in the user's unit; the backend
+  side already exists.
 - New Swift files must be added to `GlucoseMonitor.xcodeproj/project.pbxproj` by hand.
 
 ## 7. Constraints from the existing code
@@ -213,7 +247,7 @@ does not learn its strength.
 ## 8. Testing
 
 - Backend unit tests (mock-first, per project rules) for each state and its order, the flicker hold,
-  the carb formula and its floor/cap, the correction path (forecast landing, no IOB double count,
+  URGENT_LOW copying `carbAdvice` (TAKE_NOW, STILL_LANDING, absent during a low), the correction path (forecast landing, no IOB double count,
   2-h no-stacking, 0.5 U rounding, every refusal), stale data → no suggestion.
 - Calibration test with synthetic activity episodes: learned gain/half-life recover the generating
   values within tolerance; fewer than 5 activities → defaults.
