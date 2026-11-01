@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.hovorka.learning;
 
+import che.glucosemonitorbe.hovorka.ActivityGains;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -154,6 +156,61 @@ public final class DigitalTwinCalibrator {
                 trainCalibrated.size(), valSamples, improved, confidence, status);
     }
 
+    // -- Activity stage -----------------------------------------------------------
+
+    /** Minimum logged activities before the activity gains are personalised at all. */
+    public static final int MIN_ACTIVITIES = 5;
+
+    /** Outcome of the activity calibration stage. */
+    public record ActivityFit(
+            ActivityGains gains,
+            boolean applied,        // gate: fitted gains beat NEUTRAL out-of-sample on enough data
+            double maeWithout,      // validation MAE with NEUTRAL gains [mmol/L]
+            double maeWith,         // validation MAE with the fitted gains [mmol/L]
+            int activityCount,
+            String status) {}
+
+    /**
+     * Fit the personal activity gains on top of an already-fitted twin. The vector
+     * {@code [gainScale, halfLife/120]} is fitted with the same robust LM (IRLS + Huber + ridge to
+     * 1.0) while {@code fixed} is held constant, then scored on {@code val} against NEUTRAL gains
+     * (no residual model on either side). The fit is only {@code applied} when it beats NEUTRAL on at
+     * least {@code minValSamples} validation samples.
+     */
+    public ActivityFit fitActivity(AnchorSampleSource train, AnchorSampleSource val,
+                                   TwinScales fixed, int activityCount) {
+        if (activityCount < MIN_ACTIVITIES) {
+            return new ActivityFit(ActivityGains.NEUTRAL, false, Double.NaN, Double.NaN,
+                    activityCount, "fewer than " + MIN_ACTIVITIES + " activities");
+        }
+        List<AnchorSample> valWithout = val.replay(fixed, ActivityGains.NEUTRAL);
+        double maeWithout = RobustLoss.mae(valWithout);
+        if (valWithout.size() < cfg.minValSamples) {
+            return new ActivityFit(ActivityGains.NEUTRAL, false, maeWithout, Double.NaN,
+                    activityCount, "too little validation data");
+        }
+
+        double halfLifeUnit = ActivityGains.NEUTRAL.tailHalfLifeMin();
+        double[] p = robustFit(
+                q -> train.replay(fixed, toGains(q, halfLifeUnit)),
+                new double[]{1.0, 1.0},
+                new double[]{ActivityGains.MIN_GAIN_SCALE, ActivityGains.MIN_GAIN_SCALE},
+                new double[]{ActivityGains.MAX_GAIN_SCALE, ActivityGains.MAX_GAIN_SCALE},
+                null);
+        ActivityGains fitted = toGains(p, halfLifeUnit);
+
+        double maeWith = RobustLoss.mae(val.replay(fixed, fitted));
+        boolean applied = maeWith < maeWithout;
+        String status = applied
+                ? String.format("activity applied: val MAE %.2f->%.2f mmol/L", maeWithout, maeWith)
+                : String.format("activity not applied: val MAE %.2f->%.2f mmol/L", maeWithout, maeWith);
+        return new ActivityFit(fitted, applied, maeWithout, maeWith, activityCount, status);
+    }
+
+    private static ActivityGains toGains(double[] p, double halfLifeUnit) {
+        return new ActivityGains(p[0], p[1] * halfLifeUnit).clamped();
+    }
+
     // -- BASAL_CHECK --------------------------------------------------------------
 
     /**
@@ -186,10 +243,16 @@ public final class DigitalTwinCalibrator {
      */
     private double[] robustFit(AnchorSampleSource src, double[] start, double[] lower, double[] upper,
                                Function<double[], TwinScales> toScales, Predicate<AnchorSample> filter) {
+        return robustFit(p -> src.replay(toScales.apply(p)), start, lower, upper, filter);
+    }
+
+    /** As above, with an arbitrary parameter-vector-to-samples replay (e.g. scales held fixed). */
+    private double[] robustFit(Function<double[], List<AnchorSample>> replay, double[] start,
+                               double[] lower, double[] upper, Predicate<AnchorSample> filter) {
         double[] p = LmParameterFitter.clampToBounds(start.clone(), lower, upper);
 
         for (int iter = 0; iter < cfg.irlsIterations; iter++) {
-            List<AnchorSample> sel = select(src.replay(toScales.apply(p)), filter);
+            List<AnchorSample> sel = select(replay.apply(p), filter);
             if (sel.isEmpty()) return p;
 
             final double[] weights = huberWeights(sel);
@@ -197,7 +260,7 @@ public final class DigitalTwinCalibrator {
             final double ridge = Math.sqrt(cfg.ridgeLambda);
 
             LmParameterFitter.ResidualModel model = params -> {
-                List<AnchorSample> s = select(src.replay(toScales.apply(params)), filter);
+                List<AnchorSample> s = select(replay.apply(params), filter);
                 int rows = Math.min(s.size(), m);
                 double[] r = new double[rows + params.length];
                 for (int i = 0; i < rows; i++) {
