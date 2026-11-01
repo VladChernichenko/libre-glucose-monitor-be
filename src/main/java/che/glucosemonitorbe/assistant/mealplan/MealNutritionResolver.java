@@ -29,6 +29,11 @@ import org.springframework.stereotype.Service;
 public class MealNutritionResolver {
 
     static final double DEFAULT_PORTION_G = 150.0;
+    /** Oat words a person types for oats or porridge; with a small stated weight they mean dry oats. */
+    static final java.util.Set<String> OAT_WORDS = java.util.Set.of("porridge", "oats", "oatmeal", "hercules",
+            "овсянка", "овсяные хлопья", "геркулес", "каша овсяная", "овсяная каша");
+    /** Up to this weight an oat item is the dry portion (a cooked bowl weighs 200 g or more). */
+    static final double DRY_OATS_MAX_G = 120.0;
     /** Per-item confidence passed as the segmentation confidence: stated weight vs. assumed portion. */
     static final double STATED_WEIGHT_CONFIDENCE = 0.9;
     static final double ASSUMED_PORTION_CONFIDENCE = 0.3;
@@ -75,7 +80,7 @@ public class MealNutritionResolver {
         ARNutritionRequest req = new ARNutritionRequest();
         req.setFoods(items.stream().map(i -> {
             ARFoodItem f = new ARFoodItem();
-            f.setLabel(i.name());
+            f.setLabel(label(i));
             f.setMassG(i.grams() != null ? i.grams() : DEFAULT_PORTION_G);
             f.setSegmentationConfidence(i.grams() != null ? STATED_WEIGHT_CONFIDENCE : ASSUMED_PORTION_CONFIDENCE);
             return f;
@@ -85,6 +90,13 @@ public class MealNutritionResolver {
             n.setConfidence(Math.min(n.getConfidence(), ASSUMED_PORTION_CONFIDENCE));
         }
         return n;
+    }
+
+    /** "60 g porridge" in chat is the dry oats weighed out, not 60 g of cooked porridge. */
+    static String label(IntentClassifier.FoodItem i) {
+        String name = i.name() == null ? "" : i.name().trim().toLowerCase(java.util.Locale.ROOT);
+        boolean oats = OAT_WORDS.contains(name) || OAT_WORDS.stream().anyMatch(w -> name.endsWith(" " + w));
+        return oats && i.grams() != null && i.grams() <= DRY_OATS_MAX_G ? ARNutritionService.DRY_OATS : i.name();
     }
 
     private static boolean nothing(NutritionSnapshot n) {
