@@ -324,4 +324,28 @@ public class InsulinCalculatorService {
                 .calculationTime(LocalDateTime.now())
                 .build();
     }
+
+    /**
+     * Correction dose aimed at where the forecast <em>lands</em>, not at the current reading.
+     * Takes no IOB: the landing already reflects insulin on board, so subtracting it again
+     * would double count. Returns raw, unrounded units; the caller decides presentation.
+     */
+    public double calculateForecastCorrection(String username, double currentReadingMmol,
+                                              double landingMmol, double targetMmol, double isf) {
+        UserSettingsDTO settings = requireSettings(username);
+        if (!Double.isFinite(isf) || isf <= 0) {
+            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID, "isf=" + isf);
+        }
+        if (currentReadingMmol < HYPO_REFUSAL_THRESHOLD_MMOL) {
+            throw new DosingRefusedException(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
+                    "currentReading=" + currentReadingMmol + " < " + HYPO_REFUSAL_THRESHOLD_MMOL);
+        }
+        double units = Math.max(0.0, (landingMmol - targetMmol) / isf);
+        double maxBolus = maxBolusUnits(settings);
+        if (units > maxBolus) {
+            throw new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS,
+                    "correction=" + units + " exceeds max=" + maxBolus);
+        }
+        return units;
+    }
 }
