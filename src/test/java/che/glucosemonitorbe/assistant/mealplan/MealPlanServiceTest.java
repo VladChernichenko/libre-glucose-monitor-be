@@ -111,6 +111,31 @@ class MealPlanServiceTest {
     }
 
     @Test
+    void doseWhoseForecastGoesBelowHypoIsWithheld() {
+        // Real case: 7.7 U on board, the calculator still asked for 4.5 U; its forecast bottomed at 1.0.
+        dose(4.5);
+        when(optimizer.choose(any(), any(), anyDouble(), anyDouble(), any()))
+                .thenReturn(new PauseChoice(null, List.of(), 8.2, 1.0, "pre-bolus in flight", true));
+
+        MealPlan plan = service.plan(USER, nutrition, NOW);
+
+        assertThat(plan.doseUnits()).isNull();
+        assertThat(plan.refusalCode()).isEqualTo("FORECAST_LOW");
+        assertThat(plan.pause().min()).isEqualTo(1.0); // kept so the card and reply can say how low
+        assertThat(plan.history()).isNull();
+        verifyNoInteractions(history);
+    }
+
+    @Test
+    void doseWhoseForecastStaysAtHypoLineIsKept() {
+        dose(2.0);
+        when(optimizer.choose(any(), any(), anyDouble(), anyDouble(), any()))
+                .thenReturn(new PauseChoice(0, List.of(), 9.0, 3.9, "ok"));
+
+        assertThat(service.plan(USER, nutrition, NOW).doseUnits()).isEqualTo(2.0);
+    }
+
+    @Test
     void refusalSurfaced() {
         when(freshness.freshReading(USER, INSTANT)).thenReturn(Optional.of(reading(3.7)));
         when(calculator.calculateRecommendedInsulin(any()))

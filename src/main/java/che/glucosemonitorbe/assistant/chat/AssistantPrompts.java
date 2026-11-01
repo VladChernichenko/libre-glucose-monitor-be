@@ -46,7 +46,8 @@ final class AssistantPrompts {
                 + " in one to three short sentences, plain text. Use ONLY the numbers in the facts JSON below; "
                 + "never invent or recompute numbers. Never issue imperative dosing commands; describe what the "
                 + "model suggests. If fat or protein is high, say the rise may come late. "
-                + "If the calculator refused or there is no fresh CGM reading, say so plainly. "
+                + "If the calculator refused or there is no fresh CGM reading, say so plainly; FORECAST_LOW means "
+                + "the dose was withheld because with it the forecast falls to 'forecastLowest', below 'lowThreshold'. "
                 + "'episodes' are the user's similar past meals with their outcomes; you may compare with them. "
                 + retry(offending)
                 + "\nFacts JSON:\n" + json(facts);
@@ -89,6 +90,12 @@ final class AssistantPrompts {
         if (Boolean.TRUE.equals(p.noFreshCgmReading())) {
             return (ru ? "Свежих данных CGM нет, поэтому доза и пауза не предлагаются."
                     : "No fresh CGM reading, so no dose or pause is suggested.") + carbs;
+        }
+        if ("FORECAST_LOW".equals(p.calculatorRefused()) && p.forecastLowest() != null && p.lowThreshold() != null) {
+            return (ru ? "Доза не предлагается: с ней прогноз опускается до " : "No dose suggested: with it the forecast drops to ")
+                    + fmt(p.forecastLowest()) + (ru ? " ммоль/л, ниже " : " mmol/L, below ") + fmt(p.lowThreshold())
+                    + (ru ? ". Сначала поешьте или купируйте, затем спросите снова." : ". Eat or treat first, then ask again.")
+                    + carbs;
         }
         if (p.calculatorRefused() != null) {
             return (ru ? "Калькулятор не предложил дозу (" : "The calculator did not suggest a dose (")
