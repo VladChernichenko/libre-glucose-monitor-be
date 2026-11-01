@@ -38,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -145,6 +146,77 @@ class WatchStripServiceTest {
         assertThat(strip.suggestion().kind()).isEqualTo(Kind.CARBS);
         assertThat(strip.suggestion().grams()).isEqualTo(20);
         assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(15));
+    }
+
+    @Test
+    void lowWithConfirmedEvent_treatingLow_noMoreCarbs() {
+        when(hypoEvents.findUnrecoveredConfirmed(USER)).thenReturn(Optional.of(confirmed()));
+        reading(3.6);
+        WatchStrip strip = service.evaluate(USER, flat()).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.URGENT_LOW);
+        assertThat(strip.reason()).isEqualTo(Reason.TREATING_LOW);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+        assertThat(strip.suggestion().grams()).isNull();
+        assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(15)); // rescue note time unknown
+    }
+
+    @Test
+    void lowWithConfirmedEvent_rechecksFromItsRescueNote() {
+        HypoEventDTO event = confirmed();
+        Note rescue = note(15, 0, Note.TYPE_HYPO_TREATMENT, 4);
+        rescue.setId(event.noteId());
+        notesAre(rescue);
+        when(notes.findById(event.noteId())).thenReturn(Optional.of(rescue));
+        when(hypoEvents.findUnrecoveredConfirmed(USER)).thenReturn(Optional.of(event));
+        reading(3.6);
+        WatchStrip strip = service.evaluate(USER, flat()).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.TREATING_LOW);
+        assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(11));
+    }
+
+    @Test
+    void lowWithConfirmedEventWhoseRescueIsOver15MinOld_carbsAgain() {
+        HypoEventDTO event = confirmed();
+        Note rescue = note(15, 0, Note.TYPE_HYPO_TREATMENT, 20);
+        rescue.setId(event.noteId());
+        notesAre(rescue);
+        when(notes.findById(event.noteId())).thenReturn(Optional.of(rescue));
+        when(hypoEvents.findUnrecoveredConfirmed(USER)).thenReturn(Optional.of(event));
+        reading(3.6);
+        WatchStrip strip = service.evaluate(USER, flat()).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.LOW_NOW);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.CARBS);
+    }
+
+    @Test
+    void lowWithRecentRescueNote_treatingLow_recheckFromNote() {
+        notesAre(note(15, 0, Note.TYPE_HYPO_TREATMENT, 5));
+        reading(3.6);
+        WatchStrip strip = service.evaluate(USER, flat()).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.TREATING_LOW);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+        assertThat(strip.suggestion().grams()).isNull();
+        assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(10));
+        verify(notes).findByUserIdAndTimestampBetween(USER, NOW.minusMinutes(15), NOW.plusMinutes(15));
+    }
+
+    @Test
+    void lowWithRescueNoteLoggedAheadOfClock_treatingLow() {
+        notesAre(note(15, 0, Note.TYPE_HYPO_TREATMENT, -5));
+        reading(3.6);
+        WatchStrip strip = service.evaluate(USER, flat()).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.TREATING_LOW);
+        assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(20));
+    }
+
+    @Test
+    void lowWithOnlyOldRescueOrMealNotes_stillCarbs() {
+        notesAre(note(15, 0, Note.TYPE_HYPO_TREATMENT, 16), note(40, 0, Note.TYPE_NORMAL, 5));
+        reading(3.6);
+        WatchStrip strip = service.evaluate(USER, flat()).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.LOW_NOW);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.CARBS);
+        assertThat(strip.suggestion().grams()).isEqualTo(20);
     }
 
     @Test
@@ -360,7 +432,7 @@ class WatchStripServiceTest {
 
     @Test
     void high_correctionFromLanding_roundedDown() {
-        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 11.0, 5.55, 2.0)).thenReturn(2.75);
+        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 11.0, 5.55, 2.0, NOW)).thenReturn(2.75);
         WatchStrip strip = service.evaluate(USER, high(10.5, 11.0)).orElseThrow();
         assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
         assertThat(strip.reason()).isEqualTo(Reason.HIGH_FORECAST);
@@ -385,7 +457,7 @@ class WatchStripServiceTest {
 
     @Test
     void high_under05_smallRise() {
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(0.49);
         WatchStrip strip = service.evaluate(USER, high(10.5, 10.6)).orElseThrow();
         assertThat(strip.reason()).isEqualTo(Reason.SMALL_RISE);
@@ -394,7 +466,7 @@ class WatchStripServiceTest {
 
     @Test
     void high_refusal_surfacesCode() {
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenThrow(new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS, "too big"));
         WatchStrip strip = service.evaluate(USER, high(12.0, 16.0)).orElseThrow();
         assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
@@ -410,20 +482,71 @@ class WatchStripServiceTest {
     }
 
     @Test
+    void high_twoHourBelowThreshold_notHigh() {
+        assertThat(service.evaluate(USER, high(9.0, 11.0))).isEmpty();
+    }
+
+    @Test
+    void high_exactlyAtThreshold_notHigh() {
+        assertThat(service.evaluate(USER, high(10.0, 10.0))).isEmpty();
+    }
+
+    @Test
+    void high_readingMismatch_refusedWithoutCalculator() {
+        GlucoseCalculationsResponse r = high(10.5, 11.0);
+        r.setCurrentGlucose(7.0); // stored reading 6.0
+        WatchStrip strip = service.evaluate(USER, r).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
+        assertThat(strip.reason()).isEqualTo(Reason.HIGH_FORECAST);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.REFUSED);
+        assertThat(strip.suggestion().refusalCode()).isEqualTo("READING_MISMATCH");
+        assertThat(strip.suggestion().units()).isNull();
+        verify(calculator, never()).calculateForecastCorrection(anyString(), anyDouble(), anyDouble(),
+                anyDouble(), anyDouble(), any());
+    }
+
+    @Test
+    void high_smallMismatch_normalCorrection() {
+        GlucoseCalculationsResponse r = high(10.5, 11.0);
+        r.setCurrentGlucose(6.2);
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenReturn(2.75);
+        WatchStrip strip = service.evaluate(USER, r).orElseThrow();
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.INSULIN);
+        assertThat(strip.suggestion().units()).isEqualTo(2.5);
+    }
+
+    @Test
+    void high_missingEffectiveIsf_refusedSettingsInvalid() {
+        // Real ISF and calculator: settings without an ISF must surface as a refusal, never throw.
+        UserSettingsDTO noIsf = new UserSettingsDTO();
+        noIsf.setCarbRatio(1.0);
+        when(settings.getUserSettings(any(UUID.class))).thenReturn(noIsf);
+        when(digitalTwin.activeScales(USER)).thenReturn(Optional.empty());
+        WatchStripService real = new WatchStripService(cgm, hypoEvents, notes, settings,
+                new InsulinCalculatorService(settings), new TwinIsfService(digitalTwin),
+                new WatchStateHold(), digitalTwin, Clock.fixed(CLOCK_NOW, ZoneOffset.UTC));
+        WatchStrip strip = real.evaluate(USER, high(10.5, 11.0)).orElseThrow();
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.REFUSED);
+        assertThat(strip.suggestion().refusalCode()).isEqualTo("SETTINGS_INVALID");
+    }
+
+    @Test
     void high_usesStoredReadingForRefusalCheck() {
         reading(7.2);
         GlucoseCalculationsResponse r = high(10.5, 11.0);
-        r.setCurrentGlucose(3.0);
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        r.setCurrentGlucose(7.0); // within the 0.3 mismatch tolerance, but not the stored value
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(1.0);
         service.evaluate(USER, r);
-        verify(calculator).calculateForecastCorrection(eq(USER.toString()), eq(7.2), eq(11.0), anyDouble(), eq(2.0));
+        verify(calculator).calculateForecastCorrection(eq(USER.toString()), eq(7.2), eq(11.0), anyDouble(), eq(2.0), eq(NOW));
     }
 
     @Test
     void high_doseLoggedAheadOfClock_stillBlocksCorrection() {
         notesAre(note(0, 3.0, Note.TYPE_NORMAL, -5));
         assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().reason()).isEqualTo(Reason.INSULIN_LANDING);
+        verify(notes).findByUserIdAndTimestampBetween(USER, NOW.minusHours(2), NOW.plusMinutes(15));
     }
 
     @Test
@@ -455,7 +578,7 @@ class WatchStripServiceTest {
 
     @Test
     void hold_doseStripNotKeptAfterForecastDrops() {
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(2.75);
         assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().suggestion().kind()).isEqualTo(Kind.INSULIN);
         readingStoredAt(6.0, -3);

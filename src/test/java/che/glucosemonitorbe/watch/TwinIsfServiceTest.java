@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -42,5 +43,12 @@ class TwinIsfServiceTest {
         when(twin.activeScales(id)).thenReturn(Optional.of(TwinScales.of(3.0, 1.0)));
         when(settings.getEffectiveIsf(t)).thenReturn(2.0);
         assertEquals(4.0, svc.effectiveIsf(id, settings, t), 1e-9); // 3.0 clamped to 2.0
+    }
+
+    @Test
+    void missingSettingsIsf_isNaNNotNpe() {
+        when(twin.activeScales(id)).thenReturn(Optional.of(TwinScales.of(1.5, 1.0)));
+        when(settings.getEffectiveIsf(t)).thenReturn(null);
+        assertTrue(Double.isNaN(svc.effectiveIsf(id, settings, t)));
     }
 }

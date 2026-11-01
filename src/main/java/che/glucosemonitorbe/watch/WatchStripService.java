@@ -56,6 +56,11 @@ public class WatchStripService {
     static final double CALM_MIN_COB = 5.0;
     static final double CALM_MIN_CARBS_G = 10.0;
     static final int DEFAULT_RESCUE_CARBS_G = 15;
+    /** Rescue carbs this recent (either side of now, for clock skew) are still landing: don't stack more. */
+    static final int RESCUE_WINDOW_MINUTES = 15;
+    /** Client and stored readings further apart than this mean the forecast's anchor is in doubt. */
+    static final double READING_MISMATCH_MMOL = 0.3;
+    static final String READING_MISMATCH = "READING_MISMATCH";
 
     private final CgmFreshnessService cgmFreshness;
     private final HypoEventService hypoEvents;
@@ -114,8 +119,13 @@ public class WatchStripService {
         Double iob = resp.getActiveInsulinOnBoard();
         Double cob = resp.getActiveCarbsOnBoard();
 
-        // 2. Low now, or an open hypo event.
+        // 2. Low now, or an open hypo event. Rescue carbs already taken get their 15 min to land
+        // before more are suggested: stacking rescues is how a low turns into a rebound high.
         if (reading < HypoThresholds.HYPO_MMOL || hypoEvents.findOpenEvent(userId).isPresent()) {
+            Optional<LocalDateTime> rescueRecheck = rescueRecheck(userId, now);
+            if (rescueRecheck.isPresent()) {
+                return Optional.of(low(Reason.TREATING_LOW, noAction(), null, rescueRecheck.get(), iob, cob));
+            }
             UserSettingsDTO s = settings.getUserSettings(userId);
             int rescue = s != null && s.getRescueCarbsG() != null ? s.getRescueCarbsG() : DEFAULT_RESCUE_CARBS_G;
             return Optional.of(low(Reason.LOW_NOW, new Suggestion(Kind.CARBS, rescue, null, null, null, null, null),
@@ -148,7 +158,7 @@ public class WatchStripService {
         Double twoHour = resp.getTwoHourPrediction();
         Double fourHour = resp.getFourHourPrediction();
         if (twoHour != null && twoHour > HIGH_MMOL && fourHour != null && fourHour > HIGH_MMOL) {
-            return Optional.of(high(userId, now, reading, fourHour, iob, cob));
+            return Optional.of(high(userId, now, reading, resp.getCurrentGlucose(), fourHour, iob, cob));
         }
 
         // 6. Calm: a recent dose, meal or activity that is still acting.
@@ -162,8 +172,8 @@ public class WatchStripService {
     }
 
     /** Correction priced from where the forecast lands; no trend term enters the dose. */
-    private WatchStrip high(UUID userId, LocalDateTime now, double reading, double landing,
-                            Double iob, Double cob) {
+    private WatchStrip high(UUID userId, LocalDateTime now, double reading, Double clientReading,
+                            double landing, Double iob, Double cob) {
         GlucosePoint landingPoint = new GlucosePoint(now.plusMinutes(HORIZON_MINUTES), landing);
         LocalDateTime next = now.plusMinutes(HIGH_CHECK_MINUTES);
         boolean recentDose = notes.findByUserIdAndTimestampBetween(userId,
@@ -172,6 +182,11 @@ public class WatchStripService {
                         && !Note.TYPE_LONG_ACTING.equals(n.getType()));
         if (recentDose) {
             return highStrip(Reason.INSULIN_LANDING, noAction(), landingPoint, next, iob, cob);
+        }
+        // The forecast was run from the client's reading, the dose would be priced from the stored
+        // one: when they disagree the landing is not trustworthy enough to dose from.
+        if (clientReading != null && Math.abs(clientReading - reading) > READING_MISMATCH_MMOL) {
+            return highStrip(Reason.HIGH_FORECAST, refused(READING_MISMATCH), landingPoint, next, iob, cob);
         }
         try {
             UserSettingsDTO s = settings.getUserSettings(userId);
@@ -182,7 +197,7 @@ public class WatchStripService {
             double target = s.getTargetGlucoseMmol() != null
                     ? s.getTargetGlucoseMmol() : UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL;
             double isf = twinIsf.effectiveIsf(userId, s, now);
-            double raw = calculator.calculateForecastCorrection(userId.toString(), reading, landing, target, isf);
+            double raw = calculator.calculateForecastCorrection(userId.toString(), reading, landing, target, isf, now);
             double units = Math.floor(raw * 2) / 2;
             if (units < MIN_DOSE_UNITS) {
                 return highStrip(Reason.SMALL_RISE, noAction(), landingPoint, next, iob, cob);
@@ -191,9 +206,7 @@ public class WatchStripService {
                     new Suggestion(Kind.INSULIN, null, units, null, target, isf, null),
                     landingPoint, next, iob, cob);
         } catch (DosingRefusedException e) {
-            return highStrip(Reason.HIGH_FORECAST,
-                    new Suggestion(Kind.REFUSED, null, null, e.getReason().name(), null, null, null),
-                    landingPoint, next, iob, cob);
+            return highStrip(Reason.HIGH_FORECAST, refused(e.getReason().name()), landingPoint, next, iob, cob);
         }
     }
 
@@ -211,6 +224,35 @@ public class WatchStripService {
 
     private static Suggestion noAction() {
         return new Suggestion(Kind.NO_ACTION, null, null, null, null, null, null);
+    }
+
+    private static Suggestion refused(String code) {
+        return new Suggestion(Kind.REFUSED, null, null, code, null, null, null);
+    }
+
+    /**
+     * When rescue carbs are already landing: the next check, 15 min after the newest
+     * {@code hypo_treatment} note in [now - 15, now + 15]. An unrecovered CONFIRMED event whose
+     * rescue note can no longer be found also counts, with its time unknown (now + 15). Empty when
+     * nothing was taken recently, so more carbs are due.
+     */
+    private Optional<LocalDateTime> rescueRecheck(UUID userId, LocalDateTime now) {
+        LocalDateTime from = now.minusMinutes(RESCUE_WINDOW_MINUTES);
+        LocalDateTime to = now.plusMinutes(RESCUE_WINDOW_MINUTES);
+        Optional<LocalDateTime> newest = notes.findByUserIdAndTimestampBetween(userId, from, to).stream()
+                .filter(Note::isHypoTreatment)
+                .map(Note::getTimestamp)
+                .filter(t -> t != null && !t.isBefore(from) && !t.isAfter(to))
+                .max(Comparator.naturalOrder());
+        if (newest.isPresent()) {
+            return Optional.of(newest.get().plusMinutes(CHECK_MINUTES));
+        }
+        // A confirmed event's rescue note normally sits in the window above. Found outside it, the
+        // rescue is older than 15 min and has had its chance; not found at all, its time is unknown.
+        boolean confirmedWithoutNote = hypoEvents.findUnrecoveredConfirmed(userId)
+                .filter(e -> e.noteId() == null || notes.findById(e.noteId()).isEmpty())
+                .isPresent();
+        return confirmedWithoutNote ? Optional.of(now.plusMinutes(CHECK_MINUTES)) : Optional.empty();
     }
 
     private WatchStrip calm(List<PredictionPointDTO> forecast, LocalDateTime now, double reading,

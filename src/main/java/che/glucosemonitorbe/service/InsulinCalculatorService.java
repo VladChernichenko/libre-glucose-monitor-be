@@ -329,16 +329,21 @@ public class InsulinCalculatorService {
      * Correction dose aimed at where the forecast <em>lands</em>, not at the current reading.
      * Takes no IOB: the landing already reflects insulin on board, so subtracting it again
      * would double count. Returns raw, unrounded units; the caller decides presentation.
+     *
+     * <p>Keeps every refusal of the meal-bolus path: hypo first (whatever the settings say), then
+     * the settings plausibility check at {@code time}, the ISF itself and the max bolus.
      */
     public double calculateForecastCorrection(String username, double currentReadingMmol,
-                                              double landingMmol, double targetMmol, double isf) {
-        UserSettingsDTO settings = requireSettings(username);
-        if (!Double.isFinite(isf) || isf <= 0) {
-            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID, "isf=" + isf);
-        }
+                                              double landingMmol, double targetMmol, double isf,
+                                              LocalDateTime time) {
         if (currentReadingMmol < HYPO_REFUSAL_THRESHOLD_MMOL) {
             throw new DosingRefusedException(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
                     "currentReading=" + currentReadingMmol + " < " + HYPO_REFUSAL_THRESHOLD_MMOL);
+        }
+        UserSettingsDTO settings = requireSettings(username);
+        resolveGramsPerUnit(settings, time);
+        if (!Double.isFinite(isf) || isf <= 0) {
+            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID, "isf=" + isf);
         }
         double units = Math.max(0.0, (landingMmol - targetMmol) / isf);
         double maxBolus = maxBolusUnits(settings);

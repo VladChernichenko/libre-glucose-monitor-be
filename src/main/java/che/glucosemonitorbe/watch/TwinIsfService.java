@@ -18,10 +18,13 @@ public class TwinIsfService {
 
     private final DigitalTwinService digitalTwinService;
 
+    /** @return the ISF to price with, or {@code NaN} when settings hold none (the calculator refuses it) */
     public double effectiveIsf(UUID userId, UserSettingsDTO settings, LocalDateTime time) {
+        Double base = settings.getEffectiveIsf(time);
+        if (base == null) return Double.NaN;
         double scale = digitalTwinService.activeScales(userId)
                 .map(s -> s.clamped().isfScale())
                 .orElse(1.0);
-        return settings.getEffectiveIsf(time) * scale;
+        return base * scale;
     }
 }

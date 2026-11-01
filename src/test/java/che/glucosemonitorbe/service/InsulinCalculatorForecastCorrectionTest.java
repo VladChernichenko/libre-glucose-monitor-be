@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,12 +21,15 @@ class InsulinCalculatorForecastCorrectionTest {
     private static final UUID USER_ID = UUID.randomUUID();
     private static final String USER = USER_ID.toString();
 
+    private static final LocalDateTime T = LocalDateTime.of(2026, 11, 1, 15, 0);
+
     private InsulinCalculatorService calc;
+    private UserSettingsDTO settings;
 
     @BeforeEach
     void setUp() {
         UserSettingsService settingsService = mock(UserSettingsService.class);
-        UserSettingsDTO settings = new UserSettingsDTO(
+        settings = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, /*carbRatio*/ 1.0, /*isf*/ 2.0, /*halfLife*/ 45, /*maxCob*/ 240);
         settings.setBodyWeightKg(70.0); // max bolus 0.3 U/kg -> 21 U
         when(settingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
@@ -34,36 +38,56 @@ class InsulinCalculatorForecastCorrectionTest {
 
     @Test
     void aimsFromLandingNotCurrent() {
-        assertEquals(2.75, calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 2.0), 1e-9);
+        assertEquals(2.75, calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 2.0, T), 1e-9);
     }
 
     @Test
     void refusesBelow39() {
         assertRefused(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
-                () -> calc.calculateForecastCorrection(USER, 3.8, 11.0, 5.5, 2.0));
+                () -> calc.calculateForecastCorrection(USER, 3.8, 11.0, 5.5, 2.0, T));
     }
 
     @Test
     void refusesNonPositiveIsf() {
         assertRefused(DosingRefusalReason.SETTINGS_INVALID,
-                () -> calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 0.0));
+                () -> calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 0.0, T));
     }
 
     @Test
     void refusesNonFiniteIsf() {
         assertRefused(DosingRefusalReason.SETTINGS_INVALID,
-                () -> calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, Double.NaN));
+                () -> calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, Double.NaN, T));
     }
 
     @Test
     void refusesOverMaxBolus() {
         assertRefused(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS,
-                () -> calc.calculateForecastCorrection(USER, 9.0, 30.0, 5.5, 1.0));
+                () -> calc.calculateForecastCorrection(USER, 9.0, 30.0, 5.5, 1.0, T));
     }
 
     @Test
     void landingBelowTarget_isZero() {
-        assertEquals(0.0, calc.calculateForecastCorrection(USER, 9.0, 5.0, 5.5, 2.0), 1e-9);
+        assertEquals(0.0, calc.calculateForecastCorrection(USER, 9.0, 5.0, 5.5, 2.0, T), 1e-9);
+    }
+
+    @Test
+    void refusesInconsistentSettings() {
+        settings.setCarbRatio(10.0); // 10 * isf 2.0 / 10.0 = 2 g/U, below the 3 g/U floor
+        assertRefused(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
+                () -> calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 2.0, T));
+    }
+
+    @Test
+    void hypoRefusalComesBeforeIsfCheck() {
+        assertRefused(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
+                () -> calc.calculateForecastCorrection(USER, 3.8, 11.0, 5.5, 0.0, T));
+    }
+
+    @Test
+    void hypoRefusalComesBeforeSettingsCheck() {
+        settings.setCarbRatio(10.0);
+        assertRefused(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
+                () -> calc.calculateForecastCorrection(USER, 3.8, 11.0, 5.5, 2.0, T));
     }
 
     private static void assertRefused(DosingRefusalReason expected, Executable call) {
