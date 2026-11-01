@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.hovorka.learning;
 
+import che.glucosemonitorbe.hovorka.ActivityGains;
+
 import java.util.List;
 
 /**
@@ -14,4 +16,9 @@ public interface AnchorSampleSource {
 
     /** Evaluate the model at every anchor with the given scales and return all comparison samples. */
     List<AnchorSample> replay(TwinScales scales);
+
+    /** As above with per-user activity gains; sources that do not model activity ignore them. */
+    default List<AnchorSample> replay(TwinScales scales, ActivityGains gains) {
+        return replay(scales);
+    }
 }

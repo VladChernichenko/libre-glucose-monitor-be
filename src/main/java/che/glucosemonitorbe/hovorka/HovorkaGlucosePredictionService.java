@@ -297,14 +297,36 @@ public class HovorkaGlucosePredictionService {
             ActivityProvider activityProvider,
             double basalDurationHours) {
 
-        return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
+        return buildPredictionPath(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider, basalDurationHours);
+                activityProvider, basalDurationHours, ActivityGains.NEUTRAL);
     }
 
     /**
-     * Core ODE integration - shared by both public overloads.
+     * As the hot-path overload above, with per-user {@link ActivityGains} shaping the activity term
+     * (gains are clamped; {@link ActivityGains#NEUTRAL} is bit-identical to the un-personalised model).
      */
+    public List<PredictionPointDTO> buildPredictionPath(
+            HovorkaParameters customParams,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider,
+            double basalDurationHours,
+            ActivityGains gains) {
+
+        return buildWithParams(customParams, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider, basalDurationHours, gains);
+    }
+
+    /** Core ODE integration with population-default activity gains. */
     private List<PredictionPointDTO> buildWithParams(
             HovorkaParameters p,
             RapidInsulinIobParameters rapidIob,
@@ -318,6 +340,28 @@ public class HovorkaGlucosePredictionService {
             int pathMinutes,
             ActivityProvider activityProvider,
             double basalDurationHours) {
+        return buildWithParams(p, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider, basalDurationHours, ActivityGains.NEUTRAL);
+    }
+
+    /**
+     * Core ODE integration - shared by all public overloads.
+     */
+    private List<PredictionPointDTO> buildWithParams(
+            HovorkaParameters p,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider,
+            double basalDurationHours,
+            ActivityGains gains) {
 
         // -- State warm-up -----------------------------------------------------
         WarmUp warmUp = buildWarmState(currentGlucose, pastCarbsEntries, currentTime, p);
@@ -383,7 +427,7 @@ public class HovorkaGlucosePredictionService {
         // -- Activity modulation (a(t) -> insulin-sensitivity amplification + insulin-independent
         //    uptake). Inert with the NONE provider - that path is bit-identical to the base model. --
         boolean hasActivity = activityProvider != ActivityProvider.NONE;
-        ActivityModulation activity = new ActivityModulation();
+        ActivityModulation activity = gains.clamped().modulation();
         if (hasActivity) {
             // Warm-start the post-exercise sensitivity tail from activity just before "now".
             for (int m = ActivityModulation.WARMUP_MINUTES; m >= 1; m--) {

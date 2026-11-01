@@ -7,6 +7,7 @@ import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
+import che.glucosemonitorbe.hovorka.ActivityGains;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
@@ -190,13 +191,18 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
      * (predicted, actual) samples.
      */
     public List<AnchorSample> replay(TwinScales scales) {
+        return replay(scales, ActivityGains.NEUTRAL);
+    }
+
+    @Override
+    public List<AnchorSample> replay(TwinScales scales, ActivityGains gains) {
         TwinScales s = scales.clamped();
         List<AnchorSample> out = new ArrayList<>();
         for (AnchorContext a : anchors) {
             HovorkaParameters p = applyScales(a.macroParams(), s);
             List<PredictionPointDTO> curve = predictor.buildPredictionPath(
                     p, rapidIob, settings, a.g0(), a.now(), a.carbs(), a.insulin(), a.longActing(),
-                    userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours);
+                    userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours, gains);
             long t0 = toEpochMs(a.now(), userZone);
             for (PredictionPointDTO pt : curve) {
                 int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
