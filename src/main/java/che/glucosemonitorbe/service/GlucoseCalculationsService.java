@@ -20,6 +20,7 @@ import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import che.glucosemonitorbe.watch.WatchStripService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -85,9 +86,14 @@ public class GlucoseCalculationsService {
     @Autowired(required = false)
     private CarbAdviceService carbAdviceService;
 
+    /** Lazy: the watch strip reads the carb advice and the forecast this call just produced. */
+    @Lazy
+    @Autowired(required = false)
+    private WatchStripService watchStripService;
+
     /**
      * The dashboard call: {@link #calculateGlucoseData} plus the fast-carbs-in-advance advice
-     * (§6.13), evaluated on the forecast just computed. Requests carrying prospective (what-if)
+     * (§6.13) and the watch strip, evaluated on the forecast just computed. Requests carrying prospective (what-if)
      * notes skip the advice, so a what-if never touches the advice hold and the gram search's own
      * re-runs cannot recurse. Internal callers (alerts, chat, snapshots) call
      * {@link #calculateGlucoseData} directly: they send no CGM trend, so letting them evaluate would
@@ -96,17 +102,31 @@ public class GlucoseCalculationsService {
     public GlucoseCalculationsResponse calculateDashboard(GlucoseCalculationsRequest request) {
         GlucoseCalculationsResponse response = calculateGlucoseData(request);
         boolean whatIf = request.getProspectiveNotes() != null && !request.getProspectiveNotes().isEmpty();
-        if (whatIf || carbAdviceService == null || response.getPredictionPath() == null) {
+        if (whatIf) {
             return response;
         }
-        try {
-            UUID userUUID = userService.getUserByUsername(request.getUserId()).getId();
-            double trend = request.getCurrentTrendMmolPerMin() != null ? request.getCurrentTrendMmolPerMin() : 0.0;
-            carbAdviceService.evaluate(userUUID, response.getCalculatedAt(), request.getCurrentGlucose(),
-                    trend, response.getPredictionPath()).ifPresent(response::setCarbAdvice);
-        } catch (RuntimeException e) {
-            // The forecast itself is still valid; never fail the dashboard over the advice.
-            log.warn("Carb advice unavailable for user={}: {}", request.getUserId(), e.getMessage(), e);
+        UUID userUUID = null;
+        if (carbAdviceService != null && response.getPredictionPath() != null) {
+            try {
+                userUUID = userService.getUserByUsername(request.getUserId()).getId();
+                double trend = request.getCurrentTrendMmolPerMin() != null ? request.getCurrentTrendMmolPerMin() : 0.0;
+                carbAdviceService.evaluate(userUUID, response.getCalculatedAt(), request.getCurrentGlucose(),
+                        trend, response.getPredictionPath()).ifPresent(response::setCarbAdvice);
+            } catch (RuntimeException e) {
+                // The forecast itself is still valid; never fail the dashboard over the advice.
+                log.warn("Carb advice unavailable for user={}: {}", request.getUserId(), e.getMessage(), e);
+            }
+        }
+        if (watchStripService != null) {
+            // After the carb advice: the strip reads it. Own try/catch so a failure leaves watch null.
+            try {
+                if (userUUID == null) {
+                    userUUID = userService.getUserByUsername(request.getUserId()).getId();
+                }
+                watchStripService.evaluate(userUUID, response).ifPresent(response::setWatch);
+            } catch (RuntimeException e) {
+                log.warn("Watch strip unavailable for user={}: {}", request.getUserId(), e.getMessage(), e);
+            }
         }
         return response;
     }
