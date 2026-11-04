@@ -371,7 +371,9 @@ public class HovorkaGlucosePredictionService {
         HovorkaState state = warmUp.state();
 
         // -- EGP net from long-acting insulin ----------------------------------
-        double x3Basal  = basalResolver.resolveEgpSuppression(longActingNotes, currentTime, basalDurationHours);
+        double x3Basal  = basalResolver.resolveEgpSuppression(
+                longActingNotes, currentTime, basalDurationHours,
+                BasalInsulinResolver.REFERENCE_UNITS_PER_KG * p.weightKg());
         double egp0Abs  = HovorkaParameters.EGP0_PER_KG * p.weightKg();
         double egpNow   = basalResolver.netEgp(p.f01(), egp0Abs, x3Basal);
         // No basal logged, or the newest logged dose is too old to say anything about current

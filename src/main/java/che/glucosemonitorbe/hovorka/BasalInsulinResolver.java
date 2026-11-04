@@ -44,6 +44,12 @@ public class BasalInsulinResolver {
     /** EGP suppression fraction at steady-state basal insulin (dimensionless, 0-1). */
     public static final double PEAK_X3_BASAL   = 0.40;
 
+    /** Logged units that count as a full plateau: 0.3 U per kg of body weight. */
+    public static final double REFERENCE_UNITS_PER_KG = 0.3;
+
+    /** Reference used when the caller has no body weight, and by the 3-argument overload. */
+    public static final double DEFAULT_REFERENCE_UNITS = 20.0;
+
     /** Duration of action assumed when the user's long-acting insulin is unknown [hours]. */
     public static final double DEFAULT_DURATION_HOURS = 24.0;
 
@@ -75,14 +81,27 @@ public class BasalInsulinResolver {
      * @return                 x3_basal suppression fraction ∈ [0, PEAK_X3_BASAL]
      */
     public double resolveEgpSuppression(List<Note> longActingNotes, LocalDateTime now, double durationHours) {
+        return resolveEgpSuppression(longActingNotes, now, durationHours, DEFAULT_REFERENCE_UNITS);
+    }
+
+    /**
+     * As {@link #resolveEgpSuppression(List, LocalDateTime, double)}, scaled by logged units.
+     * {@code referenceUnits} is a full plateau (0.3 U/kg). A larger dose does not exceed the peak.
+     * A non-finite or non-positive reference falls back to {@link #DEFAULT_REFERENCE_UNITS}.
+     */
+    public double resolveEgpSuppression(List<Note> longActingNotes, LocalDateTime now,
+                                        double durationHours, double referenceUnits) {
         if (longActingNotes == null) {
             return 0.0;
         }
+        double reference = (Double.isFinite(referenceUnits) && referenceUnits > 0)
+                ? referenceUnits : DEFAULT_REFERENCE_UNITS;
         double maxSuppression = 0.0;
         for (Note note : longActingNotes) {
             double hoursAgo = hoursSinceDose(note, now);
             if (Double.isNaN(hoursAgo)) continue;
-            maxSuppression = Math.max(maxSuppression, suppressionCurve(hoursAgo, durationHours));
+            double fraction = Math.max(0.0, Math.min(1.0, note.getInsulin() / reference));
+            maxSuppression = Math.max(maxSuppression, suppressionCurve(hoursAgo, durationHours) * fraction);
         }
         return maxSuppression;
     }

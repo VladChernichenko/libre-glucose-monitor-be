@@ -29,7 +29,7 @@ class BasalInsulinResolverTest {
     private static Note dose(double hoursAgo) {
         Note n = new Note();
         n.setType(Note.TYPE_LONG_ACTING);
-        n.setInsulin(20.0);
+        n.setInsulin(21.0);
         n.setTimestamp(NOW.minusMinutes(Math.round(hoursAgo * 60)));
         return n;
     }
@@ -75,6 +75,43 @@ class BasalInsulinResolverTest {
     @DisplayName("the newest of several doses decides coverage")
     void newestDoseWins() {
         assertThat(resolver.resolveEgpSuppression(List.of(dose(30), dose(6)), NOW, GLARGINE_H)).isEqualTo(PEAK);
+    }
+
+    @Test
+    @DisplayName("six units on a 20 U reference suppresses 6/20 of the peak; 20 U is the peak")
+    void unitsScaleSuppressionUpToTheReference() {
+        Note six = dose(6); six.setInsulin(6.0);
+        Note ref = dose(6); ref.setInsulin(20.0);
+        assertThat(resolver.resolveEgpSuppression(List.of(six), NOW, GLARGINE_H, 20.0))
+                .isCloseTo(PEAK * 6.0 / 20.0, within(1e-9));
+        assertThat(resolver.resolveEgpSuppression(List.of(ref), NOW, GLARGINE_H, 20.0))
+                .isEqualTo(PEAK);
+    }
+
+    @Test
+    @DisplayName("a dose above the reference does not exceed the peak")
+    void doseAboveReferenceStaysAtPeak() {
+        Note big = dose(6); big.setInsulin(40.0);
+        assertThat(resolver.resolveEgpSuppression(List.of(big), NOW, GLARGINE_H, 20.0))
+                .isEqualTo(PEAK);
+    }
+
+    @Test
+    @DisplayName("zero units is not an active dose")
+    void zeroUnitsIsNotActive() {
+        Note zero = dose(6); zero.setInsulin(0.0);
+        assertThat(resolver.hasActiveDose(List.of(zero), NOW, GLARGINE_H)).isFalse();
+        assertThat(resolver.resolveEgpSuppression(List.of(zero), NOW, GLARGINE_H, 20.0))
+                .isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("a below-reference basal lets fasting glucose rise above the reference dose")
+    void belowReferenceBasalRaisesFastingForecast() {
+        Note six = dose(6); six.setInsulin(6.0);
+        Note ref = dose(6); ref.setInsulin(21.0); // 0.3 U/kg at the helper's 70 kg
+        assertThat(fastingGlucoseAt4h(List.of(six), GLARGINE_H))
+                .isGreaterThan(fastingGlucoseAt4h(List.of(ref), GLARGINE_H) + 0.3);
     }
 
     // -- Through the forecast ---------------------------------------------------
