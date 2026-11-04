@@ -32,6 +32,14 @@ public class DigitalTwinResidualProvider implements PredictionResidualProvider {
     }
 
     @Override
+    public double isfScale(UUID userId) {
+        if (userId == null) return 1.0;
+        return digitalTwinService.activeScales(userId)
+                .map(s -> s.clamped().isfScale())
+                .orElse(1.0);
+    }
+
+    @Override
     public ActivityGains activityGains(UUID userId) {
         if (userId == null) return ActivityGains.NEUTRAL;
         return digitalTwinService.activeActivityGains(userId).orElse(ActivityGains.NEUTRAL);

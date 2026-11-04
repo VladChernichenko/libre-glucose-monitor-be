@@ -38,6 +38,14 @@ public interface PredictionResidualProvider {
      * The learned activity gains for the live forecast; population defaults unless the user's twin
      * learned better ones. Replay never goes through this - it passes gains explicitly.
      */
+    /**
+     * Applied digital-twin ISF multiplier. {@code 1.0} when no twin is applied.
+     * Callers clamp with {@link TwinScales} before using the value on a dose.
+     */
+    default double isfScale(UUID userId) {
+        return 1.0;
+    }
+
     default ActivityGains activityGains(UUID userId) {
         return ActivityGains.NEUTRAL;
     }

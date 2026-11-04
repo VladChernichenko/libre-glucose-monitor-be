@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.hovorka;
 
+import che.glucosemonitorbe.domain.InsulinDose;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.entity.Note;
@@ -126,11 +127,68 @@ class BasalInsulinResolverTest {
         assertThat(fastingGlucoseAt4h(List.of(dose(35)), GLARGINE_H)).isEqualTo(6.0);
     }
 
-    private static double fastingGlucoseAt4h(List<Note> longActing, double basalDurationHours) {
+    @Test
+    @DisplayName("doubling egp0 raises fasting glucose when a basal dose is on schedule")
+    void scaledEgp0ReachesTheForecast() {
+        Note onSchedule = dose(6); onSchedule.setInsulin(21.0);
+        assertThat(fastingGlucoseAt4h(List.of(onSchedule), GLARGINE_H, 2.0))
+                .isGreaterThan(fastingGlucoseAt4h(List.of(onSchedule), GLARGINE_H, 1.0) + 0.5);
+    }
+
+    @Test
+    @DisplayName("doubling egp0 does nothing when the basal log is empty")
+    void scaledEgp0DoesNotMoveASilentLog() {
+        assertThat(fastingGlucoseAt4h(List.of(), GLARGINE_H, 2.0)).isEqualTo(6.0);
+        assertThat(fastingGlucoseAt4h(List.of(), GLARGINE_H, 1.0)).isEqualTo(6.0);
+    }
+
+    @Test
+    @DisplayName("an isfScale of 2 pulls a bolus forecast down; 3 is clamped to 2")
+    void bolusForecastUsesClampedIsfScale() {
+        InsulinDose bolus = InsulinDose.builder()
+                .units(4.0).timestamp(NOW.minusMinutes(60)).build();
+        double atScale1 = glucoseAt4h(List.of(bolus), scale(1.0));
+        double atScale2 = glucoseAt4h(List.of(bolus), scale(2.0));
+        double atScale3 = glucoseAt4h(List.of(bolus), scale(3.0));
+        assertThat(atScale2).isLessThan(atScale1 - 0.4);
+        assertThat(atScale3).isCloseTo(atScale2, within(1e-6));
+    }
+
+    private static PredictionResidualProvider scale(double isfScale) {
+        return new PredictionResidualProvider() {
+            @Override public double residualMmol(UUID userId, LocalDateTime pointTime) { return 0.0; }
+            @Override public double uncertaintySdMmol(UUID userId, int horizonMin) { return 0.0; }
+            @Override public double isfScale(UUID userId) { return isfScale; }
+        };
+    }
+
+    private static double glucoseAt4h(List<InsulinDose> boluses, PredictionResidualProvider provider) {
         double w = 70.0;
         HovorkaParameters p = new HovorkaParameters(
                 HovorkaParameters.VG_PER_KG * w, HovorkaParameters.F01_PER_KG * w,
                 HovorkaParameters.F01_PER_KG * w, HovorkaParameters.EGP0_PER_KG * w,
+                HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
+                45.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, 1.0, 2.2, w);
+        DallaManGutModel gut = new DallaManGutModel();
+        HovorkaGlucosePredictionService service = new HovorkaGlucosePredictionService(
+                mock(HovorkaParameterService.class), new HovorkaOdeSolver(gut), new BasalInsulinResolver(),
+                mock(UserInsulinPreferencesService.class), gut,
+                mock(UserSettingsService.class), provider);
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                p, new RapidInsulinIobParameters(4.5, 55.0), null, 6.0, NOW, List.of(), boluses,
+                List.of(), UUID.randomUUID(), 240, ActivityProvider.NONE, GLARGINE_H);
+        return curve.get(curve.size() - 1).getPredictedGlucose();
+    }
+
+    private static double fastingGlucoseAt4h(List<Note> longActing, double basalDurationHours) {
+        return fastingGlucoseAt4h(longActing, basalDurationHours, 1.0);
+    }
+
+    private static double fastingGlucoseAt4h(List<Note> longActing, double basalDurationHours, double egpScale) {
+        double w = 70.0;
+        HovorkaParameters p = new HovorkaParameters(
+                HovorkaParameters.VG_PER_KG * w, HovorkaParameters.F01_PER_KG * w,
+                HovorkaParameters.F01_PER_KG * w, HovorkaParameters.EGP0_PER_KG * w * egpScale,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 45.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, 1.0, 2.2, w);
         DallaManGutModel gut = new DallaManGutModel();

@@ -8,6 +8,7 @@ import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
+import che.glucosemonitorbe.hovorka.learning.TwinScales;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -374,7 +375,7 @@ public class HovorkaGlucosePredictionService {
         double x3Basal  = basalResolver.resolveEgpSuppression(
                 longActingNotes, currentTime, basalDurationHours,
                 BasalInsulinResolver.REFERENCE_UNITS_PER_KG * p.weightKg());
-        double egp0Abs  = HovorkaParameters.EGP0_PER_KG * p.weightKg();
+        double egp0Abs  = p.egp0();
         double egpNow   = basalResolver.netEgp(p.f01(), egp0Abs, x3Basal);
         // No basal logged, or the newest logged dose is too old to say anything about current
         // coverage -> assume fasting steady state (T1D on continuous unlogged background basal).
@@ -392,7 +393,7 @@ public class HovorkaGlucosePredictionService {
         // -- Pre-compute per-dose IOB timelines, each tagged with the ISF that --
         //    was in effect when that dose was administered --------------------
         List<DoseActivity> doseActivities = buildDoseActivities(pastInsulinDoses, currentTime,
-                pathMinutes, rapidIob, settings, pAdj.isf());
+                pathMinutes, rapidIob, settings, pAdj.isf(), userId);
 
         // -- Future carb timeline (prospective notes already in pastCarbsEntries
         //    with future timestamps - carbs at t <= now were in the warm-up) ---
@@ -751,7 +752,8 @@ public class HovorkaGlucosePredictionService {
             int pathMinutes,
             RapidInsulinIobParameters rapidIob,
             UserSettingsDTO settings,
-            double fallbackIsf) {
+            double fallbackIsf,
+            UUID userId) {
 
         int size = pathMinutes + 2;
         List<DoseActivity> activities = new ArrayList<>();
@@ -770,7 +772,8 @@ public class HovorkaGlucosePredictionService {
                         dose.getUnits(), minsAgoAtStep,
                         rapidIob.diaHours(), rapidIob.peakMinutes());
             }
-            double isf = resolveIsf(settings, fallbackIsf, dose.getTimestamp());
+            double isf = resolveIsf(settings, fallbackIsf, dose.getTimestamp())
+                    * TwinScales.of(residualProvider.isfScale(userId), 1.0).clamped().isfScale();
             activities.add(new DoseActivity(iob, isf));
         }
         return activities;
