@@ -61,7 +61,7 @@ public class GlycemicPatternMatchingService {
         double fiber   = s.getFiber()   != null ? s.getFiber()   : 0.0;
         double fat     = s.getFat()     != null ? s.getFat()     : 0.0;
         double protein = s.getProtein() != null ? s.getProtein() : 0.0;
-        double gi      = s.getEstimatedGi()    != null ? s.getEstimatedGi()    : 0.0;
+        Double gi      = s.getEstimatedGi();
         double gl      = s.getGlycemicLoad()   != null ? s.getGlycemicLoad()   : 0.0;
 
         // Comparator: longer suggestedDuration first (more specific FPU tier wins).
@@ -97,14 +97,18 @@ public class GlycemicPatternMatchingService {
     }
 
     private boolean matches(GlycemicResponsePattern p,
-                            double gi, double gl, double fat, double protein, double fiber) {
+                            Double gi, double gl, double fat, double protein, double fiber) {
         // Fiber barrier check
         if (p.isHasFiberBarrier() && fiber < FIBER_BARRIER_THRESHOLD) return false;
         if (!p.isHasFiberBarrier() && fiber >= FIBER_BARRIER_THRESHOLD) return false;
 
-        // GI range
-        if (p.getGiMin() != null && gi < p.getGiMin()) return false;
-        if (p.getGiMax() != null && gi > p.getGiMax()) return false;
+        // A missing GI is not GI 0. GI bounds apply only when the snapshot has one.
+        if (gi == null) {
+            if (p.getGiMin() != null || p.getGiMax() != null) return false;
+        } else {
+            if (p.getGiMin() != null && gi < p.getGiMin()) return false;
+            if (p.getGiMax() != null && gi > p.getGiMax()) return false;
+        }
 
         // GL range
         if (p.getGlMin() != null && gl < p.getGlMin().doubleValue()) return false;

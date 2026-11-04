@@ -77,6 +77,18 @@ class GlycemicPatternMatchingServiceTest {
     }
 
     @Test
+    void missingGi_doesNotMatchSlowClimb() {
+        NutritionSnapshot s = NutritionSnapshot.builder()
+                .estimatedGi(null)
+                .glycemicLoad(12.0)
+                .fiber(0.0)
+                .protein(1.0)
+                .fat(1.0)
+                .build();
+        assertThat(service.enrich(s).getPatternName()).isNull();
+    }
+
+    @Test
     void pureSlowCarbs_lowGI_matchesSlowClimb() {
         NutritionSnapshot s = snapshot(40.0, 12.0, 1.0, 2.0, 1.0);
         NutritionSnapshot enriched = service.enrich(s);
