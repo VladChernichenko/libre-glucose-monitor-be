@@ -529,6 +529,36 @@ class GlucoseCalculationsServiceTest {
     }
 
     @Test
+    void confidence_readsTheTwoHourPoint_notTheEndOfThePath() throws Exception {
+        String username = "band_user";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+        when(featureToggleConfig.isHovorkaModelEnabled()).thenReturn(true);
+
+        Field f = GlucoseCalculationsService.class.getDeclaredField("hovorkaService");
+        f.setAccessible(true);
+        f.set(service, hovorkaService);
+
+        List<PredictionPointDTO> path = new ArrayList<>();
+        for (int minute = 5; minute <= 240; minute += 5) {
+            path.add(PredictionPointDTO.builder()
+                    .timestamp(LocalDateTime.now().plusMinutes(minute))
+                    .predictedGlucose(6.0)
+                    .uncertaintySd(minute == 120 ? 1.0 : 4.0)
+                    .build());
+        }
+        when(hovorkaService.buildPredictionPath(
+                anyDouble(), any(LocalDateTime.class), anyList(), anyList(), anyList(),
+                any(UUID.class), anyInt(), any(ActivityProvider.class)))
+                .thenReturn(path);
+
+        var response = service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(6.0).userId(username).build());
+
+        assertThat(response.getConfidence()).isEqualTo(0.8);
+    }
+
+    @Test
     void predictionPath_notEmpty_for4hHorizon() {
         String username = "path_user";
         UUID userId = UUID.randomUUID();
