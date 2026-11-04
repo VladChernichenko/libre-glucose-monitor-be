@@ -7,7 +7,7 @@ import che.glucosemonitorbe.dto.NoteDto;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
+import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,7 +41,7 @@ class NotesServiceRapidInsulinEventTest {
             return n;
         });
         when(mapper.toDto(any(Note.class))).thenReturn(new NoteDto());
-        service = new NotesService(notes, mapper, mock(NutritionEnrichmentService.class), new ObjectMapper(),
+        service = new NotesService(notes, mapper, mock(FoodCompositionService.class), new ObjectMapper(),
                 mock(GlucoseAlertService.class), mock(UserService.class), mock(NotePhotoStorageService.class),
                 mock(ForecastSnapshotTrigger.class), events);
     }

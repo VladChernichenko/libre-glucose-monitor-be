@@ -17,6 +17,19 @@ public interface MealEpisodeRepository extends JpaRepository<MealEpisode, UUID> 
 
     boolean existsByUserId(UUID userId);
 
+    /** Drops the episode built from this meal note, if one exists. */
+    @Modifying
+    @Transactional
+    @Query("delete from MealEpisode e where e.noteId = :noteId")
+    int deleteByNoteId(@Param("noteId") UUID noteId);
+
+    /** Episodes whose meal note is gone, of any age. */
+    @Modifying
+    @Transactional
+    @Query(value = "DELETE FROM meal_episode e WHERE NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = e.note_id)",
+            nativeQuery = true)
+    int deleteOrphans();
+
     @Query("SELECT e.noteId FROM MealEpisode e WHERE e.userId = :userId")
     List<UUID> findNoteIdsByUserId(@Param("userId") UUID userId);
 

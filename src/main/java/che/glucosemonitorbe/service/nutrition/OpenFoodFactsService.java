@@ -37,7 +37,7 @@ import java.util.Optional;
  *
  * GI/GL estimation: OpenFoodFacts does not publish glycemic index.
  * We estimate GI from category tags (provided by the OFF taxonomy) using the
- * same dampening formula as NutritionEnrichmentService: fat×0.30 + protein×0.20,
+ * same fat and protein dampening: fat×0.30 + protein×0.20,
  * capped at 20 GI units, floor 15.
  *
  * MongoDB dump note: when the local OFF dump is imported into MongoDB,

@@ -103,6 +103,20 @@ public class NotePhotoStorageService {
     }
 
     /**
+     * Validates {@code file} and returns its bytes without writing them anywhere. Used when object
+     * storage is off: the phone keeps the picture in its gallery, and recognition uses these bytes
+     * for this request only.
+     */
+    public PhotoObject read(MultipartFile file) {
+        validateAndExtensionFor(file);
+        try {
+            return new PhotoObject(file.getBytes(), file.getContentType());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read photo upload", e);
+        }
+    }
+
+    /**
      * Downloads the photo stored at {@code key}, or returns {@code null} if storage is
      * disabled, the note has no photo, or the object no longer exists in the bucket.
      */

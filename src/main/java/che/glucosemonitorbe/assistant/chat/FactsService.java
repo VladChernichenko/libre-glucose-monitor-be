@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -122,6 +124,7 @@ public class FactsService {
                 .fat(round1(plan.fat().mid()))
                 .protein(round1(plan.protein().mid()))
                 .fiber(round1(plan.fiber().mid()))
+                .massG(massGrams(description))
                 .gi(plan.gi())
                 .pattern(plan.patternLabel());
         if (plan.stale()) return b.noFreshCgmReading(true).build();
@@ -159,5 +162,18 @@ public class FactsService {
 
     static Double round2(Double v) {
         return v == null || !Double.isFinite(v) ? null : Math.round(v * 100.0) / 100.0;
+    }
+
+    /** Sum of portion weights written as "40 g" in the meal description. */
+    static Double massGrams(String description) {
+        if (description == null || description.isBlank()) return null;
+        Matcher matcher = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*g\\b", Pattern.CASE_INSENSITIVE).matcher(description);
+        double sum = 0;
+        boolean any = false;
+        while (matcher.find()) {
+            sum += Double.parseDouble(matcher.group(1));
+            any = true;
+        }
+        return any ? round1(sum) : null;
     }
 }

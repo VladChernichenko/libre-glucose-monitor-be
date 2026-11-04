@@ -32,6 +32,18 @@ class NotePhotoStorageServiceTest {
     }
 
     @Test
+    void disabled_readReturnsBytesWithoutStoring() {
+        NotePhotoStorageService service = new NotePhotoStorageService(new S3StorageProperties());
+        byte[] jpeg = new byte[]{1, 2, 3};
+        MultipartFile photo = new MockMultipartFile("photo", "meal.jpg", "image/jpeg", jpeg);
+
+        NotePhotoStorageService.PhotoObject read = service.read(photo);
+
+        assertArrayEquals(jpeg, read.data());
+        assertEquals("image/jpeg", read.contentType());
+    }
+
+    @Test
     void disabled_downloadReturnsNull() {
         NotePhotoStorageService service = new NotePhotoStorageService(new S3StorageProperties());
 

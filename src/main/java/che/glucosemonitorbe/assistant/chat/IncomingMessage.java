@@ -9,13 +9,19 @@ import java.time.ZoneId;
  * "now" by the quick-log parser and for note timestamps); {@code photoKey} is the storage key of an
  * already-uploaded photo, or null.
  */
-public record IncomingMessage(String text, String photoKey, LocalDateTime clientNow, ZoneId zone) {
+public record IncomingMessage(String text, String photoKey, LocalDateTime clientNow, ZoneId zone,
+                              byte[] photoBytes, String photoContentType) {
+
+    /** A message whose photo, if any, is already in object storage. */
+    public IncomingMessage(String text, String photoKey, LocalDateTime clientNow, ZoneId zone) {
+        this(text, photoKey, clientNow, zone, null, null);
+    }
 
     public boolean hasText() {
         return text != null && !text.isBlank();
     }
 
     public boolean hasPhoto() {
-        return photoKey != null;
+        return photoKey != null || (photoBytes != null && photoBytes.length > 0);
     }
 }

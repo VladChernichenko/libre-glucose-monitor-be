@@ -12,7 +12,7 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
+import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
@@ -33,6 +33,8 @@ import org.springframework.web.multipart.MultipartFile;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.List;
 import java.util.UUID;
@@ -46,7 +48,7 @@ public class NotesService {
 
     private final NoteRepository noteRepository;
     private final NoteMapper noteMapper;
-    private final NutritionEnrichmentService nutritionEnrichmentService;
+    private final FoodCompositionService foodCompositionService;
     private final ObjectMapper objectMapper;
     private final GlucoseAlertService glucoseAlertService;
     private final UserService userService;
@@ -262,8 +264,46 @@ public class NotesService {
         }
         notePhotoStorageService.delete(note.getPhotoKey());
         forecastSnapshotTrigger.noteDeleted(noteId);
-        eventPublisher.publishEvent(new NoteDeleted(userId, noteId, note.getChatMessageId()));
+        eventPublisher.publishEvent(new NoteDeleted(userId, noteId, note.getChatMessageId(), deletionText(note),
+                note.getTimestamp()));
         return true;
+    }
+
+    /**
+     * One English sentence naming this note, sent to the chat model so a later reply treats the entry
+     * as gone. Numbers are the note's own; nothing is estimated.
+     */
+    static String deletionText(Note n) {
+        StringBuilder sb = new StringBuilder("Deleted note");
+        if (n.getTimestamp() != null) {
+            sb.append(" at ").append(n.getTimestamp().format(DateTimeFormatter.ofPattern("HH:mm")));
+        }
+        List<String> parts = new ArrayList<>();
+        if (n.isLongActing()) parts.add("long-acting insulin");
+        else if (n.isActivity()) parts.add("activity");
+        else if (n.isHypoTreatment()) parts.add("fast carbs");
+        String meal = n.getMeal();
+        if (meal != null && !meal.isBlank() && !"none".equalsIgnoreCase(meal)) {
+            parts.add("meal " + meal.trim());
+        }
+        if (n.getCarbs() != null && n.getCarbs() > 0) parts.add("carbs " + fmt(n.getCarbs()) + " g");
+        if (n.getInsulin() != null && n.getInsulin() > 0) parts.add("insulin " + fmt(n.getInsulin()) + " U");
+        if (n.getGlucoseLevel() != null) parts.add("glucose " + fmt(n.getGlucoseLevel()) + " mmol/L");
+        if (n.isActivity()) {
+            if (n.getActivityType() != null && !n.getActivityType().isBlank()) parts.add(n.getActivityType().trim());
+            if (n.getIntensity() != null && !n.getIntensity().isBlank()) parts.add(n.getIntensity().trim());
+            if (n.getDurationMin() != null && n.getDurationMin() > 0) parts.add(n.getDurationMin() + " min");
+        }
+        String written = ((n.getDetailedInput() == null ? "" : n.getDetailedInput()) + " "
+                + (n.getComment() == null ? "" : n.getComment())).trim();
+        if (!written.isBlank()) parts.add("text " + written);
+        if (parts.isEmpty()) return sb.append(" removed.").toString();
+        return sb.append(": ").append(String.join(", ", parts)).append('.').toString();
+    }
+
+    private static String fmt(double v) {
+        double r = Math.round(v * 10.0) / 10.0;
+        return r == Math.rint(r) ? String.valueOf((long) r) : String.valueOf(r);
     }
     
     /**
@@ -400,7 +440,7 @@ public class NotesService {
 
     private void enrichNutrition(Note note) {
         try {
-            NutritionSnapshot snapshot = nutritionEnrichmentService.enrichFromText(
+            NutritionSnapshot snapshot = foodCompositionService.composeFromText(
                     note.getDetailedInput(),
                     note.getComment(),
                     note.getCarbs()

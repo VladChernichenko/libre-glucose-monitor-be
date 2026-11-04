@@ -161,6 +161,104 @@ class MealEpisodeSchedulerTest {
     }
 
     @Test
+    @DisplayName("an episode whose meal note was deleted is removed")
+    void deletedMealLeavesTheRag() {
+        Note other = note(MEAL_AT.minusDays(1), 30, 3, "dinner");
+        MealEpisode gone = new MealEpisode();
+        gone.setId(UUID.randomUUID());
+        gone.setNoteId(UUID.randomUUID());
+        gone.setMealAt(MEAL_AT.minusHours(6));
+        when(episodes.existsByUserId(USER)).thenReturn(true);
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(other));
+        when(episodes.findByUserIdAndMealAtGreaterThanEqual(eq(USER), any())).thenReturn(List.of(gone));
+
+        scheduler.buildForUser(USER);
+
+        verify(episodes).delete(gone);
+    }
+
+    @Test
+    @DisplayName("deleting a note rebuilds a meal that included it")
+    void deletedNoteRebuildsTheMealThatCountedIt() {
+        Note meal = note(MEAL_AT, 40, 4, "lunch");
+        MealEpisode old = new MealEpisode();
+        old.setId(UUID.randomUUID());
+        old.setNoteId(meal.getId());
+        old.setUserId(USER);
+        old.setMealAt(MEAL_AT);
+        old.setFoodText("lunch");
+        old.setCarbs(40);
+        old.setLocalMinuteOfDay(720);
+        old.setUpdatedAt(NOW);
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(meal));
+        when(episodes.findByUserIdAndMealAtGreaterThanEqual(eq(USER), any())).thenReturn(List.of(old));
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER), anyLong(), anyLong()))
+                .thenReturn(flatCgm());
+        when(insulin.calculateTotalActiveInsulin(anyList(), any(), anyDouble(), anyDouble())).thenReturn(0.0);
+
+        assertThat(scheduler.syncDeletedNote(USER, UUID.randomUUID(), MEAL_AT.minusMinutes(20))).isEqualTo(1);
+
+        verify(episodes).deleteByNoteId(any());
+        verify(episodes).save(any(MealEpisode.class));
+    }
+
+    @Test
+    @DisplayName("deleting a carb note drops those carbs and leaves the separate active insulin")
+    void deletingCarbsDropsThemAndLeavesActiveInsulin() {
+        Note meal = note(MEAL_AT, 40, 0, "lunch");
+        Note bolus = note(MEAL_AT.minusHours(2), 0, 2, "bolus");
+        UUID deletedCarbs = UUID.randomUUID();
+        MealEpisode mealEpisode = new MealEpisode();
+        mealEpisode.setId(UUID.randomUUID());
+        mealEpisode.setNoteId(meal.getId());
+        mealEpisode.setUserId(USER);
+        mealEpisode.setMealAt(MEAL_AT);
+        mealEpisode.setFoodText("lunch");
+        mealEpisode.setCarbs(40);
+        mealEpisode.setDoseUnits(5.0);
+        mealEpisode.setLocalMinuteOfDay(720);
+        mealEpisode.setUpdatedAt(NOW);
+        MealEpisode carbEpisode = new MealEpisode();
+        carbEpisode.setId(UUID.randomUUID());
+        carbEpisode.setNoteId(deletedCarbs);
+        carbEpisode.setCarbs(25);
+
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(meal, bolus));
+        when(episodes.findByUserIdAndMealAtGreaterThanEqual(eq(USER), any())).thenReturn(List.of(mealEpisode, carbEpisode));
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER), anyLong(), anyLong()))
+                .thenReturn(flatCgm());
+        when(calculations.activeCobIobInputs(USER, MEAL_AT)).thenReturn(inputs(
+                List.of(carb(meal)),
+                List.of(dose(bolus))));
+        when(insulin.calculateTotalActiveInsulin(anyList(), eq(MEAL_AT), anyDouble(), anyDouble()))
+                .thenAnswer(inv -> ((List<InsulinDose>) inv.getArgument(0)).stream()
+                        .mapToDouble(InsulinDose::getUnits).sum());
+        when(cob.calculateTotalCarbsOnBoard(anyList(), eq(MEAL_AT), any(UserSettingsDTO.class)))
+                .thenAnswer(inv -> ((List<CarbsEntry>) inv.getArgument(0)).stream()
+                        .mapToDouble(CarbsEntry::getCarbs).sum());
+
+        scheduler.syncDeletedNote(USER, deletedCarbs, MEAL_AT.plusMinutes(60));
+
+        verify(episodes).deleteByNoteId(deletedCarbs);
+        verify(episodes, never()).delete(mealEpisode);
+        @SuppressWarnings("unchecked") ArgumentCaptor<List<InsulinDose>> doses = ArgumentCaptor.forClass(List.class);
+        verify(insulin).calculateTotalActiveInsulin(doses.capture(), eq(MEAL_AT), eq(4.0), eq(75.0));
+        assertThat(doses.getValue()).extracting(InsulinDose::getId).containsExactly(bolus.getId());
+        @SuppressWarnings("unchecked") ArgumentCaptor<List<CarbsEntry>> carbs = ArgumentCaptor.forClass(List.class);
+        verify(cob).calculateTotalCarbsOnBoard(carbs.capture(), eq(MEAL_AT), any(UserSettingsDTO.class));
+        assertThat(carbs.getValue()).extracting(CarbsEntry::getId).doesNotContain(deletedCarbs);
+
+        ArgumentCaptor<MealEpisode> saved = ArgumentCaptor.forClass(MealEpisode.class);
+        verify(episodes).save(saved.capture());
+        assertThat(saved.getValue().getNoteId()).isEqualTo(meal.getId());
+        assertThat(saved.getValue().getCarbs()).isEqualTo(40);
+        assertThat(saved.getValue().getDoseUnits()).isNull();
+        assertThat(saved.getValue().getIob()).isEqualTo(2.0);
+        assertThat(saved.getValue().getCob()).isZero();
+        assertThat(saved.getValue().isContaminated()).isFalse();
+    }
+
+    @Test
     @DisplayName("an episode with no later note changes is left alone")
     void unchangedEpisodeNotRebuilt() {
         Note meal = note(MEAL_AT, 40, 4, "lunch");

@@ -27,7 +27,8 @@ final class AssistantPrompts {
                 + "Never issue imperative dosing commands; give cautious decision-support wording. "
                 + "You cannot add, change or remove notes, doses or settings: never say you did. If the user "
                 + "asks to remove an entry, tell them to write e.g. 'remove the 1 U' to get a Remove button, "
-                + "or to delete it in the Notes tab. "
+                + "or to delete it in the Notes tab. A turn that begins with 'Deleted note' means the user "
+                + "already removed that entry; treat it as gone and do not count its carbs, insulin or glucose. "
                 + "'state' is now; 'episodes' are the user's own past events with their outcomes "
                 + "(minutes are counted from 'at'); refer to them when they help answer. "
                 + "'plan' (if present) is the meal plan card shown earlier in this chat: 'doseUnits' is the "
@@ -86,7 +87,7 @@ final class AssistantPrompts {
         boolean ru = "ru".equals(f.language());
         FactsPayload.PlanFacts p = f.plan();
         if (p == null) return questionTemplate(f);
-        String carbs = (ru ? " Углеводы около " : " Carbs about ") + fmt(p.carbs()) + (ru ? " г." : " g.");
+        String carbs = portion(p, ru);
         if (Boolean.TRUE.equals(p.noFreshCgmReading())) {
             return (ru ? "Свежих данных CGM нет, поэтому доза и пауза не предлагаются."
                     : "No fresh CGM reading, so no dose or pause is suggested.") + carbs;
@@ -103,15 +104,24 @@ final class AssistantPrompts {
         }
         StringBuilder sb = new StringBuilder(ru ? "Модель предлагает " : "The model suggests ")
                 .append(fmt(p.doseUnits())).append(ru ? " ЕД" : " U");
-        if (p.pauseMinutes() != null) {
-            sb.append(ru ? ", пауза " : ", ").append(p.pauseMinutes()).append(ru ? " мин до еды" : " min before eating");
-        }
         if (p.forecastPeak() != null && p.forecastLowest() != null) {
             sb.append(ru ? "; прогноз: пик " : "; forecast peak ").append(fmt(p.forecastPeak()))
                     .append(ru ? ", минимум " : ", lowest ").append(fmt(p.forecastLowest()))
                     .append(ru ? " ммоль/л" : " mmol/L");
         }
         return sb.append('.').append(carbs).toString();
+    }
+
+
+    /** Total portion weight first, then the nutrient split. */
+    private static String portion(FactsPayload.PlanFacts p, boolean ru) {
+        String nutrients = (ru ? "\u0423\u0433\u043b\u0435\u0432\u043e\u0434\u044b " : "Carbs ") + fmt(p.carbs())
+                + (ru ? " \u0433, \u0436\u0438\u0440 " : " g, fat ") + fmt(p.fat())
+                + (ru ? " \u0433, \u0431\u0435\u043b\u043e\u043a " : " g, protein ") + fmt(p.protein())
+                + (ru ? " \u0433, \u043a\u043b\u0435\u0442\u0447\u0430\u0442\u043a\u0430 " : " g, fiber ") + fmt(p.fiber())
+                + (ru ? " \u0433." : " g.");
+        if (p.massG() == null) return " " + nutrients;
+        return (ru ? " \u041c\u0430\u0441\u0441\u0430 " : " ") + fmt(p.massG()) + (ru ? " \u0433. " : " g total. ") + nutrients;
     }
 
     private static String retry(List<String> offending) {

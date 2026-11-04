@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.domain.NoteDeleted;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.NoteDto;
 import che.glucosemonitorbe.dto.UpdateNoteRequest;
@@ -7,7 +8,7 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
+import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,7 +42,7 @@ class NotesServiceTest {
     private NoteMapper noteMapper;
 
     @Mock
-    private NutritionEnrichmentService nutritionEnrichmentService;
+    private FoodCompositionService foodCompositionService;
 
     @Mock
     private ObjectMapper objectMapper;
@@ -75,7 +76,7 @@ class NotesServiceTest {
                 .absorptionMode("GI_GL_ENHANCED")
                 .source("API_NINJAS")
                 .build();
-        when(nutritionEnrichmentService.enrichFromText(any(), any(), any())).thenReturn(snapshot);
+        when(foodCompositionService.composeFromText(any(), any(), any())).thenReturn(snapshot);
         when(objectMapper.writeValueAsString(snapshot)).thenReturn("{\"absorptionMode\":\"GI_GL_ENHANCED\"}");
 
         Note saved = new Note(userId, ts, 45.0, 3.0, "Lunch");
@@ -130,7 +131,7 @@ class NotesServiceTest {
         notesService.updateNote(userId, noteId, request);
 
         assertEquals(clientProfile, capturedSavedNote().getNutritionProfile());
-        verify(nutritionEnrichmentService, never()).enrichFromText(any(), any(), any());
+        verify(foodCompositionService, never()).composeFromText(any(), any(), any());
     }
 
     /**
@@ -158,7 +159,7 @@ class NotesServiceTest {
         notesService.updateNote(userId, noteId, request);
 
         assertEquals(storedProfile, capturedSavedNote().getNutritionProfile());
-        verify(nutritionEnrichmentService, never()).enrichFromText(any(), any(), any());
+        verify(foodCompositionService, never()).composeFromText(any(), any(), any());
     }
 
     /** A note that has never been enriched still gets a profile from its text on update. */
@@ -190,7 +191,7 @@ class NotesServiceTest {
                 .absorptionMode("GI_GL_ENHANCED")
                 .source("KEYWORD_GI")
                 .build();
-        when(nutritionEnrichmentService.enrichFromText(any(), any(), any())).thenReturn(snapshot);
+        when(foodCompositionService.composeFromText(any(), any(), any())).thenReturn(snapshot);
         when(objectMapper.writeValueAsString(snapshot)).thenReturn(json);
     }
 
@@ -278,6 +279,22 @@ class NotesServiceTest {
         verify(notePhotoStorageService).delete(existingNote.getPhotoKey());
     }
 
+    @Test
+    void deleteNotePublishesTheNoteItselfForTheModel() {
+        UUID userId = UUID.randomUUID();
+        Note note = new Note(userId, LocalDateTime.of(2026, 11, 4, 23, 10), 17.4, 1.5, "Raffaello");
+        note.setId(UUID.randomUUID());
+        note.setDetailedInput("Raffaello 45 g");
+        when(noteRepository.findByIdAndUserId(note.getId(), userId)).thenReturn(Optional.of(note));
+
+        assertTrue(notesService.deleteNote(userId, note.getId()));
+
+        ArgumentCaptor<NoteDeleted> event = ArgumentCaptor.forClass(NoteDeleted.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertEquals("Deleted note at 23:10: meal Raffaello, carbs 17.4 g, insulin 1.5 U, text Raffaello 45 g.",
+                event.getValue().text());
+    }
+
     // --- absorptionMode field tests (data-flow fix) ---
 
     @Test
@@ -293,7 +310,7 @@ class NotesServiceTest {
         request.setAbsorptionMode("slow");          // iOS user's picker choice
 
         // Nutrition enrichment throws (e.g. no external API key in test env)
-        when(nutritionEnrichmentService.enrichFromText(any(), any(), any()))
+        when(foodCompositionService.composeFromText(any(), any(), any()))
                 .thenThrow(new RuntimeException("API unavailable"));
 
         Note saved = new Note(userId, ts, 30.0, 2.0, "Dinner");
@@ -330,7 +347,7 @@ class NotesServiceTest {
         request.setMeal("Snack");
         // absorptionMode intentionally null - older clients / web that don't send this field
 
-        when(nutritionEnrichmentService.enrichFromText(any(), any(), any()))
+        when(foodCompositionService.composeFromText(any(), any(), any()))
                 .thenThrow(new RuntimeException("API unavailable"));
 
         Note saved = new Note(userId, ts, 20.0, 1.5, "Snack");
@@ -371,7 +388,7 @@ class NotesServiceTest {
                 .absorptionMode("GI_GL_ENHANCED")
                 .source("API_NINJAS")
                 .build();
-        when(nutritionEnrichmentService.enrichFromText(any(), any(), any())).thenReturn(snapshot);
+        when(foodCompositionService.composeFromText(any(), any(), any())).thenReturn(snapshot);
         when(objectMapper.writeValueAsString(snapshot)).thenReturn("{\"absorptionMode\":\"GI_GL_ENHANCED\"}");
 
         Note saved = new Note(userId, ts, 50.0, 4.0, "Lunch");

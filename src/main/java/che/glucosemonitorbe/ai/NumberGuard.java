@@ -51,7 +51,7 @@ public final class NumberGuard {
     private static final Set<String> INSULIN_FIELDS = Set.of("doseUnits", "iob", "insulin", "insulinUnits",
             "modelUnits", "historyUnits", "typicalDoseUnits");
     private static final Set<String> CARB_FIELDS = Set.of("carbs", "carbsLow", "carbsHigh", "fat", "protein",
-            "fiber", "cob");
+            "fiber", "massG", "cob");
     private static final Set<String> GLUCOSE_FIELDS = Set.of("glucose", "startGlucose", "peak", "nadir", "g60",
             "g120", "g240", "forecastPeak", "forecastLowest", "lowThreshold", "peakLow", "peakHigh", "landing");
 

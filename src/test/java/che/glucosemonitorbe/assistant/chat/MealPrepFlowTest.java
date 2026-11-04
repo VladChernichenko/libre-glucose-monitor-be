@@ -62,7 +62,8 @@ class MealPrepFlowTest {
         flow = new MealPrepFlow(history, nutrition, planService, actions, objectMapper, facts, retrieval,
                 new GuardedReplyService(llm, traces, objectMapper), banners);
         userMessage = history.appendUser(user, "40 g rye bread", null, Instant.now());
-        when(nutrition.resolve(any(), anyList())).thenReturn(Optional.of(NutritionSnapshot.builder().totalCarbs(40.0).build()));
+        when(nutrition.resolve(any(), any(), any(), anyList()))
+                .thenReturn(Optional.of(NutritionSnapshot.builder().totalCarbs(40.0).build()));
         when(planService.plan(eq(user), any(), eq(NOW))).thenReturn(new MealPlan(
                 new NutritionRange(36, 40, 44), new NutritionRange(2, 2, 2), new NutritionRange(5, 5, 5),
                 new NutritionRange(4, 4, 4), null, null, 4.0, null,
@@ -124,8 +125,8 @@ class MealPrepFlowTest {
         assertEquals(List.of(AssistantEvent.Plan.class, AssistantEvent.Token.class, AssistantEvent.Done.class),
                 events.stream().map(Object::getClass).toList());
         String text = ((AssistantEvent.Token) events.get(1)).text();
-        assertEquals("The model suggests 4 U, 15 min before eating; forecast peak 10.4, lowest 5.6 mmol/L. "
-                + "Carbs about 40 g.", text);
+        assertEquals("The model suggests 4 U; forecast peak 10.4, lowest 5.6 mmol/L. "
+                + "40 g total. Carbs 40 g, fat 2 g, protein 5 g, fiber 4 g.", text);
         assertTrue(NumberGuard.check(text, FactsPayload.builder()
                 .plan(FactsService.plan(new MealPlan(new NutritionRange(36, 40, 44), new NutritionRange(2, 2, 2),
                         new NutritionRange(5, 5, 5), new NutritionRange(4, 4, 4), null, null, 4.0, null,

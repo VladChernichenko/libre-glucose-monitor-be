@@ -83,9 +83,22 @@ public class AssistantController {
         if (hasText && text.length() > MAX_TEXT_LENGTH) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Message longer than " + MAX_TEXT_LENGTH);
         }
-        // Store the photo on the request thread: the multipart temp file may be gone once the stream runs.
-        String photoKey = hasPhoto ? photoStorage.upload(userId, UUID.randomUUID(), photo) : null;
-        IncomingMessage msg = new IncomingMessage(hasText ? text : null, photoKey, clientNow, zone);
+        // Read the photo on the request thread: the multipart temp file may be gone once the stream runs.
+        // With object storage off the bytes stay in this request and the phone keeps the gallery copy.
+        String photoKey = null;
+        byte[] photoBytes = null;
+        String photoContentType = null;
+        if (hasPhoto) {
+            if (photoStorage.isEnabled()) {
+                photoKey = photoStorage.upload(userId, UUID.randomUUID(), photo);
+            } else {
+                NotePhotoStorageService.PhotoObject inline = photoStorage.read(photo);
+                photoBytes = inline.data();
+                photoContentType = inline.contentType();
+            }
+        }
+        IncomingMessage msg = new IncomingMessage(hasText ? text : null, photoKey, clientNow, zone,
+                photoBytes, photoContentType);
 
         StreamingResponseBody body = out -> {
             try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8))) {

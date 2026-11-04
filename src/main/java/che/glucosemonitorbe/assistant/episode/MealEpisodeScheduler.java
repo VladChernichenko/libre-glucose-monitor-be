@@ -38,7 +38,9 @@ import java.util.stream.Collectors;
  * Hourly: builds {@link MealEpisode}s for meals whose 4 h window has closed (in the user's wall
  * time), rebuilds episodes whose surrounding notes changed afterwards, then fills missing
  * embeddings in batches. A user with no episodes yet gets a one-off backfill over all history;
- * otherwise only the last {@link #LOOKBACK_DAYS} days are re-examined. IOB/COB come from the
+ * otherwise only the last {@link #LOOKBACK_DAYS} days are re-examined. Episodes whose meal note is
+ * gone are deleted on every run, and a note deletion rebuilds the meals that included it immediately.
+ * IOB/COB come from the
  * dashboard's single source ({@link GlucoseCalculationsService#activeCobIobInputs}) at the meal
  * time with the meal's own notes removed. Embedding failure leaves the column null; the next run
  * retries. Nothing here runs inside a request.
@@ -106,7 +108,31 @@ public class MealEpisodeScheduler {
                 log.warn("Meal episode build failed for user {}: {}", u.getId(), e.getMessage());
             }
         }
+        try {
+            int gone = episodes.deleteOrphans();
+            if (gone > 0) log.info("Removed {} meal episodes whose notes are gone", gone);
+        } catch (Exception e) {
+            log.warn("Meal episode orphan cleanup failed: {}", e.getMessage());
+        }
         fillEmbeddings();
+    }
+
+    /**
+     * The deleted note leaves the meal RAG now, and every still-logged meal that counted it (in the
+     * five hours before it or the four hours after) is rebuilt from the notes that remain.
+     */
+    public int syncDeletedNote(UUID userId, UUID noteId, LocalDateTime at) {
+        episodes.deleteByNoteId(noteId);
+        if (at == null || userId == null) return 0;
+        UserSettingsDTO settings = settingsService.getUserSettings(userId);
+        ZoneId zone = UserZones.resolve(settings.getTimezone(), settings.getUtcOffsetMinutes());
+        LocalDateTime nowWall = LocalDateTime.ofInstant(clock.instant(), zone);
+        LocalDateTime cutoff = nowWall.minus(MealEpisodeBuilder.OUTCOME_WINDOW);
+        LocalDateTime from = at.minus(MealEpisodeBuilder.OUTCOME_WINDOW);
+        LocalDateTime to = at.plus(NOTES_BEFORE);
+        if (to.isAfter(cutoff)) to = cutoff;
+        if (from.isAfter(to)) return 0;
+        return syncWindow(userId, settings, zone, from, nowWall, to, true);
     }
 
     /** @return number of episodes created or rebuilt */
@@ -118,43 +144,81 @@ public class MealEpisodeScheduler {
         boolean backfill = !episodes.existsByUserId(userId);
         LocalDateTime from = backfill ? EPOCH : nowWall.minusDays(LOOKBACK_DAYS);
 
+        int changed = syncWindow(userId, settings, zone, from, nowWall, cutoff, false);
+        changed += dropEpisodesWhoseNotesAreGone(userId, from, windowNoteIds(userId, from, nowWall));
+        if (changed > 0) log.info("Built {} meal episodes for user {} (backfill={})", changed, userId, backfill);
+        return changed;
+    }
+
+    /**
+     * @param force rebuild meals in range even when no surrounding note was edited afterwards
+     * @return episodes created, rebuilt, or removed
+     */
+    private int syncWindow(UUID userId, UserSettingsDTO settings, ZoneId zone, LocalDateTime from,
+                           LocalDateTime nowWall, LocalDateTime cutoff, boolean force) {
         List<Note> window = notes.findByUserIdAndTimestampBetween(userId, from.minus(NOTES_BEFORE), nowWall);
         Map<UUID, MealEpisode> existing = episodes.findByUserIdAndMealAtGreaterThanEqual(userId, from).stream()
                 .collect(Collectors.toMap(MealEpisode::getNoteId, Function.identity(), (a, b) -> a));
         int changed = 0;
         for (Note meal : window) {
-            if (meal.getTimestamp().isBefore(from) || meal.getTimestamp().isAfter(cutoff)
+            if (meal.getTimestamp() == null || meal.getTimestamp().isBefore(from) || meal.getTimestamp().isAfter(cutoff)
                     || meal.getCarbs() == null || meal.getCarbs() < MealEpisodeBuilder.MIN_CARBS) continue;
-            LocalDateTime at = meal.getTimestamp();
-            List<Note> around = window.stream()
-                    .filter(n -> !n.getTimestamp().isBefore(at.minus(NOTES_BEFORE))
-                            && !n.getTimestamp().isAfter(at.plus(MealEpisodeBuilder.OUTCOME_WINDOW)))
-                    .toList();
-            MealEpisode old = existing.get(meal.getId());
-            if (old != null && !isStale(old, around)) continue;
-
-            long fromMs = UserZones.toEpochMs(at.minus(CGM_BEFORE), zone);
-            long toMs = UserZones.toEpochMs(at.plus(MealEpisodeBuilder.OUTCOME_WINDOW).plusMinutes(10), zone);
-            List<CgmReading> readings = cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, fromMs, toMs);
-            List<Note> others = around.stream().filter(n -> !n.getId().equals(meal.getId())).toList();
-            MealLoad load = loadAt(userId, meal, others);
-            Optional<MealEpisode> built = builder.build(meal, around, readings, settings, load);
-            if (built.isEmpty()) {
-                if (old != null) episodes.delete(old);
-                continue;
-            }
-            MealEpisode e = built.get();
-            e.setUpdatedAt(clock.instant());
-            snapshots.findByNoteId(meal.getId()).filter(s -> !s.isExcluded()).ifPresent(s -> copyHits(e, s));
-            if (old != null) e.setId(old.getId());
-            episodes.save(e);
-            if (old != null && !MealEpisodeBuilder.foodText(e).equals(MealEpisodeBuilder.foodText(old))) {
-                episodes.clearEmbedding(old.getId());
-            }
-            changed++;
+            changed += syncMeal(userId, meal, window, existing.get(meal.getId()), settings, zone, force);
         }
-        if (changed > 0) log.info("Built {} meal episodes for user {} (backfill={})", changed, userId, backfill);
         return changed;
+    }
+
+    private int syncMeal(UUID userId, Note meal, List<Note> window, MealEpisode old, UserSettingsDTO settings,
+                         ZoneId zone, boolean force) {
+        LocalDateTime at = meal.getTimestamp();
+        List<Note> around = window.stream()
+                .filter(n -> n.getTimestamp() != null
+                        && !n.getTimestamp().isBefore(at.minus(NOTES_BEFORE))
+                        && !n.getTimestamp().isAfter(at.plus(MealEpisodeBuilder.OUTCOME_WINDOW)))
+                .toList();
+        if (old != null && !force && !isStale(old, around)) return 0;
+
+        long fromMs = UserZones.toEpochMs(at.minus(CGM_BEFORE), zone);
+        long toMs = UserZones.toEpochMs(at.plus(MealEpisodeBuilder.OUTCOME_WINDOW).plusMinutes(10), zone);
+        List<CgmReading> readings = cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, fromMs, toMs);
+        List<Note> others = around.stream().filter(n -> !n.getId().equals(meal.getId())).toList();
+        MealLoad load = loadAt(userId, meal, others);
+        Optional<MealEpisode> built = builder.build(meal, around, readings, settings, load);
+        if (built.isEmpty()) {
+            if (old != null) episodes.delete(old);
+            return old == null ? 0 : 1;
+        }
+        MealEpisode e = built.get();
+        e.setUpdatedAt(clock.instant());
+        snapshots.findByNoteId(meal.getId()).filter(s -> !s.isExcluded()).ifPresent(s -> copyHits(e, s));
+        if (old != null) e.setId(old.getId());
+        episodes.save(e);
+        if (old != null && !MealEpisodeBuilder.foodText(e).equals(MealEpisodeBuilder.foodText(old))) {
+            episodes.clearEmbedding(old.getId());
+        }
+        return 1;
+    }
+
+    /** Episodes in the examined range whose meal note is no longer stored. */
+    private int dropEpisodesWhoseNotesAreGone(UUID userId, LocalDateTime from, Set<UUID> presentNoteIds) {
+        int dropped = 0;
+        for (MealEpisode old : episodes.findByUserIdAndMealAtGreaterThanEqual(userId, from)) {
+            if (old.getNoteId() != null && !presentNoteIds.contains(old.getNoteId())) {
+                episodes.delete(old);
+                dropped++;
+            }
+        }
+        return dropped;
+    }
+
+    private Set<UUID> windowNoteIds(UUID userId, LocalDateTime from, LocalDateTime nowWall) {
+        List<Note> window = notes.findByUserIdAndTimestampBetween(userId, from.minus(NOTES_BEFORE), nowWall);
+        Set<UUID> ids = new HashSet<>();
+        if (window == null) return ids;
+        for (Note n : window) {
+            if (n.getId() != null) ids.add(n.getId());
+        }
+        return ids;
     }
 
     /** True when any surrounding note was created or edited after the episode was last built. */

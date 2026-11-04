@@ -1,27 +1,21 @@
 package che.glucosemonitorbe.assistant.mealplan;
 
 import che.glucosemonitorbe.assistant.chat.IntentClassifier;
-import che.glucosemonitorbe.dto.ARFoodItem;
-import che.glucosemonitorbe.dto.ARNutritionRequest;
-import che.glucosemonitorbe.service.nutrition.ARNutritionService;
-import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
+import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
+import che.glucosemonitorbe.service.nutrition.FoodPortion;
+import che.glucosemonitorbe.service.nutrition.MealPhotoRecognizer;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
-import che.glucosemonitorbe.service.nutrition.NutritionVisionService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 /**
- * Meal-prep nutrition from the existing {@code service/nutrition}: a stored chat photo goes to
- * {@link NutritionVisionService}; named items go to {@link ARNutritionService} (fresh table,
- * OpenFoodFacts, keyword fallback per item, then the population pattern). An item without a stated
- * weight is sized at {@link #DEFAULT_PORTION_G} with low confidence, so the card's range is wide.
- * Empty when nothing usable was recognised.
+ * Meal-prep nutrition. A stored chat photo is named by {@link MealPhotoRecognizer} and filled from
+ * {@link FoodCompositionService}. Named items go to the same catalog. An item without a stated
+ * weight uses the catalog's typical serving at low confidence.
  */
 @Slf4j
 @Service
@@ -29,23 +23,35 @@ import org.springframework.stereotype.Service;
 public class MealNutritionResolver {
 
     static final double DEFAULT_PORTION_G = 150.0;
+    /** Catalog name for the dry rolled-oats row. */
+    static final String DRY_OATS = "rolled oats (dry)";
     /** Oat words a person types for oats or porridge; with a small stated weight they mean dry oats. */
     static final java.util.Set<String> OAT_WORDS = java.util.Set.of("porridge", "oats", "oatmeal", "hercules",
-            "овсянка", "овсяные хлопья", "геркулес", "каша овсяная", "овсяная каша");
+            "\u043e\u0432\u0441\u044f\u043d\u043a\u0430", "\u043e\u0432\u0441\u044f\u043d\u044b\u0435 \u0445\u043b\u043e\u043f\u044c\u044f",
+            "\u0433\u0435\u0440\u043a\u0443\u043b\u0435\u0441", "\u043a\u0430\u0448\u0430 \u043e\u0432\u0441\u044f\u043d\u0430\u044f",
+            "\u043e\u0432\u0441\u044f\u043d\u0430\u044f \u043a\u0430\u0448\u0430");
     /** Up to this weight an oat item is the dry portion (a cooked bowl weighs 200 g or more). */
     static final double DRY_OATS_MAX_G = 120.0;
-    /** Per-item confidence passed as the segmentation confidence: stated weight vs. assumed portion. */
-    static final double STATED_WEIGHT_CONFIDENCE = 0.9;
     static final double ASSUMED_PORTION_CONFIDENCE = 0.3;
 
     private final NotePhotoStorageService photoStorage;
-    private final NutritionVisionService vision;
-    private final ObjectProvider<ARNutritionService> itemNutrition; // absent when Mongo/OFF is disabled
-    private final NutritionEnrichmentService enrichment;
+    private final MealPhotoRecognizer recognizer;
+    private final FoodCompositionService composition;
 
     public Optional<NutritionSnapshot> resolve(String photoKey, List<IntentClassifier.FoodItem> items) {
+        return resolve(photoKey, null, null, items);
+    }
+
+    /**
+     * {@code photoBytes} is the picture kept on the phone when object storage is off. A storage key
+     * is used only when the photo was uploaded.
+     */
+    public Optional<NutritionSnapshot> resolve(String photoKey, byte[] photoBytes, String contentType,
+                                               List<IntentClassifier.FoodItem> items) {
         NutritionSnapshot n;
-        if (photoKey != null) {
+        if (photoBytes != null && photoBytes.length > 0) {
+            n = fromBytes(photoBytes, contentType);
+        } else if (photoKey != null) {
             n = fromPhoto(photoKey);
         } else if (items != null && !items.isEmpty()) {
             n = fromItems(items);
@@ -56,10 +62,19 @@ public class MealNutritionResolver {
         return Optional.of(n);
     }
 
+    private NutritionSnapshot fromBytes(byte[] data, String contentType) {
+        try {
+            return composition.compose(recognizer.recognize(data, contentType == null ? "image/jpeg" : contentType));
+        } catch (RuntimeException e) {
+            log.warn("Meal-prep photo could not be analysed: {}", e.getMessage());
+            return null;
+        }
+    }
+
     private NutritionSnapshot fromPhoto(String photoKey) {
         try {
             NotePhotoStorageService.PhotoObject photo = photoStorage.download(photoKey);
-            return vision.analyzeImage(photo.data(), photo.contentType());
+            return composition.compose(recognizer.recognize(photo.data(), photo.contentType()));
         } catch (RuntimeException e) {
             log.warn("Meal-prep photo {} could not be analysed: {}", photoKey, e.getMessage());
             return null;
@@ -67,25 +82,13 @@ public class MealNutritionResolver {
     }
 
     private NutritionSnapshot fromItems(List<IntentClassifier.FoodItem> items) {
-        ARNutritionService service = itemNutrition.getIfAvailable();
         boolean anyAssumed = items.stream().anyMatch(i -> i.grams() == null);
-        if (service == null) {
-            // No item database: keyword estimate with carbs at 15 % of the (assumed) mass, as AR's fallback.
-            double mass = items.stream().mapToDouble(i -> i.grams() != null ? i.grams() : DEFAULT_PORTION_G).sum();
-            String text = items.stream().map(IntentClassifier.FoodItem::name).collect(Collectors.joining(", "));
-            NutritionSnapshot n = enrichment.enrichFromText(text, "", mass * 0.15);
-            n.setConfidence(Math.min(n.getConfidence() != null ? n.getConfidence() : 0.4, ASSUMED_PORTION_CONFIDENCE));
-            return n;
-        }
-        ARNutritionRequest req = new ARNutritionRequest();
-        req.setFoods(items.stream().map(i -> {
-            ARFoodItem f = new ARFoodItem();
-            f.setLabel(label(i));
-            f.setMassG(i.grams() != null ? i.grams() : DEFAULT_PORTION_G);
-            f.setSegmentationConfidence(i.grams() != null ? STATED_WEIGHT_CONFIDENCE : ASSUMED_PORTION_CONFIDENCE);
-            return f;
-        }).toList());
-        NutritionSnapshot n = service.analyze(req);
+        List<FoodPortion> portions = items.stream().map(i -> {
+            boolean assumed = i.grams() == null;
+            double grams = assumed ? DEFAULT_PORTION_G : i.grams();
+            return new FoodPortion(label(i), grams, assumed);
+        }).toList();
+        NutritionSnapshot n = composition.compose(portions);
         if (n != null && anyAssumed && n.getConfidence() != null) {
             n.setConfidence(Math.min(n.getConfidence(), ASSUMED_PORTION_CONFIDENCE));
         }
@@ -96,11 +99,13 @@ public class MealNutritionResolver {
     static String label(IntentClassifier.FoodItem i) {
         String name = i.name() == null ? "" : i.name().trim().toLowerCase(java.util.Locale.ROOT);
         boolean oats = OAT_WORDS.contains(name) || OAT_WORDS.stream().anyMatch(w -> name.endsWith(" " + w));
-        return oats && i.grams() != null && i.grams() <= DRY_OATS_MAX_G ? ARNutritionService.DRY_OATS : i.name();
+        return oats && i.grams() != null && i.grams() <= DRY_OATS_MAX_G ? DRY_OATS : i.name();
     }
 
     private static boolean nothing(NutritionSnapshot n) {
-        return v(n.getTotalCarbs()) <= 0 && v(n.getFat()) <= 0 && v(n.getProtein()) <= 0;
+        boolean noMacros = v(n.getTotalCarbs()) <= 0 && v(n.getFat()) <= 0 && v(n.getProtein()) <= 0;
+        boolean noNames = n.getNormalizedFoods() == null || n.getNormalizedFoods().isEmpty();
+        return noMacros && noNames;
     }
 
     private static double v(Double d) {

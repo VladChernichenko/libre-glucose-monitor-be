@@ -776,6 +776,26 @@ class GlucoseCalculationsServiceTest {
     }
 
     @Test
+    void activeCobIobInputs_deletedCarbNoteDropsCarbsAndKeepsRapidInsulin() {
+        UUID userId = UUID.randomUUID();
+        when(userSettingsService.getUserSettings(userId)).thenReturn(new UserSettingsDTO());
+        when(userInsulinPreferencesService.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75.0));
+
+        Note bolus = insulinNote(userId, 2.5, Note.TYPE_NORMAL);
+        bolus.setCarbs(0.0);
+        bolus.setMeal("Pre-bolus");
+        when(noteRepository.findByUserIdAndTimestampBetween(eq(userId), any(), any()))
+                .thenReturn(List.of(bolus));
+
+        var inputs = service.activeCobIobInputs(userId, LocalDateTime.of(2026, 11, 4, 23, 10));
+
+        assertThat(inputs.carbsEntries()).isEmpty();
+        assertThat(inputs.insulinEntries()).extracting(InsulinDose::getUnits).containsExactly(2.5);
+        assertThat(inputs.insulinEntries()).extracting(InsulinDose::getId).containsExactly(bolus.getId());
+    }
+
+    @Test
     void activeCobIobInputs_queriesEightHourWindow() {
         UUID userId = UUID.randomUUID();
         when(userSettingsService.getUserSettings(userId)).thenReturn(new UserSettingsDTO());

@@ -23,6 +23,9 @@
 hs_err_pid*
 replay_pid*
 
+# Local food-composition database (seeded on startup, not a source file)
+data/*.sqlite
+
 # Gradle
 .gradle/
 build/

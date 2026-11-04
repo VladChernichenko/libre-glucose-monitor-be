@@ -57,7 +57,7 @@ public class MealPrepFlow {
         userMessage.setIntent(INTENT_MEAL_PREP);
         history.save(userMessage);
 
-        Optional<NutritionSnapshot> n = nutrition.resolve(msg.photoKey(), items);
+        Optional<NutritionSnapshot> n = nutrition.resolve(msg.photoKey(), msg.photoBytes(), msg.photoContentType(), items);
         if (n.isEmpty()) {
             String text = ru
                     ? "Не удалось распознать блюдо. Напишите продукты с весом, например «хлеб 40 г»."
@@ -69,9 +69,21 @@ public class MealPrepFlow {
             sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_MEAL_PREP_FAILED));
             return;
         }
+        if ("UNMATCHED".equals(n.get().getSource())) {
+            String names = String.join(", ", n.get().getNormalizedFoods());
+            String text = ru
+                    ? "\u0412\u0438\u0436\u0443 " + names + ", \u043d\u043e \u044d\u0442\u043e\u0433\u043e \u043f\u0440\u043e\u0434\u0443\u043a\u0442\u0430 \u043d\u0435\u0442 \u0432 \u043a\u0430\u0442\u0430\u043b\u043e\u0433\u0435, \u043f\u043e\u044d\u0442\u043e\u043c\u0443 \u0443\u0433\u043b\u0435\u0432\u043e\u0434\u044b \u043d\u0435 \u043f\u043e\u0441\u0447\u0438\u0442\u0430\u0442\u044c."
+                    : "I see " + names + ", but that food is not in the catalog, so I can't estimate the carbs.";
+            ObjectNode payload = history.newPayload().put("userMessageId", userMessage.getId().toString());
+            ChatMessage reply = history.appendAssistant(userMessage, text, INTENT_MEAL_PREP_FAILED, payload, null,
+                    System.currentTimeMillis() - start);
+            sink.accept(new AssistantEvent.Token(text));
+            sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_MEAL_PREP_FAILED));
+            return;
+        }
 
         MealPlan plan = planService.plan(userId, n.get(), msg.clientNow());
-        String description = description(msg, items);
+        String description = description(msg, items, n.get());
         ObjectNode payload = history.newPayload()
                 .put("userMessageId", userMessage.getId().toString())
                 .put("language", language)
@@ -162,11 +174,14 @@ public class MealPrepFlow {
         sink.accept(new AssistantEvent.Done(userMessage.getId(), saved.getId(), MealActionService.INTENT_EVENT_PROPOSAL));
     }
 
-    private static String description(IncomingMessage msg, List<IntentClassifier.FoodItem> items) {
+    private static String description(IncomingMessage msg, List<IntentClassifier.FoodItem> items, NutritionSnapshot n) {
         if (items != null && !items.isEmpty()) {
             return items.stream()
                     .map(i -> i.grams() == null ? i.name() : i.name() + " " + fmt(i.grams()) + " g")
                     .collect(Collectors.joining(", "));
+        }
+        if (n.getNormalizedFoods() != null && !n.getNormalizedFoods().isEmpty()) {
+            return String.join(", ", n.getNormalizedFoods());
         }
         return msg.hasPhoto() ? "meal photo" : "meal";
     }
