@@ -254,6 +254,15 @@ public class InsulinCalculatorService {
      * while still producing a wrong dose.
      */
     private double resolveGramsPerUnit(UserSettingsDTO settings, LocalDateTime at) {
+        Double explicit = settings.getGramsPerUnit();
+        if (explicit != null) {
+            if (!Double.isFinite(explicit)
+                    || explicit < MIN_GRAMS_PER_UNIT || explicit > MAX_GRAMS_PER_UNIT) {
+                throw new DosingRefusedException(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
+                        "gramsPerUnit=" + explicit + " at=" + at);
+            }
+            return explicit;
+        }
         Double isf = settings.getEffectiveIsf(at);
         Double carbRatio = settings.getCarbRatio();
         if (isf == null || carbRatio == null

@@ -21,6 +21,8 @@ public class UserSettingsDTO {
     private UUID userId;
     /** mmol/L rise per 10 g carbs (no insulin); formula uses (COB grams / 10) * carbRatio. */
     private Double carbRatio;
+    /** Explicit grams per unit. NULL = derive {@code 10 * isf / carbRatio}. Outside 3-30 is refused. */
+    private Double gramsPerUnit;
     /** IANA zone id (e.g. "Europe/Berlin"); authoritative over utcOffsetMinutes, DST-aware. */
     private String timezone;
     /** Minutes EAST of UTC (UTC+4 = 240); fallback when timezone is absent or unparseable. */

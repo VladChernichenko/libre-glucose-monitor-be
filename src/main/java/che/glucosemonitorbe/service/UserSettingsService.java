@@ -111,6 +111,9 @@ public class UserSettingsService {
         if (settingsDTO.getCarbRatio() != null) {
             settings.setCarbRatio(settingsDTO.getCarbRatio());
         }
+        if (settingsDTO.getGramsPerUnit() != null) {
+            settings.setGramsPerUnit(settingsDTO.getGramsPerUnit());
+        }
         if (settingsDTO.getIsf() != null) {
             settings.setIsf(settingsDTO.getIsf());
         }
@@ -198,6 +201,7 @@ public class UserSettingsService {
         dto.setPredictionEngine(settings.getPredictionEngine());
         dto.setTargetGlucoseMmol(settings.getTargetGlucoseMmol());
         dto.setRescueCarbsG(settings.getRescueCarbsG());
+        dto.setGramsPerUnit(settings.getGramsPerUnit());
         return dto;
     }
 }

@@ -507,8 +507,13 @@ class InsulinCalculatorServiceTest {
 
     /** Settings stub: 7-arg constructor is (id, userId, carbRatio, isf, halfLife, maxCob, bodyWeightKg). */
     private void givenSettings(Double carbRatio, Double isf, Double bodyWeightKg) {
+        givenSettings(carbRatio, isf, bodyWeightKg, null);
+    }
+
+    private void givenSettings(Double carbRatio, Double isf, Double bodyWeightKg, Double gramsPerUnit) {
         UserSettingsDTO settings = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, carbRatio, isf, 45, 240, bodyWeightKg);
+        settings.setGramsPerUnit(gramsPerUnit);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
     }
 
@@ -524,6 +529,34 @@ class InsulinCalculatorServiceTest {
 
     private static DosingRefusalReason refusalReasonOf(Throwable ex) {
         return ((DosingRefusedException) ex).getReason();
+    }
+
+    @Test
+    void recommendedInsulin_explicitGramsPerUnit_ignoresCarbRatio() {
+        givenSettings(2.0, 2.2, 70.0, 10.0); // carbRatio would derive 11 g/U
+        var response = service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0));
+        assertThat(response.getRecommendedInsulin()).isEqualTo(6.0); // 60 / 10
+    }
+
+    @Test
+    void recommendedInsulin_nullGramsPerUnit_keepsDerivedRatio() {
+        givenSettings(2.0, 2.2, 70.0, null);
+        var response = service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0));
+        assertThat(response.getRecommendedInsulin()).isEqualTo(5.45); // 60 / 11, rounded to 0.01
+    }
+
+    @Test
+    void recommendedInsulin_gramsPerUnitOutsideEnvelope_refuses() {
+        givenSettings(2.0, 2.2, 70.0, 2.2);
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT);
+        givenSettings(2.0, 2.2, 70.0, 40.0);
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT);
     }
 
     @Test

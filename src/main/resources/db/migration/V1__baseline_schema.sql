@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     id                  UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id             UUID             NOT NULL UNIQUE,
     carb_ratio          DOUBLE PRECISION NOT NULL DEFAULT 2.0,
+    grams_per_unit      DOUBLE PRECISION,                        -- explicit g/U meal ratio; NULL = derive 10 * isf / carb_ratio
     isf                 DOUBLE PRECISION NOT NULL DEFAULT 1.0,
     carb_half_life      INTEGER          NOT NULL DEFAULT 45,
     max_cob_duration    INTEGER          NOT NULL DEFAULT 240,
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT chk_user_settings_carb_ratio_positive CHECK (carb_ratio > 0),
+    CONSTRAINT chk_user_settings_grams_per_unit CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30)),
     CONSTRAINT chk_user_settings_weight_positive CHECK (body_weight_kg IS NULL OR body_weight_kg > 0),
     CONSTRAINT chk_user_settings_isf_breakfast_positive CHECK (isf_breakfast IS NULL OR isf_breakfast > 0),
     CONSTRAINT chk_user_settings_isf_lunch_positive CHECK (isf_lunch IS NULL OR isf_lunch > 0),

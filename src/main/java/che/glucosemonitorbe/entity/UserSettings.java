@@ -27,6 +27,10 @@ public class UserSettings {
     /** mmol/L blood glucose rise per 10 g carbs absorbed, assuming no insulin (used as (COB_g/10) * carbRatio). */
     @Column(name = "carb_ratio", nullable = false)
     private Double carbRatio = 2.0;
+
+    /** Explicit grams of carbohydrate per unit. NULL = derive {@code 10 * isf / carbRatio}. */
+    @Column(name = "grams_per_unit")
+    private Double gramsPerUnit;
     
     @Column(name = "isf", nullable = false)
     private Double isf = 1.0;
