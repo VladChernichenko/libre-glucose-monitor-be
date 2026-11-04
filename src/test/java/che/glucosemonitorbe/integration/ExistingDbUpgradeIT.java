@@ -100,7 +100,7 @@ class ExistingDbUpgradeIT {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notes", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT target_glucose_mmol FROM user_settings", Double.class)).isEqualTo(5.55);
         assertThat(jdbc.queryForObject("SELECT rescue_carbs_g FROM user_settings", Integer.class)).isEqualTo(15);
-        assertThat(jdbc.queryForObject("SELECT grams_per_unit FROM user_settings", Double.class)).isNull();
+        assertThat(jdbc.queryForObject("SELECT grams_per_unit FROM user_settings", Double.class)).isEqualTo(5.0);
         assertThat(jdbc.queryForObject(
                 "SELECT count(*) FROM pg_constraint WHERE conname = 'chk_user_settings_grams_per_unit'",
                 Integer.class)).isEqualTo(1);

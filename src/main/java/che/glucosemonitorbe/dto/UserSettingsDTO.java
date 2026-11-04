@@ -19,9 +19,9 @@ public class UserSettingsDTO {
     // Getters and Setters
     private UUID id;
     private UUID userId;
-    /** mmol/L rise per 10 g carbs (no insulin); formula uses (COB grams / 10) * carbRatio. */
+    /** Legacy mmol/L rise per 10 g. A save must send the stored value back; dosing does not read it. */
     private Double carbRatio;
-    /** Explicit grams per unit. NULL = derive {@code 10 * isf / carbRatio}. Outside 3-30 is refused. */
+    /** Insulin-to-carb ratio, grams per unit. Missing or outside 3-30 is refused. */
     private Double gramsPerUnit;
     /** IANA zone id (e.g. "Europe/Berlin"); authoritative over utcOffsetMinutes, DST-aware. */
     private String timezone;

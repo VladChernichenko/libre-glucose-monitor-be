@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.assistant.quicklog;
 
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.HypoEventDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -8,6 +9,7 @@ import che.glucosemonitorbe.service.HypoEventService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.NotesService;
 import che.glucosemonitorbe.service.UserSettingsService;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,12 +29,17 @@ import org.springframework.web.server.ResponseStatusException;
 public class AssistantNoteWriter {
 
     static final double MAX_CARBS_G = 300.0;
+    /** At or above this glucose an insulin-only log is a correction; below it, a pre-bolus. */
+    static final double CORRECTION_GLUCOSE_MMOL = 10.0;
     private static final double MAX_BASAL_UNITS = 100.0;
+    private static final String MEAL_PRE_BOLUS = "Pre-bolus";
+    private static final String MEAL_CORRECTION = "Correction";
 
     private final NotesService notesService;
     private final HypoEventService hypoEventService;
     private final UserSettingsService userSettingsService;
     private final InsulinCalculatorService insulinCalculatorService;
+    private final CgmFreshnessService cgmFreshnessService;
 
     public record WriteResult(List<UUID> noteIds, UUID hypoEventId) {}
 
@@ -40,7 +47,7 @@ public class AssistantNoteWriter {
         validate(userId, cmd);
         return switch (cmd.kind()) {
             case FAST_SUGAR -> writeFastSugar(userId, cmd, chatMessageId);
-            case RAPID -> single(userId, cmd, chatMessageId, Note.TYPE_NORMAL, cmd.units(), 0.0, "Insulin");
+            case RAPID -> single(userId, cmd, chatMessageId, Note.TYPE_NORMAL, cmd.units(), 0.0, rapidMeal(userId));
             case RAPID_WITH_MEAL -> single(userId, cmd, chatMessageId, Note.TYPE_NORMAL, cmd.units(), cmd.carbs(), "Meal");
             case MEAL -> single(userId, cmd, chatMessageId, Note.TYPE_NORMAL, 0.0, cmd.carbs(), "Meal");
             case LONG_ACTING -> single(userId, cmd, chatMessageId, Note.TYPE_LONG_ACTING, cmd.units(), 0.0, "Long-acting insulin");
@@ -93,6 +100,14 @@ public class AssistantNoteWriter {
                 throw new QuickLogRejectedException("Carbs above " + (int) MAX_CARBS_G + " g");
             }
         }
+    }
+
+    /** No fresh reading is treated as below the threshold, same as an unknown glucose on the notes form. */
+    private String rapidMeal(UUID userId) {
+        return cgmFreshnessService.freshReading(userId, Instant.now())
+                .filter(r -> r.mmol() >= CORRECTION_GLUCOSE_MMOL)
+                .map(r -> MEAL_CORRECTION)
+                .orElse(MEAL_PRE_BOLUS);
     }
 
     private WriteResult writeFastSugar(UUID userId, QuickLogCommand cmd, UUID chatMessageId) {

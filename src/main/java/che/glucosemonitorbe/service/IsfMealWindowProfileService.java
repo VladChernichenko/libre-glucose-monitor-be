@@ -31,10 +31,9 @@ import java.util.*;
  * <ol>
  *   <li>Define the analysis window {@code [t_B, t_B + DIA]} (user's rapid-acting DIA, typ. 4.5 h).</li>
  *   <li>Read CGM at t_B (baseline) and at t_B + DIA (post). Skip if either is missing.</li>
- *   <li>Compute expected glucose rise from any carbs logged in [-30 min, +DIA] using the user's
- *       carb ratio: {@code Δcarb = (gramsAbsorbed / 10) × CR}.</li>
- *   <li>Residual drop attributable to insulin: {@code Δinsulin = Δcarb − (postCGM − preCGM)}.</li>
- *   <li>Per-event ISF estimate: {@code ISF = Δinsulin / B.units}.</li>
+ *   <li>Estimate ISF from the observed change and the insulin-to-carb ratio (grams per unit):
+ *       {@code ISF = observedDelta / (absorbedGrams / ICR - units)} when the denominator is not zero.
+ *       A missing ICR produces no estimate.</li>
  *   <li>Weight: 1.0 if no carbs nearby (correction bolus), else 0.4 (deconvolved meal bolus).</li>
  *   <li>Bucket by {@link MealWindow#fromTimestamp(LocalDateTime)} (full 24h: B/L/D/NIGHT).</li>
  * </ol>
@@ -70,8 +69,9 @@ public class IsfMealWindowProfileService {
     /** CGM lookup tolerance (minutes) - pick the nearest CGM reading within this window. */
     private static final int CGM_LOOKUP_WINDOW_MIN = 15;
 
-    /** Default carb ratio fallback when user has none configured (mmol/L per 10 g). */
-    private static final double DEFAULT_CARB_RATIO = 2.0;
+    /** Same envelope as {@link InsulinCalculatorService}: an ICR outside it is not an estimate. */
+    private static final double MIN_GRAMS_PER_UNIT = 3.0;
+    private static final double MAX_GRAMS_PER_UNIT = 30.0;
 
     private final NoteRepository noteRepository;
     private final CgmReadingRepository cgmReadingRepository;
@@ -129,9 +129,7 @@ public class IsfMealWindowProfileService {
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, since, now);
         List<CgmReading> cgmReadings = loadCgmReadings(userId, since, userZone);
 
-        double carbRatio = (userSettings != null && userSettings.getCarbRatio() != null && userSettings.getCarbRatio() > 0)
-                ? userSettings.getCarbRatio()
-                : DEFAULT_CARB_RATIO;
+        Double gramsPerUnit = userSettings == null ? null : userSettings.getGramsPerUnit();
 
         List<EventEstimate> estimates = new ArrayList<>();
         for (Note bolus : notes) {
@@ -139,7 +137,7 @@ public class IsfMealWindowProfileService {
             if (bolus.isLongActing()) continue;
             if (bolus.getTimestamp() == null) continue;
 
-            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, carbRatio, userZone);
+            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, gramsPerUnit, userZone);
             if (est != null) {
                 estimates.add(est);
             }
@@ -200,7 +198,7 @@ public class IsfMealWindowProfileService {
             List<CgmReading> cgmReadings,
             RapidInsulinIobParameters rapid,
             UserSettingsDTO userSettings,
-            double carbRatio,
+            Double gramsPerUnit,
             ZoneId userZone) {
 
         LocalDateTime t0 = bolus.getTimestamp();
@@ -244,12 +242,18 @@ public class IsfMealWindowProfileService {
         // Carbs that remained un-absorbed at tEnd don't contribute to the observed Δglucose.
         double cobAtEnd = carbsOnBoardService.calculateTotalCarbsOnBoard(carbEntries, tEnd, userSettings);
         double absorbedGrams = Math.max(0.0, carbsGrams - cobAtEnd);
-        double deltaCarbMmol = (absorbedGrams / 10.0) * carbRatio;
-        double observedDelta = postCgm - preCgm; // mmol/L change from t0 to tEnd
-        double insulinAttributedDrop = deltaCarbMmol - observedDelta;
+        if (gramsPerUnit == null || !Double.isFinite(gramsPerUnit)
+                || gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
+            return null;
+        }
 
         double units = bolus.getInsulin();
-        double isf = insulinAttributedDrop / units;
+        double observedDelta = postCgm - preCgm; // mmol/L change from t0 to tEnd
+        double denominator = absorbedGrams / gramsPerUnit - units;
+        if (Math.abs(denominator) < 1e-9) {
+            return null;
+        }
+        double isf = observedDelta / denominator;
 
         if (Double.isNaN(isf) || Double.isInfinite(isf)) return null;
         if (isf < MIN_PLAUSIBLE_ISF || isf > MAX_PLAUSIBLE_ISF) return null;

@@ -44,11 +44,12 @@ class InsulinCalculatorServiceIsfWindowTest {
         settings.setIsfDinner(1.5);
         settings.setIsfNight(1.0);
         settings.setBodyWeightKg(84.0);
+        settings.setGramsPerUnit(7.5);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
         service = new InsulinCalculatorService(userSettingsService);
     }
 
-    /** 18:00 is DINNER: gramsPerUnit = 10 x 1.5 / 2.0 = 7.5, so 80 g -> 10.67 u. */
+    /** 18:00 is DINNER. Meal dose is carbs / ICR (7.5 g/U), so 80 g -> 10.67 u. The window ISF is not the ratio. */
     @Test
     void mealDoseUsesTheDinnerIsfForADinnerTimeRequest() {
         InsulinCalculationResponse r = service.calculateRecommendedInsulin(
@@ -57,15 +58,14 @@ class InsulinCalculatorServiceIsfWindowTest {
     }
 
     /**
-     * 23:00 is NIGHT, where the override equals the base: gramsPerUnit = 5.0, so 80 g -> 16 u.
-     * Without this the dinner assertion alone would also pass an implementation that had merely
-     * been rebased onto a different single constant.
+     * 23:00 is NIGHT. The meal dose stays 80 / 7.5 = 10.67 u: ICR does not follow the window ISF.
+     * The correction tests below are what change between dinner and night.
      */
     @Test
     void mealDoseUsesTheNightIsfForALateRequest() {
         InsulinCalculationResponse r = service.calculateRecommendedInsulin(
                 request(80.0, 6.5, 6.5, "2026-08-21T23:00:00"));
-        assertThat(r.getRecommendedInsulin()).isCloseTo(16.0, within(0.01));
+        assertThat(r.getRecommendedInsulin()).isCloseTo(10.67, within(0.01));
     }
 
     /** Correction at the 20:07 glucose of the incident: (14.1 - 6.5) / 1.5 = 5.07 u. */
@@ -90,6 +90,7 @@ class InsulinCalculatorServiceIsfWindowTest {
         UserSettingsDTO bare = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, /*carbRatio*/ 2.0, /*isf*/ null,
                 /*halfLife*/ 45, /*maxCob*/ 240);
+        bare.setGramsPerUnit(7.5);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(bare);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(

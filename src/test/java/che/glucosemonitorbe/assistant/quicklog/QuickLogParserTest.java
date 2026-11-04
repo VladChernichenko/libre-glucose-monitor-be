@@ -39,7 +39,11 @@ class QuickLogParserTest {
                 Arguments.of("5u at 11:30", RAPID, 5.0, null, t1130),
                 Arguments.of("5u 20 min ago", RAPID, 5.0, null, t1140),
                 Arguments.of("2.5u", RAPID, 2.5, null, NOW),
-                Arguments.of("5U", RAPID, 5.0, null, NOW));
+                Arguments.of("5U", RAPID, 5.0, null, NOW),
+                Arguments.of("4u pre bolus", RAPID, 4.0, null, NOW),
+                Arguments.of("4u pre-bolus", RAPID, 4.0, null, NOW),
+                Arguments.of("4u bolus", RAPID, 4.0, null, NOW),
+                Arguments.of("4u correction", RAPID, 4.0, null, NOW));
     }
 
     @ParameterizedTest

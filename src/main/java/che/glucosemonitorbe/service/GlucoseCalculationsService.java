@@ -48,7 +48,19 @@ public class GlucoseCalculationsService {
     private final FeatureToggleConfig featureToggleConfig;
 
     // Default constants for glucose calculations
-    private static final double DEFAULT_CARB_RATIO = 2.0; // mmol/L per 10g carbs
+    /**
+     * Glucose rise (mmol/L) from {@code grams} absorbed at this step's ISF.
+     * {@code grams / ICR * ISF}. A missing or out-of-range ICR contributes nothing;
+     * the legacy mmol/L-per-10 g ratio is not a fallback.
+     */
+    static double carbRiseMmol(double grams, Double gramsPerUnit, double isf) {
+        if (gramsPerUnit == null || !Double.isFinite(gramsPerUnit)
+                || gramsPerUnit < 3.0 || gramsPerUnit > 30.0
+                || !Double.isFinite(isf) || !Double.isFinite(grams)) {
+            return 0.0;
+        }
+        return (grams / gramsPerUnit) * isf;
+    }
     private static final double DEFAULT_ISF = 1.0; // mmol/L per unit insulin
     private static final double DEFAULT_GLUCOSE_TREND = 0.0; // mmol/L per minute (stable)
     private static final double PREDICTION_HORIZON_MINUTES = 120.0; // 2 hours
@@ -411,7 +423,6 @@ public class GlucoseCalculationsService {
         }
 
         // -- OpenAPS exponential model (default) -------------------------------
-        double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
         double preBolusTimingContribution = calculatePreBolusTimingContribution(avgBolusToMealMinutes);
         double activeCobNow = cobService.calculateTotalCarbsOnBoard(carbsEntries, currentTime, userSettings);
         double activeIobNow = insulinCalculatorService.calculateTotalActiveInsulin(
@@ -441,8 +452,9 @@ public class GlucoseCalculationsService {
             double iobAtT = insulinCalculatorService.calculateTotalActiveInsulin(
                     insulinEntries, t, diaHours, peakMinutes);
 
-            double carbsDeliveredEffect = ((activeCobNow - cobAtT) / 10.0) * userCarbRatio;
             double stepIsf = resolveIsf(userSettings, t);
+            double carbsDeliveredEffect = carbRiseMmol(
+                    activeCobNow - cobAtT, userSettings.getGramsPerUnit(), stepIsf);
             cumulativeInsulinEffect += -((previousIob - iobAtT) * stepIsf);
             previousIob = iobAtT;
             double insulinDeliveredEffect = cumulativeInsulinEffect;
@@ -488,11 +500,11 @@ public class GlucoseCalculationsService {
         // ISF for that point in time (its meal window), not the request-time window.
         LocalDateTime predictionTime = currentTime.plusMinutes((long) horizonMinutes);
         double userISF = resolveIsf(userSettings, predictionTime);
-        double userCarbRatio = userSettings.getCarbRatio() != null ? userSettings.getCarbRatio() : DEFAULT_CARB_RATIO;
-        
+
         // Use delivered effect over horizon (delta now -> horizon), same model as prediction path.
         // This prevents overestimating both carb rise and insulin drop when part of effect is outside horizon.
-        double carbContribution = ((currentCOB - futureCOB) / 10.0) * userCarbRatio;
+        double carbContribution = carbRiseMmol(
+                currentCOB - futureCOB, userSettings.getGramsPerUnit(), userISF);
         double insulinContribution = -((currentIOB - futureIOB) * userISF);
         
         // Baseline contribution: assume minimal baseline drift

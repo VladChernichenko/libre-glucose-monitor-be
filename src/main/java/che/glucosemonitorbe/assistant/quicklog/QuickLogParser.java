@@ -28,8 +28,11 @@ public class QuickLogParser {
 
     private static final Set<String> LONG_WORDS = Set.of(
             "t", "tresiba", "lantus", "levemir", "toujeo", "basal", "long", "т", "базал", "базальный");
+    /** Words that name a rapid dose. They do not change the kind; glucose does, at write time. */
+    private static final Set<String> BOLUS_WORDS = Set.of("pre", "bolus", "pre-bolus", "prebolus");
+
     private static final Set<String> FAST_WORDS = Set.of(
-            "correction", "fast", "hypo", "sugar", "коррекция", "быстрые", "гипо", "сахар");
+            "fast", "hypo", "sugar", "коррекция", "быстрые", "гипо", "сахар");
 
     public Optional<QuickLogCommand> parse(String text, LocalDateTime now) {
         if (text == null || now == null || text.isBlank()) {
@@ -76,12 +79,18 @@ public class QuickLogParser {
 
         boolean isLong = false;
         boolean isFast = false;
+        boolean namedBolus = false;
+        boolean namedCorrection = false;
         for (String w : s.trim().split("\\s+")) {
             if (w.isEmpty()) {
                 continue;
             }
             if (LONG_WORDS.contains(w)) {
                 isLong = true;
+            } else if (BOLUS_WORDS.contains(w)) {
+                namedBolus = true;
+            } else if ("correction".equals(w) || "\u043a\u043e\u0440\u0440\u0435\u043a\u0446\u0438\u044f".equals(w)) {
+                namedCorrection = true;
             } else if (FAST_WORDS.contains(w)) {
                 isFast = true;
             } else {
@@ -91,7 +100,7 @@ public class QuickLogParser {
 
         Kind kind;
         if (units != null && carbs != null) {
-            if (isLong || isFast) {
+            if (isLong || isFast || namedBolus || namedCorrection) {
                 return Optional.empty();
             }
             kind = Kind.RAPID_WITH_MEAL;
@@ -101,10 +110,10 @@ public class QuickLogParser {
             }
             kind = isLong ? Kind.LONG_ACTING : Kind.RAPID;
         } else {
-            if (isLong) {
+            if (isLong || namedBolus) {
                 return Optional.empty();
             }
-            kind = isFast ? Kind.FAST_SUGAR : Kind.MEAL;
+            kind = isFast || namedCorrection ? Kind.FAST_SUGAR : Kind.MEAL;
         }
         return Optional.of(new QuickLogCommand(kind, units, carbs, at));
     }

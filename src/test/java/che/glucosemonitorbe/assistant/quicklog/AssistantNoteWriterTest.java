@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
+import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.HypoEventDTO;
 import che.glucosemonitorbe.dto.NoteDto;
@@ -30,7 +32,8 @@ class AssistantNoteWriterTest {
     private final HypoEventService hypo = mock(HypoEventService.class);
     private final UserSettingsService settings = mock(UserSettingsService.class);
     private final InsulinCalculatorService calc = mock(InsulinCalculatorService.class);
-    private final AssistantNoteWriter writer = new AssistantNoteWriter(notes, hypo, settings, calc);
+    private final CgmFreshnessService cgm = mock(CgmFreshnessService.class);
+    private final AssistantNoteWriter writer = new AssistantNoteWriter(notes, hypo, settings, calc, cgm);
 
     private final UUID user = UUID.randomUUID();
     private final UUID msg = UUID.randomUUID();
@@ -105,6 +108,37 @@ class AssistantNoteWriterTest {
         assertEquals(Note.TYPE_LONG_ACTING, req.getType());
         assertEquals(20.0, req.getInsulin());
         assertEquals(0.0, req.getCarbs());
+    }
+
+    @Test
+    void rapidBelow10MmolIsPreBolus() {
+        when(cgm.freshReading(eq(user), any())).thenReturn(Optional.of(reading(9.9)));
+
+        writer.write(user, new QuickLogCommand(RAPID, 4.0, null, AT), msg);
+
+        assertEquals("Pre-bolus", captureRequest().getMeal());
+    }
+
+    @Test
+    void rapidAtOrAbove10MmolIsCorrection() {
+        when(cgm.freshReading(eq(user), any())).thenReturn(Optional.of(reading(10.0)));
+
+        writer.write(user, new QuickLogCommand(RAPID, 4.0, null, AT), msg);
+
+        assertEquals("Correction", captureRequest().getMeal());
+    }
+
+    @Test
+    void rapidWithNoFreshGlucoseIsPreBolus() {
+        when(cgm.freshReading(eq(user), any())).thenReturn(Optional.empty());
+
+        writer.write(user, new QuickLogCommand(RAPID, 4.0, null, AT), msg);
+
+        assertEquals("Pre-bolus", captureRequest().getMeal());
+    }
+
+    private static CgmReadingDTO reading(double mmol) {
+        return new CgmReadingDTO(mmol, AT, null, null);
     }
 
     @Test

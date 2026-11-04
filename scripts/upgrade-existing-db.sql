@@ -23,8 +23,8 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- user_settings: correction target, rescue carbs, and optional grams per unit (V1 on this branch).
--- grams_per_unit NULL keeps the derived meal ratio 10 * isf / carb_ratio.
+-- user_settings: correction target, rescue carbs, and the insulin-to-carb ratio (V1 on this branch).
+-- grams_per_unit is grams of carbohydrate per unit. carb_ratio (mmol/L per 10 g) is left as stored.
 ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,
     ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15,
@@ -42,6 +42,14 @@ BEGIN
             CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30));
     END IF;
 END $$;
+
+-- One-time: the ICR that produces the same rise as (grams / 10) * carb_ratio is 10 * isf / carb_ratio.
+-- Rows outside 3-30 stay NULL and have to be typed in. A second run matches nothing.
+UPDATE user_settings
+SET grams_per_unit = 10.0 * isf / carb_ratio
+WHERE grams_per_unit IS NULL
+  AND isf > 0 AND carb_ratio > 0
+  AND (10.0 * isf / carb_ratio) BETWEEN 3 AND 30;
 
 -- notes: assistant chat carb band, context tags and originating chat message (V1 on this branch)
 ALTER TABLE notes

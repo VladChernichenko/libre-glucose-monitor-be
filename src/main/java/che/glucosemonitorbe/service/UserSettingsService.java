@@ -44,6 +44,7 @@ public class UserSettingsService {
                 .map(this::convertToDTO)
                 .orElseGet(() -> {
                     UserSettingsDTO d = new UserSettingsDTO(null, userId, 2.0, 1.0, 45, 240);
+                    d.setGramsPerUnit(5.0);
                     d.setTargetGlucoseMmol(UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL);
                     d.setRescueCarbsG(15);
                     return d;

@@ -883,4 +883,11 @@ class GlucoseCalculationsServiceTest {
         assertThatThrownBy(() -> service.calculateGlucoseData(request))
                 .isInstanceOf(DataAccessResourceFailureException.class);
     }
+
+    @Test
+    void openApsCarbStep_tenGramsAtIcrTenAndIsfTwo_risesTwoMmol() {
+        assertThat(GlucoseCalculationsService.carbRiseMmol(10.0, 10.0, 2.0)).isEqualTo(2.0);
+        assertThat(GlucoseCalculationsService.carbRiseMmol(10.0, null, 2.0)).isEqualTo(0.0);
+        assertThat(GlucoseCalculationsService.carbRiseMmol(10.0, 30.1, 2.0)).isEqualTo(0.0);
+    }
 }

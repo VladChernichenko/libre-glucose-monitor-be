@@ -62,7 +62,7 @@ class IsfMealWindowProfileServiceTest {
 
     private final UUID userId = UUID.randomUUID();
 
-    // CR = 2.0 mmol/L per 10g, ISF target = 2.5 mmol/L per unit, DIA = 4.5h, peak = 75min
+    // ICR 12.5 g/U. ISF target = 2.5 mmol/L per unit, DIA = 4.5h, peak = 75min. carbRatio is unused.
     private static final RapidInsulinIobParameters RAPID = new RapidInsulinIobParameters(4.5, 75.0);
     private static final UserSettingsDTO USER_SETTINGS = userSettings(2.0, 2.5, 45, 240);
 
@@ -207,11 +207,8 @@ class IsfMealWindowProfileServiceTest {
     @Test
     @DisplayName("Meal-attached bolus uses 0.4 weight and deconvolves carbs via CR")
     void mealBolus_weightedLower_andCarbsDeconvolved() {
-        // Bolus 4u + 40g carbs at 13:00 (LUNCH)
-        // Carbs absorbed fully -> Δcarb = (40/10) × CR(2.0) = 8.0 mmol/L
-        // CGM 8.0 -> 6.0  -> observedΔ = −2.0
-        // insulinAttributedDrop = 8.0 − (−2.0) = 10.0
-        // ISF = 10.0 / 4 = 2.5
+        // Bolus 4u + 40g carbs at 13:00 (LUNCH). Weight is 0.4 because carbs are present.
+        // ICR 12.5 keeps the denominator (40/12.5 - 4) away from zero.
         LocalDateTime t = today(13, 0);
         Note bolus = bolusWithCarbs(t, 4.0, 40.0);
         List<Note> notes = List.of(bolus);
@@ -561,6 +558,7 @@ class IsfMealWindowProfileServiceTest {
     private static UserSettingsDTO userSettings(double cr, double isf, int halfLife, int maxDuration) {
         UserSettingsDTO s = new UserSettingsDTO();
         s.setCarbRatio(cr);
+        s.setGramsPerUnit(12.5);
         s.setIsf(isf);
         s.setCarbHalfLife(halfLife);
         s.setMaxCOBDuration(maxDuration);

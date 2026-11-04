@@ -24,13 +24,13 @@ public class UserSettings {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
     
-    /** mmol/L blood glucose rise per 10 g carbs absorbed, assuming no insulin (used as (COB_g/10) * carbRatio). */
+    /** Legacy mmol/L rise per 10 g. Kept so a stored 2.0 is never read as 2 g/U. Dosing does not use it. */
     @Column(name = "carb_ratio", nullable = false)
     private Double carbRatio = 2.0;
 
-    /** Explicit grams of carbohydrate per unit. NULL = derive {@code 10 * isf / carbRatio}. */
+    /** Insulin-to-carb ratio: grams of carbohydrate covered by 1 unit. New rows default to 5. */
     @Column(name = "grams_per_unit")
-    private Double gramsPerUnit;
+    private Double gramsPerUnit = 5.0;
     
     @Column(name = "isf", nullable = false)
     private Double isf = 1.0;
@@ -102,6 +102,7 @@ public class UserSettings {
     // Constructors
     public UserSettings() {
         this.carbRatio = 2.0;
+        this.gramsPerUnit = 5.0;
         this.isf = 1.0;
         this.carbHalfLife = 45;
         this.maxCOBDuration = 240;
@@ -110,6 +111,7 @@ public class UserSettings {
     public UserSettings(UUID userId) {
         this.userId = userId;
         this.carbRatio = 2.0;
+        this.gramsPerUnit = 5.0;
         this.isf = 1.0;
         this.carbHalfLife = 45;
         this.maxCOBDuration = 240;

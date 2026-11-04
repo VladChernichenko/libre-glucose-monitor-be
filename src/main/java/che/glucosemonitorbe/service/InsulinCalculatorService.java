@@ -243,41 +243,20 @@ public class InsulinCalculatorService {
     }
 
     /**
-     * Derives the insulin:carb ratio in grams per unit.
+     * Insulin-to-carb ratio in grams per unit. {@code carbRatio} is not consulted: a stored
+     * 2.0 mmol/L per 10 g must not be read as 2 g/U.
      *
-     * <p>{@code carbRatio} is mmol/L of rise per 10 g; {@code isf} is mmol/L per unit. So
-     * {@code gramsPerUnit = 10 * isf / carbRatio}. Deriving it means the ratio inherits the
-     * digital twin's per-user calibration of both parameters for free.
-     *
-     * <p>The envelope is a refusal boundary, not a clamp: a derived 1 g/U means ISF and
-     * carbRatio are mutually inconsistent, and silently substituting 3.0 would hide that
-     * while still producing a wrong dose.
+     * <p>The envelope is a refusal boundary, not a clamp. A missing ratio, or one outside
+     * 3-30, is typed in rather than invented.
      */
     private double resolveGramsPerUnit(UserSettingsDTO settings, LocalDateTime at) {
         Double explicit = settings.getGramsPerUnit();
-        if (explicit != null) {
-            if (!Double.isFinite(explicit)
-                    || explicit < MIN_GRAMS_PER_UNIT || explicit > MAX_GRAMS_PER_UNIT) {
-                throw new DosingRefusedException(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
-                        "gramsPerUnit=" + explicit + " at=" + at);
-            }
-            return explicit;
-        }
-        Double isf = settings.getEffectiveIsf(at);
-        Double carbRatio = settings.getCarbRatio();
-        if (isf == null || carbRatio == null
-                || !Double.isFinite(isf) || !Double.isFinite(carbRatio)
-                || isf <= 0 || carbRatio <= 0) {
-            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID,
-                    "isf=" + isf + " carbRatio=" + carbRatio + " at=" + at);
-        }
-        double gramsPerUnit = 10.0 * isf / carbRatio;
-        if (gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
+        if (explicit == null || !Double.isFinite(explicit)
+                || explicit < MIN_GRAMS_PER_UNIT || explicit > MAX_GRAMS_PER_UNIT) {
             throw new DosingRefusedException(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
-                    "derived gramsPerUnit=" + gramsPerUnit + " from isf=" + isf
-                            + " carbRatio=" + carbRatio + " at=" + at);
+                    "gramsPerUnit=" + explicit + " at=" + at);
         }
-        return gramsPerUnit;
+        return explicit;
     }
 
     /** Weight-scaled ceiling, so the bound is sane for a child and for an adult alike. */
@@ -299,7 +278,12 @@ public class InsulinCalculatorService {
                 : LocalDateTime.now();
 
         double gramsPerUnit = resolveGramsPerUnit(settings, doseTime);
-        double isf = settings.getEffectiveIsf(doseTime);
+        Double isfValue = settings.getEffectiveIsf(doseTime);
+        if (isfValue == null || !Double.isFinite(isfValue) || isfValue <= 0) {
+            throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID,
+                    "isf=" + isfValue + " at=" + doseTime);
+        }
+        double isf = isfValue;
 
         if (request.getCarbs() == null || request.getCurrentGlucose() == null
                 || request.getTargetGlucose() == null) {
