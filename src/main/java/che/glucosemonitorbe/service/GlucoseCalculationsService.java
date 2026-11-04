@@ -54,9 +54,6 @@ public class GlucoseCalculationsService {
     private static final double PREDICTION_HORIZON_MINUTES = 120.0; // 2 hours
     private static final double TREND_RISING_THRESHOLD = 0.3;
     private static final double TREND_FALLING_THRESHOLD = -0.3;
-    private static final double CONFIDENCE_HIGH = 0.9;
-    private static final double CONFIDENCE_MEDIUM = 0.7;
-    private static final double CONFIDENCE_LOW = 0.5;
     private static final double PRE_BOLUS_TARGET_MINUTES = 15.0;
     private static final double PRE_BOLUS_MATCH_WINDOW_MINUTES = 90.0;
     private static final double PRE_BOLUS_MAX_TIMING_EFFECT = 1.2;
@@ -211,10 +208,6 @@ public class GlucoseCalculationsService {
         PredictionFactors factors = calculatePredictionFactors(
             activeCOB, futureCOB, activeIOB, futureIOB, predictionHorizon, userSettings, avgBolusToMealMinutes, carbsEntries, currentTime);
 
-        // Calculate confidence based on data quality
-        double confidence = calculateConfidence(carbsEntries.size(), insulinEntries.size(),
-            request.getCurrentGlucose());
-
         // A stored EMPIRICAL / BOTH falls back to Hovorka while the twin is switched off.
         PredictionEngine engine = userSettings.getPredictionEngine() != null
                 && featureToggleConfig.isEmpiricalTwinEnabled()
@@ -253,12 +246,18 @@ public class GlucoseCalculationsService {
         // if the path is unexpectedly empty.
         int twoHourIndex = (int) Math.round(predictionHorizon / PREDICTION_PATH_STEP_MINUTES) - 1;
         double predictedGlucose;
+        double uncertaintySd = 2.3;
         if (!predictionPath.isEmpty()) {
             int idx2h = Math.max(0, Math.min(twoHourIndex, predictionPath.size() - 1));
-            predictedGlucose = predictionPath.get(idx2h).getPredictedGlucose();
+            PredictionPointDTO atTwoHours = predictionPath.get(idx2h);
+            predictedGlucose = atTwoHours.getPredictedGlucose();
+            if (atTwoHours.getUncertaintySd() != null && Double.isFinite(atTwoHours.getUncertaintySd())) {
+                uncertaintySd = atTwoHours.getUncertaintySd();
+            }
         } else {
             predictedGlucose = calculatePredictedGlucose(request.getCurrentGlucose(), factors, predictionHorizon);
         }
+        double confidence = confidenceFromUncertainty(uncertaintySd);
 
         // fourHourPrediction = point at exactly 240 min (PREDICTION_PATH_MINUTES).
         // eightHourPrediction = last point when path extends beyond 4 h (HFHP / Dual Wave).
@@ -629,26 +628,13 @@ public class GlucoseCalculationsService {
     }
     
     /**
-     * Calculate confidence score based on available data quality
+     * Headline confidence from the 2-hour uncertainty [mmol/L].
+     * 0 sd maps to 0.95; the population 120-minute prior of 2.3 maps to 0.54; sd of 4.5 or more maps to 0.5.
+     * A non-finite or negative sd maps to 0.5. Note count and the current glucose do not enter.
      */
-    private double calculateConfidence(int carbsEntriesCount, int insulinEntriesCount, Double currentGlucose) {
-        double confidence = CONFIDENCE_MEDIUM;
-        
-        // Increase confidence with more data points
-        if (carbsEntriesCount > 3 || insulinEntriesCount > 3) {
-            confidence = CONFIDENCE_HIGH;
-        } else if (carbsEntriesCount == 0 && insulinEntriesCount == 0) {
-            confidence = CONFIDENCE_LOW;
-        }
-        
-        // Adjust confidence based on glucose level (extreme values are less predictable)
-        if (currentGlucose != null) {
-            if (currentGlucose < 3.0 || currentGlucose > 15.0) {
-                confidence *= 0.8; // Reduce confidence for extreme values
-            }
-        }
-        
-        return Math.max(CONFIDENCE_LOW, confidence);
+    static double confidenceFromUncertainty(double uncertaintySdMmol) {
+        if (!Double.isFinite(uncertaintySdMmol) || uncertaintySdMmol < 0) return 0.5;
+        return Math.max(0.5, Math.min(0.95, 1.0 - uncertaintySdMmol / 5.0));
     }
     
     /**

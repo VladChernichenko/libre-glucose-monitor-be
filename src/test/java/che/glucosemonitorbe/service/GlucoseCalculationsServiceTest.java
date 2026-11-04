@@ -492,41 +492,40 @@ class GlucoseCalculationsServiceTest {
     // -- NotebookLM scenario 5: hypoglycemia branch - confidence reduced -------
 
     @Test
-    void confidence_hypoGlucose_reducedBelowNormal() {
-        String username = "hypo_user";
-        UUID userId = UUID.randomUUID();
-        stubFullPipeline(username, userId);
-
-        // Include a prospective carbs note so carbsEntries.size()=1 -> base confidence
-        // becomes CONFIDENCE_MEDIUM (0.7) rather than CONFIDENCE_LOW (0.5).
-        // Hypo path: 0.7 * 0.8 = 0.56 which is < normal 0.7, and > CONFIDENCE_LOW floor.
-        che.glucosemonitorbe.dto.ProspectiveNoteDTO meal =
-                che.glucosemonitorbe.dto.ProspectiveNoteDTO.builder().carbs(40.0).meal("Lunch").build();
-
-        GlucoseCalculationsRequest hypo = GlucoseCalculationsRequest.builder()
-                .currentGlucose(2.8).userId(username).prospectiveNotes(List.of(meal)).build();
-        GlucoseCalculationsRequest normal = GlucoseCalculationsRequest.builder()
-                .currentGlucose(6.5).userId(username).prospectiveNotes(List.of(meal)).build();
-
-        var respHypo   = service.calculateGlucoseData(hypo);
-        var respNormal = service.calculateGlucoseData(normal);
-
-        assertThat(respHypo.getConfidence()).isLessThan(respNormal.getConfidence());
+    void confidenceFromUncertainty_matchesThePinnedLine() {
+        assertThat(GlucoseCalculationsService.confidenceFromUncertainty(0.0)).isEqualTo(0.95);
+        assertThat(GlucoseCalculationsService.confidenceFromUncertainty(2.3)).isCloseTo(0.54, within(1e-9));
+        assertThat(GlucoseCalculationsService.confidenceFromUncertainty(4.5)).isEqualTo(0.5);
+        assertThat(GlucoseCalculationsService.confidenceFromUncertainty(Double.NaN)).isEqualTo(0.5);
     }
 
     @Test
-    void confidence_zeroDataPoints_returnsLowConfidence() {
+    void confidence_extremeGlucose_matchesNormal_whenUncertaintyMatches() {
+        String username = "hypo_user";
+        UUID userId = UUID.randomUUID();
+        stubFullPipeline(username, userId);
+        var meal = ProspectiveNoteDTO.builder().carbs(40.0).meal("Lunch").build();
+        var hypo = service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(2.8).userId(username).prospectiveNotes(List.of(meal)).build());
+        var normal = service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(6.5).userId(username).prospectiveNotes(List.of(meal)).build());
+        assertThat(hypo.getConfidence()).isEqualTo(normal.getConfidence());
+    }
+
+    @Test
+    void confidence_noteCount_doesNotChangeTheHeadline() {
         String username = "no_data";
         UUID userId = UUID.randomUUID();
         stubFullPipeline(username, userId);
-
-        GlucoseCalculationsRequest request = GlucoseCalculationsRequest.builder()
-                .currentGlucose(7.0).userId(username).build();
-
-        var response = service.calculateGlucoseData(request);
-
-        // 0 carbs + 0 insulin entries -> CONFIDENCE_LOW = 0.5
-        assertThat(response.getConfidence()).isLessThanOrEqualTo(0.5);
+        var empty = service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(7.0).userId(username).build());
+        var notes = new ArrayList<ProspectiveNoteDTO>();
+        for (int i = 0; i < 5; i++) {
+            notes.add(ProspectiveNoteDTO.builder().insulin(1.0).meal("Lunch").build());
+        }
+        var crowded = service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(7.0).userId(username).prospectiveNotes(notes).build());
+        assertThat(crowded.getConfidence()).isEqualTo(empty.getConfidence());
     }
 
     @Test
