@@ -608,14 +608,15 @@ class HovorkaGlucosePredictionServiceTest {
 
     @Test
     void noCobNoIob_longActingLogged_plateauEgpSuppression_glucoseAlsoStaysFlat() {
-        // A long-acting note injected 6h ago -> suppressionCurve returns PEAK_X3_BASAL (0.40)
+        // A reference basal (0.3 U/kg = 21 U at 70 kg) 6h ago -> suppressionCurve returns PEAK_X3_BASAL (0.40).
+        // A smaller log is only that fraction of the peak and is not this guard.
         // egpNow = EGP0 * (1 - 0.40) ≈ f01 -> steady state -> glucose flat.
         // This guards that the EGP suppression path still works correctly after the fix.
         double g0 = 7.2;
 
         che.glucosemonitorbe.entity.Note longActing = new che.glucosemonitorbe.entity.Note();
         longActing.setTimestamp(NOW.minusHours(6));
-        longActing.setInsulin(10.0);
+        longActing.setInsulin(21.0);
         longActing.setType(che.glucosemonitorbe.entity.Note.TYPE_LONG_ACTING);
 
         List<PredictionPointDTO> curve = service.buildPredictionPath(

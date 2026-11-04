@@ -23,10 +23,25 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- user_settings: correction target and rescue carbs (V1 on this branch)
+-- user_settings: correction target, rescue carbs, and optional grams per unit (V1 on this branch).
+-- grams_per_unit NULL keeps the derived meal ratio 10 * isf / carb_ratio.
 ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,
-    ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15;
+    ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15,
+    ADD COLUMN IF NOT EXISTS grams_per_unit      DOUBLE PRECISION;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_user_settings_grams_per_unit'
+          AND conrelid = 'user_settings'::regclass
+    ) THEN
+        ALTER TABLE user_settings
+            ADD CONSTRAINT chk_user_settings_grams_per_unit
+            CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30));
+    END IF;
+END $$;
 
 -- notes: assistant chat carb band, context tags and originating chat message (V1 on this branch)
 ALTER TABLE notes

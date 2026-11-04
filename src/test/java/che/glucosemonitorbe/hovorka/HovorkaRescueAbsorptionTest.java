@@ -293,7 +293,8 @@ class HovorkaRescueAbsorptionTest {
     }
 
     /**
-     * 60 g mixed meal 30 min ago with GI 55, 25 g protein, 20 g fat; 4 U bolus; basal 8 h ago;
+     * 60 g mixed meal 30 min ago with GI 55, 25 g protein, 20 g fat; 4 U bolus; 21 U basal
+     * (the 70 kg reference, so suppression stays at the full 0.40 plateau) 8 h ago;
      * plus a 40 g GI-65 snack 75 min from now. The past meal drives the warm-up replay; the future
      * snack drives the forward timeline's non-rescue fallback in {@code buildFutureTMaxGTimeline}
      * and the forward integration loop - neither meal carries the RESCUE marker, so this scenario's
@@ -316,7 +317,7 @@ class HovorkaRescueAbsorptionTest {
 
         Note basal = new Note();
         basal.setTimestamp(NOW.minusHours(8));
-        basal.setInsulin(20.0);
+        basal.setInsulin(21.0);
         basal.setType(Note.TYPE_LONG_ACTING);
 
         return service.buildPredictionPath(
