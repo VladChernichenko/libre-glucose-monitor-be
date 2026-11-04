@@ -12,7 +12,7 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.exception.ResourceNotFoundException;
 import che.glucosemonitorbe.mapper.NoteMapper;
 import che.glucosemonitorbe.repository.NoteRepository;
-import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
+import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
@@ -46,7 +46,7 @@ public class NotesService {
 
     private final NoteRepository noteRepository;
     private final NoteMapper noteMapper;
-    private final NutritionEnrichmentService nutritionEnrichmentService;
+    private final FoodCompositionService foodCompositionService;
     private final ObjectMapper objectMapper;
     private final GlucoseAlertService glucoseAlertService;
     private final UserService userService;
@@ -400,7 +400,7 @@ public class NotesService {
 
     private void enrichNutrition(Note note) {
         try {
-            NutritionSnapshot snapshot = nutritionEnrichmentService.enrichFromText(
+            NutritionSnapshot snapshot = foodCompositionService.composeFromText(
                     note.getDetailedInput(),
                     note.getComment(),
                     note.getCarbs()

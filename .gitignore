@@ -167,3 +167,5 @@ Thumbs.db
 
 # claude-flow / ruflo tool state
 .claude-flow/
+
+data/*.sqlite
