@@ -259,6 +259,44 @@ class MealEpisodeSchedulerTest {
     }
 
     @Test
+    @DisplayName("deleting an insulin note drops that dose and leaves the meal carbs")
+    void deletingInsulinDropsItAndLeavesTheCarbs() {
+        Note meal = note(MEAL_AT, 40, 0, "lunch");
+        Note bolus = note(MEAL_AT.minusMinutes(20), 0, 2, "bolus");
+        MealEpisode mealEpisode = new MealEpisode();
+        mealEpisode.setId(UUID.randomUUID());
+        mealEpisode.setNoteId(meal.getId());
+        mealEpisode.setUserId(USER);
+        mealEpisode.setMealAt(MEAL_AT);
+        mealEpisode.setFoodText("lunch");
+        mealEpisode.setCarbs(40);
+        mealEpisode.setDoseUnits(2.0);
+        mealEpisode.setLocalMinuteOfDay(720);
+        mealEpisode.setUpdatedAt(NOW);
+
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(meal));
+        when(episodes.findByUserIdAndMealAtGreaterThanEqual(eq(USER), any())).thenReturn(List.of(mealEpisode));
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER), anyLong(), anyLong()))
+                .thenReturn(flatCgm());
+        when(calculations.activeCobIobInputs(USER, MEAL_AT)).thenReturn(inputs(List.of(carb(meal)), List.of()));
+        when(insulin.calculateTotalActiveInsulin(anyList(), eq(MEAL_AT), anyDouble(), anyDouble()))
+                .thenAnswer(inv -> ((List<InsulinDose>) inv.getArgument(0)).stream()
+                        .mapToDouble(InsulinDose::getUnits).sum());
+        when(cob.calculateTotalCarbsOnBoard(anyList(), eq(MEAL_AT), any(UserSettingsDTO.class)))
+                .thenAnswer(inv -> ((List<CarbsEntry>) inv.getArgument(0)).stream()
+                        .mapToDouble(CarbsEntry::getCarbs).sum());
+
+        scheduler.syncDeletedNote(USER, bolus.getId(), bolus.getTimestamp());
+
+        verify(episodes).deleteByNoteId(bolus.getId());
+        ArgumentCaptor<MealEpisode> saved = ArgumentCaptor.forClass(MealEpisode.class);
+        verify(episodes).save(saved.capture());
+        assertThat(saved.getValue().getCarbs()).isEqualTo(40);
+        assertThat(saved.getValue().getDoseUnits()).isNull();
+        assertThat(saved.getValue().getIob()).isZero();
+    }
+
+    @Test
     @DisplayName("an episode with no later note changes is left alone")
     void unchangedEpisodeNotRebuilt() {
         Note meal = note(MEAL_AT, 40, 4, "lunch");

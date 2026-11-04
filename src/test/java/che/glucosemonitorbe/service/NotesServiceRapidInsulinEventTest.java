@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotTrigger;
+import che.glucosemonitorbe.domain.NoteLogged;
 import che.glucosemonitorbe.domain.RapidInsulinLogged;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.NoteDto;
@@ -76,13 +77,20 @@ class NotesServiceRapidInsulinEventTest {
     }
 
     @Test
-    @DisplayName("long-acting, zero-insulin and meal-only notes publish nothing")
-    void nonRapidPublishesNothing() {
+    @DisplayName("long-acting and meal-only notes are not rapid doses, but they are still told to the chat")
+    void nonRapidIsLoggedInChatButNotARapidDose() {
         service.createNote(USER, note(18.0, 0.0, Note.TYPE_LONG_ACTING, null));
         service.createNote(USER, note(0.0, 45.0, Note.TYPE_NORMAL, null));
 
-        verify(events, never()).publishEvent(any(Object.class));
-        assertEquals(2, mockingDetails(notes).getInvocations().stream()
-                .filter(i -> i.getMethod().getName().equals("save")).count());
+        verify(events, never()).publishEvent(any(RapidInsulinLogged.class));
+        verify(events, times(2)).publishEvent(any(NoteLogged.class));
+    }
+
+    @Test
+    @DisplayName("a note that already belongs to a chat message is not written into the chat again")
+    void chatNoteIsNotLoggedTwice() {
+        service.createNote(USER, note(3.0, 40.0, Note.TYPE_NORMAL, UUID.randomUUID()));
+
+        verify(events, never()).publishEvent(any(NoteLogged.class));
     }
 }

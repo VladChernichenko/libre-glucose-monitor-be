@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.NoteDeleted;
+import che.glucosemonitorbe.domain.NoteLogged;
 import che.glucosemonitorbe.dto.CreateNoteRequest;
 import che.glucosemonitorbe.dto.NoteDto;
 import che.glucosemonitorbe.dto.UpdateNoteRequest;
@@ -24,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -293,6 +295,40 @@ class NotesServiceTest {
         verify(eventPublisher).publishEvent(event.capture());
         assertEquals("Deleted note at 23:10: meal Raffaello, carbs 17.4 g, insulin 1.5 U, text Raffaello 45 g.",
                 event.getValue().text());
+    }
+
+    @Test
+    void createNoteTellsTheChatAboutInsulinAndAboutCarbs() {
+        UUID userId = UUID.randomUUID();
+        when(noteRepository.save(any(Note.class))).thenAnswer(inv -> {
+            Note n = inv.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(noteMapper.toDto(any(Note.class))).thenReturn(new NoteDto());
+
+        notesService.createNote(userId, outsideChat(LocalDateTime.of(2026, 11, 4, 23, 10), 0.0, 2.0, "Pre-bolus"));
+        notesService.createNote(userId, outsideChat(LocalDateTime.of(2026, 11, 4, 23, 12), 40.0, 0.0, "Meal"));
+
+        ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, atLeastOnce()).publishEvent(events.capture());
+        var texts = events.getAllValues().stream()
+                .filter(NoteLogged.class::isInstance)
+                .map(e -> ((NoteLogged) e).text())
+                .toList();
+        assertEquals(List.of(
+                "Logged note at 23:10: meal Pre-bolus, insulin 2 U.",
+                "Logged note at 23:12: meal Meal, carbs 40 g."), texts);
+    }
+
+    private static CreateNoteRequest outsideChat(LocalDateTime at, double carbs, double insulin, String meal) {
+        CreateNoteRequest request = new CreateNoteRequest();
+        request.setTimestamp(at);
+        request.setCarbs(carbs);
+        request.setInsulin(insulin);
+        request.setMeal(meal);
+        request.setNutritionProfile("{}");
+        return request;
     }
 
     // --- absorptionMode field tests (data-flow fix) ---

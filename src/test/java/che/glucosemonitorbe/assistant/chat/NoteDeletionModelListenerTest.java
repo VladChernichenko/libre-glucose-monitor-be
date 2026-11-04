@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import che.glucosemonitorbe.domain.NoteDeleted;
+import che.glucosemonitorbe.domain.NoteLogged;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +39,19 @@ class NoteDeletionModelListenerTest {
         assertEquals(ChatMessage.Role.USER, told.getRole());
         assertEquals(NoteDeletionModelListener.INTENT, told.getIntent());
         assertEquals("Deleted note at 23:10: meal Raffaello, carbs 17.4 g, text Raffaello 45 g.", told.getText());
+    }
+
+    @Test
+    void anInsulinNoteAndACarbNoteAreBothWrittenIntoTheChat() {
+        listener.onNoteLogged(new NoteLogged(user, UUID.randomUUID(), "Logged note at 23:10: insulin 2 U."));
+        listener.onNoteLogged(new NoteLogged(user, UUID.randomUUID(), "Logged note at 23:12: carbs 40 g."));
+
+        var saved = org.mockito.ArgumentCaptor.forClass(ChatMessage.class);
+        verify(messages, org.mockito.Mockito.atLeast(2)).save(saved.capture());
+        var texts = saved.getAllValues().stream().map(ChatMessage::getText).toList();
+        assertEquals(true, texts.contains("Logged note at 23:10: insulin 2 U."));
+        assertEquals(true, texts.contains("Logged note at 23:12: carbs 40 g."));
+        assertEquals(NoteDeletionModelListener.LOGGED_INTENT, saved.getValue().getIntent());
     }
 
     @Test

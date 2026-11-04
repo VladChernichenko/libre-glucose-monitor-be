@@ -27,6 +27,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.ApplicationEventPublisher;
 import che.glucosemonitorbe.domain.NoteDeleted;
+import che.glucosemonitorbe.domain.NoteLogged;
 import che.glucosemonitorbe.domain.RapidInsulinLogged;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -143,6 +144,11 @@ public class NotesService {
         // Stacking guard: a PLANNED meal plan priced before this dose must not be Took (same transaction).
         if (RapidInsulinLogged.isRapidDose(savedNote)) {
             eventPublisher.publishEvent(new RapidInsulinLogged(userId, savedNote.getId(), savedNote.getChatMessageId()));
+        }
+        // A note that already belongs to a chat message is that message. Anything else (Notes tab,
+        // a dose or a meal saved on its own) is written into the chat so insulin and carbs stay in sync.
+        if (savedNote.getChatMessageId() == null) {
+            eventPublisher.publishEvent(new NoteLogged(userId, savedNote.getId(), loggedText(savedNote)));
         }
 
         // Fire over-injection check asynchronously - does not block the response.
@@ -274,7 +280,16 @@ public class NotesService {
      * as gone. Numbers are the note's own; nothing is estimated.
      */
     static String deletionText(Note n) {
-        StringBuilder sb = new StringBuilder("Deleted note");
+        return sentence("Deleted note", n, true);
+    }
+
+    /** The same facts as {@link #deletionText}, for a note that was just saved. */
+    static String loggedText(Note n) {
+        return sentence("Logged note", n, false);
+    }
+
+    private static String sentence(String lead, Note n, boolean removal) {
+        StringBuilder sb = new StringBuilder(lead);
         if (n.getTimestamp() != null) {
             sb.append(" at ").append(n.getTimestamp().format(DateTimeFormatter.ofPattern("HH:mm")));
         }
@@ -297,7 +312,7 @@ public class NotesService {
         String written = ((n.getDetailedInput() == null ? "" : n.getDetailedInput()) + " "
                 + (n.getComment() == null ? "" : n.getComment())).trim();
         if (!written.isBlank()) parts.add("text " + written);
-        if (parts.isEmpty()) return sb.append(" removed.").toString();
+        if (parts.isEmpty()) return removal ? sb.append(" removed.").toString() : sb.append('.').toString();
         return sb.append(": ").append(String.join(", ", parts)).append('.').toString();
     }
 
