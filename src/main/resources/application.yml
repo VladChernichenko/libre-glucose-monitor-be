@@ -51,8 +51,8 @@ spring:
 
 security:
   jwt:
-    # Dev-only fallback (>=64 bytes for HS512). SecretsStartupValidator refuses to boot under the
-    # 'prod' profile with this default - set a strong JWT_SECRET (e.g. `openssl rand -base64 64`).
+    # Dev-only fallback (>=64 bytes for HS512). SecretsStartupValidator refuses to boot under
+    # prod/staging/docker with this default - set a strong JWT_SECRET (e.g. `openssl rand -base64 64`).
     secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-CHANGE-ME-do-not-use-in-production-0123456789}
     access-expiration-ms: 3600000      # 1 hour
     # Long-lived refresh so mobile clients stay signed in across weeks without re-login.

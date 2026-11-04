@@ -120,6 +120,10 @@ src/main/resources/application-secrets.yml
 **/application-secrets.yml
 !**/application-local.yml.example
 
+# Patient PHI exports (CGM / notes dumps). Keep only on a private harness path — never commit.
+/cgm_readings_*.csv
+/notes_*.csv
+
 # Database
 *.db
 *.sqlite

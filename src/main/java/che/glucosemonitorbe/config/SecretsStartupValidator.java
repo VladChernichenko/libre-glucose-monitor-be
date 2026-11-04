@@ -9,14 +9,17 @@ import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Fail-fast guard for insecure secrets (BE-P0 / H1).
  *
- * <p>Under the {@code prod} profile the application refuses to start if the JWT signing secret is
- * missing, too short for HS512, or a known development default - or if the credential-encryption
- * key is still the development fallback. In non-prod profiles these conditions only log warnings so
- * local development keeps working.
+ * <p>Under any deployed-like profile ({@code prod}, {@code staging}, {@code docker}) the
+ * application refuses to start if the JWT signing secret is missing, too short for HS512, or a
+ * known development default — or if the credential-encryption key is still the development
+ * fallback. Local profiles ({@code dev}, {@code local}, {@code test}, or none) only log warnings
+ * so developer machines keep working.
  */
 @Component
 @Slf4j
@@ -24,6 +27,9 @@ public class SecretsStartupValidator {
 
     /** HS512 requires a key of at least 512 bits (64 bytes). */
     private static final int MIN_HS512_KEY_BYTES = 64;
+
+    /** Profiles that must never boot with development secrets. */
+    static final Set<String> STRICT_PROFILES = Set.of("prod", "staging", "docker");
 
     /** Substrings that mark a non-production JWT secret. */
     private static final String[] KNOWN_DEV_SECRET_MARKERS = {
@@ -48,7 +54,7 @@ public class SecretsStartupValidator {
 
     @PostConstruct
     void validate() {
-        boolean prod = Arrays.asList(environment.getActiveProfiles()).contains("prod");
+        boolean strict = isStrictProfile(environment.getActiveProfiles());
 
         int secretBytes = jwtSecret == null ? 0 : jwtSecret.getBytes(StandardCharsets.UTF_8).length;
         boolean blank = jwtSecret == null || jwtSecret.isBlank();
@@ -56,10 +62,10 @@ public class SecretsStartupValidator {
         boolean devDefault = isKnownDevSecret(jwtSecret);
         boolean credentialDevFallback = credentialEncryption.isUsingDevFallback();
 
-        if (prod) {
+        if (strict) {
             if (blank || tooShort || devDefault) {
                 throw new IllegalStateException(
-                        "Refusing to start under the 'prod' profile with an insecure JWT secret. "
+                        "Refusing to start under a deployed profile with an insecure JWT secret. "
                                 + "Set a strong, unique JWT_SECRET of at least " + MIN_HS512_KEY_BYTES
                                 + " bytes (current: " + secretBytes + " bytes"
                                 + (devDefault ? ", matches a known development default" : "") + "). "
@@ -67,10 +73,10 @@ public class SecretsStartupValidator {
             }
             if (credentialDevFallback) {
                 throw new IllegalStateException(
-                        "Refusing to start under the 'prod' profile with the development credential "
+                        "Refusing to start under a deployed profile with the development credential "
                                 + "encryption key. Set app.credentials.encryption-key to a strong secret.");
             }
-            log.info("Secrets validation passed for prod profile (JWT secret {} bytes).", secretBytes);
+            log.info("Secrets validation passed for deployed profile (JWT secret {} bytes).", secretBytes);
             return;
         }
 
@@ -86,11 +92,20 @@ public class SecretsStartupValidator {
         }
     }
 
+    static boolean isStrictProfile(String... activeProfiles) {
+        if (activeProfiles == null || activeProfiles.length == 0) {
+            return false;
+        }
+        return Arrays.stream(activeProfiles)
+                .map(p -> p == null ? "" : p.trim().toLowerCase(Locale.ROOT))
+                .anyMatch(STRICT_PROFILES::contains);
+    }
+
     private static boolean isKnownDevSecret(String secret) {
         if (secret == null) {
             return false;
         }
-        String lower = secret.toLowerCase();
+        String lower = secret.toLowerCase(Locale.ROOT);
         for (String marker : KNOWN_DEV_SECRET_MARKERS) {
             if (lower.contains(marker)) {
                 return true;

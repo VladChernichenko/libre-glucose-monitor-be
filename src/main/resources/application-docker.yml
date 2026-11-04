@@ -17,7 +17,8 @@ spring:
 
 security:
   jwt:
-    secret: ${JWT_SECRET:dev-only-insecure-jwt-secret-CHANGE-ME-do-not-use-in-production-0123456789}
+    # No insecure default: SecretsStartupValidator refuses docker profile without a strong JWT_SECRET.
+    secret: ${JWT_SECRET:}
     access-expiration-ms: 3600000      # 1 hour
     refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:31536000000}    # default 365 days
 
