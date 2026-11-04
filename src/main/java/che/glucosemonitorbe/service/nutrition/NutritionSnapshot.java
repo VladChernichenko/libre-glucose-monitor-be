@@ -24,6 +24,8 @@ public class NutritionSnapshot {
     private Double fat;
     private Double estimatedGi;
     private Double glycemicLoad;
+    /** True when the portion weight was a typical serving or a photo estimate, not a stated weight. */
+    private Boolean massEstimated;
     private String absorptionSpeedClass; // FAST | MEDIUM | SLOW | DEFAULT
     // Empirical-twin flags; null = neutral (ordinary meal curve, no slow split)
     private Boolean fattyMeal;

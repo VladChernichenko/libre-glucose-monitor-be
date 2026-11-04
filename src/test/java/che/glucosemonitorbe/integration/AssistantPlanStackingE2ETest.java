@@ -12,7 +12,7 @@ import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.service.UserSettingsService;
-import che.glucosemonitorbe.service.nutrition.ARNutritionService;
+import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -64,7 +64,7 @@ class AssistantPlanStackingE2ETest {
             .withDatabaseName("testdb").withUsername("test").withPassword("test");
 
     @MockitoBean private LlmGatewayService llm;
-    @MockitoBean private ARNutritionService arNutrition;
+    @MockitoBean private FoodCompositionService composition;
 
     @Autowired private TestRestTemplate rest;
     @Autowired private UserRepository userRepository;
@@ -113,7 +113,7 @@ class AssistantPlanStackingE2ETest {
             c.accept("ok");
             return LlmGatewayService.GatewayResult.builder().modelId("test-model").rawOutput("x").build();
         });
-        when(arNutrition.analyze(any(ARNutritionRequest.class))).thenReturn(NutritionSnapshot.builder()
+        when(composition.compose(any())).thenReturn(NutritionSnapshot.builder()
                 .source("AR_OFF").confidence(0.75).totalCarbs(45.0).fat(8.0).protein(20.0).fiber(4.0)
                 .estimatedGi(50.0).patternName("Slow Climb").build());
     }

@@ -11,7 +11,7 @@ import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.NotesService;
 import che.glucosemonitorbe.service.UserService;
 import che.glucosemonitorbe.service.UserSettingsService;
-import che.glucosemonitorbe.service.nutrition.NutritionEnrichmentService;
+import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
 import che.glucosemonitorbe.service.observer.GlucoseAlertService;
 import che.glucosemonitorbe.storage.NotePhotoStorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -216,7 +216,7 @@ class ForecastSnapshotServiceTest {
             return n;
         });
         when(mapper.toDto(any(Note.class))).thenReturn(new NoteDto());
-        NotesService notesService = new NotesService(notes, mapper, mock(NutritionEnrichmentService.class),
+        NotesService notesService = new NotesService(notes, mapper, mock(FoodCompositionService.class),
                 new ObjectMapper(), mock(GlucoseAlertService.class), mock(UserService.class),
                 mock(NotePhotoStorageService.class), trigger,
                 mock(org.springframework.context.ApplicationEventPublisher.class));
