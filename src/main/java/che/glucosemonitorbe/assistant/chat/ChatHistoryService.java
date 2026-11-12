@@ -33,7 +33,7 @@ public class ChatHistoryService {
     /** A page of the user's history strictly older than {@code before} (default: now), newest first. */
     public List<ChatMessageDTO> history(UUID userId, Instant before, Integer limit) {
         Instant cursor = before != null ? before : Instant.now().plus(DEFAULT_CURSOR_SLACK);
-        int size = limit == null ? DEFAULT_PAGE : Math.max(1, Math.min(MAX_PAGE, limit));
+        int size = limit == null ? DEFAULT_PAGE : Math.clamp(limit, 1, MAX_PAGE);
         return repository.findByUserIdAndCreatedAtBeforeOrderByCreatedAtDesc(userId, cursor, PageRequest.of(0, size))
                 .stream().map(this::toDto).toList();
     }

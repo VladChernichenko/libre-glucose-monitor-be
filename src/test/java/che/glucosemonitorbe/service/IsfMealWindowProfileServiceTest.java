@@ -287,6 +287,40 @@ class IsfMealWindowProfileServiceTest {
         assertThat(saved.getRawSampleCount()).isEqualTo(1); // only the second bolus
     }
 
+    @Test
+    @DisplayName("Insulin on board from an earlier bolus is counted in the units that caused the drop")
+    void earlierBolus_iobIsNotCreditedToTheLaterOne() {
+        // 4 U at 07:00, then a 1 U correction at 07:30. Glucose falls 6 mmol/L over the correction's
+        // window. Crediting that to 1 U alone reads as ISF 6.0; nearly all of the 4 U was still on
+        // board at 07:30 and did most of the work.
+        LocalDateTime t = today(7, 0);
+        Note first = bolus(t, 4.0);
+        Note correction = bolus(t.plusMinutes(30), 1.0);
+        LocalDateTime end = t.plusMinutes(30).plusMinutes((long) (RAPID.diaHours() * 60));
+        List<CgmReading> cgm = List.of(cgmReading(t.plusMinutes(30), 9.0), cgmReading(end, 3.0));
+
+        IsfMealWindowProfileService.EventEstimate est = service.estimateForBolus(
+                correction, List.of(first, correction), cgm, RAPID, USER_SETTINGS, 12.5, ZoneOffset.UTC);
+
+        assertThat(est).isNotNull();
+        assertThat(est.isf).isBetween(1.2, 1.5);   // 6 mmol/L over ~1 U + ~3.6 U still on board
+    }
+
+    @Test
+    @DisplayName("A bolus that matched its meal gives no estimate: the net insulin is too small to divide by")
+    void matchedMealBolus_dropped() {
+        // 40 g at 12.5 g/U is 3.2 U of carbs against a 3.0 U bolus: 0.2 U net. A 0.5 mmol/L wobble
+        // would read as an ISF of 2.5 with nothing behind it.
+        LocalDateTime t = today(13, 0);
+        Note meal = bolusWithCarbs(t, 3.0, 40.0);
+        List<CgmReading> cgm = List.of(
+                cgmReading(t, 7.0),
+                cgmReading(t.plusMinutes((long) (RAPID.diaHours() * 60)), 6.5));
+
+        assertThat(service.estimateForBolus(
+                meal, List.of(meal), cgm, RAPID, USER_SETTINGS, 12.5, ZoneOffset.UTC)).isNull();
+    }
+
     // -- Missing CGM -----------------------------------------------------------
 
     @Test

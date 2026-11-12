@@ -196,6 +196,10 @@ class EmpiricalEnginePredictionE2ETest {
     @DisplayName("insulin only - 2 U correction -> steady fall of about ISF x dose")
     void insulinOnly_falls() throws Exception {
         double current = 10.0;
+        // The engine reads the user's own ISF, so the expected fall is stated against it.
+        ResponseEntity<String> isf = rest.exchange("/api/user-settings", HttpMethod.PUT,
+                new HttpEntity<>(Map.of("isf", 1.5), authHeaders), String.class);
+        assertEquals(HttpStatus.OK, isf.getStatusCode());
         postNote(0.0, 2.0, "Correction", null, 5);
 
         JsonNode path = calculate(current).path("predictionPath");
@@ -207,7 +211,7 @@ class EmpiricalEnginePredictionE2ETest {
                     "Glucose must never rise on insulin alone - index " + i + ": " + previous + " -> " + g);
             previous = g;
         }
-        // 2 U x 27 mg/dL per U = 54 mg/dL = 3.0 mmol/L; nearly all of it lands within the 4 h path.
+        // 2 U x 1.5 mmol/L per U = 3.0 mmol/L; nearly all of it lands within the 4 h path.
         double drop = current - glucoseAt(path, 240);
         assertTrue(drop > 2.6 && drop <= 3.05,
                 "2 U should lower glucose by close to 3.0 mmol/L over 4 h - got: " + drop);

@@ -32,8 +32,10 @@ import java.util.*;
  *   <li>Define the analysis window {@code [t_B, t_B + DIA]} (user's rapid-acting DIA, typ. 4.5 h).</li>
  *   <li>Read CGM at t_B (baseline) and at t_B + DIA (post). Skip if either is missing.</li>
  *   <li>Estimate ISF from the observed change and the insulin-to-carb ratio (grams per unit):
- *       {@code ISF = observedDelta / (absorbedGrams / ICR - units)} when the denominator is not zero.
- *       A missing ICR produces no estimate.</li>
+ *       {@code ISF = observedDelta / (absorbedGrams / ICR - units)}, where {@code units} includes the
+ *       insulin still on board from earlier boluses and {@code absorbedGrams} the carbs still on
+ *       board from earlier meals. No estimate when the denominator is under
+ *       {@link #MIN_NET_UNITS} or the ICR is missing.</li>
  *   <li>Weight: 1.0 if no carbs nearby (correction bolus), else 0.4 (deconvolved meal bolus).</li>
  *   <li>Bucket by {@link MealWindow#fromTimestamp(LocalDateTime)} (full 24h: B/L/D/NIGHT).</li>
  * </ol>
@@ -68,6 +70,17 @@ public class IsfMealWindowProfileService {
 
     /** CGM lookup tolerance (minutes) - pick the nearest CGM reading within this window. */
     private static final int CGM_LOOKUP_WINDOW_MIN = 15;
+
+    /**
+     * Smallest net insulin [U] an estimate may divide by. {@code ISF = Δ / (absorbed/ICR − units)},
+     * so when a bolus matched its meal the denominator is near zero and ordinary CGM noise becomes
+     * an ISF of any size and either sign. Half a unit keeps a 0.5 mmol/L reading error under
+     * 1 mmol/L per unit of ISF error.
+     */
+    public static final double MIN_NET_UNITS = 0.5;
+
+    /** How far back earlier meals are searched for carbs still on board at the bolus [hours]. */
+    private static final int PRIOR_CARB_LOOKBACK_HOURS = 8;
 
     /** Same envelope as {@link InsulinCalculatorService}: an ICR outside it is not an estimate. */
     private static final double MIN_GRAMS_PER_UNIT = 3.0;
@@ -222,10 +235,28 @@ public class IsfMealWindowProfileService {
             }
         }
 
-        // Carbs in [-30 min, +DIA] are considered part of this event's nutrient envelope.
+        // Insulin still on board from earlier rapid boluses acts inside this window as well - all of
+        // it, since a dose given before t0 is spent before t0 + DIA. Leaving it out credits its
+        // whole effect to this bolus: 4 U at 12:00 and a 1 U correction at 12:30 would read as an
+        // ISF five times too large.
+        double priorIob = 0.0;
+        for (Note other : allNotes) {
+            if (other == bolus || other.isLongActing()) continue;
+            if (other.getInsulin() == null || other.getInsulin() <= 0) continue;
+            if (other.getTimestamp() == null || other.getTimestamp().isAfter(t0)) continue;
+            double minsAgo = java.time.Duration.between(other.getTimestamp(), t0).toMinutes();
+            priorIob += InsulinCalculatorService.iobOpenApsExponential(
+                    other.getInsulin(), minsAgo, rapid.diaHours(), rapid.peakMinutes());
+        }
+
+        // Carbs in [-30 min, +DIA] are considered part of this event's nutrient envelope. Earlier
+        // meals count only for what they still have on board at t0: that share is absorbed inside
+        // the window too, and what was absorbed before it is already in the baseline reading.
         LocalDateTime carbWindowStart = t0.minusMinutes(30);
+        LocalDateTime priorCarbStart = t0.minusHours(PRIOR_CARB_LOOKBACK_HOURS);
         double carbsGrams = 0.0;
         List<che.glucosemonitorbe.domain.CarbsEntry> carbEntries = new ArrayList<>();
+        List<che.glucosemonitorbe.domain.CarbsEntry> priorCarbEntries = new ArrayList<>();
         for (Note n : allNotes) {
             // A rescue carb is a hypo treatment, not part of this bolus's nutrient envelope.
             // Counting it would push carbsGrams past CARB_THRESHOLD_GRAMS - reclassifying a
@@ -233,24 +264,30 @@ public class IsfMealWindowProfileService {
             if (n.isHypoTreatment()) continue;
             if (n.getCarbs() == null || n.getCarbs() <= 0) continue;
             if (n.getTimestamp() == null) continue;
-            if (n.getTimestamp().isBefore(carbWindowStart)) continue;
             if (n.getTimestamp().isAfter(tEnd)) continue;
+            if (n.getTimestamp().isBefore(carbWindowStart)) {
+                if (!n.getTimestamp().isBefore(priorCarbStart)) priorCarbEntries.add(buildCarbsEntry(n));
+                continue;
+            }
             carbsGrams += n.getCarbs();
             carbEntries.add(buildCarbsEntry(n));
         }
+        double priorCobAtStart = priorCarbEntries.isEmpty() ? 0.0
+                : carbsOnBoardService.calculateTotalCarbsOnBoard(priorCarbEntries, t0, userSettings);
+        carbEntries.addAll(priorCarbEntries);
 
         // Carbs that remained un-absorbed at tEnd don't contribute to the observed Δglucose.
         double cobAtEnd = carbsOnBoardService.calculateTotalCarbsOnBoard(carbEntries, tEnd, userSettings);
-        double absorbedGrams = Math.max(0.0, carbsGrams - cobAtEnd);
+        double absorbedGrams = Math.max(0.0, carbsGrams + priorCobAtStart - cobAtEnd);
         if (gramsPerUnit == null || !Double.isFinite(gramsPerUnit)
                 || gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
             return null;
         }
 
-        double units = bolus.getInsulin();
+        double units = bolus.getInsulin() + priorIob;
         double observedDelta = postCgm - preCgm; // mmol/L change from t0 to tEnd
         double denominator = absorbedGrams / gramsPerUnit - units;
-        if (Math.abs(denominator) < 1e-9) {
+        if (Math.abs(denominator) < MIN_NET_UNITS) {
             return null;
         }
         double isf = observedDelta / denominator;
@@ -258,7 +295,7 @@ public class IsfMealWindowProfileService {
         if (Double.isNaN(isf) || Double.isInfinite(isf)) return null;
         if (isf < MIN_PLAUSIBLE_ISF || isf > MAX_PLAUSIBLE_ISF) return null;
 
-        double weight = (carbsGrams < CARB_THRESHOLD_GRAMS) ? WEIGHT_CORRECTION : WEIGHT_MEAL;
+        double weight = (carbsGrams + priorCobAtStart < CARB_THRESHOLD_GRAMS) ? WEIGHT_CORRECTION : WEIGHT_MEAL;
         MealWindow window = MealWindow.fromTimestamp(t0).orElse(null);
         if (window == null) return null;
 

@@ -6,7 +6,8 @@ package che.glucosemonitorbe.empirical;
  * also records the provenance and evidence behind each value.
  *
  * <p>These were tuned by hand on ~5 days of one person's data: a starting point, not population
- * values.</p>
+ * values. A live forecast must use {@link #forUser}, which takes the dosing parameters from the
+ * user's settings.</p>
  *
  * @param isf          insulin sensitivity [mg/dL per U]
  * @param crAM         carb ratio for meals logged 05:00-11:00 local [g per U]
@@ -61,5 +62,42 @@ public record EmpiricalTwinParams(
                 90, 0.3,
                 1, 20, 1, 3,
                 40, 0);
+    }
+
+    /**
+     * {@link #defaults()} with the dosing parameters replaced by the user's own: ISF, carb ratio and
+     * the action profile of their rapid insulin. The defaults for those were one person's values,
+     * and a forecast drawn with them for anyone else is off by the ratio of the two sensitivities.
+     *
+     * <p>A missing or implausible input keeps the default for that parameter. One carb ratio is
+     * used for the whole day - settings carry no morning ratio - and the fast-sugar rise follows
+     * from the other two as {@code isf / carbRatio}. The shape parameters (absorption times, GI
+     * exponents, walk and alcohol effects) are not personal settings and stay at their defaults.</p>
+     *
+     * @param isfMmolPerUnit ISF [mmol/L per U], or null
+     * @param gramsPerUnit   carb ratio [g per U], or null
+     * @param diaHours       rapid-insulin duration of action [h]
+     * @param peakMinutes    rapid-insulin activity peak [min]
+     */
+    public static EmpiricalTwinParams forUser(Double isfMmolPerUnit, Double gramsPerUnit,
+                                              double diaHours, double peakMinutes) {
+        EmpiricalTwinParams d = defaults();
+        boolean hasIsf = isfMmolPerUnit != null && Double.isFinite(isfMmolPerUnit) && isfMmolPerUnit > 0;
+        boolean hasCr  = gramsPerUnit != null && Double.isFinite(gramsPerUnit)
+                && gramsPerUnit >= 3.0 && gramsPerUnit <= 30.0;
+        double isf  = hasIsf ? isfMmolPerUnit * EmpiricalTwinEngine.MGDL_PER_MMOL : d.isf();
+        double crAM = hasCr ? gramsPerUnit : d.crAM();
+        double crDay = hasCr ? gramsPerUnit : d.crDay();
+        double csf  = hasIsf || hasCr ? isf / crDay : d.csf();
+        double dia  = Double.isFinite(diaHours) && diaHours > 0 ? diaHours * 60.0 : d.dia();
+        double peak = Double.isFinite(peakMinutes) && peakMinutes > 0 ? peakMinutes : d.peak();
+        return new EmpiricalTwinParams(
+                isf, crAM, crDay, csf,
+                dia, peak,
+                d.kMeal(), d.kFast(), d.kFruit(),
+                d.giPow(), d.giMag(), d.oneU(),
+                d.kSlow(), d.fatSlow(),
+                d.walkBoost(), d.walkDrop(), d.walkDropTail(), d.walkTail(),
+                d.alcDrop(), d.drift());
     }
 }

@@ -22,9 +22,9 @@ import java.util.function.Predicate;
  * (forgotten / mis-timed meals and boluses), a plain squared loss would chase those outliers, so the
  * fit is wrapped in <b>IRLS</b> (iteratively reweighted least squares) with <b>Huber</b> weights: large
  * residuals are down-weighted between LM passes, giving LM the outlier robustness a raw least-squares
- * fit lacks. Regularisation toward physiology is folded in as Tikhonov <b>ridge-to-1.0</b> residual
- * rows (each scale is pulled toward the neutral 1.0), and physiological <b>hard clamps</b> keep every
- * parameter in {@code [MIN_SCALE, MAX_SCALE]}.</p>
+ * fit lacks. Regularisation toward physiology is a Gaussian <b>prior centred on 1.0</b> for each scale,
+ * folded in as one extra residual row per parameter (see {@link Config#priorSd}), and physiological
+ * <b>hard clamps</b> keep every parameter in {@code [MIN_SCALE, MAX_SCALE]}.</p>
  *
  * <h3>Two-stage fit</h3>
  * <ol>
@@ -48,8 +48,23 @@ public final class DigitalTwinCalibrator {
 
     /** Tunables for the fit. */
     public static final class Config {
-        /** Ridge strength pulling scales toward 1.0. Higher = more conservative personalisation. */
-        public double ridgeLambda = 0.05;
+        /**
+         * Standard deviation of the prior on each scale, centred on 1.0. Smaller = more conservative
+         * personalisation.
+         *
+         * <p>The prior enters the least-squares problem as the row {@code (σ_r / priorSd) × (scale − 1)},
+         * where σ_r is the robust spread of the residuals. That is the MAP form of a Gaussian prior
+         * against Gaussian errors of spread σ_r, so its weight does not depend on the unit of the
+         * residuals and does not vanish as samples accumulate the way a fixed constant does. 0.3
+         * says a scale outside roughly 0.4-1.6 would be surprising, which is the clamp band.</p>
+         */
+        public double priorSd = 0.3;
+        /**
+         * Samples that share an anchor are one trajectory read at several horizons, not independent
+         * observations. The prior row is multiplied by the square root of this so a sample counts
+         * for one anchor's worth of evidence. Matches the default number of sampled horizons.
+         */
+        public int    samplesPerAnchor = PredictionUncertaintyModel.HORIZONS.length;
         /** Minimum training anchors before we attempt a fit at all. */
         public int    minTrainAnchors = 12;
         /** Minimum validation samples before an improvement is trusted. */
@@ -259,9 +274,10 @@ public final class DigitalTwinCalibrator {
             List<AnchorSample> sel = select(replay.apply(p), filter);
             if (sel.isEmpty()) return p;
 
-            final double[] weights = huberWeights(sel);
+            final double sigma = robustScale(errors(sel));
+            final double[] weights = huberWeights(sel, sigma);
             final int m = sel.size();
-            final double ridge = Math.sqrt(cfg.ridgeLambda);
+            final double ridge = priorRowWeight(sigma);
 
             LmParameterFitter.ResidualModel model = params -> {
                 List<AnchorSample> s = select(replay.apply(params), filter);
@@ -271,7 +287,7 @@ public final class DigitalTwinCalibrator {
                     r[i] = Math.sqrt(weights[i]) * s.get(i).error();
                 }
                 for (int j = 0; j < params.length; j++) {
-                    r[rows + j] = ridge * (params[j] - 1.0);   // Tikhonov pull toward physiology
+                    r[rows + j] = ridge * (params[j] - 1.0);   // prior pull toward physiology
                 }
                 return r;
             };
@@ -284,11 +300,21 @@ public final class DigitalTwinCalibrator {
         return p;
     }
 
-    /** Huber weights from the samples' residuals, scaled by a robust (MAD) spread estimate. */
-    private double[] huberWeights(List<AnchorSample> samples) {
+    /** Weight of the prior row for a residual spread {@code sigma} - see {@link Config#priorSd}. */
+    double priorRowWeight(double sigma) {
+        if (cfg.priorSd <= 0) return 0.0;   // prior switched off
+        return sigma / cfg.priorSd * Math.sqrt(Math.max(1, cfg.samplesPerAnchor));
+    }
+
+    private static double[] errors(List<AnchorSample> samples) {
         double[] resid = new double[samples.size()];
         for (int i = 0; i < resid.length; i++) resid[i] = samples.get(i).error();
-        double sigma = robustScale(resid);
+        return resid;
+    }
+
+    /** Huber weights from the samples' residuals, scaled by a robust (MAD) spread {@code sigma}. */
+    private double[] huberWeights(List<AnchorSample> samples, double sigma) {
+        double[] resid = errors(samples);
         double[] w = new double[resid.length];
         for (int i = 0; i < resid.length; i++) {
             double z = Math.abs(resid[i]) / sigma;

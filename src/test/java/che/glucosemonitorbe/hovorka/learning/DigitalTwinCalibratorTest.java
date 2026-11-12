@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.assertj.core.data.Offset.offset;
 
 /**
@@ -63,6 +64,20 @@ class DigitalTwinCalibratorTest {
 
         assertThat(r.improved()).isFalse();
         assertThat(r.status()).contains("no improvement");
+    }
+
+    @Test
+    void thePriorWeighsTheSameHoweverManySamplesThereAre() {
+        // The prior row is (σ_r / priorSd) × √samplesPerAnchor × (scale − 1): it follows the
+        // residual spread, so it is in the residuals' own units, and it is not a fixed constant
+        // that hundreds of error rows drown out.
+        DigitalTwinCalibrator calibrator = new DigitalTwinCalibrator();
+        assertThat(calibrator.priorRowWeight(2.0)).isCloseTo(2.0 / 0.3 * 2.0, within(1e-9));
+        assertThat(calibrator.priorRowWeight(1.0)).isCloseTo(1.0 / 0.3 * 2.0, within(1e-9));
+
+        DigitalTwinCalibrator.Config off = new DigitalTwinCalibrator.Config();
+        off.priorSd = 0.0;
+        assertThat(new DigitalTwinCalibrator(off).priorRowWeight(2.0)).isZero();
     }
 
     @Test
