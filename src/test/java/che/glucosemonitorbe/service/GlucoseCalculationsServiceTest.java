@@ -548,7 +548,7 @@ class GlucoseCalculationsServiceTest {
                     .build());
         }
         when(hovorkaService.buildPredictionPath(
-                anyDouble(), any(LocalDateTime.class), anyList(), anyList(), anyList(),
+                anyDouble(), anyDouble(), any(LocalDateTime.class), anyList(), anyList(), anyList(),
                 any(UUID.class), anyInt(), any(ActivityProvider.class)))
                 .thenReturn(path);
 
@@ -638,7 +638,7 @@ class GlucoseCalculationsServiceTest {
                     .build());
         }
         when(hovorkaService.buildPredictionPath(
-                anyDouble(), any(LocalDateTime.class), anyList(), anyList(), anyList(),
+                anyDouble(), anyDouble(), any(LocalDateTime.class), anyList(), anyList(), anyList(),
                 any(UUID.class), anyInt(), any(ActivityProvider.class)))
                 .thenReturn(fallingPath);
 

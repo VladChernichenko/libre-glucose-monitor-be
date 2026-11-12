@@ -291,9 +291,8 @@ class HovorkaOdeSolverTest {
 
     @Test
     void glp1Inhibition_highInc_kemptNeverReachesZero() {
-        // With old linear formula and PHI_GLP1=0.5, inc=2.0 would give 1-0.5*2=0 -> floor at 0.20
-        // New saturating formula: 1/(1+2.0*2.0) = 0.20 naturally, no clamp needed
-        // At inc=10: 1/(1+20) = 0.048 — strictly positive
+        // Saturating form 1/(1 + KAPPA_GLP1 × inc) with KAPPA_GLP1 = 1.0: at inc = 10 it is
+        // 1/11 ≈ 0.091, strictly positive. (inc cannot exceed 1 in a real run; 10 is a stress value.)
         HovorkaState state = HovorkaState.steadyState(6.0, params);
         double mealMmol = 100.0;  // full stomach reference
         // Manually construct a state with high inc, Qsto1 empty, Qsto2 full (mid-emptying)
@@ -304,9 +303,8 @@ class HovorkaOdeSolverTest {
         HovorkaState next = solver.step(highInc, params, 0.0, 0.0);
         // Qsto2 should drain (kemptEff > 0 always), not be frozen at the clamp floor
         assertThat(next.qsto2()).isLessThan(50.0);
-        // With qsto=50 (half-full), kempt is reduced toward K_MIN; with phi ≈ 0.048
+        // With qsto=50 (half-full), kempt is reduced toward K_MIN; with phi ≈ 0.091
         // drain should be noticeable but not huge
-        // Old form would have drained more (0.20 floor). New form is more gentle (~0.048).
         assertThat(50.0 - next.qsto2()).isLessThan(5.0);  // new form drains <5 mmol/min at high inc
     }
 
@@ -315,15 +313,14 @@ class HovorkaOdeSolverTest {
         // When inc=0, phi=1/(1+0)=1.0 -> kemptEff = kempt (no change)
         HovorkaState state = HovorkaState.steadyState(6.0, params);
         double mealMmol = 100.0;  // full stomach reference
-        // Isolate Qsto2 draining: Qsto1 empty, Qsto2 at half-full (50 mmol)
-        // At qsto=50 with mealMmol=100, kempt is reduced toward K_MIN
+        // Isolate Qsto2 draining: Qsto1 empty, Qsto2 full (100 mmol)
+        // At qsto=100 with mealMmol=100, kempt is near K_MAX
         HovorkaState withStomach = new HovorkaState(
                 state.q1(), state.q2(), 0.0, 100.0, 0.0, 0.0, 0.0, mealMmol, 70);
         HovorkaState next = solver.step(withStomach, params, 0.0, 0.0);
-        // With qsto=100 (full), kempt ≈ K_MAX * giScale; phi=1.0, activeGI=70 -> giScale=0.70
-        // drain = 100 * 0.0558 * 0.70 ≈ 3.906 mmol/min
-        double giScale = 70.0 / 100.0;  // default activeGI = 70
-        assertThat(100.0 - next.qsto2()).isCloseTo(100.0 * DallaManGutModel.K_MAX * giScale, within(0.5));
+        // qsto = 100 (full) -> kempt ≈ K_MAX × giScale; inc = 0 -> brake 1; activeGI = 70 -> giScale 1
+        assertThat(100.0 - next.qsto2())
+                .isCloseTo(100.0 * DallaManGutModel.K_MAX * HovorkaOdeSolver.giScale(70), within(0.5));
     }
 
     // ---
@@ -332,7 +329,7 @@ class HovorkaOdeSolverTest {
 
     @Test
     void incGlp1_risesDuringMealAbsorption_peaksAboveBaseline() {
-        // dInc/dt = K_INC_PF*ProtFatGut − K_DEL*Inc; ProtFatGut drains at K_PF_DRAIN.
+        // dInc/dt = K_INC_PF*ProtFatGut/(ProtFatGut+K_M_PF) − K_DEL*Inc; ProtFatGut drains at K_PF_DRAIN.
         // Inc is now driven by protein+fat gut transit (NOT carb Ra — Gap 4 fix).
         // Inject 400 kcal protein+fat alongside the carb meal; Inc must peak above baseline.
         HovorkaState state = HovorkaState.steadyState(5.5, params);
@@ -445,6 +442,17 @@ class HovorkaOdeSolverTest {
         assertThat(s60.inc()).isLessThan(0.001);
     }
 
+    @Test
+    void brakeKcal_countsOnlyProteinAndFatBeyondTheReferenceMeal() {
+        double ref = HovorkaOdeSolver.REFERENCE_PF_KCAL_PER_CARB_G;
+        assertThat(ref).isCloseTo(4.0 * 55.0 / 45.0, within(1e-12));
+        assertThat(HovorkaOdeSolver.brakeKcal(80, 30, 30)).isEqualTo(0.0);
+        assertThat(HovorkaOdeSolver.brakeKcal(60, 30, 30)).isCloseTo(390.0 - 60.0 * ref, within(1e-9));
+        assertThat(HovorkaOdeSolver.brakeKcal(0, 10, 20)).isEqualTo(220.0);
+        assertThat(HovorkaOdeSolver.brakeKcal(50, 0, 0)).isEqualTo(0.0);
+        assertThat(HovorkaOdeSolver.brakeKcal(-5, -1, 10)).isEqualTo(90.0);
+    }
+
     // ---
     // Test 15 (renumbered): GI scaling - low GI absorbs slower than high GI
     // ---
@@ -468,6 +476,16 @@ class HovorkaOdeSolverTest {
         assertThat(stateHi.qsto1()).isLessThan(stateLo.qsto1());
         // High GI raises blood glucose faster (more Ra delivered)
         assertThat(stateHi.q1()).isGreaterThan(stateLo.q1());
+    }
+
+    @Test
+    void giScale_isOneAtTheDefaultGi_andClamped() {
+        assertThat(HovorkaOdeSolver.DEFAULT_GI).isEqualTo(70);
+        assertThat(HovorkaOdeSolver.giScale(70)).isEqualTo(1.0);
+        assertThat(HovorkaOdeSolver.giScale(55)).isCloseTo(55.0 / 70.0, within(1e-12));
+        assertThat(HovorkaOdeSolver.giScale(100)).isCloseTo(100.0 / 70.0, within(1e-12));
+        assertThat(HovorkaOdeSolver.giScale(10)).isEqualTo(0.3);
+        assertThat(HovorkaOdeSolver.giScale(150)).isEqualTo(1.5);
     }
 
     // -- Helper: OpenAPS IOB (same formula as InsulinCalculatorService) --------

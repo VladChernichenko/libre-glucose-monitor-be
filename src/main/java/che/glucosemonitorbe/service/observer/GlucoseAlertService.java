@@ -65,7 +65,8 @@ public class GlucoseAlertService {
 
         try {
             LocalDateTime now = LocalDateTime.now();
-            GlucoseCalculationsResponse calc = runCalculations(username, currentGlucose, now);
+            // Explicit 0: this glucose is the note's own, not the stored reading the stored CGM trend belongs to.
+            GlucoseCalculationsResponse calc = runCalculations(username, currentGlucose, 0.0, now);
             if (calc == null) return;
 
             Optional<GlucoseAlert> alert =
@@ -96,7 +97,8 @@ public class GlucoseAlertService {
 
         try {
             LocalDateTime now = LocalDateTime.now();
-            GlucoseCalculationsResponse calc = runCalculations(username, currentGlucose, now);
+            // No trend: this glucose is the latest stored reading, so the server applies the stored one.
+            GlucoseCalculationsResponse calc = runCalculations(username, currentGlucose, null, now);
             if (calc == null) return;
 
             List<GlucoseAlert> alerts =
@@ -150,11 +152,13 @@ public class GlucoseAlertService {
 
     // -- Calculation helper ----------------------------------------------------
 
+    /** @param trendMmolPerMin the CGM trend to send with {@code currentGlucose}; null sends none */
     private GlucoseCalculationsResponse runCalculations(
-            String username, double currentGlucose, LocalDateTime now) {
+            String username, double currentGlucose, Double trendMmolPerMin, LocalDateTime now) {
         try {
             GlucoseCalculationsRequest req = GlucoseCalculationsRequest.builder()
                     .currentGlucose(currentGlucose)
+                    .currentTrendMmolPerMin(trendMmolPerMin)
                     .userId(username)
                     .includePredictionFactors(true)
                     .clientTimeInfo(ClientTimeInfo.builder()

@@ -58,10 +58,13 @@ public final class BacktestHarness {
         public int    strideMin      = 5;      // anchor cadence
         public long   alignToleranceMs = 150_000;   // ±2.5 min
         public double inBandMmol     = 2.0;    // headline tolerance band
-        /** Apply per-meal macro-modulated tMaxG (mirrors GlucosePredictService). */
-        public boolean macroTMaxG    = true;
-        /** Add FPU-equivalent slow-carb entries from protein/fat (mirrors GlucosePredictService). */
+        /**
+         * Add the harness's own FPU-equivalent slow-carb entries from protein and fat. Not the live
+         * model: {@code ProteinGluconeogenesis} converts protein only, 120 min after the meal.
+         */
         public boolean fpuEquiv      = true;
+        /** Start each anchor from the CGM trend as well as the reading (as the dashboard does). */
+        public boolean anchorTrend   = !"false".equalsIgnoreCase(System.getenv("BACKTEST_ANCHOR_TREND"));
         /**
          * EGP scale >= 1.0: target egpNet = egpScale × f01 at fasting. Realized via a synthetic
          * long-acting note positioned on the basal-suppression curve (only when no REAL basal is
@@ -73,7 +76,7 @@ public final class BacktestHarness {
         public int[]  reportHorizons = {30, 60, 120, 180, 240};
     }
 
-    // -- FPU constants (mirror GlucosePredictService) ---------------------------
+    // -- FPU constants (from the deleted GlucosePredictService; the live values are in ProteinGluconeogenesis) --
     private static final int    FPU_ONSET_MIN    = 90;
     private static final double FPU_CARB_EQUIV_G = 10.0;
     private static final double FPU_MIN_EQUIV_G  = 2.0;
@@ -229,9 +232,6 @@ public final class BacktestHarness {
             List<InsulinDose> insulinDoses = new ArrayList<>();
             List<Note>        longActing   = new ArrayList<>();
             boolean carbActive = false, insulinActive = false;
-            // Dominant active meal (max carbs in [t0-3h, t0+horizon]) drives the macro tMaxG,
-            // mirroring how GlucosePredictService sets tMaxG from the prospective meal's macros.
-            double domCarbs = 0, domProtein = 0, domFat = 0, domFiber = 0, domCarbAmt = -1;
 
             for (NoteRow n : notes) {
                 long age = t0 - n.epochMs();
@@ -264,15 +264,11 @@ public final class BacktestHarness {
                     }
                 }
 
-                // Bucket + dominant-meal tracking over the active window [t0-3h, t0+horizon].
+                // Bucket tracking over the active window [t0-3h, t0+horizon].
                 boolean active = age <= 3 * 3600_000L && -age <= horizonMs;
                 if (active) {
                     if (n.carbs() > 0 || n.protein() > 0 || n.fat() > 0) carbActive = true;
                     if (n.insulin() > 0) insulinActive = true;
-                    if (n.carbs() > domCarbAmt) {
-                        domCarbAmt = n.carbs();
-                        domCarbs = n.carbs(); domProtein = n.protein(); domFat = n.fat(); domFiber = n.fiber();
-                    }
                 }
             }
             Bucket bucket = carbActive ? Bucket.MEAL : (insulinActive ? Bucket.CORRECTION : Bucket.FASTING);
@@ -283,20 +279,16 @@ public final class BacktestHarness {
                 longActing.add(syntheticBasal(t0, cfg.egpScale));
             }
 
-            // Per-anchor params: macro-modulated tMaxG from the dominant meal (else base tMaxG).
-            HovorkaParameters anchorParams = params;
-            if (cfg.macroTMaxG && (domCarbs + domProtein + domFat) > 0) {
-                double tMaxG = MacroNutrientGastricModel.computeTMaxG(
-                        domCarbs, domProtein, domFat, domFiber,
-                        HovorkaParameterService.HALF_LIFE_TO_TMAX_G);
-                anchorParams = new HovorkaParameters(
-                        params.vG(), params.f01(), params.egpNet(), params.egp0(), params.k12(), params.k21(),
-                        tMaxG, params.aG(), params.isf(), params.weightKg());
-            }
-
+            // CGM trend at the anchor over the preceding 15 min, as the dashboard gets it from the
+            // client (0 when there is no earlier reading, or cfg.anchorTrend is off).
+            Double before = cfg.anchorTrend ? nearest(cgmT, cgmG, t0 - 15 * 60_000L, cfg.alignToleranceMs) : null;
+            double trend = before == null ? 0.0 : (g0 - before) / 15.0;
             List<PredictionPointDTO> curve = svc.buildPredictionPath(
-                    anchorParams, g0, now, carbEntries, insulinDoses, longActing,
-                    ANCHOR_USER, cfg.horizonMin);
+                    params, new RapidInsulinIobParameters(cfg.diaHours, cfg.peakMinutes), null,
+                    g0, now, carbEntries, insulinDoses, longActing,
+                    ANCHOR_USER, cfg.horizonMin, che.glucosemonitorbe.hovorka.ActivityProvider.NONE,
+                    BasalInsulinResolver.DEFAULT_DURATION_HOURS,
+                    che.glucosemonitorbe.hovorka.ActivityGains.NEUTRAL, 1.0, trend);
 
             for (PredictionPointDTO pt : curve) {
                 int h = (int) Duration.between(now, pt.getTimestamp()).toMinutes();
@@ -463,9 +455,9 @@ public final class BacktestHarness {
             sb.append("\n══════════════════ GLUCOSE PREDICTION BACKTEST ══════════════════\n");
             if (!cfg.label.isEmpty()) sb.append("Variant: ").append(cfg.label).append('\n');
             sb.append(String.format("Config: ISF=%.1f weight=%.0fkg carbT½=%.0fmin aG=%.2f DIA=%.1fh peak=%.0fmin "
-                            + "macroTMaxG=%s FPU=%s%n",
+                            + "FPU=%s%n",
                     cfg.isf, cfg.weightKg, cfg.carbHalfLifeMin, cfg.aG, cfg.diaHours, cfg.peakMinutes,
-                    cfg.macroTMaxG, cfg.fpuEquiv));
+                    cfg.fpuEquiv));
             sb.append(String.format("Anchors stride=%dmin  horizon=%dmin  in-band=±%.1f mmol/L  total samples=%d%n%n",
                     cfg.strideMin, cfg.horizonMin, cfg.inBandMmol, sampleCount()));
             sb.append(String.format("%-8s %5s %7s %7s %7s %8s %10s %10s %9s%n",

@@ -110,13 +110,13 @@ class BacktestHarnessTest {
         // Variant A: ODE core only (fixed base tMaxG, no FPU) - what the first runs measured.
         BacktestHarness.Config base = new BacktestHarness.Config();
         base.isf = isf; base.weightKg = weight; base.carbHalfLifeMin = chl;
-        base.macroTMaxG = false; base.fpuEquiv = false; base.label = "A * ODE core (fixed tMaxG, no FPU)";
+        base.fpuEquiv = false; base.label = "A * ODE core (no FPU)";
 
-        // Variant B: production-faithful meal handling (per-meal macro tMaxG + FPU-equiv tails).
+        // Variant B: variant A plus the harness's own protein+fat FPU tail (not the live meal model).
         BacktestHarness.Config faithful = new BacktestHarness.Config();
         faithful.isf = isf; faithful.weightKg = weight; faithful.carbHalfLifeMin = chl;
-        faithful.macroTMaxG = true; faithful.fpuEquiv = true;
-        faithful.label = "B * production-faithful (macro tMaxG + FPU)";
+        faithful.fpuEquiv = true;
+        faithful.label = "B * ODE core + harness FPU tail";
 
         BacktestHarness.Report rA = BacktestHarness.runAndReport(cgmPresent, notesPresent, base);
         BacktestHarness.Report rB = BacktestHarness.runAndReport(cgmPresent, notesPresent, faithful);
@@ -147,7 +147,7 @@ class BacktestHarnessTest {
         for (double isf : isfs) for (double aG : aGs) for (double egp : egps) {
             BacktestHarness.Config c = new BacktestHarness.Config();
             c.isf = isf; c.aG = aG; c.egpScale = egp;
-            c.macroTMaxG = false; c.fpuEquiv = false;   // isolate ISF/aG/EGP from macro/FPU confounds
+            c.fpuEquiv = false;   // isolate ISF/aG/EGP from the FPU confound
             BacktestHarness.Report r = BacktestHarness.runAndReport(cgm, notes, c);
             BacktestHarness.Metrics all  = r.metricsAt(240);
             BacktestHarness.Metrics meal = r.metricsAt(240, BacktestHarness.Bucket.MEAL);

@@ -131,7 +131,9 @@ public class HovorkaGlucosePredictionService {
      * @param currentTime            client-side "now"
      * @param pastCarbsEntries       carb events from the last 8 h (for gut warm-up)
      * @param pastInsulinDoses       bolus doses from the last 8 h (for IOB curve)
-     * @param longActingNotes        long-acting notes from the last 36 h (for EGP)
+     * @param longActingNotes        long-acting notes from the last
+     *                               {@link BasalInsulinResolver#LOOKBACK_HOURS} hours (for EGP and
+     *                               the usual daily amount)
      * @param userId                 user UUID
      * @param pathMinutes            total prediction horizon [min] - 240 or 480
      * @return                       list of prediction points, emitted every 5/10 min
@@ -180,17 +182,46 @@ public class HovorkaGlucosePredictionService {
     }
 
     /**
-     * Build the prediction path with pre-built (possibly macro-modulated) parameters.
+     * The dashboard forecast: as the activity-aware overload above, anchored on the CGM reading
+     * <b>and its current trend</b> (mmol/L per minute, 0 when unknown). The trend is what lets the
+     * forecast start from where plasma glucose is rather than from where the sensor still reads -
+     * see {@link InterstitialLagModel}.
+     */
+    public List<PredictionPointDTO> buildPredictionPath(
+            double currentGlucose,
+            double currentTrendMmolPerMin,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider) {
+
+        HovorkaParameters p      = paramService.buildForUser(userId);
+        RapidInsulinIobParameters rapidIob = insulinPrefsService.getRapidIobParameters(userId);
+        UserSettingsDTO settings  = userSettingsService.getUserSettings(userId);
+        return integrate(p, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider,
+                insulinPrefsService.getLongActingDurationHours(userId),
+                Objects.requireNonNullElse(residualProvider.activityGains(userId), ActivityGains.NEUTRAL),
+                1.0, currentTrendMmolPerMin);
+    }
+
+    /**
+     * Build the prediction path with pre-built parameters.
      *
-     * <p>For callers that built the parameters themselves (e.g. a meal-specific tMaxG from
-     * {@link MacroNutrientGastricModel}).</p>
+     * <p>For callers that built the parameters themselves (calibration replay, backtests).</p>
      *
-     * @param customParams           pre-built HovorkaParameters (tMaxG may be overridden)
+     * @param customParams           pre-built HovorkaParameters
      * @param currentGlucose         current CGM reading [mmol/L]
      * @param currentTime            client-side "now"
      * @param pastCarbsEntries       carb events from the last 8 h (for gut warm-up)
      * @param pastInsulinDoses       bolus doses from the last 8 h (for IOB curve)
-     * @param longActingNotes        long-acting notes from the last 36 h (for EGP)
+     * @param longActingNotes        long-acting notes from the last
+     *                               {@link BasalInsulinResolver#LOOKBACK_HOURS} hours (for EGP and
+     *                               the usual daily amount)
      * @param userId                 user UUID (needed for IOB preferences only)
      * @param pathMinutes            total prediction horizon [min]
      * @return                       list of prediction points, emitted every 5/10 min
@@ -334,6 +365,9 @@ public class HovorkaGlucosePredictionService {
      * calibration replay tries a candidate {@code isfScale}: the replay runs on the
      * {@link PredictionResidualProvider#NONE} provider, whose scale is 1.0, so the candidate has to
      * arrive as an argument. It multiplies the provider's own scale and the product is clamped once.
+     *
+     * <p>{@code anchorTrendMmolPerMin} is the CGM trend at the anchor (0 when unknown), so a replay
+     * starts each anchor the way the dashboard does.</p>
      */
     public List<PredictionPointDTO> buildPredictionPath(
             HovorkaParameters customParams,
@@ -349,11 +383,12 @@ public class HovorkaGlucosePredictionService {
             ActivityProvider activityProvider,
             double basalDurationHours,
             ActivityGains gains,
-            double isfScale) {
+            double isfScale,
+            double anchorTrendMmolPerMin) {
 
         return integrate(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider, basalDurationHours, gains, isfScale);
+                activityProvider, basalDurationHours, gains, isfScale, anchorTrendMmolPerMin);
     }
 
     /** Core ODE integration with population-default activity gains. */
@@ -396,7 +431,7 @@ public class HovorkaGlucosePredictionService {
             ActivityGains gains) {
         return integrate(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider, basalDurationHours, gains, 1.0);
+                activityProvider, basalDurationHours, gains, 1.0, 0.0);
     }
 
     /** Core ODE integration - shared by every overload. */
@@ -414,16 +449,20 @@ public class HovorkaGlucosePredictionService {
             ActivityProvider activityProvider,
             double basalDurationHours,
             ActivityGains gains,
-            double callerIsfScale) {
+            double callerIsfScale,
+            double anchorTrendMmolPerMin) {
 
         // -- State warm-up -----------------------------------------------------
-        WarmUp warmUp = buildWarmState(currentGlucose, pastCarbsEntries, currentTime, p);
+        // The ODE state is plasma glucose; the anchor is a sensor reading, which trails plasma.
+        double plasmaNow = Math.max(G_MIN, Math.min(G_MAX,
+                InterstitialLagModel.plasmaFromSensor(currentGlucose, anchorTrendMmolPerMin)));
+        WarmUp warmUp = buildWarmState(plasmaNow, pastCarbsEntries, currentTime, p);
         HovorkaState state = warmUp.state();
 
         // -- EGP net from long-acting insulin ----------------------------------
         double x3Basal  = basalResolver.resolveEgpSuppression(
                 longActingNotes, currentTime, basalDurationHours,
-                BasalInsulinResolver.REFERENCE_UNITS_PER_KG * p.weightKg());
+                basalResolver.usualDailyUnits(longActingNotes, currentTime));
         double egp0Abs  = p.egp0();
         double egpNow   = basalResolver.netEgp(p.f01(), egp0Abs, x3Basal);
         // No basal logged, or the newest logged dose is too old to say anything about current
@@ -475,9 +514,11 @@ public class HovorkaGlucosePredictionService {
         // Forward minute at or past which the active rescue is spent and the rate reverts.
         int rescueSpentAtMin = warmUp.rescueSpentAtMin();
 
-        // CGM measurement model: what the sensor would read, not what plasma does. Seeded at the
-        // anchor, where interstitial and plasma coincide. Pass-through unless the lag is configured.
-        InterstitialLagModel sensor = InterstitialLagModel.startingAt(state.glucoseMmolL(pAdj));
+        // CGM measurement model: what the sensor would read, not what plasma does. Seeded with
+        // the reading itself, so the emitted curve leaves "now" from the measured value and with
+        // the measured trend. Pass-through when the lag is switched off.
+        InterstitialLagModel sensor = InterstitialLagModel.startingAt(
+                InterstitialLagModel.tauMinutes > 0 ? currentGlucose : state.glucoseMmolL(pAdj));
 
         // -- Activity modulation (a(t) -> insulin-sensitivity amplification + insulin-independent
         //    uptake). Inert with the NONE provider - that path is bit-identical to the base model. --
@@ -988,7 +1029,8 @@ public class HovorkaGlucosePredictionService {
     private record FutureTMaxG(Map<Integer, Double> byMinute, Set<Integer> rescueMinutes) {}
 
     /**
-     * Maps future minute-offset → protein+fat caloric load [kcal] entering the gut.
+     * Maps future minute-offset → braking load [kcal] entering the gut: each meal's protein+fat
+     * energy beyond the reference meal's share (see {@link HovorkaOdeSolver#brakeKcal}).
      * Used to drive the protFatGut compartment (GLP-1 ileal brake).
      *
      * <p>Mirrors the minute-offset logic of {@link #buildFutureCarbTimeline}: past entries
@@ -1039,7 +1081,7 @@ public class HovorkaGlucosePredictionService {
     /**
      * A meal's gut time constant [min]: the fast rescue value for a hypo treatment, otherwise the
      * user's own tMaxG slowed by the meal's fiber (its own plus any first course's - see
-     * {@link #effectiveFiberByMeal}) through the same viscosity factor {@code /api/predict} uses.
+     * {@link #effectiveFiberByMeal}) through the fiber viscosity factor.
      * Shared by the warm-up replay and the future timeline for the same reason as {@link #giOf} -
      * a meal logged one minute ago and one logged one minute ahead must absorb identically.
      * No fiber returns {@code p.tMaxG()} exactly, so fiber-free curves are unchanged.
@@ -1085,8 +1127,7 @@ public class HovorkaGlucosePredictionService {
      * <p>{@link HovorkaOdeSolver#derivatives} reads {@code p.tMaxG()} twice: once for the caloric
      * correction on k_gri/k_max/k_min (gastric emptying) and once for {@code effectiveKAbs}
      * (intestinal drain). Both must move together for a rescue carb, so the per-minute value is
-     * threaded in through the parameter record rather than as a separate argument - the same
-     * mechanism {@link MacroNutrientGastricModel} already uses on the {@code /api/predict} path.</p>
+     * threaded in through the parameter record rather than as a separate argument.</p>
      */
     private static HovorkaParameters withTMaxG(HovorkaParameters p, double tMaxG) {
         return new HovorkaParameters(
@@ -1095,13 +1136,17 @@ public class HovorkaGlucosePredictionService {
     }
 
     /**
-     * A meal's protein+fat caloric load [kcal] - the GLP-1 driver behind the ileal brake.
+     * A meal's braking load [kcal] - the GLP-1 driver behind the ileal brake. This is the
+     * protein+fat energy beyond the reference meal's share for the meal's carbs
+     * ({@link HovorkaOdeSolver#brakeKcal}), not the meal's whole protein+fat energy; it is 0 for
+     * a meal at or under that share.
      * Shared by the warm-up replay and the future timeline, same reason as {@link #giOf}.
      */
     private double protFatKcal(CarbsEntry entry) {
-        double proteinKcal = entry.getProtein() != null ? entry.getProtein() * 4.0 : 0.0;
-        double fatKcal     = entry.getFat()     != null ? entry.getFat()     * 9.0 : 0.0;
-        return proteinKcal + fatKcal;
+        return HovorkaOdeSolver.brakeKcal(
+                entry.getCarbs()   != null ? entry.getCarbs()   : 0.0,
+                entry.getProtein() != null ? entry.getProtein() : 0.0,
+                entry.getFat()     != null ? entry.getFat()     : 0.0);
     }
 
     /** Round to 1 decimal place [mmol/L] - matches the predictedGlucose precision. */

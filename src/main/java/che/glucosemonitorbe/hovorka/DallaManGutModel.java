@@ -42,10 +42,8 @@ public class DallaManGutModel {
     public static final double D_LOW  = 0.010;    // lower saturation threshold (fraction of D)
 
     /**
-     * Baseline gastric half-emptying time for a pure-carbohydrate meal [min].
-     * Calvert formula: t½ = 9 + 27.5×d, d = 4 kcal/g × 1 g/mL (pure carb, 1 kcal/mL average)
-     * → t½_basal = 9 + 27.5×1 = 36.5. In practice we use 45 min (the established Hovorka carb half-life)
-     * as the reference so C_caloric = 1.0 for a typical carb meal.
+     * Carb half-life [min] at which the published rates apply unchanged: {@link #caloricScale}
+     * is 1.0 at 45 min.
      */
     public static final double BASE_T_HALF_MIN = 45.0;
 
@@ -70,7 +68,7 @@ public class DallaManGutModel {
 
     /**
      * Nonlinear gastric emptying rate with caller-supplied k_max/k_min effective values.
-     * Used when the caloric density correction (C_caloric) has been applied upstream.
+     * Used when the half-time scale C_caloric ({@link #caloricScale}) has been applied upstream.
      *
      * @param qstoMmol  total stomach content Qsto1+Qsto2 [mmol]
      * @param mealMmol  original meal dose [mmol]
@@ -88,11 +86,11 @@ public class DallaManGutModel {
     }
 
     /**
-     * Caloric scale factor C_caloric = BASE_T_HALF_MIN / t½_meal.
-     * Scales k_max and k_min proportionally to stretch the k_empt sigmoid for high-calorie
-     * dense meals (fat/protein slow gastric motility). Clamped to [0.4, 1.5].
+     * Rate scale C_caloric = BASE_T_HALF_MIN / t½_meal, clamped to [0.4, 1.5].
+     * The solver multiplies k_gri, k_max and k_min by it, so a meal with a longer gut half-time
+     * empties proportionally slower and one with a shorter half-time faster.
      *
-     * @param tHalfMealMin  computed half-emptying time for the meal [min] (from Calvert formula)
+     * @param tHalfMealMin  the absorbing meal's gut half-time [min], {@code tMaxG × 1.68}
      */
     public static double caloricScale(double tHalfMealMin) {
         double scale = BASE_T_HALF_MIN / Math.max(tHalfMealMin, 1.0);
@@ -114,7 +112,7 @@ public class DallaManGutModel {
 
     /**
      * Glucose appearance rate using a caller-supplied absorption constant.
-     * Used when the macro-modulated tMaxG has already been converted to an
+     * Used when the absorbing meal's tMaxG has already been converted to an
      * effective K_ABS via {@link #effectiveKAbs(double)}.
      *
      * @param qgutMmol  intestinal compartment content [mmol]
@@ -127,30 +125,28 @@ public class DallaManGutModel {
     // -- tMaxG -> K_ABS scaling -------------------------------------------------
 
     /**
-     * Baseline tMaxG [min] for a pure-carbohydrate meal
+     * tMaxG [min] at which K_ABS applies unchanged
      * (45-min carb half-life, Hovorka 2-compartment factor 1.68).
      */
     static final double BASE_T_MAX_G_MIN = 45.0 / 1.68;  // ≈ 26.79 min
 
     /**
-     * Effective intestinal absorption rate constant [min⁻¹], scaled for the
-     * macro-modulated gastric-emptying time.
+     * Effective intestinal absorption rate constant [min⁻¹] for the absorbing meal's
+     * gut time constant.
      *
      * <p>The Dalla Man (2007) model uses a fixed K_ABS calibrated for average
-     * gastric emptying.  When fat and protein slow emptying (higher tMaxG),
-     * the intestinal drain rate should be proportionally reduced so that the
-     * predicted glucose appearance peak aligns with the macro-computed tMaxG.
-     * This re-connects {@link MacroNutrientGastricModel}'s tMaxG output to the
-     * actual ODE integration.</p>
+     * gastric emptying. Here it is scaled so that the predicted glucose appearance peak
+     * moves with {@code tMaxG}. {@code tMaxG} comes from the user's carb half-life, slowed
+     * by the meal's fiber, or from the rescue-carb profile.</p>
      *
-     * <p>Scale: K_ABS_eff = K_ABS × clamp(BASE_T_MAX_G / tMaxG, MIN, MAX).
-     * Slow meals (high tMaxG: fat/protein) reduce the intestinal drain so the Ra peak
-     * shifts right; fast meals (low tMaxG: juice, glucose tabs, hypo treatment) raise it
-     * so the rapid spike is captured. Previously the factor was clamped at 1, which made
-     * the model unable to absorb fast carbs faster than an average mixed meal - a
-     * systematic under-prediction of the early spike for liquid/simple-sugar meals.</p>
+     * <p>Scale: K_ABS_eff = K_ABS × clamp(BASE_T_MAX_G / tMaxG, 0.2, 2.5).
+     * A high tMaxG (a long carb half-life, a fiber-rich meal) reduces the intestinal drain
+     * so the Ra peak shifts right; a low tMaxG (a short carb half-life, a hypo treatment)
+     * raises it so the rapid spike is captured. The factor is not capped at 1: capped, the
+     * model could not absorb fast carbs faster than an average mixed meal and under-predicted
+     * their early spike.</p>
      *
-     * @param tMaxGMin  macro-modulated tMaxG [min] - from {@link HovorkaParameters#tMaxG()}
+     * @param tMaxGMin  the absorbing meal's tMaxG [min] - from {@link HovorkaParameters#tMaxG()}
      * @return effective K_ABS [min⁻¹]
      */
     public static double effectiveKAbs(double tMaxGMin) {

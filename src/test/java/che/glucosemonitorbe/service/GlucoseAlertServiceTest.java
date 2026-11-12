@@ -100,6 +100,38 @@ class GlucoseAlertServiceTest {
         }
     }
 
+    // -- CGM trend sent with the forecast request -------------------------------
+
+    @Test
+    void checkOverInjection_sendsAnExplicitZeroTrend() {
+        ArgumentCaptor<GlucoseCalculationsRequest> request =
+                ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
+        when(calculationsService.calculateGlucoseData(request.capture()))
+                .thenReturn(mock(GlucoseCalculationsResponse.class));
+        when(evaluator.evaluateOverInjection(any(), any(), anyDouble(), any())).thenReturn(Optional.empty());
+
+        alertService.checkOverInjection(UUID.randomUUID(), "testuser", 4.0, 6.5);
+
+        assertThat(request.getAllValues()).hasSize(1);
+        assertThat(request.getValue().getCurrentTrendMmolPerMin())
+                .as("the note's glucose is not the stored CGM reading, so the stored trend must not be applied to it")
+                .isEqualTo(0.0);
+    }
+
+    @Test
+    void evaluateAll_sendsNoTrend_soTheStoredOneApplies() {
+        ArgumentCaptor<GlucoseCalculationsRequest> request =
+                ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
+        when(calculationsService.calculateGlucoseData(request.capture()))
+                .thenReturn(mock(GlucoseCalculationsResponse.class));
+        when(evaluator.evaluateAll(any(), any(), anyDouble(), any(), any())).thenReturn(List.of());
+
+        alertService.evaluateAll(UUID.randomUUID(), "testuser", 6.5, -0.05, null);
+
+        assertThat(request.getAllValues()).hasSize(1);
+        assertThat(request.getValue().getCurrentTrendMmolPerMin()).isNull();
+    }
+
     // -- C4: cooldownMap TOCTOU race - duplicate alerts under concurrency ------
 
     /**

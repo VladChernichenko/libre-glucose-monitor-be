@@ -11,11 +11,12 @@ import java.util.UUID;
  * {@code meal + ONSET_MIN}. A big protein portion raises glucose 1.5-3 h after the meal, after a
  * normal rapid bolus has mostly worn off - the late half of the "early low, late high" pattern.
  *
- * <p>Single source for both prediction paths: {@code /api/predict} (a prospective meal) and the
- * dashboard (logged notes), so the same steak predicts the same late rise on both screens.
- * Fat is deliberately not converted: its effect is gastric delay, already modelled by
- * {@link MacroNutrientGastricModel} on {@code /api/predict} and by the GLP-1 ileal brake in the
- * Hovorka solver; adding fat kcal here caused a +1.1 mmol/L meal-tail overshoot in the backtest.</p>
+ * <p>Used by the dashboard forecast (logged and what-if meals) and by the calibration replay,
+ * which rebuilds that forecast at past anchors so the twin can be fitted against CGM; the same
+ * steak adds the same late rise in both.
+ * Fat is deliberately not converted: its effect is gastric delay, modelled by the GLP-1 ileal
+ * brake in the Hovorka solver; adding fat kcal here caused a +1.1 mmol/L meal-tail overshoot in
+ * the backtest.</p>
  */
 public final class ProteinGluconeogenesis {
 

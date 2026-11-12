@@ -12,11 +12,15 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.TimeZone;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -88,5 +92,56 @@ class CgmFreshnessServiceTest {
         } finally {
             TimeZone.setDefault(original);
         }
+    }
+
+    @Test
+    @DisplayName("the trend is the slope from the reading about 15 minutes before the newest one")
+    void trendFromTheReadingFifteenMinutesEarlier() {
+        long newest = NOW.minus(Duration.ofMinutes(2)).toEpochMilli();
+        long earlier = newest - Duration.ofMinutes(14).toMillis();
+        when(readings.findFirstByUserIdOrderByDateTimestampDesc(userId)).thenReturn(Optional.of(
+                CgmReading.builder().userId(userId).sgv(151).dateTimestamp(newest).build()));
+        long target = newest - Duration.ofMinutes(15).toMillis();
+        when(readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                userId, target - 300_000L, target + 300_000L))
+                .thenReturn(List.of(
+                        CgmReading.builder().userId(userId).sgv(90).dateTimestamp(target - 280_000L).build(),
+                        CgmReading.builder().userId(userId).sgv(126).dateTimestamp(earlier).build()));
+
+        // 151 - 126 = 25 mg/dL over 14 min, from the reading nearest the 15-minute mark
+        assertThat(service.freshTrendMmolPerMin(userId, NOW).getAsDouble())
+                .isCloseTo(25.0 / 18.0 / 14.0, within(1e-9));
+    }
+
+    /** A valid stored reading 15 minutes before the newest one, whatever window is asked for. */
+    private void earlierReadingExists() {
+        long newest = readings.findFirstByUserIdOrderByDateTimestampDesc(userId).orElseThrow().getDateTimestamp();
+        when(readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(userId), anyLong(), anyLong()))
+                .thenReturn(List.of(CgmReading.builder().userId(userId).sgv(108)
+                        .dateTimestamp(newest - Duration.ofMinutes(15).toMillis()).build()));
+    }
+
+    @Test
+    @DisplayName("no trend from a stale newest reading, even with an earlier one to pair it with")
+    void noTrendFromAStaleReading() {
+        newestReadingAgeMinutes(16);
+        earlierReadingExists();
+        assertThat(service.freshTrendMmolPerMin(userId, NOW)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("no trend while upstream is down, even with a fresh pair of readings")
+    void noTrendWhileUpstreamIsDown() {
+        newestReadingAgeMinutes(2);
+        earlierReadingExists();
+        when(libre.upstreamStatus(userId)).thenReturn(new LibreUpstreamStatusDTO(false, "OPEN", 120L));
+        assertThat(service.freshTrendMmolPerMin(userId, NOW)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("no trend without an earlier reading")
+    void noTrendWithoutAnEarlierReading() {
+        newestReadingAgeMinutes(2);
+        assertThat(service.freshTrendMmolPerMin(userId, NOW)).isEmpty();
     }
 }

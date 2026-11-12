@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 
 @Data
-@Builder
+@Builder(toBuilder = true)
 @NoArgsConstructor
 @AllArgsConstructor
 public class GlucoseCalculationsRequest {
@@ -36,10 +36,14 @@ public class GlucoseCalculationsRequest {
     private List<ProspectiveNoteDTO> prospectiveNotes;
 
     /**
-     * Current glucose rate-of-change from the CGM sensor trend arrow (mmol/L per minute).
-     * Used to blend short-term momentum into the prediction path so that when glucose is
-     * currently flat the near-term prediction does not show an unrealistic steep rise.
-     * Null / absent means no momentum term (pure COB/IOB model).
+     * Current CGM rate of change [mmol/L per minute], negative when glucose is falling.
+     *
+     * <p>Hovorka model: the forecast infers plasma glucose from the reading and this trend. When it
+     * is null the server takes the trend from the user's stored CGM readings, if they are fresh. A
+     * caller whose {@link #currentGlucose} is not the user's current CGM reading (a typed or
+     * historical value) must therefore send {@code 0.0}, or that value is given the sensor's trend.</p>
+     *
+     * <p>OpenAPS model: the short-term momentum term of the prediction path; null means none.</p>
      */
     private Double currentTrendMmolPerMin;
 

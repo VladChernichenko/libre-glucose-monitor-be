@@ -35,6 +35,15 @@ import java.util.List;
  * {@link #hasActiveDose} is false and the caller falls back to the same steady-state assumption it
  * uses when no long-acting note exists at all.</p>
  *
+ * <h3>How much a dose suppresses</h3>
+ * <p>A basal dose is titrated until fasting glucose holds steady, so the user's <em>usual</em> daily
+ * amount is by construction the amount that gives full suppression - whether that is 0.15 or
+ * 0.5 U/kg. Coverage is therefore measured against {@link #usualDailyUnits the user's own usual
+ * daily basal}, read from the same log, and not against a population dose: a population reference
+ * made every user below it drift upward in the forecast while their real glucose stayed flat.
+ * Doses active at the same time add up (a twice-daily regimen is two half doses), capped at full
+ * suppression. Less than usual - a reduced or overdue dose - is what lets EGP rise.</p>
+ *
  * The peak suppression fraction {@link #PEAK_X3_BASAL} (0.40) is derived from the
  * steady-state identity EGP0 × (1 - x3) = F01 -> x3 = 1 - F01/EGP0 = 1 - 0.0097/0.0161 ≈ 0.40.
  */
@@ -44,10 +53,7 @@ public class BasalInsulinResolver {
     /** EGP suppression fraction at steady-state basal insulin (dimensionless, 0-1). */
     public static final double PEAK_X3_BASAL   = 0.40;
 
-    /** Logged units that count as a full plateau: 0.3 U per kg of body weight. */
-    public static final double REFERENCE_UNITS_PER_KG = 0.3;
-
-    /** Reference used when the caller has no body weight, and by the 3-argument overload. */
+    /** Reference used when a caller's reference is unusable (not finite, or not positive). */
     public static final double DEFAULT_REFERENCE_UNITS = 20.0;
 
     /** Duration of action assumed when the user's long-acting insulin is unknown [hours]. */
@@ -68,10 +74,11 @@ public class BasalInsulinResolver {
     }
 
     /**
-     * Estimates the current EGP suppression fraction x3_basal ∈ [0, 0.40].
+     * Estimates the current EGP suppression fraction x3_basal ∈ [0, 0.40], measuring the logged
+     * doses against {@link #usualDailyUnits the user's own usual daily basal}.
      *
-     * <p>If multiple overlapping doses are present, the maximum fraction is taken
-     * (conservative - avoid double-counting). Returns 0 if no dose is active; callers must check
+     * <p>Doses active at the same time add up, capped at the peak. Returns 0 if no dose is active;
+     * callers must check
      * {@link #hasActiveDose} first, because "no active dose" means the log is silent, not that
      * the user has no basal insulin.</p>
      *
@@ -81,13 +88,17 @@ public class BasalInsulinResolver {
      * @return                 x3_basal suppression fraction ∈ [0, PEAK_X3_BASAL]
      */
     public double resolveEgpSuppression(List<Note> longActingNotes, LocalDateTime now, double durationHours) {
-        return resolveEgpSuppression(longActingNotes, now, durationHours, DEFAULT_REFERENCE_UNITS);
+        return resolveEgpSuppression(longActingNotes, now, durationHours,
+                usualDailyUnits(longActingNotes, now));
     }
 
     /**
      * As {@link #resolveEgpSuppression(List, LocalDateTime, double)}, scaled by logged units.
-     * {@code referenceUnits} is a full plateau (0.3 U/kg). A larger dose does not exceed the peak.
-     * A non-finite or non-positive reference falls back to {@link #DEFAULT_REFERENCE_UNITS}.
+     * {@code referenceUnits} is the amount that gives a full plateau - pass
+     * {@link #usualDailyUnits}. Each dose contributes its units times its place on the curve; the
+     * sum over the reference is the covered fraction, and more than the reference does not exceed
+     * the peak. A non-finite or non-positive reference falls back to
+     * {@link #DEFAULT_REFERENCE_UNITS}.
      */
     public double resolveEgpSuppression(List<Note> longActingNotes, LocalDateTime now,
                                         double durationHours, double referenceUnits) {
@@ -96,14 +107,74 @@ public class BasalInsulinResolver {
         }
         double reference = (Double.isFinite(referenceUnits) && referenceUnits > 0)
                 ? referenceUnits : DEFAULT_REFERENCE_UNITS;
-        double maxSuppression = 0.0;
+        double coveredUnits = 0.0;
         for (Note note : longActingNotes) {
             double hoursAgo = hoursSinceDose(note, now);
             if (Double.isNaN(hoursAgo)) continue;
-            double fraction = Math.max(0.0, Math.min(1.0, note.getInsulin() / reference));
-            maxSuppression = Math.max(maxSuppression, suppressionCurve(hoursAgo, durationHours) * fraction);
+            coveredUnits += note.getInsulin() * suppressionCurve(hoursAgo, durationHours) / PEAK_X3_BASAL;
         }
-        return maxSuppression;
+        return PEAK_X3_BASAL * Math.max(0.0, Math.min(1.0, coveredUnits / reference));
+    }
+
+    /** Doses logged less than this many hours after another belong to the same day's basal. */
+    static final double SAME_DAY_HOURS = 18.0;
+
+    /**
+     * The user's usual daily basal [U], read from the log.
+     *
+     * <p>A group is a dose plus every dose logged less than {@link #SAME_DAY_HOURS} after it.
+     * Doses are grouped by their spacing and not by 24-hour blocks counted back from {@code now},
+     * so the answer does not change with the time of day it is asked. 18 hours sits between a
+     * twice-daily gap (about 12 hours) and a once-daily gap (about 24).</p>
+     *
+     * <p>A single dose always counts: the largest one is a lower bound on a day's basal. A group
+     * of several doses counts only as far as a second group reaches the same total, which is the
+     * second-largest total among those groups. A twice-daily regimen repeats its pair of doses; a
+     * late dose followed by an on-time one looks the same in the log but does not repeat. The
+     * usual amount is the larger of the two: the largest single dose, and that second-largest
+     * group total.</p>
+     *
+     * <p>Known limits: the first two doses of a twice-daily regimen read as a usual amount of one
+     * dose until the pair repeats with the third dose, so coverage reads full in that stretch; and
+     * two one-off late doses in the same log still read as a double day.</p>
+     *
+     * <p>Every usable dose in the list is counted, whatever its age; callers bound the list to
+     * {@link #LOOKBACK_HOURS}.</p>
+     *
+     * <p>The largest single dose is used so that a day with a reduced dose is measured against a
+     * normal day's dose and not against itself. 0 when the log holds no usable dose.</p>
+     */
+    public double usualDailyUnits(List<Note> longActingNotes, LocalDateTime now) {
+        if (longActingNotes == null) {
+            return 0.0;
+        }
+        double largestDose = 0.0;
+        double largestGroup = 0.0;
+        double secondLargestGroup = 0.0;
+        for (Note first : longActingNotes) {
+            double firstHoursAgo = hoursSinceDose(first, now);
+            if (Double.isNaN(firstHoursAgo)) continue;
+            largestDose = Math.max(largestDose, first.getInsulin());
+            double total = 0.0;
+            int doses = 0;
+            for (Note other : longActingNotes) {
+                double hoursAgo = hoursSinceDose(other, now);
+                if (Double.isNaN(hoursAgo)) continue;
+                double hoursAfterFirst = firstHoursAgo - hoursAgo;
+                if (hoursAfterFirst >= 0 && hoursAfterFirst < SAME_DAY_HOURS) {
+                    total += other.getInsulin();
+                    doses++;
+                }
+            }
+            if (doses < 2) continue;
+            if (total > largestGroup) {
+                secondLargestGroup = largestGroup;
+                largestGroup = total;
+            } else if (total > secondLargestGroup) {
+                secondLargestGroup = total;
+            }
+        }
+        return Math.max(largestDose, secondLargestGroup);
     }
 
     /**

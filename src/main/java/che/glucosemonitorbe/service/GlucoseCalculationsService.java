@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.assistant.advice.CarbAdviceService;
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.InsulinDose;
@@ -28,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -100,16 +102,25 @@ public class GlucoseCalculationsService {
     @Autowired(required = false)
     private WatchStripService watchStripService;
 
+    /** Lazy and optional: the stored CGM trend, for requests that carry none (web, alerts, chat). */
+    @Lazy
+    @Autowired(required = false)
+    private CgmFreshnessService cgmFreshnessService;
+
     /**
      * The dashboard call: {@link #calculateGlucoseData} plus the fast-carbs-in-advance advice
-     * (§6.13) and the watch strip, evaluated on the forecast just computed. Requests carrying prospective (what-if)
+     * (§6.13) and the watch strip, evaluated on the forecast just computed. The CGM trend is resolved
+     * once per request ({@link #withResolvedTrend}) and that one value goes to the forecast and to the
+     * advice, so the advice's own re-runs start from the same plasma glucose as the forecast they are
+     * compared with. Requests carrying prospective (what-if)
      * notes skip the advice, so a what-if never touches the advice hold and the gram search's own
      * re-runs cannot recurse. Internal callers (alerts, chat, snapshots) call
-     * {@link #calculateGlucoseData} directly: they send no CGM trend, so letting them evaluate would
-     * count trend-less forecasts against the hold.
+     * {@link #calculateGlucoseData} directly and do not evaluate advice, so only dashboard requests
+     * count against the hold.
      */
     public GlucoseCalculationsResponse calculateDashboard(GlucoseCalculationsRequest request) {
-        GlucoseCalculationsResponse response = calculateGlucoseData(request);
+        GlucoseCalculationsRequest resolved = withResolvedTrend(request);
+        GlucoseCalculationsResponse response = calculateGlucoseData(resolved);
         boolean whatIf = request.getProspectiveNotes() != null && !request.getProspectiveNotes().isEmpty();
         if (whatIf) {
             return response;
@@ -118,7 +129,7 @@ public class GlucoseCalculationsService {
         if (carbAdviceService != null && response.getPredictionPath() != null) {
             try {
                 userUUID = userService.getUserByUsername(request.getUserId()).getId();
-                double trend = request.getCurrentTrendMmolPerMin() != null ? request.getCurrentTrendMmolPerMin() : 0.0;
+                double trend = resolved.getCurrentTrendMmolPerMin() != null ? resolved.getCurrentTrendMmolPerMin() : 0.0;
                 carbAdviceService.evaluate(userUUID, response.getCalculatedAt(), request.getCurrentGlucose(),
                         trend, response.getPredictionPath()).ifPresent(response::setCarbAdvice);
             } catch (RuntimeException e) {
@@ -226,7 +237,7 @@ public class GlucoseCalculationsService {
                 ? userSettings.getPredictionEngine() : PredictionEngine.HOVORKA;
         List<PredictionPointDTO> empiricalPath = engine == PredictionEngine.HOVORKA ? null
                 : buildEmpiricalPath(request.getCurrentGlucose(), currentTime,
-                        carbsEntries, insulinEntries, recentNotes);
+                        carbsEntries, insulinEntries, recentNotes, userSettings, rapidIob);
 
         // EMPIRICAL replaces the path (so the headline predictions below are read off it too);
         // BOTH keeps the Hovorka path primary and returns the empirical one beside it.
@@ -360,8 +371,14 @@ public class GlucoseCalculationsService {
             LocalDateTime currentTime,
             List<CarbsEntry> carbsEntries,
             List<InsulinDose> insulinEntries,
-            List<Note> recentNotes
+            List<Note> recentNotes,
+            UserSettingsDTO userSettings,
+            RapidInsulinIobParameters rapidIob
     ) {
+        // The user's own ISF (for the meal window "now" falls in), carb ratio and insulin profile.
+        EmpiricalTwinParams params = EmpiricalTwinParams.forUser(
+                userSettings.getEffectiveIsf(currentTime), userSettings.getGramsPerUnit(),
+                rapidIob.diaHours(), rapidIob.peakMinutes());
         List<EmpiricalEvent> events = new ArrayList<>();
         carbsEntries.forEach(c -> events.add(EmpiricalEventMapper.carbs(c)));
         insulinEntries.forEach(d -> events.add(EmpiricalEventMapper.insulin(d)));
@@ -375,7 +392,7 @@ public class GlucoseCalculationsService {
         List<PredictionPointDTO> points = new ArrayList<>();
         // Full horizon look-ahead: prospective entries ahead of now count, as in the Hovorka path.
         for (EmpiricalTwinEngine.Point p : EmpiricalTwinEngine.forecast(anchor, cgm, events,
-                EmpiricalTwinParams.defaults(), EmpiricalTwinEngine.HORIZON_MIN)) {
+                params, EmpiricalTwinEngine.HORIZON_MIN)) {
             if (p.minute() == 0) continue;
             // Likely-range cone: a point at the anchor, widening with the horizon.
             double half = EMPIRICAL_CONE.halfWidthMmol(p.minute());
@@ -392,6 +409,41 @@ public class GlucoseCalculationsService {
         return points;
     }
 
+    /** Whether the forecast is the Hovorka model's: switched on, and the service present. */
+    private boolean hovorkaActive() {
+        return featureToggleConfig.isHovorkaModelEnabled() && hovorkaService != null;
+    }
+
+    /**
+     * The request with the CGM trend its Hovorka forecast will start from, so the forecast and the
+     * carb advice computed from it share one value. The request itself when it already carries a
+     * trend, or when the Hovorka model is off (the OpenAPS path reads a missing trend as no momentum).
+     */
+    private GlucoseCalculationsRequest withResolvedTrend(GlucoseCalculationsRequest request) {
+        if (request.getCurrentTrendMmolPerMin() != null || cgmFreshnessService == null || !hovorkaActive()) {
+            return request;
+        }
+        UUID userId = userService.getUserByUsername(request.getUserId()).getId();
+        return request.toBuilder().currentTrendMmolPerMin(storedTrend(userId)).build();
+    }
+
+    /**
+     * The CGM trend [mmol/L per minute] from stored readings, for a request that carries none.
+     * 0 when no source is wired, there is no fresh pair of readings, or the lookup fails.
+     */
+    private double storedTrend(UUID userId) {
+        if (cgmFreshnessService == null) {
+            return 0.0;
+        }
+        try {
+            return cgmFreshnessService.freshTrendMmolPerMin(userId, Instant.now()).orElse(0.0);
+        } catch (RuntimeException e) {
+            // The forecast is still valid without the lag correction; never fail it over the trend.
+            log.warn("Stored CGM trend unavailable for user={}: {}", userId, e.getMessage(), e);
+            return 0.0;
+        }
+    }
+
     private List<PredictionPointDTO> buildPredictionPath(
             double currentGlucose,
             LocalDateTime currentTime,
@@ -405,8 +457,9 @@ public class GlucoseCalculationsService {
             Integer pathMinutesOverride
     ) {
         // -- Hovorka 2-compartment ODE model (feature-flagged) -----------------
-        if (featureToggleConfig.isHovorkaModelEnabled() && hovorkaService != null) {
-            // Long-acting notes - load from a 36h window so Lantus taken yesterday is included
+        if (hovorkaActive()) {
+            // Long-acting notes from the last BasalInsulinResolver.LOOKBACK_HOURS (56 h), so an
+            // overdue degludec dose is still included
             List<Note> longActingNotes = getLongActingNotes(userUUID, currentTime);
             List<Note> recentNotes = getRecentNotes(userUUID, currentTime);
             int pathMinutes = resolvePathDurationMinutes(carbsEntries, pathMinutesOverride);
@@ -417,7 +470,8 @@ public class GlucoseCalculationsService {
                             ? che.glucosemonitorbe.hovorka.NotesActivityProvider.fromNotes(recentNotes)
                             : che.glucosemonitorbe.hovorka.ActivityProvider.NONE;
             return hovorkaService.buildPredictionPath(
-                    currentGlucose, currentTime,
+                    currentGlucose, currentTrendMmolPerMin != null ? currentTrendMmolPerMin : storedTrend(userUUID),
+                    currentTime,
                     modelMealEntries(carbsEntries, recentNotes), insulinEntries,
                     longActingNotes, userUUID, pathMinutes, activity);
         }

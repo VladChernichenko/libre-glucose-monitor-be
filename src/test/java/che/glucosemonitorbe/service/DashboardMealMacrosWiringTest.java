@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.assistant.advice.CarbAdviceService;
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
@@ -25,10 +27,13 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +59,8 @@ class DashboardMealMacrosWiringTest {
     @Mock private UserSettingsService userSettingsService;
     @Mock private NoteToCarbsEntryMapper noteToCarbsEntryMapper;
     @Mock private HovorkaGlucosePredictionService hovorkaService;
+    @Mock private CgmFreshnessService cgmFreshnessService;
+    @Mock private CarbAdviceService carbAdviceService;
 
     private GlucoseCalculationsService service;
     private final Map<UUID, CarbsEntry> entriesByNote = new HashMap<>();
@@ -69,9 +76,7 @@ class DashboardMealMacrosWiringTest {
                 cobService, insulinCalculatorService, noteRepository,
                 userService, userInsulinPreferencesService, objectMapper,
                 featureToggleConfig, userSettingsService, noteToCarbsEntryMapper);
-        Field f = GlucoseCalculationsService.class.getDeclaredField("hovorkaService");
-        f.setAccessible(true);
-        f.set(service, hovorkaService);
+        inject("hovorkaService", hovorkaService);
 
         when(userService.getUserByUsername("u")).thenReturn(UserDto.builder().id(userId).username("u").build());
         UserSettingsDTO settings = new UserSettingsDTO();
@@ -84,7 +89,7 @@ class DashboardMealMacrosWiringTest {
         when(userInsulinPreferencesService.getRapidIobParameters(userId))
                 .thenReturn(new RapidInsulinIobParameters(4.5, 55.0));
         when(featureToggleConfig.isHovorkaModelEnabled()).thenReturn(true);
-        when(hovorkaService.buildPredictionPath(anyDouble(), any(LocalDateTime.class), anyList(), anyList(),
+        when(hovorkaService.buildPredictionPath(anyDouble(), anyDouble(), any(LocalDateTime.class), anyList(), anyList(),
                 anyList(), any(UUID.class), anyInt(), any(ActivityProvider.class)))
                 .thenReturn(List.of(PredictionPointDTO.builder()
                         .timestamp(now.plusMinutes(5)).predictedGlucose(7.0).build()));
@@ -103,7 +108,7 @@ class DashboardMealMacrosWiringTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<CarbsEntry>> toModel = ArgumentCaptor.forClass(List.class);
-        verify(hovorkaService).buildPredictionPath(anyDouble(), any(LocalDateTime.class), toModel.capture(),
+        verify(hovorkaService).buildPredictionPath(anyDouble(), anyDouble(), any(LocalDateTime.class), toModel.capture(),
                 anyList(), anyList(), any(UUID.class), anyInt(), any(ActivityProvider.class));
         List<CarbsEntry> modelled = toModel.getValue();
 
@@ -142,9 +147,94 @@ class DashboardMealMacrosWiringTest {
         service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
                 .currentGlucose(8.0).userId("u").predictionPathMinutes(override).build());
         ArgumentCaptor<Integer> minutes = ArgumentCaptor.forClass(Integer.class);
-        verify(hovorkaService).buildPredictionPath(anyDouble(), any(LocalDateTime.class), anyList(),
+        verify(hovorkaService).buildPredictionPath(anyDouble(), anyDouble(), any(LocalDateTime.class), anyList(),
                 anyList(), anyList(), any(UUID.class), minutes.capture(), any(ActivityProvider.class));
         return minutes.getValue();
+    }
+
+    @Test
+    @DisplayName("a request without a CGM trend starts from the stored one; a request trend wins")
+    void storedTrendFillsAMissingRequestTrend() throws Exception {
+        when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(), any())).thenReturn(List.of());
+        assertThat(trendPassedFor(null)).as("no stored-trend source wired").isEqualTo(0.0);
+
+        inject("cgmFreshnessService", cgmFreshnessService);
+        when(cgmFreshnessService.freshTrendMmolPerMin(eq(userId), any(Instant.class)))
+                .thenReturn(OptionalDouble.of(0.08));
+        assertThat(trendPassedFor(null)).isEqualTo(0.08);
+        assertThat(trendPassedFor(0.02)).isEqualTo(0.02);
+        assertThat(trendPassedFor(0.0)).as("an explicit zero is a trend, not a missing one").isEqualTo(0.0);
+
+        when(cgmFreshnessService.freshTrendMmolPerMin(eq(userId), any(Instant.class)))
+                .thenReturn(OptionalDouble.empty());
+        assertThat(trendPassedFor(null)).as("no fresh reading").isEqualTo(0.0);
+
+        when(cgmFreshnessService.freshTrendMmolPerMin(eq(userId), any(Instant.class)))
+                .thenThrow(new IllegalStateException("db down"));
+        assertThat(trendPassedFor(null)).as("a failed lookup never fails the forecast").isEqualTo(0.0);
+    }
+
+    private double trendPassedFor(Double requestTrend) {
+        clearInvocations(hovorkaService);
+        service.calculateGlucoseData(GlucoseCalculationsRequest.builder()
+                .currentGlucose(8.0).userId("u").currentTrendMmolPerMin(requestTrend).build());
+        ArgumentCaptor<Double> trend = ArgumentCaptor.forClass(Double.class);
+        verify(hovorkaService).buildPredictionPath(anyDouble(), trend.capture(), any(LocalDateTime.class), anyList(),
+                anyList(), anyList(), any(UUID.class), anyInt(), any(ActivityProvider.class));
+        return trend.getValue();
+    }
+
+    @Test
+    @DisplayName("the dashboard's carb advice gets the same stored trend its forecast started from")
+    void dashboardAdviceSharesTheResolvedTrend() throws Exception {
+        when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(), any())).thenReturn(List.of());
+        inject("cgmFreshnessService", cgmFreshnessService);
+        inject("carbAdviceService", carbAdviceService);
+        when(cgmFreshnessService.freshTrendMmolPerMin(eq(userId), any(Instant.class)))
+                .thenReturn(OptionalDouble.of(-0.08));
+        when(carbAdviceService.evaluate(any(), any(), anyDouble(), anyDouble(), anyList()))
+                .thenReturn(Optional.empty());
+
+        clearInvocations(hovorkaService);
+        service.calculateDashboard(GlucoseCalculationsRequest.builder().currentGlucose(8.0).userId("u").build());
+
+        ArgumentCaptor<Double> toForecast = ArgumentCaptor.forClass(Double.class);
+        verify(hovorkaService).buildPredictionPath(anyDouble(), toForecast.capture(), any(LocalDateTime.class),
+                anyList(), anyList(), anyList(), any(UUID.class), anyInt(), any(ActivityProvider.class));
+        ArgumentCaptor<Double> toAdvice = ArgumentCaptor.forClass(Double.class);
+        verify(carbAdviceService).evaluate(eq(userId), any(), eq(8.0), toAdvice.capture(), anyList());
+
+        assertThat(toForecast.getValue()).isEqualTo(-0.08);
+        assertThat(toAdvice.getValue()).isEqualTo(-0.08);
+        verify(cgmFreshnessService, times(1)).freshTrendMmolPerMin(eq(userId), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("a dashboard request's own trend reaches forecast and advice; the stored one is not read")
+    void dashboardRequestTrendWinsForForecastAndAdvice() throws Exception {
+        when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(), any())).thenReturn(List.of());
+        inject("cgmFreshnessService", cgmFreshnessService);
+        inject("carbAdviceService", carbAdviceService);
+        when(carbAdviceService.evaluate(any(), any(), anyDouble(), anyDouble(), anyList()))
+                .thenReturn(Optional.empty());
+
+        clearInvocations(hovorkaService);
+        service.calculateDashboard(GlucoseCalculationsRequest.builder()
+                .currentGlucose(8.0).userId("u").currentTrendMmolPerMin(-0.05).build());
+
+        ArgumentCaptor<Double> toForecast = ArgumentCaptor.forClass(Double.class);
+        verify(hovorkaService).buildPredictionPath(anyDouble(), toForecast.capture(), any(LocalDateTime.class),
+                anyList(), anyList(), anyList(), any(UUID.class), anyInt(), any(ActivityProvider.class));
+        verify(carbAdviceService).evaluate(eq(userId), any(), eq(8.0), eq(-0.05), anyList());
+        assertThat(toForecast.getValue()).isEqualTo(-0.05);
+        verify(cgmFreshnessService, never()).freshTrendMmolPerMin(any(), any());
+    }
+
+    /** Sets one of the service's field-injected optional collaborators. */
+    private void inject(String field, Object value) throws Exception {
+        Field f = GlucoseCalculationsService.class.getDeclaredField(field);
+        f.setAccessible(true);
+        f.set(service, value);
     }
 
     private Note note(LocalDateTime when, double carbs, double fiber, double protein) {

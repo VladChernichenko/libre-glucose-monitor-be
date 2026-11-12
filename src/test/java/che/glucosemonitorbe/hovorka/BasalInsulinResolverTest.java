@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -108,12 +109,105 @@ class BasalInsulinResolverTest {
     }
 
     @Test
-    @DisplayName("a below-reference basal lets fasting glucose rise above the reference dose")
-    void belowReferenceBasalRaisesFastingForecast() {
-        Note six = dose(6); six.setInsulin(6.0);
-        Note ref = dose(6); ref.setInsulin(21.0); // 0.3 U/kg at the helper's 70 kg
-        assertThat(fastingGlucoseAt4h(List.of(six), GLARGINE_H))
-                .isGreaterThan(fastingGlucoseAt4h(List.of(ref), GLARGINE_H) + 0.3);
+    @DisplayName("a titrated dose holds the fasting forecast flat whatever its size")
+    void aUsualDoseIsFullCoverageAtAnySize() {
+        // 6 U is 0.09 U/kg at the helper's 70 kg. It is this user's usual dose, so it is the dose
+        // that keeps their fasting glucose steady.
+        Note small = dose(6); small.setInsulin(6.0);
+        Note large = dose(6); large.setInsulin(35.0);
+        assertThat(fastingGlucoseAt4h(List.of(small), GLARGINE_H)).isCloseTo(6.0, within(0.1));
+        assertThat(fastingGlucoseAt4h(List.of(large), GLARGINE_H)).isCloseTo(6.0, within(0.1));
+    }
+
+    @Test
+    @DisplayName("less than the usual dose lets fasting glucose rise")
+    void aReducedDoseRaisesFastingForecast() {
+        // Yesterday's dose is past its duration of action and mostly waned; today's is a third.
+        Note yesterday = dose(31); yesterday.setInsulin(21.0);
+        Note todayReduced = dose(7); todayReduced.setInsulin(7.0);
+        Note todayUsual = dose(7); todayUsual.setInsulin(21.0);
+        assertThat(fastingGlucoseAt4h(List.of(yesterday, todayReduced), GLARGINE_H))
+                .isGreaterThan(fastingGlucoseAt4h(List.of(yesterday, todayUsual), GLARGINE_H) + 0.3);
+    }
+
+    @Test
+    @DisplayName("a twice-daily regimen is two half doses that add up to full coverage")
+    void splitDosesAddUp() {
+        Note morning = dose(4); morning.setInsulin(10.0);
+        Note evening = dose(16); evening.setInsulin(10.0);
+        Note yesterdayMorning = dose(28); yesterdayMorning.setInsulin(10.0);
+        Note yesterdayEvening = dose(40); yesterdayEvening.setInsulin(10.0);
+        List<Note> log = List.of(morning, evening, yesterdayMorning, yesterdayEvening);
+        assertThat(resolver.usualDailyUnits(log, NOW)).isEqualTo(20.0);
+        assertThat(resolver.resolveEgpSuppression(log, NOW, GLARGINE_H, resolver.usualDailyUnits(log, NOW)))
+                .isEqualTo(PEAK);
+        assertThat(fastingGlucoseAt4h(log, GLARGINE_H)).isCloseTo(6.0, within(0.1));
+    }
+
+    @Test
+    @DisplayName("with one dose a day, the usual daily amount is the largest dose in the log, not today's")
+    void usualDailyUnitsIsTheLargestDoseNotTodays() {
+        Note yesterday = dose(30); yesterday.setInsulin(21.0);
+        Note today = dose(6); today.setInsulin(7.0);
+        assertThat(resolver.usualDailyUnits(List.of(yesterday, today), NOW)).isEqualTo(21.0);
+        assertThat(resolver.usualDailyUnits(List.of(), NOW)).isEqualTo(0.0);
+        assertThat(resolver.usualDailyUnits(null, NOW)).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("once-daily doses 23.5 h apart are two days, not one doubled day")
+    void dosesADayApartAreNotAddedTogether() {
+        // 22:30 two nights ago and 22:00 last night, read a little after 22:00 tonight.
+        Note older = dose(47.6); older.setInsulin(14.0);
+        Note newer = dose(24.1); newer.setInsulin(14.0);
+        List<Note> log = List.of(older, newer);
+
+        assertThat(resolver.usualDailyUnits(log, NOW)).isEqualTo(14.0);
+        assertThat(resolver.resolveEgpSuppression(log, NOW, GLARGINE_H)).isGreaterThan(PEAK * 0.95);
+        assertThat(fastingGlucoseAt4h(log, GLARGINE_H)).isCloseTo(6.0, within(0.2));
+    }
+
+    @Test
+    @DisplayName("one late dose followed by an on-time one is not a doubled day")
+    void aLateDoseThenAnOnTimeOneIsNotADoubleDay() {
+        // Usual time is 16:00. One dose was 10 h late (02:00 yesterday); the next was on time.
+        // Read at noon today: the late dose has fully waned, the on-time one is on its plateau.
+        Note late = dose(34); late.setInsulin(14.0);
+        Note onTime = dose(20); onTime.setInsulin(14.0);
+        List<Note> log = List.of(late, onTime);
+
+        assertThat(resolver.usualDailyUnits(log, NOW)).isEqualTo(14.0);
+        assertThat(resolver.resolveEgpSuppression(log, NOW, GLARGINE_H)).isEqualTo(PEAK);
+        assertThat(fastingGlucoseAt4h(log, GLARGINE_H)).isCloseTo(6.0, within(0.1));
+    }
+
+    @Test
+    @DisplayName("a single pair of doses is not yet a twice-daily regimen")
+    void onePairOfDosesIsNotYetARegimen() {
+        Note morning = dose(4); morning.setInsulin(10.0);
+        Note evening = dose(16); evening.setInsulin(10.0);
+        List<Note> log = List.of(morning, evening);
+
+        assertThat(resolver.usualDailyUnits(log, NOW)).isEqualTo(10.0);
+        assertThat(fastingGlucoseAt4h(log, GLARGINE_H)).isCloseTo(6.0, within(0.1));
+    }
+
+    @Test
+    @DisplayName("doses under 18 h apart share a day; doses over 18 h apart do not")
+    void sameDayThresholdIsEighteenHours() {
+        assertThat(BasalInsulinResolver.SAME_DAY_HOURS).isEqualTo(18.0);
+        assertThat(resolver.usualDailyUnits(tenUnitsAt(0.5, 18.0, 35.5), NOW)).isEqualTo(20.0);
+        assertThat(resolver.usualDailyUnits(tenUnitsAt(0.5, 19.0, 37.5), NOW)).isEqualTo(10.0);
+    }
+
+    private static List<Note> tenUnitsAt(double... hoursAgo) {
+        List<Note> log = new ArrayList<>();
+        for (double h : hoursAgo) {
+            Note n = dose(h);
+            n.setInsulin(10.0);
+            log.add(n);
+        }
+        return log;
     }
 
     // -- Through the forecast ---------------------------------------------------

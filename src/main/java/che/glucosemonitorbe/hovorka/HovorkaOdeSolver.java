@@ -34,8 +34,8 @@ public class HovorkaOdeSolver {
      * Half-saturation protein+fat gut load for the GLP-1 response [kcal].
      *
      * <p>L-cell GLP-1 secretion saturates with nutrient load; it is not proportional to it.
-     * Half-max at 200 kcal spreads the response across the realistic range: a 100 kcal snack
-     * reaches 33 % activation, a 390 kcal mixed meal 66 %, a 1000 kcal meal 83 %. This is a
+     * Half-max at 200 kcal spreads the response across the realistic range: a 100 kcal load
+     * reaches 33 % activation, a 390 kcal load 66 %, a 1000 kcal load 83 %. This is a
      * calibration choice, not a measured constant.</p>
      */
     static final double K_M_PF     = 200.0;
@@ -62,33 +62,43 @@ public class HovorkaOdeSolver {
     // Φ_GLP1(t) = 1 / (1 + KAPPA_GLP1 × Inc(t))  — saturating, never reaches zero
     /**
      * Strength of GLP-1 inhibition of gastric emptying [per Inc unit].
-     * {@code Φ_GLP1 = 1 / (1 + KAPPA_GLP1 × Inc)} — Palumbo (2026).
+     * {@code Φ_GLP1 = 1 / (1 + KAPPA_GLP1 × Inc)}. The form and the constants are this project's
+     * own calibration choice; they are not taken from a published model.
      *
      * <p>With {@code Inc} bounded at 1.0, {@code KAPPA_GLP1 = 1.0} floors Φ at 0.5: the most a
-     * protein/fat load can do is halve gastric emptying, matching the roughly doubled gastric
-     * half-emptying time reported for high-fat/high-protein mixed meals. Note this composes with
-     * {@link DallaManGutModel#caloricScale} and, on the {@code /api/predict} path, with
-     * {@link MacroNutrientGastricModel}'s tMaxG — fat and protein currently slow absorption
-     * through more than one channel.</p>
+     * protein/fat load can do is halve gastric emptying.</p>
+     *
+     * <p>The Dalla Man rates this multiplies already contain the slowing from the reference
+     * meal's protein and fat, so {@code protFatGut} is loaded only with the excess over that
+     * share (see {@link #brakeKcal}). A meal leaner than the reference is not sped up.</p>
      */
     static final double KAPPA_GLP1 = 1.0;
 
-    /** GI assumed for a meal that carries no glycemic-index estimate. */
+    /**
+     * GI assumed for a meal that carries no glycemic-index estimate, and the GI at which the gut
+     * model runs at its published rates (see {@link #giScale}).
+     */
     public static final int DEFAULT_GI = 70;
 
     /** Number of ODE state variables. */
     private static final int N = 7;
 
     /**
-     * Absorption-rate multiplier for a meal's glycemic index (Palumbo 2026): k_abs, k_gri, k_max
-     * and k_min all scale linearly with GI/100, clamped to [0.3, 1.5] - never below 30% (very low
-     * GI) nor above 150% (glucose solutions).
+     * Absorption-rate multiplier for a meal's glycemic index: k_abs, k_gri, k_max and k_min all
+     * scale with {@code GI / DEFAULT_GI}, clamped to [0.3, 1.5].
+     *
+     * <p>The scale is 1.0 at {@link #DEFAULT_GI}, not at GI 100. The Dalla Man rate constants were
+     * identified on an ordinary mixed meal, so they already describe a meal of ordinary GI; a meal
+     * with no GI estimate is that meal and must absorb at the published rates. Dividing by 100
+     * instead ran every unlabelled meal 30% slower than the model it is taken from. A linear scale
+     * is a modelling choice, not a measured law: GI is defined from the 2-hour glucose area, and
+     * faster appearance is only the most direct way a rate model can express it.</p>
      *
      * <p>Shared with {@link HovorkaGlucosePredictionService}'s warm-up replay so an already-logged
      * meal and a prospective one scale identically.</p>
      */
     public static double giScale(int gi) {
-        return Math.max(0.3, Math.min(1.5, gi / 100.0));
+        return Math.max(0.3, Math.min(1.5, gi / (double) DEFAULT_GI));
     }
 
     /**
@@ -112,6 +122,38 @@ public class HovorkaOdeSolver {
      */
     public static double ilealBrake(double inc) {
         return 1.0 / (1.0 + KAPPA_GLP1 * inc);
+    }
+
+    /**
+     * Protein+fat energy the reference meal carries per gram of its carbohydrate [kcal/g].
+     *
+     * <p>The Dalla Man gut rates were identified on a mixed meal of 10 kcal/kg with 45 % of its
+     * energy from carbohydrate, 15 % from protein and 40 % from fat
+     * (<a href="https://doi.org/10.1152/ajpendo.00319.2003">Dalla Man 2004</a>,
+     * <a href="https://journals.physiology.org/doi/full/10.1152/ajpendo.00190.2001">Basu 2003</a>).
+     * Protein and fat are therefore 55/45 of the carbohydrate energy, and a gram of carbohydrate
+     * is 4 kcal: {@code 4 × 55 / 45 ≈ 4.89}.</p>
+     */
+    public static final double REFERENCE_PF_KCAL_PER_CARB_G = 4.0 * 55.0 / 45.0;
+
+    /**
+     * Protein+fat load that drives the ileal brake [kcal]: the energy a meal's protein and fat
+     * carry beyond the reference meal's share for its carbohydrate,
+     * {@code max(0, 4 × proteinG + 9 × fatG − REFERENCE_PF_KCAL_PER_CARB_G × carbsG)}.
+     * Negative inputs count as 0.
+     *
+     * <p>The published gut rates already contain the slowing from the reference share, so a meal
+     * at or under it returns 0 and absorbs at those rates. A carb-free protein and fat course
+     * returns its whole energy.</p>
+     *
+     * @param carbsG   carbohydrate in the meal [g]
+     * @param proteinG protein in the meal [g]
+     * @param fatG     fat in the meal [g]
+     */
+    public static double brakeKcal(double carbsG, double proteinG, double fatG) {
+        double proteinFatKcal = 4.0 * Math.max(0.0, proteinG) + 9.0 * Math.max(0.0, fatG);
+        double referenceKcal  = REFERENCE_PF_KCAL_PER_CARB_G * Math.max(0.0, carbsG);
+        return Math.max(0.0, proteinFatKcal - referenceKcal);
     }
 
     private final DallaManGutModel gutModel;
@@ -163,7 +205,8 @@ public class HovorkaOdeSolver {
      *
      * @param carbMmolNow    carbs ingested at this minute [mmol]
      * @param mealGI         glycemic index of the arriving carbs [0-100]; use state.activeGI() if no new meal
-     * @param protFatKcalNow protein+fat caloric load entering gut at this minute [kcal]
+     * @param protFatKcalNow protein+fat load beyond the reference meal (see {@link #brakeKcal})
+     *                       entering gut at this minute [kcal]
      * @param insulinEffect  glucose removal from bolus insulin [mmol/min], summed across active doses
      * @param activityRate   insulin-independent muscle uptake rate [/min]
      */
@@ -261,7 +304,7 @@ public class HovorkaOdeSolver {
         double tHalfMeal = p.tMaxG() * 1.68;
         double cCal      = DallaManGutModel.caloricScale(tHalfMeal);
 
-        // GI scaling: k_abs and k_gri scale linearly with GI/100 (Palumbo 2026).
+        // GI scaling: all four gut rates scale with GI relative to the reference meal's.
         double giScale  = giScale(gi);
 
         // Apply GI scale ON TOP OF caloric correction
@@ -276,13 +319,13 @@ public class HovorkaOdeSolver {
         double kempt = gutModel.kEmpt(qsto, mealMmol, kMaxEff, kMinEff);
 
         // Ileal brake: elevated GLP-1 (Inc) inhibits gastric emptying.
-        // After protein/fat intake Inc rises via K_INC×Ra, which delays subsequent
-        // carb absorption - the "food sequencing" effect (Palumbo modification).
+        // After protein/fat intake Inc rises with the protein+fat load in the gut, which delays
+        // subsequent carb absorption - the "food sequencing" effect.
         // Saturating form ensures kemptEff never reaches zero for large Inc.
         double kemptEff = kempt * ilealBrake(inc);
 
-        // Scale K_ABS by the macro-modulated gastric-emptying time (Gap-1 fix) plus GI scale.
-        // A high-fat/protein meal has a longer tMaxG -> slower intestinal drain
+        // Ra uses K_ABS scaled for the absorbing meal's tMaxG and its GI.
+        // A longer tMaxG (a long carb half-life, fiber) -> slower intestinal drain
         // -> Ra peak shifts right without changing total absorbed glucose.
         double ra    = gutModel.ra(qgut, kAbsEff);
 

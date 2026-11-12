@@ -9,9 +9,7 @@ import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.ActivityGains;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
-import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
-import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
 import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
 
 import java.time.Duration;
@@ -31,7 +29,7 @@ import java.util.UUID;
  *
  * <h3>Cost control</h3>
  * <p>The optimiser evaluates {@link #replay(TwinScales)} many times, so the per-anchor input
- * assembly (history windows, macro-modulated {@code tMaxG}, regime) is done <b>once</b> in the
+ * assembly (history windows, regime, CGM trend) is done <b>once</b> in the
  * constructor; each replay only re-runs the ODE with freshly scaled parameters. Anchors are strided
  * and capped ({@link Config#maxAnchors}) to keep a full calibration well under a second.</p>
  */
@@ -39,6 +37,9 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
     private static final long BASAL_LOOKBACK_MS =
             che.glucosemonitorbe.hovorka.BasalInsulinResolver.LOOKBACK_HOURS * 3600_000L;
+
+    /** Minutes of CGM history the anchor trend is taken over. */
+    private static final int TREND_WINDOW_MIN = 15;
 
     /** CGM reading in the replay window. */
     public record Reading(long epochMs, double mmol) {}
@@ -94,12 +95,6 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         /** Hard cap on anchors; if the window yields more they are evenly subsampled. */
         public int    maxAnchors      = 250;
         /**
-         * Override tMaxG per anchor from {@link MacroNutrientGastricModel}. Off by default: the live
-         * forecast does not do this, and a twin must be fitted on the model it will be applied to.
-         * Kept for offline experiments.
-         */
-        public boolean macroTMaxG     = false;
-        /**
          * Add the delayed protein glucose, through the same {@link ProteinGluconeogenesis} the live
          * forecast uses (protein only - fat acts through the ileal brake, not as carbs).
          */
@@ -136,7 +131,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     private record AnchorContext(
             double g0, LocalDateTime now,
             List<CarbsEntry> carbs, List<InsulinDose> insulin, List<Note> longActing,
-            Regime regime, HovorkaParameters macroParams) {}
+            Regime regime, HovorkaParameters params, double trend) {}
 
     /**
      * @param predicted  a predictor wired with {@link PredictionResidualProvider#NONE} (raw model)
@@ -216,11 +211,11 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         TwinScales s = scales.clamped();
         List<AnchorSample> out = new ArrayList<>();
         for (AnchorContext a : anchors) {
-            HovorkaParameters p = applyScales(a.macroParams(), s);
+            HovorkaParameters p = applyScales(a.params(), s);
             List<PredictionPointDTO> curve = predictor.buildPredictionPath(
                     p, rapidIob, settings, a.g0(), a.now(), a.carbs(), a.insulin(), a.longActing(),
                     userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours, gains,
-                    s.isfScale());
+                    s.isfScale(), a.trend());
             long t0 = toEpochMs(a.now(), userZone);
             for (PredictionPointDTO pt : curve) {
                 int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
@@ -264,7 +259,6 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
             List<InsulinDose> insulin = new ArrayList<>();
             List<Note> longActing = new ArrayList<>();
             boolean carbActive = false, insulinActive = false;
-            double domCarbAmt = -1, domCarbs = 0, domProtein = 0, domFat = 0, domFiber = 0;
 
             for (Event n : events) {
                 long age = t0 - n.epochMs();
@@ -304,10 +298,6 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 if (active) {
                     if (n.carbs() > 0 || n.protein() > 0 || n.fat() > 0) carbActive = true;
                     if (n.insulin() > 0) insulinActive = true;
-                    if (n.carbs() > domCarbAmt) {
-                        domCarbAmt = n.carbs();
-                        domCarbs = n.carbs(); domProtein = n.protein(); domFat = n.fat(); domFiber = n.fiber();
-                    }
                 }
             }
 
@@ -317,13 +307,11 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
             Regime regime = carbActive ? Regime.MEAL : (insulinActive ? Regime.CORRECTION : Regime.FASTING);
 
-            HovorkaParameters macroParams = baseParams;
-            if (cfg.macroTMaxG && (domCarbs + domProtein + domFat) > 0) {
-                double tMaxG = MacroNutrientGastricModel.computeTMaxG(
-                        domCarbs, domProtein, domFat, domFiber, HovorkaParameterService.HALF_LIFE_TO_TMAX_G);
-                macroParams = withTMaxG(baseParams, tMaxG);
-            }
-            result.add(new AnchorContext(g0, now, carbs, insulin, longActing, regime, macroParams));
+            // CGM trend at the anchor, as the dashboard receives it from the client: the slope
+            // over the preceding reading window. 0 when there is no earlier reading to take it from.
+            Double before = nearest(cgmT, cgmG, t0 - TREND_WINDOW_MIN * 60_000L, cfg.alignToleranceMs);
+            double trend = before == null ? 0.0 : (g0 - before) / TREND_WINDOW_MIN;
+            result.add(new AnchorContext(g0, now, carbs, insulin, longActing, regime, baseParams, trend));
         }
         return result;
     }
@@ -343,12 +331,6 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 p.egp0()   * c.egpScale(),
                 p.k12(), p.k21(),
                 p.tMaxG(), p.aG() * c.agScale(), p.isf(), p.weightKg());
-    }
-
-    private static HovorkaParameters withTMaxG(HovorkaParameters p, double tMaxG) {
-        return new HovorkaParameters(
-                p.vG(), p.f01(), p.egpNet(), p.egp0(), p.k12(), p.k21(),
-                tMaxG, p.aG(), p.isf(), p.weightKg());
     }
 
     private boolean isSampleHorizon(int h) {

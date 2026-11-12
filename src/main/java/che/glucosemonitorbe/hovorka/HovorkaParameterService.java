@@ -60,7 +60,7 @@ public class HovorkaParameterService {
     /**
      * Factor converting exponential COB half-life to Hovorka 2-compartment tMaxG.
      * Derived from CumAbs(t_half) = 0.5 for the 2-compartment gamma chain -> t_half ≈ 1.68 × tMaxG.
-     * Public so {@link MacroNutrientGastricModel} and predict services can reuse it.
+     * Public so backtests can reuse it.
      */
     public static final double HALF_LIFE_TO_TMAX_G = 1.68;
 
@@ -154,9 +154,9 @@ public class HovorkaParameterService {
      * production EGP0) to a base parameter set. {@code isf} stays unscaled - see
      * {@link #buildForUser}. {@code egpScale} reaches the ODE through
      * {@code p.egp0()}: buildWithParams uses that field when a basal dose is active, and still
-     * forces EGP to F01 when the basal log is silent. {@code tMaxGScale} is left neutral - it is
-     * frequently overridden per-meal by {@link che.glucosemonitorbe.hovorka.MacroNutrientGastricModel},
-     * so a global scale would not survive the meal path (see {@link TwinScales}).
+     * forces EGP to F01 when the basal log is silent. {@code tMaxGScale} is not wired in: the gut
+     * time constant is adjusted per meal (multiplied by the fiber factor, replaced for a rescue
+     * carb), see {@link TwinScales}.
      */
     private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {
         TwinScales c = s.clamped();

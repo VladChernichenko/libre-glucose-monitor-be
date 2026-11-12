@@ -15,19 +15,21 @@ package che.glucosemonitorbe.hovorka.learning;
  *       meal-window override, settings ISF or parameter fallback) the dose resolves to.</li>
  *   <li>{@code agScale} - corrects systematic meal-magnitude bias (carbs hitting harder/softer than
  *       logged). Flows through {@code HovorkaParameters.aG()}.</li>
+ *   <li>{@code egpScale} - corrects fasting/basal drift. Fitted on fasting anchors and applied to
+ *       EGP0 by {@code HovorkaParameterService.applyScales}; it reaches the forecast when a basal
+ *       dose is active. The fasting drift it does not remove falls to the
+ *       {@link ResidualBiasModel}, which is fitted on the scaled model's remaining error.</li>
  * </ul>
  *
  * <h3>Reserved dimensions</h3>
- * <p>{@code tMaxGScale} (absorption speed) and {@code egpScale} (fasting/basal drift) are carried so
- * the entity and optimiser vector can grow to the full digital twin, but are <b>not</b> wired into the
- * live ODE in v1: {@code tMaxG} is frequently overridden per-meal by
- * {@link che.glucosemonitorbe.hovorka.MacroNutrientGastricModel}, and fasting drift is currently
- * absorbed more robustly by the {@link ResidualBiasModel}. They default to 1.0 (neutral).</p>
+ * <p>{@code tMaxGScale} (absorption speed) is carried so the entity and optimiser vector can grow,
+ * but is <b>not</b> wired into the live ODE: the gut time constant is adjusted per meal (multiplied
+ * by the fiber factor, replaced for a rescue carb). It defaults to 1.0 (neutral).</p>
  *
  * @param isfScale    multiplier on ISF               [dimensionless, ~0.5-2.0]
  * @param agScale     multiplier on meal magnitude A_G [dimensionless, ~0.5-2.0]
  * @param tMaxGScale  multiplier on gut absorption time (reserved)
- * @param egpScale    multiplier on endogenous glucose production (reserved)
+ * @param egpScale    multiplier on endogenous glucose production
  */
 public record TwinScales(
         double isfScale,
@@ -45,7 +47,7 @@ public record TwinScales(
         return new TwinScales(1.0, 1.0, 1.0, 1.0);
     }
 
-    /** Convenience factory for the two v1-active dimensions (reserved scales left neutral). */
+    /** Convenience factory for {@code isfScale} and {@code agScale}; the other two scales stay neutral. */
     public static TwinScales of(double isfScale, double agScale) {
         return new TwinScales(isfScale, agScale, 1.0, 1.0);
     }

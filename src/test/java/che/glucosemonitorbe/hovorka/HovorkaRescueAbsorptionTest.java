@@ -250,26 +250,26 @@ class HovorkaRescueAbsorptionTest {
 
     /**
      * Emitted glucose [mmol/L] every 5 min for {@link #goldenScenario()}, and the matching carb
-     * absorption effect. <b>Before/after baseline, not a snapshot of current output</b>: generated
-     * by running this exact scenario against the source as it stood at commit {@code 4ceae15} -
-     * immediately before {@code 1bd5af7} gave the Hovorka gut model a per-entry tMaxG - via
-     * {@code git checkout 4ceae15 -- src/main/java/.../hovorka/} plus a throwaway print harness,
-     * then restoring the working tree. Per-entry tMaxG must be exactly inert for any meal without
-     * the RESCUE marker, so the current implementation must reproduce these numbers bit-for-bit;
-     * any future edit that shifts an ordinary meal's curve has to change these literals
-     * deliberately, not silently.
+     * absorption effect. A snapshot of the current implementation's output for that scenario,
+     * regenerated on 2026-11-12 for {@code giScale = GI / 70} and the 7-minute sensor lag, and
+     * for the reference-meal brake.
+     *
+     * <p>What it guards: an ordinary meal's forecast must not move when rescue-carb handling
+     * changes. Per-entry tMaxG has to be exactly inert for any meal without the RESCUE marker,
+     * so an edit that shifts an ordinary meal's curve has to change these literals deliberately,
+     * not silently.</p>
      */
     private static final double[] GOLDEN_GLUCOSE = {
-             7.4,  7.4,  7.4,  7.3,  7.3,  7.2,  7.1,  7.0,  6.8,  6.7,  6.6,  6.4,
-             6.3,  6.2,  6.1,  6.0,  6.1,  6.2,  6.5,  6.8,  7.1,  7.4,  7.7,  8.0,
-             8.2,  8.5,  8.7,  8.9,  9.1,  9.2,  9.4,  9.6,  9.8,  9.9, 10.1, 10.2,
-            10.4, 10.6, 10.7, 10.9, 11.0, 11.2, 11.3, 11.5, 11.6, 11.8, 12.0, 12.1};
+             7.5,  7.6,  7.7,  7.7,  7.7,  7.7,  7.6,  7.5,  7.5,  7.4,  7.3,  7.3,
+             7.2,  7.2,  7.1,  7.2,  7.6,  8.2,  8.7,  9.3,  9.7, 10.0, 10.3, 10.6,
+            10.9, 11.1, 11.3, 11.5, 11.7, 11.9, 12.1, 12.3, 12.5, 12.7, 12.9, 13.0,
+            13.2, 13.4, 13.5, 13.7, 13.9, 14.0, 14.1, 14.3, 14.4, 14.6, 14.7, 14.8};
 
     private static final double[] GOLDEN_CARB_EFFECT = {
-             6.25,  6.22,  6.05,   5.8,  5.54,  5.26,   5.0,  4.75,  4.52,  4.31,  4.13,  3.96,
-             3.81,  3.68,  4.91,  8.05, 10.51,  11.8, 11.96, 11.52, 10.85, 10.11,  9.39,  8.73,
-             8.13,   7.6,  7.15,  6.75,   6.4,  6.11,  5.85,  5.63,  5.43,  5.26,  5.11,  4.98,
-             4.86,  4.75,  4.65,  4.56,  4.48,  4.39,  4.32,  4.24,  4.17,   4.1,  4.04,  3.97};
+             8.92,  8.38,  7.88,  7.43,  7.05,  6.72,  6.44,  6.19,  5.98,  5.79,  5.62,  5.46,
+              5.3,  5.16,  7.55, 14.19, 16.78, 16.26, 14.91,  13.5, 12.25,  11.2, 10.34,  9.63,
+             9.06,  8.57,  8.16,  7.81,  7.49,   7.2,  6.94,  6.69,  6.45,  6.23,  6.01,   5.8,
+              5.6,  5.41,  5.22,  5.04,  4.86,  4.69,  4.52,  4.36,   4.2,  4.05,  3.91,  3.76};
 
     @Test
     @DisplayName("golden curve: an ordinary meal's forecast is unchanged to the last emitted digit")
@@ -277,7 +277,8 @@ class HovorkaRescueAbsorptionTest {
         // The task's central claim is that per-entry tMaxG is exactly neutral for non-rescue meals.
         // Asserting two non-rescue modes against each other cannot show that - both would drift
         // together. This pins the actual emitted numbers, exercising a past meal through the
-        // warm-up replay with GI, protein, fat, a bolus and a basal note all in play.
+        // warm-up replay with GI, a bolus and a basal note in play. The meal's protein and fat
+        // (25 g and 20 g on 60 g of carbs) are under the reference share, so they add no brake.
         List<PredictionPointDTO> curve = goldenScenario();
 
         assertThat(curve).hasSize(GOLDEN_GLUCOSE.length);

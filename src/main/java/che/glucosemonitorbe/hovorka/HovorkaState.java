@@ -11,7 +11,8 @@ package che.glucosemonitorbe.hovorka;
  *   <li>qsto2     [3] Dalla Man liquid-stomach compartment [mmol]</li>
  *   <li>qgut      [4] Dalla Man intestinal compartment [mmol]</li>
  *   <li>inc       [5] incretin GLP-1 effect [dimensionless]</li>
- *   <li>protFatGut[6] protein+fat caloric load in gut compartment [kcal] — GLP-1 driver</li>
+ *   <li>protFatGut[6] braking load in gut compartment [kcal]: protein+fat energy beyond the
+ *       reference meal's share (see {@link HovorkaOdeSolver#brakeKcal}) — GLP-1 driver</li>
  * </ul>
  *
  * <h3>Non-ODE tracking fields</h3>
@@ -27,7 +28,7 @@ public record HovorkaState(
         double qsto2,
         double qgut,
         double inc,
-        double protFatGut,  // NEW: protein+fat caloric load in gut (ODE var, GLP-1 driver)
+        double protFatGut,  // protein+fat load beyond the reference share, in gut (ODE var, GLP-1 driver)
         double mealMmol,
         int    activeGI     // NEW: GI of meal being absorbed [0-100]; default 70
 ) {

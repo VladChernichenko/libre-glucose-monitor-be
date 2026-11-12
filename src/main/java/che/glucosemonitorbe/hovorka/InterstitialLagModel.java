@@ -4,10 +4,7 @@ package che.glucosemonitorbe.hovorka;
  * Measurement model for the CGM: interstitial glucose lagging plasma glucose.
  *
  * <p>The ODE integrates <b>plasma</b> glucose, but a CGM samples interstitial fluid, which trails
- * plasma by roughly 10-15 minutes as glucose diffuses across the capillary wall. Comparing the
- * un-lagged model output directly against CGM therefore charges the model for an error the sensor
- * introduced - worst at short horizons, where the whole prediction is dominated by the leading edge
- * of a rise.</p>
+ * plasma as glucose diffuses across the capillary wall.</p>
  *
  * <pre>
  *   dGi/dt = (G - Gi) / tau
@@ -16,26 +13,42 @@ package che.glucosemonitorbe.hovorka;
  * <p>Advanced with the exact one-minute discretisation {@code alpha = 1 - exp(-1/tau)} rather than a
  * forward Euler step, so the filter stays accurate and unconditionally stable for any tau.</p>
  *
- * <h3>Why tau is pinned to physiology and not fitted</h3>
- * <p>Sweeping tau on the held-out AZT1D record (see {@code Azt1dCalibrationValidationTest
- * #interstitialLagSweep}) shows skill-vs-persistence rising <b>monotonically all the way to 100
- * minutes</b> - far past any plausible sensor lag. That is not evidence for a long lag: as tau grows
- * the filter increasingly mutes the model's own dynamics and the prediction slides toward the anchor,
- * i.e. toward persistence itself. Chasing that curve would buy RMSE by making the prediction refuse
- * to move, which is worthless for the thing predictions are for - seeing a meal or a hypo coming.</p>
+ * <h3>The lag runs both ways</h3>
+ * <p>The same equation that turns predicted plasma into a predicted reading also says what plasma
+ * is doing <em>now</em>, given a reading and its trend: {@code G = Gi + tau × dGi/dt}
+ * ({@link #plasmaFromSensor}). Both halves have to be used together. Starting the ODE from the
+ * reading as if it were plasma and then filtering the output applies the lag twice: with glucose
+ * rising 0.1 mmol/L per minute the model would start most of a mmol/L below the true plasma value
+ * and then delay its own answer on top. With the trend unknown (0) the two coincide, which is the
+ * old behaviour.</p>
  *
- * <p>So tau is set to the physiological 12 min and left there. The honest reading of the sweep is a
- * finding about the <i>rest</i> of the model, not about the sensor: the excursions it predicts are
- * currently worse than predicting no excursion at all.</p>
+ * <h3>Why tau is pinned to physiology and not fitted</h3>
+ * <p>Tracer studies put the plasma-to-interstitial delay at 5-6 min in healthy adults and a median
+ * of 6.8 min (range 4.8-9.8) in adults with type 1 diabetes (Basu et al., Diabetes 2013,
+ * doi:10.2337/db13-1132; J Diabetes Sci Technol 2015, doi:10.1177/1932296814554797). tau is set to
+ * 7 min on that basis.</p>
+ *
+ * <p>It is deliberately not tuned for accuracy. Sweeping tau on the held-out AZT1D record (see
+ * {@code Azt1dCalibrationValidationTest#interstitialLagSweep}) shows skill-vs-persistence rising
+ * monotonically all the way to 100 minutes. That is not evidence for a long lag: as tau grows the
+ * filter mutes the model's own dynamics and the prediction slides toward the anchor, i.e. toward
+ * persistence itself - RMSE bought by refusing to move, which is worthless for seeing a meal or a
+ * hypo coming.</p>
  *
  * <h3>Configuration</h3>
- * <p>Override with {@code -Dhovorka.cgmLagMin=...}; {@code 0} disables the filter and makes
- * predictions bit-identical to the un-lagged model.</p>
+ * <p>Override with {@code -Dhovorka.cgmLagMin=...}; {@code 0} disables the measurement model in
+ * both directions and makes predictions identical to the un-lagged model.</p>
  */
 public final class InterstitialLagModel {
 
     /** Physiological interstitial-to-plasma equilibration time [min]. */
-    public static final double PHYSIOLOGICAL_TAU_MIN = 12.0;
+    public static final double PHYSIOLOGICAL_TAU_MIN = 7.0;
+
+    /**
+     * Largest sensor trend [mmol/L per min] used to infer plasma. A CGM trend is a noisy difference
+     * of noisy readings; beyond this it is more likely an artefact than a real rate of change.
+     */
+    public static final double MAX_TREND_MMOL_PER_MIN = 0.15;
 
     /** Interstitial time constant [min]; 0 disables the filter. Global model configuration. */
     public static volatile double tauMinutes = Double.parseDouble(
@@ -50,10 +63,18 @@ public final class InterstitialLagModel {
     }
 
     /**
-     * A filter seeded at the anchor glucose. At the anchor the subject is treated as being in
-     * quasi-equilibrium, so interstitial equals plasma there and the lag only builds up as the
-     * prediction moves away from the anchor.
+     * Plasma glucose [mmol/L] implied by a sensor reading and its trend:
+     * {@code G = Gi + tau × dGi/dt}, with the trend limited to ±{@link #MAX_TREND_MMOL_PER_MIN}.
+     * Returns the reading unchanged when the trend is 0 or not finite, or the lag is disabled.
      */
+    public static double plasmaFromSensor(double sensedMmolL, double trendMmolPerMin) {
+        double tau = tauMinutes;
+        if (tau <= 0 || !Double.isFinite(trendMmolPerMin)) return sensedMmolL;
+        double trend = Math.max(-MAX_TREND_MMOL_PER_MIN, Math.min(MAX_TREND_MMOL_PER_MIN, trendMmolPerMin));
+        return sensedMmolL + tau * trend;
+    }
+
+    /** A filter whose sensed value starts at {@code g0} - the reading at the anchor. */
     public static InterstitialLagModel startingAt(double g0) {
         return new InterstitialLagModel(tauMinutes, g0);
     }

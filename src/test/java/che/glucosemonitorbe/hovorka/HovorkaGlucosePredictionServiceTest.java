@@ -493,14 +493,14 @@ class HovorkaGlucosePredictionServiceTest {
     }
 
     // ---
-    // MARK: Gap 1 - K_ABS scaling with tMaxG (FPU gastric-emptying effect)
+    // MARK: Gap 1 - K_ABS scaling with tMaxG
     // ---
 
     @Test
-    @DisplayName("high-fat params (tMaxG × 3) -> glucose peak appears later than pure-carb params")
-    void highFatTMaxG_glucosePeakShiftsRight() {
-        double baseTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN;      // ≈ 26.8 min (pure carb)
-        double hfTMaxG   = baseTMaxG * 3.0;                        // ≈ 80.4 min (high fat/protein)
+    @DisplayName("a tMaxG three times the default -> the glucose peak appears later")
+    void tripledTMaxG_glucosePeakShiftsRight() {
+        double baseTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN;      // ≈ 26.8 min (45-min carb half-life)
+        double hfTMaxG   = baseTMaxG * 3.0;                        // ≈ 80.4 min (three times the default)
 
         HovorkaParameters baseP = paramsWithTMaxG(baseTMaxG);
         HovorkaParameters hfP   = paramsWithTMaxG(hfTMaxG);
@@ -508,8 +508,8 @@ class HovorkaGlucosePredictionServiceTest {
         // 60 g carbs at t=0; no insulin
         CarbsEntry meal = CarbsEntry.builder().timestamp(NOW).carbs(60.0).build();
 
-        // Window extended to 500 min: GI=70 default (giScale=0.70) slows absorption,
-        // pushing the pure-carb peak beyond 300 min. 500 min lets both peaks resolve.
+        // 500-min window: the default GI (70) scales absorption 1.0; the long window lets both
+        // peaks resolve.
         List<PredictionPointDTO> curveBase = service.buildPredictionPath(
                 baseP, 5.5, NOW, List.of(meal), List.of(), List.of(), USER_ID, 500);
         List<PredictionPointDTO> curveHF = service.buildPredictionPath(
@@ -519,15 +519,15 @@ class HovorkaGlucosePredictionServiceTest {
         int peakMinHF   = peakMinute(curveHF);
 
         assertThat(peakMinHF)
-                .as("High-fat tMaxG (%.1f min) must shift the glucose peak right of pure-carb (%.1f min). "
+                .as("A tripled tMaxG (%.1f min) must shift the glucose peak right of the default (%.1f min). "
                     + "Base peak at %d min, HF peak at %d min.",
                     hfTMaxG, baseTMaxG, peakMinBase, peakMinHF)
                 .isGreaterThan(peakMinBase);
     }
 
     @Test
-    @DisplayName("high-fat params -> lower early glucose (t=60 min) than pure-carb")
-    void highFatTMaxG_lowerEarlyGlucose() {
+    @DisplayName("a tMaxG three times the default -> lower early glucose (t=60 min)")
+    void tripledTMaxG_lowerEarlyGlucose() {
         double baseTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN;
         double hfTMaxG   = baseTMaxG * 3.0;
 
@@ -551,8 +551,8 @@ class HovorkaGlucosePredictionServiceTest {
 
     @Test
     @DisplayName("buildWarmState replays Qgut drain with the same kAbsEff as forward integration")
-    void warmStateReplay_usesSameKAbsEffAsForwardIntegration_forHighFatMeal() {
-        // High-fat/protein meal: tMaxG x3 -> kAbsEff = K_ABS / 3 (much slower Qgut drain).
+    void warmStateReplay_usesSameKAbsEffAsForwardIntegration_forASlowMeal() {
+        // Slow meal: tMaxG x3 -> kAbsEff = K_ABS / 3 (much slower Qgut drain).
         double hfTMaxG = DallaManGutModel.BASE_T_MAX_G_MIN * 3.0;
         HovorkaParameters hfP = paramsWithTMaxG(hfTMaxG);
 
@@ -723,12 +723,34 @@ class HovorkaGlucosePredictionServiceTest {
     @DisplayName("a logged meal's protein and fat change the curve")
     void pastMealProteinAndFatReachTheModel() {
         double pureCarb = glucoseAt(curveFor(pastMeal(30, 50, null, null, null)), 120);
-        double withFpu  = glucoseAt(curveFor(pastMeal(30, 50, null, 30.0, 30.0)), 120);
+        double withFpu  = glucoseAt(curveFor(pastMeal(30, 50, null, 40.0, 60.0)), 120);
 
         assertThat(withFpu)
-                .as("30g protein + 30g fat must slow absorption, but the warm-up never loaded "
+                .as("40g protein + 60g fat must slow absorption, but the warm-up never loaded "
                         + "protFatGut so past meals carried no macros at all")
                 .isLessThan(pureCarb - 0.3);
+    }
+
+    @Test
+    @DisplayName("a meal with the reference meal's share of protein and fat absorbs like its carbs alone")
+    void referenceMixedMealAbsorbsAtThePublishedRates() {
+        // 80 g of carbs carries 391 kcal of protein+fat in the reference meal; 30 g + 30 g is 390.
+        List<PredictionPointDTO> plain = curveFor(pastMeal(30, 80, null, null, null));
+        List<PredictionPointDTO> mixed = curveFor(pastMeal(30, 80, null, 30.0, 30.0));
+        for (int minute : new int[]{30, 60, 120, 240}) {
+            assertThat(glucoseAt(mixed, minute)).as("+%d min", minute).isEqualTo(glucoseAt(plain, minute));
+        }
+    }
+
+    @Test
+    @DisplayName("a carb-free protein and fat first course still slows the carbs that follow")
+    void proteinFatFirstCourseSlowsTheFollowingMeal() {
+        CarbsEntry pasta = pastMeal(30, 50, null, null, null);
+        CarbsEntry eggs = pastMeal(50, 0, null, 30.0, 30.0);
+        double alone = glucoseAt(curveFor(pasta), 120);
+        double afterEggs = glucoseAt(service.buildPredictionPath(params, 6.0, NOW,
+                List.of(eggs, pasta), List.of(), List.of(), USER_ID, 240), 120);
+        assertThat(afterEggs).isLessThan(alone - 0.3);
     }
 
     @Test
@@ -766,6 +788,24 @@ class HovorkaGlucosePredictionServiceTest {
                 .as("60g carbs with 30g protein + 30g fat and no insulin at all must not drive "
                         + "the forecast down; the uncalibrated incretin gain took it to 2.2")
                 .isGreaterThanOrEqualTo(g0 - 0.2);
+    }
+
+    @Test
+    @DisplayName("a rising CGM trend lifts the 15-minute forecast; the first point still leaves from the reading")
+    void risingTrendLiftsTheShortForecast() {
+        List<PredictionPointDTO> flat = forecastWithTrend(0.0);
+        List<PredictionPointDTO> rising = forecastWithTrend(0.1);
+        assertThat(glucoseAt(rising, 15)).isGreaterThan(glucoseAt(flat, 15) + 0.4);
+        assertThat(glucoseAt(rising, 5)).isLessThan(6.7);
+    }
+
+    private List<PredictionPointDTO> forecastWithTrend(double trend) {
+        // Rapid IOB (4.5 h, 55 min) comes from the setUp stub, which strict stubs require every test to use.
+        return service.buildPredictionPath(
+                params, insulinPrefsService.getRapidIobParameters(USER_ID), null, 6.0, NOW,
+                List.of(), List.of(), List.of(), USER_ID, 30,
+                ActivityProvider.NONE, BasalInsulinResolver.DEFAULT_DURATION_HOURS,
+                ActivityGains.NEUTRAL, 1.0, trend);
     }
 
     /** Index of the prediction point with the highest glucose value [minutes from NOW]. */

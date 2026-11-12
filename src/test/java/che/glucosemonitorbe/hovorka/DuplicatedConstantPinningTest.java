@@ -92,17 +92,17 @@ class DuplicatedConstantPinningTest {
     @Test
     @DisplayName("HALF_LIFE_TO_TMAX_G is the single source for the 2-compartment factor")
     void halfLifeToTMaxG_pinnedAtItsPublishedValue() {
-        // HovorkaOdeSolver:349 hardcodes `p.tMaxG() * 1.68` instead of reading this constant,
-        // while eight other sites read the constant. The strong pin - asserting derivatives()
+        // HovorkaOdeSolver.derivatives hardcodes `p.tMaxG() * 1.68` instead of reading this constant,
+        // while three other sites in src/main read the constant. The strong pin - asserting derivatives()
         // and the warm-up replay produce the same four effective rates - is NOT reachable: the
         // replay's derivation is inline inside the private HovorkaGlucosePredictionService
-        // .buildWarmState (:483), and extracting it is a production change this audit forbids.
+        // .buildWarmState, and extracting it is a production change this audit forbids.
         // Until that literal is unified, this makes a change to the named constant fail loudly
         // rather than silently desynchronise the ODE from every caller that respects it.
         assertThat(HovorkaParameterService.HALF_LIFE_TO_TMAX_G)
-                .as("HovorkaOdeSolver:349 hardcodes 1.68; changing this constant alone would "
-                        + "desynchronise the ODE from the warm-up replay, MacroNutrientGastricModel, "
-                        + "PredictionReplayEngine and the dashboard path")
+                .as("HovorkaOdeSolver.derivatives hardcodes 1.68; changing this constant alone would "
+                        + "desynchronise the ODE from the warm-up replay and from the user and "
+                        + "rescue tMaxG built in HovorkaParameterService")
                 .isEqualTo(1.68);
     }
 

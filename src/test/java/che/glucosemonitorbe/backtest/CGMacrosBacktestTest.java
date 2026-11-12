@@ -83,16 +83,21 @@ class CGMacrosBacktestTest {
                 if (meal.mealType == null || meal.carbsG < 5.0) continue;
                 if (meal.libreGlMgdl <= 30) continue;
 
-                double tMaxG = MacroNutrientGastricModel.computeTMaxG(
-                        meal.carbsG, meal.proteinG, meal.fatG, meal.fiberG,
-                        HovorkaParameterService.HALF_LIFE_TO_TMAX_G);
+                // The mechanisms the live forecast runs for a meal: the default 45-min carb
+                // half-life slowed by the meal's fiber, and the ileal brake loaded with the
+                // protein+fat energy beyond the reference share. The dataset carries no GI, so
+                // every meal runs at the default.
+                double tMaxG = 45.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G
+                        * MacroNutrientGastricModel.fiberViscosityFactor(meal.fiberG);
                 HovorkaParameters params = buildParams(weightKg, tMaxG);
 
                 double anchorMmol = meal.libreGlMgdl / BacktestHarness.MGDL_PER_MMOL;
                 double carbMmol   = meal.carbsG * params.aG() / 0.18;
 
+                // Carbs and the brake load enter the gut once, with the meal.
                 HovorkaState state = HovorkaState.steadyState(anchorMmol, params);
-                state = solver.step(state, params, carbMmol, 0.0);
+                state = solver.step(state, params, carbMmol, HovorkaOdeSolver.DEFAULT_GI,
+                        HovorkaOdeSolver.brakeKcal(meal.carbsG, meal.proteinG, meal.fatG), 0.0, 0.0);
 
                 double[] predMmol = new double[H];
                 for (int m = 2; m <= HORIZONS_MIN[H - 1]; m++) {
@@ -160,14 +165,9 @@ class CGMacrosBacktestTest {
         double peakMin    = 75.0;  // Fiasp-like peak
 
         double carbsG   = 60.0;
-        double proteinG = 0.0;
-        double fatG     = 0.0;
-        double fiberG   = 0.0;
         double bolusUnits = carbsG / cr;  // 6 units
 
-        double tMaxG = MacroNutrientGastricModel.computeTMaxG(
-                carbsG, proteinG, fatG, fiberG,
-                HovorkaParameterService.HALF_LIFE_TO_TMAX_G);
+        double tMaxG = 45.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G;
         HovorkaParameters p = buildParams(weightKg, tMaxG);
 
         double g0mmol   = 5.5;
