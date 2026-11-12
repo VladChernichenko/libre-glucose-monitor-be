@@ -329,6 +329,33 @@ public class HovorkaGlucosePredictionService {
                 activityProvider, basalDurationHours, gains);
     }
 
+    /**
+     * As the overload above, with an explicit multiplier on every dose's ISF. This is how a
+     * calibration replay tries a candidate {@code isfScale}: the replay runs on the
+     * {@link PredictionResidualProvider#NONE} provider, whose scale is 1.0, so the candidate has to
+     * arrive as an argument. It multiplies the provider's own scale and the product is clamped once.
+     */
+    public List<PredictionPointDTO> buildPredictionPath(
+            HovorkaParameters customParams,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider,
+            double basalDurationHours,
+            ActivityGains gains,
+            double isfScale) {
+
+        return integrate(customParams, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider, basalDurationHours, gains, isfScale);
+    }
+
     /** Core ODE integration with population-default activity gains. */
     private List<PredictionPointDTO> buildWithParams(
             HovorkaParameters p,
@@ -349,8 +376,9 @@ public class HovorkaGlucosePredictionService {
     }
 
     /**
-     * Core ODE integration - shared by all public overloads. Package-private so tests can observe
-     * which gains a live overload resolved.
+     * The live entry to the core integration: no caller-supplied ISF scale, so the twin's scale
+     * comes from {@link #residualProvider} alone. Package-private so tests can observe which gains
+     * a live overload resolved.
      */
     List<PredictionPointDTO> buildWithParams(
             HovorkaParameters p,
@@ -366,6 +394,27 @@ public class HovorkaGlucosePredictionService {
             ActivityProvider activityProvider,
             double basalDurationHours,
             ActivityGains gains) {
+        return integrate(p, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider, basalDurationHours, gains, 1.0);
+    }
+
+    /** Core ODE integration - shared by every overload. */
+    private List<PredictionPointDTO> integrate(
+            HovorkaParameters p,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider,
+            double basalDurationHours,
+            ActivityGains gains,
+            double callerIsfScale) {
 
         // -- State warm-up -----------------------------------------------------
         WarmUp warmUp = buildWarmState(currentGlucose, pastCarbsEntries, currentTime, p);
@@ -393,7 +442,7 @@ public class HovorkaGlucosePredictionService {
         // -- Pre-compute per-dose IOB timelines, each tagged with the ISF that --
         //    was in effect when that dose was administered --------------------
         List<DoseActivity> doseActivities = buildDoseActivities(pastInsulinDoses, currentTime,
-                pathMinutes, rapidIob, settings, pAdj.isf(), userId);
+                pathMinutes, rapidIob, settings, pAdj.isf(), userId, callerIsfScale);
 
         // -- Future carb timeline (prospective notes already in pastCarbsEntries
         //    with future timestamps - carbs at t <= now were in the warm-up) ---
@@ -529,6 +578,7 @@ public class HovorkaGlucosePredictionService {
                 points.add(PredictionPointDTO.builder()
                         .timestamp(pointTime)
                         .predictedGlucose(Math.round(gAdj * 10.0) / 10.0)
+                        .rawPredictedGlucose(gAdj)
                         .predictedGlucoseLower(lower)
                         .predictedGlucoseUpper(upper)
                         .uncertaintySd(sdOut)
@@ -745,6 +795,10 @@ public class HovorkaGlucosePredictionService {
      * curve and the ISF in effect when it was administered: the user's manual
      * isfBreakfast/isfLunch/isfDinner/isfNight override for the dose's own meal window, or
      * {@code fallbackIsf} if none applies.
+     *
+     * <p>The digital twin's ISF scale is applied here and nowhere else: the provider's scale (live)
+     * times {@code callerIsfScale} (a calibration replay's candidate), clamped once. Neither
+     * {@code settings} nor {@code fallbackIsf} may arrive already scaled.</p>
      */
     private List<DoseActivity> buildDoseActivities(
             List<InsulinDose> doses,
@@ -753,9 +807,12 @@ public class HovorkaGlucosePredictionService {
             RapidInsulinIobParameters rapidIob,
             UserSettingsDTO settings,
             double fallbackIsf,
-            UUID userId) {
+            UUID userId,
+            double callerIsfScale) {
 
         int size = pathMinutes + 2;
+        double isfScale = TwinScales.clamp(
+                TwinScales.clamp(residualProvider.isfScale(userId)) * TwinScales.clamp(callerIsfScale));
         List<DoseActivity> activities = new ArrayList<>();
         for (InsulinDose dose : doses) {
             if (dose.getTimestamp() == null || dose.getUnits() == null) continue;
@@ -772,8 +829,7 @@ public class HovorkaGlucosePredictionService {
                         dose.getUnits(), minsAgoAtStep,
                         rapidIob.diaHours(), rapidIob.peakMinutes());
             }
-            double isf = resolveIsf(settings, fallbackIsf, dose.getTimestamp())
-                    * TwinScales.of(residualProvider.isfScale(userId), 1.0).clamped().isfScale();
+            double isf = resolveIsf(settings, fallbackIsf, dose.getTimestamp()) * isfScale;
             activities.add(new DoseActivity(iob, isf));
         }
         return activities;
@@ -782,8 +838,8 @@ public class HovorkaGlucosePredictionService {
     /**
      * Resolves the ISF [mmol/L per unit] in effect at {@code time}: the user's manual
      * per-meal-window override (isfBreakfast/isfLunch/isfDinner/isfNight) if one applies to
-     * {@code time}'s meal window, otherwise {@code fallbackIsf} (the Hovorka-calibrated
-     * ISF from {@link HovorkaParameterService#buildForUser}).
+     * {@code time}'s meal window, otherwise {@code fallbackIsf} (the unscaled ISF of
+     * {@link HovorkaParameters#isf()}).
      */
     private double resolveIsf(UserSettingsDTO settings, double fallbackIsf, LocalDateTime time) {
         if (settings == null) {

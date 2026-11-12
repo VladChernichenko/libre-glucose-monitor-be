@@ -12,6 +12,7 @@ import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.HovorkaParameterService;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
 import che.glucosemonitorbe.hovorka.MacroNutrientGastricModel;
+import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -39,12 +40,6 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     private static final long BASAL_LOOKBACK_MS =
             che.glucosemonitorbe.hovorka.BasalInsulinResolver.LOOKBACK_HOURS * 3600_000L;
 
-    // -- FPU constants (mirror BacktestHarness) ----------
-    private static final int    FPU_ONSET_MIN     = 90;
-    private static final double FPU_CARB_EQUIV_G  = 10.0;
-    private static final double FPU_MIN_EQUIV_G   = 2.0;
-    private static final double FPU_GLUC_FRACTION = 0.50;
-
     /** CGM reading in the replay window. */
     public record Reading(long epochMs, double mmol) {}
 
@@ -57,9 +52,19 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
      * fit then met a sharp real glucose rise it could not explain and absorbed the error into
      * {@code agScale}/{@code isfScale} - parameters that go on to shape <em>every</em> prediction
      * for that user.
+     *
+     * <p>{@code gi} is the meal's estimated glycemic index, 0 when the note carries none. Like the
+     * macros it has to travel on the event, or a logged low-GI meal is replayed at the default GI
+     * while the live forecast absorbs it at its own.
      */
     public record Event(long epochMs, double carbs, double insulin, boolean longActing,
-                        double protein, double fat, double fiber, boolean rescue) {
+                        double protein, double fat, double fiber, boolean rescue, double gi) {
+
+        /** An event with no glycemic-index estimate. */
+        public Event(long epochMs, double carbs, double insulin, boolean longActing,
+                     double protein, double fat, double fiber, boolean rescue) {
+            this(epochMs, carbs, insulin, longActing, protein, fat, fiber, rescue, 0.0);
+        }
 
         /**
          * Non-rescue event. For sources with no notion of a hypo treatment - the HUPA-UCM and
@@ -67,7 +72,12 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
          */
         public Event(long epochMs, double carbs, double insulin, boolean longActing,
                      double protein, double fat, double fiber) {
-            this(epochMs, carbs, insulin, longActing, protein, fat, fiber, false);
+            this(epochMs, carbs, insulin, longActing, protein, fat, fiber, false, 0.0);
+        }
+
+        /** The same event as the live path sees it with nutrition-aware prediction switched off. */
+        public Event withoutNutrition() {
+            return new Event(epochMs, carbs, insulin, longActing, 0.0, 0.0, 0.0, rescue, 0.0);
         }
     }
 
@@ -83,9 +93,16 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         public long   alignToleranceMs = 300_000; // ±5 min
         /** Hard cap on anchors; if the window yields more they are evenly subsampled. */
         public int    maxAnchors      = 250;
-        /** Apply per-meal macro-modulated tMaxG (as the removed /api/predict did). */
-        public boolean macroTMaxG     = true;
-        /** Add FPU-equivalent slow-carb entries from protein/fat (as the removed /api/predict did). */
+        /**
+         * Override tMaxG per anchor from {@link MacroNutrientGastricModel}. Off by default: the live
+         * forecast does not do this, and a twin must be fitted on the model it will be applied to.
+         * Kept for offline experiments.
+         */
+        public boolean macroTMaxG     = false;
+        /**
+         * Add the delayed protein glucose, through the same {@link ProteinGluconeogenesis} the live
+         * forecast uses (protein only - fat acts through the ileal brake, not as carbs).
+         */
         public boolean fpuEquiv       = true;
         /** Duration of action of the user's long-acting insulin [hours] (mirrors the live forecast). */
         public double basalDurationHours = che.glucosemonitorbe.hovorka.BasalInsulinResolver.DEFAULT_DURATION_HOURS;
@@ -202,14 +219,19 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
             HovorkaParameters p = applyScales(a.macroParams(), s);
             List<PredictionPointDTO> curve = predictor.buildPredictionPath(
                     p, rapidIob, settings, a.g0(), a.now(), a.carbs(), a.insulin(), a.longActing(),
-                    userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours, gains);
+                    userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours, gains,
+                    s.isfScale());
             long t0 = toEpochMs(a.now(), userZone);
             for (PredictionPointDTO pt : curve) {
                 int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
                 if (!isSampleHorizon(h)) continue;
                 Double actual = nearest(cgmT, cgmG, t0 + h * 60_000L, cfg.alignToleranceMs);
                 if (actual == null) continue;
-                out.add(new AnchorSample(h, pt.getPredictedGlucose(), actual, a.g0(),
+                // Unrounded: the fit differentiates this numerically with a 1e-3 step, and a value
+                // rounded to 0.1 mmol/L does not move under a step that small.
+                double predicted = pt.getRawPredictedGlucose() != null
+                        ? pt.getRawPredictedGlucose() : pt.getPredictedGlucose();
+                out.add(new AnchorSample(h, predicted, actual, a.g0(),
                         a.regime(), pt.getTimestamp().getHour()));
             }
         }
@@ -254,27 +276,28 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 }
                 if (!inPast && !inFuture) continue;
 
-                if (n.carbs() > 0) {
+                // Same entries the dashboard builds: a meal carries its GI, fiber, protein and fat
+                // into the gut model, and a carb-free note with macros (a salad or eggs eaten first)
+                // still counts, because its fiber and protein/fat act on the carbs that follow.
+                boolean hasMacros = n.protein() > 0 || n.fat() > 0 || n.fiber() > 0;
+                if (n.carbs() > 0 || (hasMacros && !n.rescue())) {
                     CarbsEntry entry = CarbsEntry.builder()
                             .timestamp(toLdt(n.epochMs(), userZone)).carbs(n.carbs()).build();
-                    // The marker is what makes the gut model use the rescue tMaxG rather than the
-                    // user's own. Only the FPU-equivalent entry below stays unmarked: that is a
-                    // slow protein/fat tail, the opposite of a rescue, and a rescue carries no
-                    // protein or fat anyway.
-                    if (n.rescue()) RescueCarbProfile.mark(entry);
+                    if (n.rescue()) {
+                        // The marker is what makes the gut model use the rescue tMaxG rather than
+                        // the user's own; a rescue has one fixed profile and no macros.
+                        RescueCarbProfile.mark(entry);
+                    } else {
+                        if (n.gi() > 0) entry.setEstimatedGi(n.gi());
+                        entry.setFiber(n.fiber());
+                        entry.setProtein(n.protein());
+                        entry.setFat(n.fat());
+                    }
                     carbs.add(entry);
                 }
                 if (n.insulin() > 0) {
                     insulin.add(InsulinDose.builder().timestamp(toLdt(n.epochMs(), userZone))
                             .units(n.insulin()).type(InsulinDose.InsulinType.BOLUS).build());
-                }
-                if (cfg.fpuEquiv) {
-                    double fpu = (n.protein() * 4.0 * FPU_GLUC_FRACTION + n.fat() * 9.0)
-                            / 100.0 * FPU_CARB_EQUIV_G;
-                    if (fpu >= FPU_MIN_EQUIV_G) {
-                        carbs.add(CarbsEntry.builder()
-                                .timestamp(toLdt(n.epochMs() + FPU_ONSET_MIN * 60_000L, userZone)).carbs(fpu).build());
-                    }
                 }
 
                 boolean active = age <= 3 * 3600_000L && -age <= horizonMs;
@@ -286,6 +309,10 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                         domCarbs = n.carbs(); domProtein = n.protein(); domFat = n.fat(); domFiber = n.fiber();
                     }
                 }
+            }
+
+            if (cfg.fpuEquiv) {
+                carbs = ProteinGluconeogenesis.withDelayedProteinGlucose(carbs);
             }
 
             Regime regime = carbActive ? Regime.MEAL : (insulinActive ? Regime.CORRECTION : Regime.FASTING);
@@ -303,7 +330,11 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
     // -- Parameter helpers -------------------------------------------------------
 
-    /** Apply the active scales (ISF, A_G, EGP₀) to a parameter set. tMaxGScale stays neutral. */
+    /**
+     * Apply the A_G and EGP₀ scales to a parameter set. tMaxGScale stays neutral, and the ISF scale
+     * is not applied here: it is passed to the predictor, which applies it per dose - a scale put on
+     * {@code p.isf()} would be ignored for every user whose settings carry an ISF.
+     */
     private static HovorkaParameters applyScales(HovorkaParameters p, TwinScales s) {
         TwinScales c = s.clamped();
         return new HovorkaParameters(
@@ -311,7 +342,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 p.egpNet() * c.egpScale(),
                 p.egp0()   * c.egpScale(),
                 p.k12(), p.k21(),
-                p.tMaxG(), p.aG() * c.agScale(), p.isf() * c.isfScale(), p.weightKg());
+                p.tMaxG(), p.aG() * c.agScale(), p.isf(), p.weightKg());
     }
 
     private static HovorkaParameters withTMaxG(HovorkaParameters p, double tMaxG) {

@@ -81,9 +81,10 @@ public class HovorkaParameterService {
 
     /**
      * Builds the user's {@link HovorkaParameters} for <b>predictions</b>, applying the learned
-     * digital-twin scales (ISF, meal magnitude) on top of the base parameters when an active twin
-     * exists. This is the single point where personalised calibration auto-applies to every
-     * prediction consumer. Dosing settings are never affected - only the prediction parameters.
+     * digital-twin scales (meal magnitude, EGP) on top of the base parameters when an active twin
+     * exists. The twin's ISF scale is not applied here: the prediction service applies it per dose,
+     * so that a per-meal-window ISF from settings and this fallback ISF are scaled the same way and
+     * exactly once. Dosing settings are never affected - only the prediction parameters.
      */
     @Transactional(readOnly = true)
     public HovorkaParameters buildForUser(UUID userId) {
@@ -149,8 +150,9 @@ public class HovorkaParameterService {
     }
 
     /**
-     * Applies the active digital-twin scales (ISF, meal magnitude A_G, and endogenous glucose
-     * production EGP0) to a base parameter set. {@code egpScale} reaches the ODE through
+     * Applies the active digital-twin scales (meal magnitude A_G and endogenous glucose
+     * production EGP0) to a base parameter set. {@code isf} stays unscaled - see
+     * {@link #buildForUser}. {@code egpScale} reaches the ODE through
      * {@code p.egp0()}: buildWithParams uses that field when a basal dose is active, and still
      * forces EGP to F01 when the basal log is silent. {@code tMaxGScale} is left neutral - it is
      * frequently overridden per-meal by {@link che.glucosemonitorbe.hovorka.MacroNutrientGastricModel},
@@ -163,6 +165,6 @@ public class HovorkaParameterService {
                 p.egpNet() * c.egpScale(),
                 p.egp0()   * c.egpScale(),
                 p.k12(), p.k21(),
-                p.tMaxG(), p.aG() * c.agScale(), p.isf() * c.isfScale(), p.weightKg());
+                p.tMaxG(), p.aG() * c.agScale(), p.isf(), p.weightKg());
     }
 }

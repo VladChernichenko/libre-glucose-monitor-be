@@ -10,8 +10,9 @@ package che.glucosemonitorbe.hovorka.learning;
  *
  * <h3>Active dimensions (v1)</h3>
  * <ul>
- *   <li>{@code isfScale} - corrects systematic under/over-response to insulin. Flows to every
- *       prediction path through {@code HovorkaParameters.isf()}.</li>
+ *   <li>{@code isfScale} - corrects systematic under/over-response to insulin. Applied per
+ *       dose by {@code HovorkaGlucosePredictionService}, on top of whichever ISF (settings
+ *       meal-window override, settings ISF or parameter fallback) the dose resolves to.</li>
  *   <li>{@code agScale} - corrects systematic meal-magnitude bias (carbs hitting harder/softer than
  *       logged). Flows through {@code HovorkaParameters.aG()}.</li>
  * </ul>

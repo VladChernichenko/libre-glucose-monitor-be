@@ -164,9 +164,13 @@ public class DigitalTwinCalibrationService {
         // -- Load events (meals / boluses / basal) -------------------------------
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, nowUserWall);
         List<PredictionReplayEngine.Event> events = new ArrayList<>(notes.size());
+        boolean nutritionAware = featureToggleConfig.isNutritionAwarePredictionEnabled();
         for (Note n : notes) {
             if (n.getTimestamp() == null) continue;
-            events.add(toEvent(n, userZone));
+            PredictionReplayEngine.Event event = toEvent(n, userZone);
+            // The live forecast only reads GI and macros when nutrition-aware prediction is on;
+            // the replay must see the same meals it does.
+            events.add(nutritionAware ? event : event.withoutNutrition());
         }
 
         // -- Build raw predictor + base params + one-time IOB/settings snapshot --
@@ -359,10 +363,10 @@ public class DigitalTwinCalibrationService {
                 n.getInsulin() != null ? n.getInsulin() : 0.0,
                 n.isLongActing(),
                 macro(profile, "protein"), macro(profile, "fat"), macro(profile, "fiber"),
-                n.isHypoTreatment());
+                n.isHypoTreatment(), macro(profile, "estimatedGi"));
     }
 
-    /** Extract a numeric macro (protein/fat/fiber) from a nutrition_profile JSON blob; 0 if absent. */
+    /** Extract a numeric field (protein/fat/fiber/estimatedGi) from a nutrition_profile JSON blob; 0 if absent. */
     static double macro(String json, String key) {
         if (json == null || json.isEmpty()) return 0.0;
         Matcher m = Pattern.compile(String.format(MACRO_FMT, key)).matcher(json);
