@@ -70,6 +70,9 @@ class MealActionServiceTest {
         ObjectNode payload = objectMapper.createObjectNode().put("state", MealActionService.PLANNED)
                 .put("description", "chicken soup, rye bread 40 g");
         payload.set("meal", objectMapper.valueToTree(new MealMacros(45.0, 12.0, 30.0, 4.0, 50.0)));
+        var items = payload.putArray("items");
+        items.addObject().put("name", "chicken soup");
+        items.addObject().put("name", "rye bread").put("grams", 40);
         payload.put("plannedAt", "2026-10-31T12:00:00").put("doseValidUntil", "2026-10-31T12:15:00");
         ObjectNode plan = payload.putObject("plan").put("stale", stale);
         if (advised != null) plan.put("doseUnits", advised); else plan.putNull("doseUnits");
@@ -177,11 +180,14 @@ class MealActionServiceTest {
         assertEquals(tap, req.getValue().getTimestamp());
         assertEquals(50.0, req.getValue().getCarbs());
         assertEquals(0.0, req.getValue().getInsulin());
+        assertEquals("chicken soup, rye bread", req.getValue().getMeal());
         assertEquals(m.getId(), req.getValue().getChatMessageId());
         JsonNode profile = objectMapper.readTree(req.getValue().getNutritionProfile());
         assertEquals(10.0, profile.get("fat").asDouble());
         assertEquals(28.0, profile.get("protein").asDouble());
         assertEquals(5.0, profile.get("fiber").asDouble());
+        assertEquals("chicken soup", profile.get("normalizedFoods").get(0).asText());
+        assertEquals("rye bread", profile.get("normalizedFoods").get(1).asText());
 
         assertEquals(MealActionService.EATEN, r.state());
         assertEquals(mealNote, r.noteId());
@@ -381,6 +387,12 @@ class MealActionServiceTest {
                 () -> service.took(user, m.getId(), 40.0, 15, NOW));
         assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
         assertEquals("PLANNED", objectMapper.readTree(m.getPayload()).get("state").asText());
+    }
+
+    @Test
+    void mealTitleFromDescriptionWhenItemsMissing() {
+        ObjectNode p = objectMapper.createObjectNode().put("description", "150 g buckwheat, grape 100 g");
+        assertEquals("buckwheat, grape", MealActionService.mealTitle(MealActionService.foodNames(p)));
     }
 
     @Test

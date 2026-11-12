@@ -584,4 +584,31 @@ class WatchStripServiceTest {
         readingStoredAt(6.0, -3);
         assertThat(service.evaluate(USER, flat())).isEmpty();
     }
+
+    @Test
+    void hold_insulinLanding_clearsWhenLiveForecastNoLongerHigh() {
+        // NO_ACTION high strips are held for anti-flicker; without reconcile they keep a stale
+        // landing (e.g. 12.2) while the chart already shows ~8.8 after a note change.
+        notesAre(note(0, 4.0, Note.TYPE_NORMAL, 30));
+        readingStoredAt(9.7, 2);
+        WatchStrip first = service.evaluate(USER, high(11.0, 12.2)).orElseThrow();
+        assertThat(first.reason()).isEqualTo(Reason.INSULIN_LANDING);
+        assertThat(first.landing().mmol()).isEqualTo(12.2);
+
+        readingStoredAt(9.7, -3);
+        assertThat(service.evaluate(USER, high(9.0, 8.8))).isEmpty();
+    }
+
+    @Test
+    void hold_highStillHigh_landingRefreshedToCurrentFourHour() {
+        notesAre(note(0, 4.0, Note.TYPE_NORMAL, 30));
+        readingStoredAt(9.7, 2);
+        assertThat(service.evaluate(USER, high(11.0, 12.2)).orElseThrow().landing().mmol()).isEqualTo(12.2);
+
+        readingStoredAt(9.7, -3);
+        // Still high, but the path moved — banner landing must track the chart's 4h point.
+        WatchStrip held = service.evaluate(USER, high(10.5, 11.1)).orElseThrow();
+        assertThat(held.state()).isEqualTo(State.URGENT_HIGH);
+        assertThat(held.landing().mmol()).isEqualTo(11.1);
+    }
 }

@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
  * times in the user's wall time (as the forecast's own timestamps). A null strip means "no strip".
  *
  * @param low        the forecast low the strip is about, when it is about one
- * @param landing    the forecast at the end of the horizon (+240 min), CALM only
+ * @param landing    the forecast at the end of the horizon (+240 min); HIGH and CALM both use it
  * @param nextCheckAt when the strip should be looked at again
  */
 public record WatchStrip(State state, Reason reason, Suggestion suggestion,

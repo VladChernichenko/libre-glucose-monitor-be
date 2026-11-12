@@ -1,6 +1,8 @@
 package che.glucosemonitorbe.service.nutrition;
 
-import lombok.RequiredArgsConstructor;
+import che.glucosemonitorbe.dto.OFFProductDto;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -8,55 +10,97 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * The only place a food name becomes carbohydrate, fat, protein, fiber, glycemic index and
  * glycemic load. Grams scale the per-100 g catalog row. Glycemic load is
- * {@code GI ? max(0, carbs ? fiber) / 100} and is not stored in the catalog.
+ * {@code GI × max(0, carbs − fiber) / 100} and is not stored in the catalog.
+ *
+ * <p>Lookup order per item: local SQLite {@link FoodCatalog} (includes GI) → on miss,
+ * {@link OpenFoodFactsService} barcode or name search → {@code toNutritionSnapshot}.
+ * OFF is optional (absent when Mongo-backed OFF is disabled).
  */
+@Slf4j
 @Service
-@RequiredArgsConstructor
 public class FoodCompositionService {
 
     private static final Pattern GRAMS = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*g\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern LETTERS = Pattern.compile("[\\p{L}]{3,}");
+    /** EAN-8 / UPC-A / EAN-13 / GTIN-14 style codes typed as the food "name". */
+    private static final Pattern BARCODE = Pattern.compile("^\\d{8,14}$");
+    private static final int OFF_SEARCH_LIMIT = 5;
+    /** Carbs/protein/fat/fiber per 100 g cannot exceed the portion mass itself. */
+    private static final double MAX_MACRO_100G = 100.0;
 
     private final FoodCatalog catalog;
     private final GlycemicPatternMatchingService patterns;
+    private final OpenFoodFactsService openFoodFacts;
+
+    @Autowired
+    public FoodCompositionService(FoodCatalog catalog, GlycemicPatternMatchingService patterns,
+                                  @Autowired(required = false) OpenFoodFactsService openFoodFacts) {
+        this.catalog = catalog;
+        this.patterns = patterns;
+        this.openFoodFacts = openFoodFacts;
+    }
+
+    /** Test seam without OFF. */
+    FoodCompositionService(FoodCatalog catalog, GlycemicPatternMatchingService patterns) {
+        this(catalog, patterns, null);
+    }
 
     public NutritionSnapshot compose(List<FoodPortion> items) {
         double carbs = 0, fiber = 0, protein = 0, fat = 0;
         double giWeighted = 0, giWeight = 0;
-        boolean any = false;
+        boolean anyCatalog = false;
+        boolean anyOff = false;
         boolean estimated = false;
         List<String> names = new ArrayList<>();
         for (FoodPortion item : merge(items)) {
             names.add(shown(item));
             FoodCatalog.Match match = catalog.find(item.name());
-            if (match == null) continue;
-            any = true;
-            double grams = item.grams() > 0 ? item.grams() : match.typicalServingG();
-            boolean usedTypical = item.grams() <= 0 || item.massEstimated();
-            estimated |= usedTypical;
-            double scale = grams / 100.0;
-            double itemCarbs = match.carbs100g() * scale;
+            if (match != null) {
+                anyCatalog = true;
+                double grams = item.grams() > 0 ? item.grams() : match.typicalServingG();
+                boolean usedTypical = item.grams() <= 0 || item.massEstimated();
+                estimated |= usedTypical;
+                double scale = grams / 100.0;
+                double itemCarbs = match.carbs100g() * scale;
+                carbs += itemCarbs;
+                fiber += match.fiber100g() * scale;
+                protein += match.protein100g() * scale;
+                fat += match.fat100g() * scale;
+                if (match.gi() != null && itemCarbs > 0) {
+                    giWeighted += match.gi() * itemCarbs;
+                    giWeight += itemCarbs;
+                }
+                continue;
+            }
+            NutritionSnapshot off = resolveOff(item);
+            if (off == null) continue;
+            anyOff = true;
+            estimated |= item.grams() <= 0 || item.massEstimated()
+                    || Boolean.TRUE.equals(off.getMassEstimated());
+            double itemCarbs = nz(off.getTotalCarbs());
             carbs += itemCarbs;
-            fiber += match.fiber100g() * scale;
-            protein += match.protein100g() * scale;
-            fat += match.fat100g() * scale;
-            if (match.gi() != null && itemCarbs > 0) {
-                giWeighted += match.gi() * itemCarbs;
+            fiber += nz(off.getFiber());
+            protein += nz(off.getProtein());
+            fat += nz(off.getFat());
+            if (off.getEstimatedGi() != null && itemCarbs > 0) {
+                giWeighted += off.getEstimatedGi() * itemCarbs;
                 giWeight += itemCarbs;
             }
         }
+        boolean any = anyCatalog || anyOff;
         Double gi = giWeight > 0 ? round1(giWeighted / giWeight) : null;
         Double gl = gi == null ? null : round1(gi * Math.max(0, carbs - fiber) / 100.0);
         NutritionSnapshot snapshot = NutritionSnapshot.builder()
                 .absorptionMode(gi != null ? "GI_GL_ENHANCED" : "DEFAULT_DECAY")
-                .source(any ? "FOOD_CATALOG" : "UNMATCHED")
-                .confidence(any ? (estimated ? 0.45 : 0.75) : 0.2)
+                .source(source(anyCatalog, anyOff))
+                .confidence(any ? (estimated ? 0.45 : (anyOff && !anyCatalog ? 0.55 : 0.75)) : 0.2)
                 .totalCarbs(round1(carbs))
                 .fiber(round1(fiber))
                 .protein(round1(protein))
@@ -109,6 +153,93 @@ public class FoodCompositionService {
             }
         }
         return snapshot;
+    }
+
+    private NutritionSnapshot resolveOff(FoodPortion item) {
+        if (openFoodFacts == null || item.name() == null) return null;
+        String key = item.name().trim();
+        if (key.isEmpty()) return null;
+        try {
+            Optional<OFFProductDto> product;
+            if (BARCODE.matcher(key).matches()) {
+                product = openFoodFacts.lookupByBarcode(key).filter(FoodCompositionService::plausibleNutriments);
+            } else {
+                product = firstUsable(key, openFoodFacts.searchProducts(key, OFF_SEARCH_LIMIT));
+            }
+            if (product.isEmpty()) return null;
+            OFFProductDto p = product.get();
+            double grams = item.grams() > 0 ? item.grams()
+                    : (p.getServingQuantityG() != null && p.getServingQuantityG() > 0
+                    ? p.getServingQuantityG() : 100.0);
+            NutritionSnapshot snap = openFoodFacts.toNutritionSnapshot(p, grams);
+            if (!plausiblePortion(snap, grams)) {
+                log.warn("Open Food Facts hit rejected for '{}': carbs {} g in {} g portion",
+                        key, snap.getTotalCarbs(), grams);
+                return null;
+            }
+            if (item.grams() <= 0 || item.massEstimated()) {
+                snap.setMassEstimated(true);
+            }
+            return snap;
+        } catch (RuntimeException e) {
+            log.warn("Open Food Facts fallback failed for '{}': {}", key, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Prefer a search hit whose name mentions the query; skip rows with impossible per-100 g macros
+     * (e.g. 385 g carbs / 100 g → 770 g carbs in a 200 g portion).
+     */
+    static Optional<OFFProductDto> firstUsable(String query, List<OFFProductDto> products) {
+        if (products == null || products.isEmpty()) return Optional.empty();
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        Optional<OFFProductDto> named = Optional.empty();
+        for (OFFProductDto p : products) {
+            if (!plausibleNutriments(p)) continue;
+            if (named.isEmpty() && nameMentions(p, q)) named = Optional.of(p);
+        }
+        if (named.isPresent()) return named;
+        for (OFFProductDto p : products) {
+            if (plausibleNutriments(p)) return Optional.of(p);
+        }
+        return Optional.empty();
+    }
+
+    static boolean plausibleNutriments(OFFProductDto p) {
+        if (p == null || p.getNutriments() == null) return false;
+        OFFProductDto.Nutriments n = p.getNutriments();
+        if (n.getCarbohydrates100g() == null && n.getProteins100g() == null && n.getFat100g() == null) {
+            return false;
+        }
+        return within100(n.getCarbohydrates100g()) && within100(n.getProteins100g())
+                && within100(n.getFat100g()) && within100(n.getFiber100g());
+    }
+
+    /** Scaled macros cannot exceed the edible mass (with a tiny rounding slack). */
+    static boolean plausiblePortion(NutritionSnapshot snap, double grams) {
+        if (snap == null || grams <= 0) return false;
+        double limit = grams * 1.05;
+        return nz(snap.getTotalCarbs()) <= limit
+                && nz(snap.getProtein()) <= limit
+                && nz(snap.getFat()) <= limit
+                && nz(snap.getFiber()) <= limit;
+    }
+
+    private static boolean within100(Double v) {
+        return v == null || (Double.isFinite(v) && v >= 0 && v <= MAX_MACRO_100G);
+    }
+
+    private static boolean nameMentions(OFFProductDto p, String query) {
+        if (query.isEmpty() || p.getProductName() == null) return false;
+        return p.getProductName().toLowerCase(Locale.ROOT).contains(query);
+    }
+
+    private static String source(boolean catalog, boolean off) {
+        if (catalog && off) return "MIXED";
+        if (off) return "OPEN_FOOD_FACTS";
+        if (catalog) return "FOOD_CATALOG";
+        return "UNMATCHED";
     }
 
     private static List<FoodPortion> merge(List<FoodPortion> items) {

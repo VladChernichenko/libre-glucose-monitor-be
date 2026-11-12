@@ -23,7 +23,8 @@ public class MealPhotoRecognizer {
     static final String PROMPT = """
             Look at this meal photo. Return ONLY a JSON object of this shape:
             {"foods":[{"name":"string","grams":number}]}
-            name is the food. grams is the visible portion weight.
+            List each visible food as its own array entry (e.g. barley, onions, meat) — not one
+            combined dish name. name is a short catalog food name. grams is the visible portion weight.
             Do not include carbohydrates, fat, protein, fiber, glycemic index or glycemic load.
             No markdown and no extra text.
             """;

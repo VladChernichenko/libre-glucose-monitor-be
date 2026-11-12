@@ -162,18 +162,22 @@ public class MealActionService {
                 pick(fiber, planned, "fiber"), gi != null ? gi : nullable(planned, "gi"));
         validate(meal);
 
+        List<String> foods = foodNames(p);
         CreateNoteRequest req = new CreateNoteRequest();
         req.setTimestamp(ate);
         req.setCarbs(meal.carbs());
         req.setInsulin(0.0);
-        req.setMeal("Meal");
+        // Notes list title: "buckwheat, grape, milk" from plan items (not the generic "Meal").
+        req.setMeal(mealTitle(foods));
         req.setType(Note.TYPE_NORMAL);
         req.setComment(truncate(p.path("description").asText(null), 500));
         req.setChatMessageId(m.getId());
         // Same shape as the plan's prospective meal, so the logged meal forecasts like the planned one.
         req.setNutritionProfile(json(NutritionSnapshot.builder()
                 .totalCarbs(meal.carbs()).fat(meal.fat()).protein(meal.protein()).fiber(meal.fiber())
-                .estimatedGi(meal.gi()).build()));
+                .estimatedGi(meal.gi())
+                .normalizedFoods(foods.isEmpty() ? null : foods)
+                .build()));
         UUID noteId = notesService.createNote(userId, req).getId();
 
         p.put("state", EATEN);
@@ -409,6 +413,34 @@ public class MealActionService {
     private static String truncate(String s, int max) {
         if (s == null) return null;
         return s.length() > max ? s.substring(0, max) : s;
+    }
+
+    /** {@code notes.meal} is varchar(50); prefer plan item names, else description without gram weights. */
+    static String mealTitle(List<String> foods) {
+        if (foods == null || foods.isEmpty()) return "Meal";
+        return truncate(String.join(", ", foods), 50);
+    }
+
+    static List<String> foodNames(JsonNode p) {
+        List<String> names = new ArrayList<>();
+        JsonNode items = p.path("items");
+        if (items.isArray()) {
+            for (JsonNode i : items) {
+                String n = i.path("name").asText("").trim();
+                if (!n.isEmpty()) names.add(n);
+            }
+        }
+        if (!names.isEmpty()) return names;
+        String desc = p.path("description").asText(null);
+        if (desc == null || desc.isBlank()) return names;
+        String lower = desc.trim().toLowerCase();
+        if (lower.equals("meal") || lower.equals("meal photo")) return names;
+        for (String part : desc.split(",")) {
+            String cleaned = part.replaceAll("(?i)\\s*\\d+(?:\\.\\d+)?\\s*g\\b", "").trim();
+            cleaned = cleaned.replaceAll("(?i)^\\d+(?:\\.\\d+)?\\s*g\\s+", "").trim();
+            if (!cleaned.isEmpty()) names.add(cleaned);
+        }
+        return names;
     }
 
     private String json(Object o) {

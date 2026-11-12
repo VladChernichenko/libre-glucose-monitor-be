@@ -187,15 +187,19 @@ public class QwenGatewayService {
                 .timeout(REQUEST_TIMEOUT)
                 .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
                 .build();
-        // Read as String first so we can log the error body on failure
-        HttpResponse<String> strResponse = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
-        if (strResponse.statusCode() >= 400) {
-            log.error("[Qwen] HTTP error status={} body={}", strResponse.statusCode(), strResponse.body());
-            throw new RuntimeException("Qwen API error status=" + strResponse.statusCode());
+        // Stream the body: buffering as a String waits for the full completion and burns the
+        // MVC async budget after vision already used most of it (client then times out with no Done).
+        HttpResponse<java.io.InputStream> response =
+                HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        if (response.statusCode() >= 400) {
+            String errBody;
+            try (java.io.InputStream in = response.body()) {
+                errBody = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            log.error("[Qwen] HTTP error status={} body={}", response.statusCode(), errBody);
+            throw new RuntimeException("Qwen API error status=" + response.statusCode());
         }
-        // Re-wrap as InputStream for the streaming reader
-        byte[] bodyBytes = strResponse.body().getBytes(StandardCharsets.UTF_8);
-        return new SyntheticStreamResponse(strResponse, bodyBytes);
+        return response;
     }
 
     private HttpResponse<String> sendRequestSync(String payload) throws Exception {
@@ -211,24 +215,6 @@ public class QwenGatewayService {
             throw new RuntimeException("Qwen API error status=" + response.statusCode() + " body=" + response.body());
         }
         return response;
-    }
-
-    /** Minimal HttpResponse<InputStream> wrapper around a pre-read String body. */
-    private static final class SyntheticStreamResponse implements HttpResponse<java.io.InputStream> {
-        private final HttpResponse<String> delegate;
-        private final byte[] body;
-        SyntheticStreamResponse(HttpResponse<String> delegate, byte[] body) {
-            this.delegate = delegate;
-            this.body = body;
-        }
-        @Override public int statusCode() { return delegate.statusCode(); }
-        @Override public java.net.http.HttpRequest request() { return delegate.request(); }
-        @Override public java.util.Optional<HttpResponse<java.io.InputStream>> previousResponse() { return java.util.Optional.empty(); }
-        @Override public java.net.http.HttpHeaders headers() { return delegate.headers(); }
-        @Override public java.io.InputStream body() { return new java.io.ByteArrayInputStream(body); }
-        @Override public java.util.Optional<javax.net.ssl.SSLSession> sslSession() { return delegate.sslSession(); }
-        @Override public URI uri() { return delegate.uri(); }
-        @Override public java.net.http.HttpClient.Version version() { return delegate.version(); }
     }
 
     private String buildChatPayload(String prompt, String model, boolean stream) throws Exception {

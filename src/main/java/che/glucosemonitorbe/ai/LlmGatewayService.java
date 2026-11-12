@@ -217,7 +217,8 @@ public class LlmGatewayService {
 
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(URI.create(ollamaUrl))
-                .header("Content-Type", "application/json");
+                .header("Content-Type", "application/json")
+                .timeout(java.time.Duration.ofSeconds(90));
         applyOllamaAuth(requestBuilder);
         HttpRequest request = requestBuilder
                 .POST(HttpRequest.BodyPublishers.ofString(payload))

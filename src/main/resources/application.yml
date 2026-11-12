@@ -47,7 +47,9 @@ spring:
     locations: classpath:db/migration
   mvc:
     async:
-      request-timeout: 120000
+      # Meal-prep: vision (up to ~90s) + OFF + plan + guarded LLM (up to ~90s×2). Must exceed that
+      # budget or Spring kills the NDJSON stream after QwenVision already succeeded; iOS uses 300s.
+      request-timeout: ${MVC_ASYNC_REQUEST_TIMEOUT_MS:300000}
 
 security:
   jwt:

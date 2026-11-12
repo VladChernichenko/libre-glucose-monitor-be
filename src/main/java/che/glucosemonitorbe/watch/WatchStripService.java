@@ -110,7 +110,42 @@ public class WatchStripService {
                 .map(st -> new WatchStrip(st.state(), st.reason(), st.suggestion(), st.low(), st.landing(),
                         st.iob(), st.cob(), st.nextCheckAt(), estimate))
                 .orElse(null);
-        return hold.apply(userId, fresh.get().timestamp(), resp.getCalculatedAt(), candidate);
+        Optional<WatchStrip> shown = hold.apply(userId, fresh.get().timestamp(), resp.getCalculatedAt(), candidate);
+        return reconcileHighWithForecast(userId, resp, candidate, shown);
+    }
+
+    /**
+     * A held {@link State#URGENT_HIGH} keeps the old strip for anti-flicker, including its landing
+     * mmol. The dashboard chart always shows the live {@code predictionPath}, so without this step
+     * the banner can say "High ahead: 12.2" while the 4 h forecast on screen is already ~8.8
+     * (e.g. after a note delete). Drop the held HIGH when the live 2 h/4 h points are no longer
+     * both above {@link #HIGH_MMOL}; while they still are, refresh landing to the current 4 h value.
+     */
+    private Optional<WatchStrip> reconcileHighWithForecast(UUID userId, GlucoseCalculationsResponse resp,
+                                                           WatchStrip candidate, Optional<WatchStrip> shown) {
+        if (shown.isEmpty() || shown.get().state() != State.URGENT_HIGH) return shown;
+        if (!staysHigh(resp)) {
+            hold.clear(userId);
+            return Optional.ofNullable(candidate);
+        }
+        Double fourHour = resp.getFourHourPrediction();
+        LocalDateTime now = resp.getCalculatedAt();
+        if (fourHour == null || now == null) return shown;
+        WatchStrip strip = shown.get();
+        GlucosePoint landing = new GlucosePoint(now.plusMinutes(HORIZON_MINUTES), fourHour);
+        if (strip.landing() != null
+                && strip.landing().at().equals(landing.at())
+                && Math.abs(strip.landing().mmol() - fourHour) < 0.05) {
+            return shown;
+        }
+        return Optional.of(new WatchStrip(strip.state(), strip.reason(), strip.suggestion(), strip.low(),
+                landing, strip.iob(), strip.cob(), strip.nextCheckAt(), strip.activityEstimate()));
+    }
+
+    private static boolean staysHigh(GlucoseCalculationsResponse resp) {
+        Double twoHour = resp.getTwoHourPrediction();
+        Double fourHour = resp.getFourHourPrediction();
+        return twoHour != null && twoHour > HIGH_MMOL && fourHour != null && fourHour > HIGH_MMOL;
     }
 
     private Optional<WatchStrip> decide(UUID userId, GlucoseCalculationsResponse resp, double reading) {
