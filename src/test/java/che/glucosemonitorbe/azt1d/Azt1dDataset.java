@@ -253,6 +253,75 @@ public final class Azt1dDataset {
     }
 
     /**
+     * One bolus or carb row of a subject's pump log, with the bolus type the pump recorded.
+     * {@code Automatic Bolus/Correction} rows are doses the AID system gave on its own; every other
+     * insulin row was chosen by the person.
+     */
+    public record BolusRecord(long epochMs, String bolusType, double carbsG,
+                              double totalU, double correctionU, double foodU) {}
+
+    /** True for a dose the pump delivered automatically (Control-IQ), not one the person chose. */
+    public static boolean isAutomatic(BolusRecord r) {
+        return r.bolusType() != null && r.bolusType().startsWith("Automatic Bolus");
+    }
+
+    /** True for insulin the person chose: some insulin delivered and not an automatic bolus. */
+    public static boolean isManual(BolusRecord r) {
+        return r.totalU() > 0 && !isAutomatic(r);
+    }
+
+    /**
+     * Read the bolus and carb rows of one subject's CSV. Columns are resolved from the header, as in
+     * {@link #load}. Rows with neither insulin nor carbs are not returned.
+     */
+    public static List<BolusRecord> loadBolusLog(Path csv) throws IOException {
+        List<BolusRecord> out = new ArrayList<>();
+        List<String> lines = Files.readAllLines(csv);
+        if (lines.isEmpty()) return out;
+
+        String[] header = lines.get(0).split(",", -1);
+        int cTime  = indexOf(header, h -> h.equalsIgnoreCase("EventDateTime"));
+        int cType  = indexOf(header, h -> h.equalsIgnoreCase("BolusType"));
+        int cCorr  = indexOf(header, h -> h.equalsIgnoreCase("CorrectionDelivered"));
+        int cTotal = indexOf(header, h -> h.equalsIgnoreCase("TotalBolusInsulinDelivered"));
+        int cFood  = indexOf(header, h -> h.equalsIgnoreCase("FoodDelivered"));
+        int cCarb  = indexOf(header, h -> h.equalsIgnoreCase("CarbSize"));
+        if (cTime < 0) return out;
+
+        for (int i = 1; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line.isBlank()) continue;
+            String[] f = line.split(",", -1);
+            if (f.length <= cTime) continue;
+            long epochMs = parseTs(f[cTime]);
+            if (epochMs < 0) continue;
+
+            double total = cell(f, cTotal);
+            double carbs = cell(f, cCarb);
+            if (total <= 0 && carbs <= 0) continue;
+            String type = cType >= 0 && cType < f.length ? f[cType].trim() : "";
+            out.add(new BolusRecord(epochMs, type, Math.max(0, carbs), Math.max(0, total),
+                    Math.max(0, cell(f, cCorr)), Math.max(0, cell(f, cFood))));
+        }
+        return out;
+    }
+
+    /** Every subject's bolus log, keyed {@code "Subject N"}, for the subjects whose CSV exists. */
+    public static java.util.Map<String, List<BolusRecord>> loadAllBolusLogs(Path datasetRoot) throws IOException {
+        java.util.Map<String, List<BolusRecord>> out = new java.util.LinkedHashMap<>();
+        Path recordsDir = datasetRoot.resolve("CGM Records");
+        for (int n = 1; n <= 25; n++) {
+            Path csv = recordsDir.resolve("Subject " + n).resolve("Subject " + n + ".csv");
+            if (Files.exists(csv)) out.put("Subject " + n, loadBolusLog(csv));
+        }
+        return out;
+    }
+
+    private static double cell(String[] f, int col) {
+        return col >= 0 && col < f.length ? parseD(f[col]) : 0.0;
+    }
+
+    /**
      * Load every {@code CGM Records/Subject N/Subject N.csv} under the dataset root, ordered by
      * subject number.
      */
