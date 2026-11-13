@@ -25,7 +25,7 @@ class PinnedTwinScenarioTest {
     private static final double START = 11.0;
     private static final double DOSE_UNITS = 2.0;
 
-    private static Azt1dDataset.Subject flatSubject() {
+    static Azt1dDataset.Subject flatSubject() {
         List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
         for (long t = DAY0; t < DAY0 + 2 * 24 * 60 * MIN; t += 5 * MIN) {
             cgm.add(new PredictionReplayEngine.Reading(t, START));
@@ -36,7 +36,7 @@ class PinnedTwinScenarioTest {
     }
 
     /** The same subject, but with glucose after the dose following the neutral model's own forecast, so the raw model is right by construction. */
-    private static Azt1dDataset.Subject subjectWhoseGlucoseFollowsTheModel(ScenarioEpisode ep) {
+    static Azt1dDataset.Subject subjectWhoseGlucoseFollowsTheModel(ScenarioEpisode ep) {
         Azt1dDataset.Subject flat = flatSubject();
         List<AnchorSample> neutral = new ScenarioForecaster(flat).forecast(ep, ScaleMode.NEUTRAL).samples();
         List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
