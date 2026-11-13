@@ -8,12 +8,14 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionException;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -36,6 +38,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (StringUtils.hasText(jwt)) {
                 try {
                     authenticateFromToken(jwt, request);
+                } catch (DataAccessException | TransactionException ex) {
+                    // The token could not be checked because the database is unavailable. Answer
+                    // 503, not an anonymous request: that would surface as 401 and tell the client
+                    // its (possibly perfectly valid) session is dead.
+                    log.error("Database unavailable while authenticating {}: {}",
+                            request.getRequestURI(), ex.getMessage());
+                    response.setHeader("Retry-After", "5");
+                    response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE,
+                            "Service temporarily unavailable");
+                    return;
                 } catch (Exception ex) {
                     // Never let an auth-setup failure break the chain; the request just stays anonymous.
                     log.error("Could not set user authentication for {}: {}",
@@ -71,7 +83,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String username = claims.getSubject();
-        if (tokenBlacklistService.isUserGloballyLoggedOut(username)) {
+        if (tokenBlacklistService.isRevokedByLogoutAll(username, JwtTokenProvider.issuedAt(claims))) {
             log.warn("JWT rejected for {}: user logged out from all devices", username);
             return;
         }

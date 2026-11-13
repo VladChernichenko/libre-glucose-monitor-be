@@ -1,7 +1,9 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.entity.RevokedToken;
+import che.glucosemonitorbe.entity.UserTokenWatermark;
 import che.glucosemonitorbe.repository.TokenBlacklistRepository;
+import che.glucosemonitorbe.repository.UserTokenWatermarkRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
@@ -31,28 +33,39 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class TokenBlacklistService {
 
-    /** Sentinel prefix for logout-all-devices (not a JWT). */
-    public static final String LOGOUT_ALL_DEVICES_PREFIX = "LOGOUT_ALL_DEVICES:";
+    /** Key prefix of the short-lived "this refresh token was just rotated" marker (not a JWT). */
+    private static final String ROTATED_PREFIX = "ROTATED:";
 
     private static final long FALLBACK_TTL_MS = TimeUnit.HOURS.toMillis(24);
-    /** Extra buffer so the sentinel outlives clock skew past the last refresh token. */
-    private static final long LOGOUT_ALL_TTL_BUFFER_MS = TimeUnit.HOURS.toMillis(1);
+
+    /** Outcome of presenting a refresh token for rotation. */
+    public enum RotationResult {
+        /** First use: the token is now spent and a new pair may be minted. */
+        ROTATED,
+        /** Already spent, but only moments ago by a rotation - the client most likely never received
+         *  (or raced) the response, so a new pair may be minted instead of signing the user out. */
+        REUSED_WITHIN_GRACE,
+        /** Spent earlier, or revoked by logout: reject. */
+        REJECTED
+    }
 
     private final TokenBlacklistRepository repository;
+    private final UserTokenWatermarkRepository watermarkRepository;
 
     @Value("${security.jwt.secret}")
     private String jwtSecret;
 
-    /** Must cover the full refresh-token lifetime so stolen refresh tokens cannot revive after logout-all. */
-    @Value("${security.jwt.refresh-expiration-ms}")
-    private long refreshExpirationMs;
+    /**
+     * How long a just-rotated refresh token may be presented again. Covers a refresh response lost
+     * in transit (app suspended, network drop) and parallel refreshes; 0 disables the tolerance.
+     */
+    @Value("${security.jwt.refresh-reuse-grace-ms:60000}")
+    private long refreshReuseGraceMs;
 
-    public TokenBlacklistService(TokenBlacklistRepository repository) {
+    public TokenBlacklistService(TokenBlacklistRepository repository,
+                                 UserTokenWatermarkRepository watermarkRepository) {
         this.repository = repository;
-    }
-
-    private long logoutAllTtlMs() {
-        return Math.max(refreshExpirationMs, FALLBACK_TTL_MS) + LOGOUT_ALL_TTL_BUFFER_MS;
+        this.watermarkRepository = watermarkRepository;
     }
 
     private SecretKey getSigningKey() {
@@ -78,44 +91,38 @@ public class TokenBlacklistService {
         }
     }
 
-    /** Invalidate all sessions for a user until re-login (logout-all-devices). */
+    /**
+     * Logout-all-devices: every token for this user issued before now is rejected from here on.
+     * The watermark is never cleared - a later login simply mints tokens issued after it.
+     */
     @Transactional
     public void blacklistAllDevicesForUser(String username) {
         if (username == null || username.isBlank()) {
             return;
         }
-        long expiration = System.currentTimeMillis() + logoutAllTtlMs();
-        store(LOGOUT_ALL_DEVICES_PREFIX + username.trim(), expiration);
-        log.info("Global logout sentinel registered for user {} until {}", username, new Date(expiration));
+        Instant now = Instant.now();
+        watermarkRepository.save(new UserTokenWatermark(username.trim(), now));
+        log.info("Logout-all watermark set for user {} at {}", username, now);
     }
 
     /**
-     * Clears the logout-all sentinel so a successful password login can issue usable tokens again.
+     * True if a token issued at {@code issuedAt} for {@code username} predates the user's last
+     * logout-all. A token with no issue time cannot be shown to postdate it, so it is rejected
+     * whenever a watermark exists.
      */
-    @Transactional
-    public void clearGlobalLogout(String username) {
-        if (username == null || username.isBlank()) {
-            return;
-        }
-        repository.deleteById(sha256Hex(LOGOUT_ALL_DEVICES_PREFIX + username.trim()));
-        log.info("Global logout sentinel cleared for user {}", username);
-    }
-
     @Transactional(readOnly = true)
-    public boolean isUserGloballyLoggedOut(String username) {
+    public boolean isRevokedByLogoutAll(String username, Instant issuedAt) {
         if (username == null || username.isBlank()) {
             return false;
         }
-        return isActive(LOGOUT_ALL_DEVICES_PREFIX + username.trim());
+        return watermarkRepository.findById(username.trim())
+                .map(w -> issuedAt == null || issuedAt.isBefore(w.getTokensValidAfter()))
+                .orElse(false);
     }
 
     @Transactional
     public void blacklistToken(String token) {
         if (token == null || token.trim().isEmpty()) {
-            return;
-        }
-        if (token.startsWith(LOGOUT_ALL_DEVICES_PREFIX)) {
-            store(token, System.currentTimeMillis() + logoutAllTtlMs());
             return;
         }
         Long expirationTime = extractExpirationTime(token);
@@ -133,17 +140,17 @@ public class TokenBlacklistService {
     }
 
     /**
-     * Atomically blacklists {@code token} iff it isn't already blacklisted, returning {@code true}
-     * iff this call performed the insert. Two concurrent calls with the same token race on a single
-     * DB-level {@code INSERT ... ON CONFLICT DO NOTHING}: exactly one gets {@code true} (the
-     * "winner"), the other gets {@code false}. This is the race-breaker for refresh-token rotation -
-     * see {@link AuthService#refreshToken}, which must reject the loser instead of also minting a
-     * second valid token pair from the same refresh token.
+     * Spends a refresh token for rotation. One DB-level {@code INSERT ... ON CONFLICT DO NOTHING}
+     * arbitrates concurrent callers: exactly one gets {@link RotationResult#ROTATED}. The winner also
+     * writes a short-lived marker in the same transaction; a caller that loses the insert waits on
+     * that transaction, then sees the marker and gets {@link RotationResult#REUSED_WITHIN_GRACE}
+     * while it is fresh. A token revoked by logout has no marker and is always
+     * {@link RotationResult#REJECTED}, as is any reuse after the grace period.
      */
     @Transactional
-    public boolean blacklistTokenIfAbsent(String token) {
+    public RotationResult rotateRefreshToken(String token) {
         if (token == null || token.trim().isEmpty()) {
-            return false;
+            return RotationResult.REJECTED;
         }
         Long expirationTime = extractExpirationTime(token);
         if (expirationTime == null) {
@@ -151,7 +158,14 @@ public class TokenBlacklistService {
             log.warn("Token blacklisted with fallback expiration (24h)");
         }
         int inserted = repository.insertIfAbsent(sha256Hex(token), Instant.ofEpochMilli(expirationTime));
-        return inserted > 0;
+        if (inserted > 0) {
+            if (refreshReuseGraceMs > 0) {
+                repository.insertIfAbsent(sha256Hex(ROTATED_PREFIX + token),
+                        Instant.now().plusMillis(refreshReuseGraceMs));
+            }
+            return RotationResult.ROTATED;
+        }
+        return isActive(ROTATED_PREFIX + token) ? RotationResult.REUSED_WITHIN_GRACE : RotationResult.REJECTED;
     }
 
     /** Remove a token from the blacklist (useful for testing). */

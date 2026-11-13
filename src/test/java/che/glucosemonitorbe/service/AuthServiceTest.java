@@ -5,12 +5,16 @@ import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.exception.UsernameAlreadyExistsException;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.security.JwtTokenProvider;
+import io.jsonwebtoken.Claims;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.time.Instant;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -137,15 +141,21 @@ class AuthServiceTest {
 
         assertThat(response.getAccessToken()).isEqualTo("access-token");
         assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
-        verify(tokenBlacklistService).clearGlobalLogout("user");
+        // A login must never lift a logout-all: tokens issued before it stay revoked.
+        verify(tokenBlacklistService, never()).blacklistAllDevicesForUser(anyString());
+        verifyNoMoreInteractions(tokenBlacklistService);
     }
 
     @Test
     void refreshToken_whenGloballyLoggedOut_rejectsWithoutMinting() {
         when(tokenProvider.validateToken("refresh-token")).thenReturn(true);
         when(tokenProvider.isRefreshToken("refresh-token")).thenReturn(true);
-        when(tokenProvider.getUsernameFromToken("refresh-token")).thenReturn("user");
-        when(tokenBlacklistService.isUserGloballyLoggedOut("user")).thenReturn(true);
+        Instant issuedAt = Instant.parse("2026-01-01T00:00:00Z");
+        Claims claims = mock(Claims.class);
+        when(claims.getSubject()).thenReturn("user");
+        when(claims.get(JwtTokenProvider.ISSUED_AT_MS_CLAIM)).thenReturn(issuedAt.toEpochMilli());
+        when(tokenProvider.parseClaims("refresh-token")).thenReturn(Optional.of(claims));
+        when(tokenBlacklistService.isRevokedByLogoutAll("user", issuedAt)).thenReturn(true);
 
         RefreshTokenRequest request = new RefreshTokenRequest();
         request.setRefreshToken("refresh-token");
@@ -153,8 +163,42 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.refreshToken(request))
                 .isInstanceOf(che.glucosemonitorbe.exception.InvalidTokenException.class)
                 .hasMessageContaining("revoked");
-        verify(tokenBlacklistService, never()).blacklistTokenIfAbsent(anyString());
+        verify(tokenBlacklistService, never()).rotateRefreshToken(anyString());
         verify(tokenProvider, never()).generateTokenFromUsername(anyString());
+    }
+
+    @Test
+    void refreshToken_reusedWithinGrace_mintsNewPair() {
+        stubValidRefreshToken();
+        when(tokenBlacklistService.rotateRefreshToken("refresh-token"))
+                .thenReturn(TokenBlacklistService.RotationResult.REUSED_WITHIN_GRACE);
+
+        RefreshTokenRequest request = new RefreshTokenRequest();
+        request.setRefreshToken("refresh-token");
+
+        assertThat(authService.refreshToken(request).getAccessToken()).isEqualTo("access-token");
+    }
+
+    @Test
+    void refreshToken_alreadySpent_rejectsWithoutMinting() {
+        stubValidRefreshToken();
+        when(tokenBlacklistService.rotateRefreshToken("refresh-token"))
+                .thenReturn(TokenBlacklistService.RotationResult.REJECTED);
+
+        RefreshTokenRequest request = new RefreshTokenRequest();
+        request.setRefreshToken("refresh-token");
+
+        assertThatThrownBy(() -> authService.refreshToken(request))
+                .isInstanceOf(che.glucosemonitorbe.exception.InvalidTokenException.class);
+        verify(tokenProvider, never()).generateTokenFromUsername(anyString());
+    }
+
+    private void stubValidRefreshToken() {
+        when(tokenProvider.validateToken("refresh-token")).thenReturn(true);
+        when(tokenProvider.isRefreshToken("refresh-token")).thenReturn(true);
+        Claims claims = mock(Claims.class);
+        when(claims.getSubject()).thenReturn("user");
+        when(tokenProvider.parseClaims("refresh-token")).thenReturn(Optional.of(claims));
     }
 
     // -- logout -----------------------------------------------------------------

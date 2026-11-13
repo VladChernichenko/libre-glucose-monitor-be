@@ -24,7 +24,10 @@ import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// Reuse grace off: these tests pin strict single-use rotation. The grace window and logout-all
+// behaviour are covered by AuthSessionRevocationIntegrationTest.
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "security.jwt.refresh-reuse-grace-ms=0")
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers

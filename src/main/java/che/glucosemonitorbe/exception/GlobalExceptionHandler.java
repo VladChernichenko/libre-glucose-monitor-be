@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -111,9 +112,9 @@ public class GlobalExceptionHandler {
      * retry rather than treat the response as data. Safety-critical readings (IOB, COB) must
      * never degrade to a fabricated zero on this path.
      */
-    @ExceptionHandler(DataAccessException.class)
+    @ExceptionHandler({DataAccessException.class, TransactionException.class})
     public ResponseEntity<CustomErrorResponse> handleDataAccess(
-            DataAccessException ex, HttpServletRequest request) {
+            RuntimeException ex, HttpServletRequest request) {
         log.error("Data access failure on {} [{}]", request.getRequestURI(), correlationId(), ex);
         return build(HttpStatus.SERVICE_UNAVAILABLE, "Service unavailable",
                 "Your data is temporarily unavailable. Please try again shortly.", request);

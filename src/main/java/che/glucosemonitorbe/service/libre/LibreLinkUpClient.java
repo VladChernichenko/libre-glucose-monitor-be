@@ -87,7 +87,7 @@ public class LibreLinkUpClient {
         body.put("email", authRequest != null ? authRequest.getEmail() : "");
         body.put("password", authRequest != null ? authRequest.getPassword() : "");
         HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, loginHeaders(locale));
-        logger.info("postLogin to {}: email={}", url, authRequest != null ? authRequest.getEmail() : "null");
+        logger.info("postLogin to {}", url);
         return restTemplate.exchange(url, HttpMethod.POST, entity, byte[].class);
     }
 

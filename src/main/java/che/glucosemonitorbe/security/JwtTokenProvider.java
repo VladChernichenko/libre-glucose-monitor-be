@@ -10,6 +10,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.time.Instant;
 import java.util.Date;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,6 +25,12 @@ public class JwtTokenProvider {
      * on the next request, forcing an unnecessary 401 -> refresh round-trip every hour.
      */
     public static final long CLOCK_SKEW_SECONDS = 30L;
+
+    /**
+     * Issue time in epoch milliseconds. The standard {@code iat} is whole seconds, too coarse to
+     * order a token against a logout-all that happened in the same second.
+     */
+    public static final String ISSUED_AT_MS_CLAIM = "iat_ms";
 
     @Value("${security.jwt.secret}")
     private String jwtSecret;
@@ -51,6 +58,7 @@ public class JwtTokenProvider {
                 .subject(username)
                 .id(UUID.randomUUID().toString())
                 .issuedAt(now)
+                .claim(ISSUED_AT_MS_CLAIM, now.getTime())
                 .expiration(expiryDate)
                 .signWith(getSigningKey(), Jwts.SIG.HS512)
                 .compact();
@@ -69,6 +77,7 @@ public class JwtTokenProvider {
                 // unique regardless of timing.
                 .id(UUID.randomUUID().toString())
                 .issuedAt(now)
+                .claim(ISSUED_AT_MS_CLAIM, now.getTime())
                 .expiration(expiryDate)
                 .claim("type", "refresh")
                 .signWith(getSigningKey(), Jwts.SIG.HS512)
@@ -100,8 +109,11 @@ public class JwtTokenProvider {
                     .parseSignedClaims(token)
                     .getPayload();
             return Optional.of(claims);
-        } catch (SecurityException ex) {
-            log.error("Invalid JWT signature");
+        } catch (io.jsonwebtoken.security.SecurityException ex) {
+            // Fully qualified on purpose: a bare `SecurityException` resolves to java.lang's, which
+            // jjwt's SignatureException does not extend - so a token signed with another secret
+            // escaped this method and surfaced as a 500 on /api/auth/refresh.
+            log.warn("Invalid JWT signature");
         } catch (MalformedJwtException ex) {
             log.error("Invalid JWT token");
         } catch (ExpiredJwtException ex) {
@@ -110,8 +122,23 @@ public class JwtTokenProvider {
             log.error("Unsupported JWT token");
         } catch (IllegalArgumentException ex) {
             log.error("JWT claims string is empty");
+        } catch (JwtException ex) {
+            log.warn("Rejected JWT: {}", ex.getClass().getSimpleName());
         }
         return Optional.empty();
+    }
+
+    /**
+     * When the token was issued: the millisecond claim if present, else the second-granularity
+     * {@code iat} (tokens minted before the claim existed); null if neither is set.
+     */
+    public static Instant issuedAt(Claims claims) {
+        Object ms = claims.get(ISSUED_AT_MS_CLAIM);
+        if (ms instanceof Number n) {
+            return Instant.ofEpochMilli(n.longValue());
+        }
+        Date iat = claims.getIssuedAt();
+        return iat != null ? iat.toInstant() : null;
     }
 
     public boolean validateToken(String authToken) {

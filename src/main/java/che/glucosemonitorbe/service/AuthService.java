@@ -6,6 +6,7 @@ import che.glucosemonitorbe.exception.InvalidTokenException;
 import che.glucosemonitorbe.exception.UsernameAlreadyExistsException;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.security.JwtTokenProvider;
+import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -29,9 +30,6 @@ public class AuthService {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
-
-        // Password login proves identity - clear logout-all so newly minted tokens are accepted.
-        tokenBlacklistService.clearGlobalLogout(request.getUsername());
 
         String accessToken = tokenProvider.generateToken(authentication);
         String refreshToken = tokenProvider.generateRefreshToken(request.getUsername());
@@ -82,19 +80,24 @@ public class AuthService {
             throw new InvalidTokenException("Invalid refresh token");
         }
 
-        String username = tokenProvider.getUsernameFromToken(request.getRefreshToken());
-        if (tokenBlacklistService.isUserGloballyLoggedOut(username)) {
+        Claims claims = tokenProvider.parseClaims(request.getRefreshToken())
+                .orElseThrow(() -> new InvalidTokenException("Invalid refresh token"));
+        String username = claims.getSubject();
+        if (tokenBlacklistService.isRevokedByLogoutAll(username, JwtTokenProvider.issuedAt(claims))) {
             throw new InvalidTokenException("Session revoked - please log in again");
         }
 
-        // Atomically claim this refresh token for rotation (DB-level INSERT ... ON CONFLICT DO
-        // NOTHING). This replaces a separate check-then-blacklist pair, which raced: two requests
-        // with the same token could both pass the blacklist check before either finished writing,
-        // each minting its own valid token pair from a single refresh token. Claiming the token
-        // *before* minting new ones makes the blacklist insert itself the single point of
-        // arbitration - exactly one concurrent caller can win it.
-        if (!tokenBlacklistService.blacklistTokenIfAbsent(request.getRefreshToken())) {
+        // Atomically spend this refresh token (DB-level INSERT ... ON CONFLICT DO NOTHING) *before*
+        // minting, so concurrent requests cannot both treat it as unused. A token that was rotated
+        // only moments ago is tolerated once more: the usual cause is a refresh response the client
+        // never received, and rejecting it would sign a legitimate user out.
+        TokenBlacklistService.RotationResult rotation =
+                tokenBlacklistService.rotateRefreshToken(request.getRefreshToken());
+        if (rotation == TokenBlacklistService.RotationResult.REJECTED) {
             throw new InvalidTokenException("Refresh token has been revoked");
+        }
+        if (rotation == TokenBlacklistService.RotationResult.REUSED_WITHIN_GRACE) {
+            log.info("Refresh token for {} reused within the rotation grace period", username);
         }
 
         String accessToken = tokenProvider.generateTokenFromUsername(username);
@@ -145,10 +148,8 @@ public class AuthService {
      */
     public LogoutResponse logoutAllDevices(String username) {
         try {
-            // BUG BE-7 fix: blacklist a user-scoped sentinel token so token validation
-            // can reject all further requests for this user until they log in again.
-            // A full implementation would iterate all active session tokens from a
-            // per-user token store; that store is not yet built (see ADR for Phase 2).
+            // Moves the user's "tokens valid after" watermark to now: every token issued before
+            // this call is rejected from here on, including after the user logs in again.
             log.info("Logout all devices requested for user: {}", username);
             tokenBlacklistService.blacklistAllDevicesForUser(username);
             return LogoutResponse.success("Logged out from all devices");

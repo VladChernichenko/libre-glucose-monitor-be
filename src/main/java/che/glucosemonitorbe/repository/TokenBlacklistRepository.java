@@ -17,7 +17,7 @@ public interface TokenBlacklistRepository extends JpaRepository<RevokedToken, St
      * Atomically inserts the hash iff absent; returns the number of rows inserted (1 = this call
      * won the race and is now the sole owner of the blacklist entry, 0 = someone else already
      * inserted it first). Used to make refresh-token rotation race-proof: see
-     * {@code TokenBlacklistService#blacklistTokenIfAbsent}.
+     * {@code TokenBlacklistService#rotateRefreshToken}.
      */
     @Modifying
     @Query(value = "INSERT INTO token_blacklist (token_hash, expires_at) VALUES (:tokenHash, :expiresAt) ON CONFLICT (token_hash) DO NOTHING", nativeQuery = true)

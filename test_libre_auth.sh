@@ -6,9 +6,9 @@ echo "Testing LibreLinkUp Authentication..."
 echo "======================================="
 echo ""
 
-# Replace with your credentials
-EMAIL="vchernichenko13@gmail.com"
-PASSWORD="W38#rTL%#wZSxbZ"
+# Credentials come from the environment: LIBRE_EMAIL and LIBRE_PASSWORD
+EMAIL="${LIBRE_EMAIL:?set LIBRE_EMAIL}"
+PASSWORD="${LIBRE_PASSWORD:?set LIBRE_PASSWORD}"
 
 # EU endpoint (based on your region: FR)
 URL="https://api-eu.libreview.io/llu/auth/login"

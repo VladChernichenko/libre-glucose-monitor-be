@@ -14,7 +14,7 @@
 --      (the server must have the pgvector extension available; the role must be
 --      allowed to CREATE EXTENSION).
 --   3. flyway repair      (accepts the new checksums of the edited V1, V4, V5, V6).
---   4. Start the app      (Flyway applies V13-V16, then Hibernate validates).
+--   4. Start the app      (Flyway applies V13-V17, then Hibernate validates).
 --
 -- Idempotent: safe to run more than once. Covered by ExistingDbUpgradeIT.
 -- =============================================================================

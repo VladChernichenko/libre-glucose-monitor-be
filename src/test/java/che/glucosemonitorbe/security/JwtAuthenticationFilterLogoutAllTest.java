@@ -12,6 +12,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,7 +29,7 @@ class JwtAuthenticationFilterLogoutAllTest {
     private JwtAuthenticationFilter filter;
 
     @Test
-    void rejectsAccessTokenWhenUserGloballyLoggedOut() throws Exception {
+    void rejectsAccessTokenIssuedBeforeLogoutAll() throws Exception {
         String jwt = "valid-access-token";
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/notes");
         request.addHeader("Authorization", "Bearer " + jwt);
@@ -41,12 +42,37 @@ class JwtAuthenticationFilterLogoutAllTest {
         when(claims.getSubject()).thenReturn("alice");
         when(tokenProvider.parseClaims(jwt)).thenReturn(Optional.of(claims));
         when(tokenBlacklistService.isTokenBlacklisted(jwt)).thenReturn(false);
-        when(tokenBlacklistService.isUserGloballyLoggedOut("alice")).thenReturn(true);
+        Instant issuedAt = Instant.parse("2026-01-01T00:00:00Z");
+        when(claims.get(JwtTokenProvider.ISSUED_AT_MS_CLAIM)).thenReturn(issuedAt.toEpochMilli());
+        when(tokenBlacklistService.isRevokedByLogoutAll("alice", issuedAt)).thenReturn(true);
 
         SecurityContextHolder.clearContext();
         filter.doFilter(request, response, chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
-        verify(tokenBlacklistService).isUserGloballyLoggedOut("alice");
+        verify(tokenBlacklistService).isRevokedByLogoutAll("alice", issuedAt);
+        assertThat(chain.getRequest()).as("request continues anonymously").isNotNull();
+    }
+
+    @Test
+    void databaseFailureWhileCheckingTokenAnswers503InsteadOfAnonymous() throws Exception {
+        String jwt = "valid-access-token";
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/notes");
+        request.addHeader("Authorization", "Bearer " + jwt);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        Claims claims = mock(Claims.class);
+        when(tokenProvider.parseClaims(jwt)).thenReturn(Optional.of(claims));
+        when(tokenBlacklistService.isTokenBlacklisted(jwt))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("db down"));
+
+        SecurityContextHolder.clearContext();
+        filter.doFilter(request, response, chain);
+
+        // A 401 here would tell the client a valid session is dead; 503 tells it to retry.
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getHeader("Retry-After")).isNotNull();
+        assertThat(chain.getRequest()).as("chain must not continue").isNull();
     }
 }

@@ -108,7 +108,8 @@ public class LibreLinkUpService {
                     }
 
                     JsonNode jsonResponse = client.parse(response);
-                    logger.info("LibreLinkUp auth response: {}", jsonResponse.toString());
+                    // Never log the body: it carries the live LibreLinkUp bearer token and account data.
+                    logger.info("LibreLinkUp auth response received: status={}", jsonResponse.path("status").asText("n/a"));
 
                     throwIfApiError(jsonResponse, "LibreLinkUp authentication error: ");
 
@@ -139,8 +140,8 @@ public class LibreLinkUpService {
                         logger.info("Successfully authenticated with LibreLinkUp for user {}, token expires: {}", userId, expires);
                         return new LibreAuthResponse(token, expires);
                     } else {
-                        logger.error("No authentication token in response. Full response: {}", jsonResponse.toString());
-                        throw new RuntimeException("No authentication token received from LibreLinkUp. Response: " + jsonResponse.toString());
+                        logger.error("No authentication token in LibreLinkUp response: status={}", jsonResponse.path("status").asText("n/a"));
+                        throw new RuntimeException("No authentication token received from LibreLinkUp");
                     }
                 } catch (RuntimeException e) {
                     throw e;
@@ -173,7 +174,7 @@ public class LibreLinkUpService {
                     }
 
                     JsonNode jsonResponse = client.parse(response);
-                    logger.info("Region-specific auth response: {}", jsonResponse.toString());
+                    logger.info("Region-specific auth response received: status={}", jsonResponse.path("status").asText("n/a"));
 
                     JsonNode data = jsonResponse.get("data");
                     JsonNode authTicket = data != null ? data.get("authTicket") : null;
@@ -194,7 +195,7 @@ public class LibreLinkUpService {
                         logger.info("Successfully authenticated with region {} endpoint for user {}, token expires: {}", region, userId, expires);
                         return new LibreAuthResponse(token, expires);
                     } else {
-                        logger.error("No token in region-specific response: {}", jsonResponse.toString());
+                        logger.error("No token in region-specific response: status={}", jsonResponse.path("status").asText("n/a"));
                         throw new RuntimeException("No authentication token in region-specific response");
                     }
                 } catch (RuntimeException e) {

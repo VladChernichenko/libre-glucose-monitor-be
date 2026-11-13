@@ -67,7 +67,7 @@ class ExistingDbUpgradeIT {
         Flyway current = Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load();
-        assertThatThrownBy(current::validate).as("edited V1/V4/V5/V6 checksums (and pending V13-V16) fail validation before repair");
+        assertThatThrownBy(current::validate).as("edited V1/V4/V5/V6 checksums (and pending V13-V17) fail validation before repair");
 
         // 2. the script, twice
         String script = Files.readString(Path.of("scripts/upgrade-existing-db.sql"));
@@ -75,7 +75,7 @@ class ExistingDbUpgradeIT {
             st.execute(script);
             st.execute(script);
         }
-        // 3. flyway repair; 4. the app start below runs V13-V16 and validates the schema
+        // 3. flyway repair; 4. the app start below runs V13-V17 and validates the schema
         current.repair();
     }
 
@@ -93,10 +93,10 @@ class ExistingDbUpgradeIT {
     @Autowired private JdbcTemplate jdbc;
 
     @Test
-    @DisplayName("main's V12 database + script + repair: the app boots (Flyway V16, Hibernate validate) and keeps the data")
+    @DisplayName("main's V12 database + script + repair: the app boots (Flyway V17, Hibernate validate) and keeps the data")
     void legacyDatabaseUpgradesAndBoots() {
         assertThat(jdbc.queryForObject(
-                "SELECT max(version::int) FROM flyway_schema_history WHERE success", Integer.class)).isEqualTo(16);
+                "SELECT max(version::int) FROM flyway_schema_history WHERE success", Integer.class)).isEqualTo(17);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notes", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT target_glucose_mmol FROM user_settings", Double.class)).isEqualTo(5.55);
         assertThat(jdbc.queryForObject("SELECT rescue_carbs_g FROM user_settings", Integer.class)).isEqualTo(15);
