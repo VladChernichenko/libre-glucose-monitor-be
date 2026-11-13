@@ -34,7 +34,11 @@ import java.util.UUID;
 public class IsfMealWindowSuggestionService {
 
     public static final int CADENCE_DAYS = 3;
-    public static final int MIN_WINDOWS_WITH_DATA = 2;
+    /**
+     * At least this many meal windows must have observational ISF before the banner can show.
+     * One calibrated window with a material delta is enough to surface a morning review.
+     */
+    public static final int MIN_WINDOWS_WITH_DATA = 1;
     /** Absolute mmol/L/U difference required to bother the user. */
     public static final double MIN_DELTA_ISF = 0.15;
 

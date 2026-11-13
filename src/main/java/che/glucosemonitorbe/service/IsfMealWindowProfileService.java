@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -52,8 +53,12 @@ public class IsfMealWindowProfileService {
     /** Lookback window for observational data. */
     public static final int HISTORY_DAYS = 14;
 
-    /** A bucket must accumulate at least this much weighted sample mass to expose an ISF value. */
-    public static final double MIN_WEIGHTED_SAMPLES = 7.0;
+    /**
+     * A bucket must accumulate at least this much weighted sample mass to expose an ISF value.
+     * Real 14-day traces often yield only a few clean (unstacked) corrections per window after
+     * plausibility filters, so a single trusted event is enough to expose a value.
+     */
+    public static final double MIN_WEIGHTED_SAMPLES = 1.0;
 
     /** Weight applied to a correction bolus (no significant carbs nearby). */
     public static final double WEIGHT_CORRECTION = 1.0;
@@ -81,6 +86,14 @@ public class IsfMealWindowProfileService {
 
     /** How far back earlier meals are searched for carbs still on board at the bolus [hours]. */
     private static final int PRIOR_CARB_LOOKBACK_HOURS = 8;
+
+    /**
+     * Drop a bolus when another rapid dose lands inside this many minutes after it. Using the full
+     * DIA here rejected almost every daytime event in real logs (meal + correction pairs); 90 min
+     * still drops true double-boluses while letting spaced corrections contribute to other windows.
+     * Earlier IOB is still subtracted via {@link InsulinCalculatorService#iobOpenApsExponential}.
+     */
+    public static final int STACK_REJECT_MINUTES = 90;
 
     /** Same envelope as {@link InsulinCalculatorService}: an ICR outside it is not an estimate. */
     private static final double MIN_GRAMS_PER_UNIT = 3.0;
@@ -128,31 +141,58 @@ public class IsfMealWindowProfileService {
         RapidInsulinIobParameters rapid = userInsulinPreferencesService.getRapidIobParameters(userId);
         UserSettingsDTO userSettings = userSettingsService.getUserSettings(userId);
 
-        // Run on the user's own clock. notes.timestamp holds the client's local wall time, while
-        // cgm_readings.date_timestamp holds true UTC epochs - every wall time below has to cross
-        // into epochs through userZone. Anchoring "now" on the JVM's zone instead would also drop
-        // a UTC+N user's most recent N hours of boluses, which sort after a JVM-wall "now".
+        // Meal-window labels use the user's IANA zone. Note↔CGM matching does not: see
+        // {@link #noteTimestampToEpochMs}. The notes query bounds use the JVM zone so they share
+        // the same LocalDateTime axis Hibernate uses for timestamptz ↔ LocalDateTime.
         ZoneId userZone = userSettings == null
                 ? ZoneOffset.UTC
                 : UserZones.resolve(userSettings.getTimezone(), userSettings.getUtcOffsetMinutes());
+        ZoneId noteZone = ZoneId.systemDefault();
 
-        LocalDateTime now = LocalDateTime.now(userZone);
+        LocalDateTime now = LocalDateTime.now(noteZone);
         LocalDateTime since = now.minusDays(HISTORY_DAYS);
 
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, since, now);
-        List<CgmReading> cgmReadings = loadCgmReadings(userId, since, userZone);
+        List<CgmReading> cgmReadings = loadCgmReadings(userId, since);
 
         Double gramsPerUnit = userSettings == null ? null : userSettings.getGramsPerUnit();
 
         List<EventEstimate> estimates = new ArrayList<>();
+        int candidates = 0;
+        int rejectedNoCgm = 0;
+        int rejectedStacked = 0;
+        int rejectedOther = 0;
         for (Note bolus : notes) {
             if (bolus.getInsulin() == null || bolus.getInsulin() <= 0) continue;
             if (bolus.isLongActing()) continue;
             if (bolus.getTimestamp() == null) continue;
+            candidates++;
 
             EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, gramsPerUnit, userZone);
             if (est != null) {
                 estimates.add(est);
+            } else {
+                // Cheap reject attribution for ops logs (mirrors estimateForBolus gates).
+                LocalDateTime t0 = bolus.getTimestamp();
+                LocalDateTime tEnd = t0.plusMinutes((long) (rapid.diaHours() * 60));
+                boolean noCgm = nearestCgmMmol(cgmReadings, t0) == null
+                        || nearestCgmMmol(cgmReadings, tEnd) == null;
+                boolean stacked = false;
+                if (!noCgm) {
+                    LocalDateTime stackDeadline = t0.plusMinutes(STACK_REJECT_MINUTES);
+                    for (Note other : notes) {
+                        if (other == bolus || other.isLongActing()) continue;
+                        if (other.getInsulin() == null || other.getInsulin() <= 0) continue;
+                        if (other.getTimestamp() == null || !other.getTimestamp().isAfter(t0)) continue;
+                        if (other.getTimestamp().isBefore(stackDeadline)) {
+                            stacked = true;
+                            break;
+                        }
+                    }
+                }
+                if (noCgm) rejectedNoCgm++;
+                else if (stacked) rejectedStacked++;
+                else rejectedOther++;
             }
         }
 
@@ -176,8 +216,9 @@ public class IsfMealWindowProfileService {
             snapshotRepository.save(snap);
         }
 
-        log.info("ISF profile recomputed user={} estimates={} breakfast={} lunch={} dinner={} night={}",
-                userId, estimates.size(),
+        log.info("ISF profile recomputed user={} candidates={} estimates={} rejectedNoCgm={} "
+                        + "rejectedStacked={} rejectedOther={} breakfast={} lunch={} dinner={} night={}",
+                userId, candidates, estimates.size(), rejectedNoCgm, rejectedStacked, rejectedOther,
                 byWindow.get(MealWindow.BREAKFAST).summary(),
                 byWindow.get(MealWindow.LUNCH).summary(),
                 byWindow.get(MealWindow.DINNER).summary(),
@@ -191,14 +232,31 @@ public class IsfMealWindowProfileService {
     // ---
 
     /**
-     * @param since lower bound of the history window on the user's wall clock (see
-     *              {@link #recomputeForUser}); crosses into the UTC epochs that
-     *              {@code cgm_readings.date_timestamp} stores via {@code userZone}.
+     * @param since lower bound of the history window on the JVM/note LocalDateTime axis (see
+     *              {@link #recomputeForUser}); converted to the UTC epochs that
+     *              {@code cgm_readings.date_timestamp} stores via {@link #noteTimestampToEpochMs}.
      */
-    private List<CgmReading> loadCgmReadings(UUID userId, LocalDateTime since, ZoneId userZone) {
-        long sinceEpochMs = UserZones.toEpochMs(since, userZone);
+    private List<CgmReading> loadCgmReadings(UUID userId, LocalDateTime since) {
+        long sinceEpochMs = noteTimestampToEpochMs(since);
         return cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
                 userId, sinceEpochMs);
+    }
+
+    /**
+     * Epoch-millis for a {@code notes.timestamp} LocalDateTime.
+     *
+     * <p>{@code notes.timestamp} is a {@code timestamptz}. Hibernate exposes it as
+     * {@link LocalDateTime} in the <em>JVM</em> zone — the wall-clock digits of the stored
+     * Instant on this host — not necessarily {@code user_settings.timezone}. CGM rows store true
+     * UTC epochs. Converting those digits with the user zone when JVM ≠ user zone (e.g. JVM
+     * {@code Asia/Tbilisi} vs settings {@code Europe/Moscow}) skews every probe by the offset
+     * delta and drops nearly all ISF estimates inside the 15-minute CGM window.
+     */
+    static long noteTimestampToEpochMs(LocalDateTime noteLocal) {
+        if (noteLocal == null) {
+            return Instant.EPOCH.toEpochMilli();
+        }
+        return noteLocal.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     /**
@@ -217,20 +275,21 @@ public class IsfMealWindowProfileService {
         LocalDateTime t0 = bolus.getTimestamp();
         LocalDateTime tEnd = t0.plusMinutes((long) (rapid.diaHours() * 60));
 
-        Double preCgm = nearestCgmMmol(cgmReadings, t0, userZone);
-        Double postCgm = nearestCgmMmol(cgmReadings, tEnd, userZone);
+        Double preCgm = nearestCgmMmol(cgmReadings, t0);
+        Double postCgm = nearestCgmMmol(cgmReadings, tEnd);
         if (preCgm == null || postCgm == null) {
             return null;
         }
 
-        // Reject if another bolus stacks within the window - confounds attribution.
+        // Reject if another bolus stacks soon after - confounds the short attribution window.
+        LocalDateTime stackDeadline = t0.plusMinutes(STACK_REJECT_MINUTES);
         for (Note other : allNotes) {
             if (other == bolus) continue;
             if (other.isLongActing()) continue;
             if (other.getInsulin() == null || other.getInsulin() <= 0) continue;
             if (other.getTimestamp() == null) continue;
             if (!other.getTimestamp().isAfter(t0)) continue;
-            if (other.getTimestamp().isBefore(tEnd)) {
+            if (other.getTimestamp().isBefore(stackDeadline)) {
                 return null;
             }
         }
@@ -296,6 +355,10 @@ public class IsfMealWindowProfileService {
         if (isf < MIN_PLAUSIBLE_ISF || isf > MAX_PLAUSIBLE_ISF) return null;
 
         double weight = (carbsGrams + priorCobAtStart < CARB_THRESHOLD_GRAMS) ? WEIGHT_CORRECTION : WEIGHT_MEAL;
+        // Bucket on the note LocalDateTime hour (device/JVM wall of the timestamptz Instant).
+        // Remapping through user_settings.timezone when it disagrees with the device zone (e.g.
+        // settings Europe/Moscow vs notes written in Asia/Tbilisi) shifts boundary hours into the
+        // wrong meal window and collapses sparse daytime samples into NIGHT.
         MealWindow window = MealWindow.fromTimestamp(t0).orElse(null);
         if (window == null) return null;
 
@@ -308,15 +371,12 @@ public class IsfMealWindowProfileService {
      * {@code sgv} as mg/dL × 1 (or as mmol/L × 10 depending on source) - this helper assumes
      * mg/dL, the dominant Nightscout convention. LibreLinkUp readings already arrive normalised.
      *
-     * @param target   a bolus time (or bolus + DIA) on the user's wall clock, since it derives from
-     *                 {@code notes.timestamp}
-     * @param userZone the clock {@code target} is on - {@code cgm_readings.date_timestamp} is a true
-     *                 UTC epoch, so reading {@code target} as UTC would shift the match by the
-     *                 user's offset and pick a reading up to an hour away from the bolus
+     * @param target a bolus time (or bolus + DIA) from {@code notes.timestamp} — see
+     *               {@link #noteTimestampToEpochMs}
      */
-    Double nearestCgmMmol(List<CgmReading> readings, LocalDateTime target, ZoneId userZone) {
+    Double nearestCgmMmol(List<CgmReading> readings, LocalDateTime target) {
         if (readings == null || readings.isEmpty() || target == null) return null;
-        long targetEpochMs = UserZones.toEpochMs(target, userZone);
+        long targetEpochMs = noteTimestampToEpochMs(target);
         long bestDelta = Long.MAX_VALUE;
         CgmReading best = null;
         for (CgmReading r : readings) {

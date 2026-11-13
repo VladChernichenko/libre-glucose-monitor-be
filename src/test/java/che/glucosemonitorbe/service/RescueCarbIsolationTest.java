@@ -91,9 +91,11 @@ class RescueCarbIsolationTest {
         RapidInsulinIobParameters rapid = new RapidInsulinIobParameters(4.5, 75.0);
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setCarbRatio(2.0);
+        userSettings.setGramsPerUnit(12.5); // the estimator skips every event without a ratio
         userSettings.setIsf(2.5);
         userSettings.setCarbHalfLife(45);
         userSettings.setMaxCOBDuration(240);
+        userSettings.setTimezone(java.time.ZoneId.systemDefault().getId());
 
         when(userInsulinPreferencesService.getRapidIobParameters(userId)).thenReturn(rapid);
         when(userSettingsService.getUserSettings(userId)).thenReturn(userSettings);
@@ -159,7 +161,7 @@ class RescueCarbIsolationTest {
                 .userId(userId)
                 .dataSource(CgmReading.DataSource.NIGHTSCOUT)
                 .sgv(sgv)
-                .dateTimestamp(ts.toInstant(ZoneOffset.UTC).toEpochMilli())
+                .dateTimestamp(ts.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())
                 .lastUpdated(LocalDateTime.now())
                 .build();
     }
