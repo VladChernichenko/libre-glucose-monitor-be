@@ -65,6 +65,38 @@ class PredictionReplayEngineTest {
         }
     }
 
+    @Test
+    void replayAtMatchesWhatReplayEmitsForThatAnchor() {
+        PredictionReplayEngine engine = engineOverEightHourTrace();
+
+        long secondAnchor = T0 + 30 * 60_000L; // anchors sit at T0, T0+30, T0+60, ...
+        List<AnchorSample> all = engine.replay(TwinScales.neutral());
+        List<AnchorSample> atAnchor = engine.replayAt(secondAnchor, TwinScales.neutral());
+
+        assertThat(atAnchor).hasSize(4);
+        assertThat(atAnchor).isEqualTo(all.subList(4, 8)); // four horizons per anchor, anchor index 1
+    }
+
+    @Test
+    void replayAtWithNoReadingNearTheAnchorIsEmpty() {
+        PredictionReplayEngine engine = engineOverEightHourTrace();
+
+        long threeHoursAfterTheLastReading = T0 + (480 + 180) * 60_000L;
+
+        assertThat(engine.replayAt(threeHoursAfterTheLastReading, TwinScales.neutral())).isEmpty();
+    }
+
+    private static PredictionReplayEngine engineOverEightHourTrace() {
+        List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
+        for (int m = 0; m <= 480; m += 5) {
+            cgm.add(new PredictionReplayEngine.Reading(T0 + m * 60_000L, 7.0 + 0.8 * Math.sin(m / 60.0)));
+        }
+        List<PredictionReplayEngine.Event> events = List.of(
+                new PredictionReplayEngine.Event(T0 + 60 * 60_000L, 40.0, 5.0, false, 10.0, 8.0, 3.0));
+        return new PredictionReplayEngine(rawPredictor(), params70kg(), new RapidInsulinIobParameters(4.5, 55.0),
+                /*settings*/ null, USER, cgm, events, new PredictionReplayEngine.Config());
+    }
+
     // ---
     // Timezone alignment: the calibrator replays the SAME predictor the live dashboard calls, and
     // the live path is fed the client's local wall time. Anchors must therefore be built on the
