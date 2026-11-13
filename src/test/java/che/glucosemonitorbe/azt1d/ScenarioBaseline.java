@@ -1,6 +1,5 @@
 package che.glucosemonitorbe.azt1d;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
@@ -26,12 +25,29 @@ final class ScenarioBaseline {
 
     record Entry(double medianErrorMmol, int failCount) {}
 
+    /** The file's shape: per kind-and-subject cells, and the episodes that passed when it was recorded. */
+    private record Stored(Map<String, Entry> cells, List<String> passing) {}
+
     private static final ObjectMapper JSON = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     private final Map<String, Entry> entries = new TreeMap<>();
+    private final java.util.Set<String> passing = new java.util.TreeSet<>();
 
     static String key(ScenarioKind kind, String subjectId) {
         return kind.name() + "|" + subjectId;
+    }
+
+    /** One episode: the baseline is local and never committed, so its start time may be part of the key. */
+    static String episodeKey(ScenarioKind kind, String subjectId, long startEpochMs) {
+        return key(kind, subjectId) + "|" + startEpochMs;
+    }
+
+    void addPassing(String episodeKey) {
+        passing.add(episodeKey);
+    }
+
+    List<String> passingEpisodes() {
+        return List.copyOf(passing);
     }
 
     /** {@code -Dazt1d.baseline}, else a file under the user's home so a {@code gradle clean} cannot erase it. */
@@ -58,7 +74,9 @@ final class ScenarioBaseline {
         if (!Files.exists(file)) return Optional.empty();
         try {
             ScenarioBaseline b = new ScenarioBaseline();
-            b.entries.putAll(JSON.readValue(file.toFile(), new TypeReference<Map<String, Entry>>() {}));
+            Stored stored = JSON.readValue(file.toFile(), Stored.class);
+            b.entries.putAll(stored.cells());
+            b.passing.addAll(stored.passing());
             return Optional.of(b);
         } catch (IOException | RuntimeException e) {
             throw new IllegalStateException("Unreadable scenario baseline " + file
@@ -68,24 +86,39 @@ final class ScenarioBaseline {
 
     void save(Path file) throws IOException {
         if (file.getParent() != null) Files.createDirectories(file.getParent());
-        JSON.writeValue(file.toFile(), entries);
+        JSON.writeValue(file.toFile(), new Stored(entries, List.copyOf(passing)));
     }
 
-    /** What got worse in {@code current} compared with this baseline; entries this baseline never recorded are not compared. */
+    /**
+     * What got worse in {@code current} compared with this baseline: a recorded cell the current run no
+     * longer produces, more failing episodes, a median error beyond the margin, or an episode that
+     * passed when recorded and does not pass now. Cells and episodes this baseline never recorded are
+     * not compared, so a newly passing episode is never a regression. A recorded median of NaN (no
+     * error samples) is not compared on error.
+     */
     List<String> regressions(ScenarioBaseline current) {
         List<String> out = new ArrayList<>();
-        for (Map.Entry<String, Entry> e : current.entries.entrySet()) {
-            Entry was = entries.get(e.getKey());
-            if (was == null) continue;
-            Entry now = e.getValue();
+        for (Map.Entry<String, Entry> e : entries.entrySet()) {
+            Entry now = current.entries.get(e.getKey());
+            Entry was = e.getValue();
+            if (now == null) {
+                out.add(String.format("%s: no longer produced by this run (baseline recorded %d failing episodes)",
+                        e.getKey(), was.failCount()));
+                continue;
+            }
             if (now.failCount() > was.failCount()) {
                 out.add(String.format("%s: %d failing episodes, baseline %d",
                         e.getKey(), now.failCount(), was.failCount()));
             }
             double limit = was.medianErrorMmol() * REGRESSION_FACTOR + ABSOLUTE_MARGIN;
-            if (now.medianErrorMmol() > limit) {
+            if (!Double.isNaN(was.medianErrorMmol()) && now.medianErrorMmol() > limit) {
                 out.add(String.format("%s: median error %.2f above the allowed %.2f (baseline %.2f)",
                         e.getKey(), now.medianErrorMmol(), limit, was.medianErrorMmol()));
+            }
+        }
+        for (String episode : passing) {
+            if (!current.passing.contains(episode)) {
+                out.add(episode + ": passed when recorded, does not pass now (or is no longer mined)");
             }
         }
         return out;

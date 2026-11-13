@@ -29,6 +29,10 @@ final class ScenarioRules {
     private ScenarioRules() {}
 
     static Verdict evaluate(ForecastResult r) {
+        if (!Double.isFinite(r.episode().startMmol())) {
+            // Without a start glucose every comparison below is false and a forecast would "pass" vacuously.
+            throw new IllegalArgumentException("episode has no start glucose: " + r.episode());
+        }
         OptionalDouble p120 = r.predictedAt(CHECK_MIN);
         OptionalDouble a120 = r.actualAt(CHECK_MIN);
         if (p120.isEmpty() || a120.isEmpty()) {

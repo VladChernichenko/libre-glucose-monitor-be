@@ -30,7 +30,7 @@ final class ScenarioFixtureExporter {
         List<ScenarioFixture.Reading> readings = s.cgm().stream()
                 .filter(r -> r.epochMs() >= from && r.epochMs() <= to)
                 .sorted(java.util.Comparator.comparingLong(r -> r.epochMs()))
-                .map(r -> new ScenarioFixture.Reading((int) ((r.epochMs() - start) / MIN), r.mmol()))
+                .map(r -> new ScenarioFixture.Reading((int) ((r.epochMs() - start) / MIN), roundToTenth(r.mmol())))
                 .toList();
         List<ScenarioFixture.Event> events = s.events().stream()
                 .filter(e -> !e.longActing() && e.epochMs() >= from && e.epochMs() <= to)
@@ -42,12 +42,23 @@ final class ScenarioFixtureExporter {
         ScenarioFixture draft = new ScenarioFixture(
                 ep.kind().name().toLowerCase().replace('_', '-') + String.format("-%02d", index),
                 ep.kind(), ep.horizonMin(), local.getHour(), local.getDayOfWeek().getValue(),
-                new ScenarioFixture.Profile(p.weightKg(), p.isfMmolPerU(), p.carbRatioGPerU(), p.basalRateUPerH()),
+                new ScenarioFixture.Profile(twoSignificantFigures(p.weightKg()), twoSignificantFigures(p.isfMmolPerU()),
+                        twoSignificantFigures(p.carbRatioGPerU()), twoSignificantFigures(p.basalRateUPerH())),
                 twin.scales().isfScale(), twin.scales().agScale(), twin.scales().egpScale(), twin.twinApplied(),
                 readings, events, null);
         // Recorded from the fixture's own replay, so the file always reproduces its expectation.
         Verdict v = ScenarioRules.evaluate(draft.replay());
         return draft.withExpected(new ScenarioFixture.Expectation(v.outcome(), v.errorMmol()));
+    }
+
+    private static double roundToTenth(double mmol) {
+        return Math.round(mmol * 10.0) / 10.0;
+    }
+
+    /** NaN, infinities and zero pass through unchanged. */
+    private static double twoSignificantFigures(double v) {
+        if (!Double.isFinite(v) || v == 0.0) return v;
+        return new java.math.BigDecimal(v).round(new java.math.MathContext(2)).doubleValue();
     }
 
     static void write(ScenarioFixture f, Path dir) throws IOException {

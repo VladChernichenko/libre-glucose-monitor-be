@@ -131,4 +131,13 @@ class ScenarioRulesTest {
         assertThat(v.outcome()).isEqualTo(Outcome.NOT_APPLICABLE);
         assertThat(v.errorMmol()).isNaN();
     }
+
+    @Test
+    void anEpisodeWithNoStartGlucoseIsRejectedNotPassed() {
+        ForecastResult r = result(ScenarioKind.CORRECTION_DROP, Double.NaN, flat(9.0), flat(9.0));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ScenarioRules.evaluate(r))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("start glucose");
+    }
 }

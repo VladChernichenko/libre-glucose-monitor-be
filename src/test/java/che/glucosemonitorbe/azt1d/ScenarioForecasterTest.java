@@ -99,4 +99,46 @@ class ScenarioForecasterTest {
         double scaledFall = 10.0 - scaled.predictedAt(120).getAsDouble();
         assertThat(scaledFall).isLessThan(neutralFall);
     }
+
+    @Test
+    void theFitIsHandedOnlyDataFromBeforeTheEpisodeDay() {
+        ScenarioForecaster forecaster = new ScenarioForecaster(subject(10.0, 6, 4));
+
+        forecaster.forecast(correctionOn(4, 10.0), ScaleMode.TWIN);
+
+        Azt1dDataset.Subject handed = forecaster.lastFitInput().orElseThrow();
+        long dayStart = at(4, 0);
+        assertThat(handed.cgm()).hasSize(4 * 24 * 12);
+        assertThat(handed.cgm()).allMatch(r -> r.epochMs() < dayStart);
+        assertThat(handed.events()).allMatch(e -> e.epochMs() < dayStart);
+    }
+
+    @Test
+    void anEpisodeWithTooLittleHistoryNeverReachesTheFit() {
+        ScenarioForecaster forecaster = new ScenarioForecaster(subject(10.0, 2, 0));
+
+        forecaster.forecast(correctionOn(0, 10.0), ScaleMode.TWIN);
+
+        assertThat(forecaster.lastFitInput()).isEmpty();
+    }
+
+    @Test
+    void theResidualGridIsFoldedIntoThePredictedValueOnlyWhenTheTwinIsApplied() {
+        List<che.glucosemonitorbe.hovorka.learning.AnchorSample> biased = new ArrayList<>();
+        for (int i = 0; i < 100; i++) { // reality is always 1 mmol/L above the model at 12:00
+            biased.add(new che.glucosemonitorbe.hovorka.learning.AnchorSample(
+                    60, 8.0, 9.0, 8.0, che.glucosemonitorbe.hovorka.learning.Regime.MEAL, 12));
+        }
+        var residual = che.glucosemonitorbe.hovorka.learning.ResidualBiasModel.fit(biased);
+        assertThat(residual.isNeutral()).isFalse();
+        var sample = new che.glucosemonitorbe.hovorka.learning.AnchorSample(
+                60, 8.0, 9.0, 8.0, che.glucosemonitorbe.hovorka.learning.Regime.MEAL, 12);
+
+        var applied = ScenarioForecaster.withResidual(List.of(sample), residual, true);
+        var notApplied = ScenarioForecaster.withResidual(List.of(sample), residual, false);
+
+        assertThat(applied.get(0).predicted()).isEqualTo(8.0 + residual.correctionAt(12));
+        assertThat(applied.get(0).predicted()).isGreaterThan(8.0);
+        assertThat(notApplied).containsExactly(sample);
+    }
 }

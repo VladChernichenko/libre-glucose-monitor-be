@@ -22,8 +22,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class Azt1dScenarioSweepTest {
 
-    private static final String TWIN_SANITY_KEY = "TWIN_SANITY|all";
-
     private record Cell(ScenarioKind kind, String subjectId, int n, int pass, int fail, int notApplicable,
                         double medianTwin, double medianNeutral, boolean fallbackProfile) {}
 
@@ -40,21 +38,27 @@ class Azt1dScenarioSweepTest {
         List<Cell> cells = new ArrayList<>();
         List<String> knownGaps = new ArrayList<>();
         java.util.Set<String> subjectsAtALimit = new java.util.TreeSet<>();
+        java.util.Set<String> subjectsWithEpisodes = new java.util.TreeSet<>();
+        List<String> passingEpisodes = new ArrayList<>();
         for (Azt1dDataset.Subject s : subjects) {
             ScenarioForecaster forecaster = new ScenarioForecaster(s);
             List<Azt1dDataset.BolusRecord> log = logs.getOrDefault(s.id(), List.of());
             for (ScenarioKind kind : ScenarioKind.values()) {
                 List<ScenarioEpisode> episodes = ScenarioMiner.mine(s, log, kind);
                 if (episodes.isEmpty()) continue;
+                subjectsWithEpisodes.add(s.id());
                 int pass = 0, fail = 0, na = 0;
                 List<Double> twinErrors = new ArrayList<>(), neutralErrors = new ArrayList<>();
                 for (ScenarioEpisode ep : episodes) {
                     ForecastResult twinResult = forecaster.forecast(ep, ScaleMode.TWIN);
-                    if (twinResult.twinApplied() && sitsAtALimit(twinResult.scales())) subjectsAtALimit.add(s.id());
+                    if (twinResult.twinApplied() && TwinSanity.sitsAtALimit(twinResult.scales())) subjectsAtALimit.add(s.id());
                     Verdict twin = ScenarioRules.evaluate(twinResult);
                     Verdict neutral = ScenarioRules.evaluate(forecaster.forecast(ep, ScaleMode.NEUTRAL));
                     switch (twin.outcome()) {
-                        case PASS -> pass++;
+                        case PASS -> {
+                            pass++;
+                            passingEpisodes.add(ScenarioBaseline.episodeKey(kind, s.id(), ep.startEpochMs()));
+                        }
                         case NOT_APPLICABLE -> na++;
                         case FAIL -> {
                             fail++;
@@ -73,24 +77,21 @@ class Azt1dScenarioSweepTest {
         System.out.print(render(cells, knownGaps));
         System.out.printf("TWIN SANITY: %d subject(s) with an applied twin whose ISF or meal scale sits at a clamp limit: %s%n",
                 subjectsAtALimit.size(), subjectsAtALimit);
-        holdBaseline(cells, subjectsAtALimit.size());
+        holdBaseline(cells, subjectsWithEpisodes, subjectsAtALimit, passingEpisodes);
     }
 
-    /** A fitted scale at its floor or ceiling is the signature of a twin that could not explain the data. */
-    private static boolean sitsAtALimit(TwinScales t) {
-        double tol = 1e-3;
-        return Math.abs(t.isfScale() - TwinScales.MIN_SCALE) < tol || Math.abs(t.isfScale() - TwinScales.MAX_SCALE) < tol
-                || Math.abs(t.agScale() - TwinScales.MIN_SCALE) < tol || Math.abs(t.agScale() - TwinScales.MAX_SCALE) < tol;
-    }
-
-    private static void holdBaseline(List<Cell> cells, int subjectsAtALimit) throws Exception {
+    private static void holdBaseline(List<Cell> cells, java.util.Set<String> subjectsWithEpisodes,
+                                     java.util.Set<String> subjectsAtALimit, List<String> passingEpisodes) throws Exception {
         ScenarioBaseline current = new ScenarioBaseline();
-        current.put(TWIN_SANITY_KEY, 0.0, subjectsAtALimit);
-        for (Cell c : cells) {
-            if (!Double.isNaN(c.medianTwin())) {
-                current.put(ScenarioBaseline.key(c.kind(), c.subjectId()), c.medianTwin(), c.fail());
-            }
+        for (String subject : subjectsWithEpisodes) {
+            current.put(TwinSanity.key(subject), 0.0, subjectsAtALimit.contains(subject) ? 1 : 0);
         }
+        // Every cell with episodes is recorded, even one with no error samples (NaN median), so a cell
+        // that later vanishes is caught instead of silently dropping out of the comparison.
+        for (Cell c : cells) {
+            current.put(ScenarioBaseline.key(c.kind(), c.subjectId()), c.medianTwin(), c.fail());
+        }
+        passingEpisodes.forEach(current::addPassing);
         Path file = ScenarioBaseline.defaultPath();
         boolean update = Boolean.getBoolean("azt1d.baseline.update");
         var recorded = update ? java.util.Optional.<ScenarioBaseline>empty() : ScenarioBaseline.load(file);
@@ -111,6 +112,7 @@ class Azt1dScenarioSweepTest {
     private static String render(List<Cell> cells, List<String> knownGaps) {
         StringBuilder sb = new StringBuilder();
         sb.append("\n═══════ AZT1D FORECAST SCENARIOS (twin fitted on earlier days; error = |forecast - reality| at 120 min) ═══════\n");
+        sb.append("note: the subject's personal profile (ISF, weight, carb ratio) is estimated from the whole record, so it is not strictly out-of-sample; the twin fit itself only sees earlier days.\n");
         for (ScenarioKind kind : ScenarioKind.values()) {
             sb.append(String.format("%n%s%n%-11s %4s %5s %5s %5s %12s %14s%n", kind,
                     "subject", "n", "pass", "fail", "n/a", "median twin", "median neutral"));

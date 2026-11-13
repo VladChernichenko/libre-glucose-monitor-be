@@ -66,9 +66,64 @@ class ScenarioBaselineTest {
 
     @Test
     void anEntryTheBaselineNeverRecordedIsNotARegression() {
-        ScenarioBaseline current = new ScenarioBaseline();
+        ScenarioBaseline current = with(1.0, 0); // everything the baseline recorded is still produced
         current.put(ScenarioBaseline.key(ScenarioKind.MEAL_NO_BOLUS, "Subject 9"), 9.0, 9);
 
         assertThat(with(1.0, 0).regressions(current)).isEmpty();
+    }
+
+    @Test
+    void aCellTheCurrentRunNoLongerProducesIsARegression() {
+        ScenarioBaseline recorded = with(1.0, 0);
+
+        assertThat(recorded.regressions(new ScenarioBaseline()))
+                .singleElement().asString().contains("CORRECTION_DROP|Subject 1").contains("no longer");
+    }
+
+    @Test
+    void aCellWithNoErrorSamplesRoundTripsAndIsNotComparedOnError() throws Exception {
+        Path file = dir.resolve("nan.json");
+        String key = ScenarioBaseline.key(ScenarioKind.MEAL_WITH_BOLUS, "Subject 4");
+        ScenarioBaseline recorded = new ScenarioBaseline();
+        recorded.put(key, Double.NaN, 0);
+
+        recorded.save(file);
+        ScenarioBaseline loaded = ScenarioBaseline.load(file).orElseThrow();
+
+        assertThat(loaded.get(key).orElseThrow().medianErrorMmol()).isNaN();
+        ScenarioBaseline current = new ScenarioBaseline();
+        current.put(key, 5.0, 0);
+        assertThat(loaded.regressions(current)).isEmpty();
+    }
+
+    @Test
+    void aPassingEpisodeThatNoLongerPassesIsARegression() {
+        String episode = ScenarioBaseline.episodeKey(ScenarioKind.CORRECTION_DROP, "Subject 1", 123L);
+        ScenarioBaseline recorded = with(1.0, 1);
+        recorded.addPassing(episode);
+        ScenarioBaseline current = with(1.0, 1); // same counts: one episode swapped from pass to fail
+
+        assertThat(recorded.regressions(current)).singleElement().asString().contains(episode);
+    }
+
+    @Test
+    void anEpisodeThatNeverPassedMayStayFailingAndANewPassIsNotARegression() {
+        ScenarioBaseline recorded = with(1.0, 1);
+        ScenarioBaseline current = with(1.0, 1);
+        current.addPassing(ScenarioBaseline.episodeKey(ScenarioKind.CORRECTION_DROP, "Subject 1", 456L));
+
+        assertThat(recorded.regressions(current)).isEmpty();
+    }
+
+    @Test
+    void passingEpisodesRoundTrip() throws Exception {
+        Path file = dir.resolve("passing.json");
+        String episode = ScenarioBaseline.episodeKey(ScenarioKind.OVERNIGHT_STEADY, "Subject 2", 789L);
+        ScenarioBaseline b = with(1.0, 0);
+        b.addPassing(episode);
+
+        b.save(file);
+
+        assertThat(ScenarioBaseline.load(file).orElseThrow().passingEpisodes()).containsExactly(episode);
     }
 }

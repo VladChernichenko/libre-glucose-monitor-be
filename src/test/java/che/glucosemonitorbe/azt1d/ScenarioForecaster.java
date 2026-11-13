@@ -42,6 +42,7 @@ final class ScenarioForecaster {
     private final HovorkaGlucosePredictionService predictor = Azt1dCalibrationValidationTest.rawPredictor();
     private final Map<Long, Fit> fitsByDay = new HashMap<>();
     private PredictionReplayEngine fullEngine;
+    private Azt1dDataset.Subject lastFitInput;
 
     ScenarioForecaster(Azt1dDataset.Subject subject) {
         this.subject = subject;
@@ -54,7 +55,8 @@ final class ScenarioForecaster {
         }
         Fit fit = fitFor(ep);
         List<AnchorSample> samples = engine().replayAt(ep.startEpochMs(), fit.scales());
-        return new ForecastResult(ep, mode, fit.scales(), fit.applied(), withResidual(samples, fit));
+        return new ForecastResult(ep, mode, fit.scales(), fit.applied(),
+                withResidual(samples, fit.residual(), fit.applied()));
     }
 
     /** The forecast with exactly these scales, for tests that need a known twin. */
@@ -78,8 +80,14 @@ final class ScenarioForecaster {
         return fitsByDay.computeIfAbsent(dayStart, d -> fit(fitData(subject, ep)));
     }
 
+    /** What the most recent twin fit was handed, so a test can prove it never saw the episode's day. */
+    java.util.Optional<Azt1dDataset.Subject> lastFitInput() {
+        return java.util.Optional.ofNullable(lastFitInput);
+    }
+
     private Fit fit(Azt1dDataset.Subject prior) {
         if (prior.cgm().size() < MIN_PRIOR_READINGS) return Fit.none();
+        lastFitInput = prior;
         List<PredictionReplayEngine.Reading> cgm = new ArrayList<>(prior.cgm());
         cgm.sort(Comparator.comparingLong(PredictionReplayEngine.Reading::epochMs));
         int boundary = (int) Math.floor(cgm.size() * TRAIN_FRACTION);
@@ -108,12 +116,12 @@ final class ScenarioForecaster {
         return fullEngine;
     }
 
-    /** Fold the fitted residual grid into {@code predicted}, as the live forecast applies it. */
-    private static List<AnchorSample> withResidual(List<AnchorSample> samples, Fit fit) {
-        if (!fit.applied() || fit.residual().isNeutral()) return samples;
+    /** Fold the fitted residual grid into {@code predicted}, as the live forecast applies it; a no-op when the twin was not applied. */
+    static List<AnchorSample> withResidual(List<AnchorSample> samples, ResidualBiasModel residual, boolean applied) {
+        if (!applied || residual.isNeutral()) return samples;
         List<AnchorSample> out = new ArrayList<>(samples.size());
         for (AnchorSample s : samples) {
-            out.add(new AnchorSample(s.horizonMin(), s.predicted() + fit.residual().correctionAt(s.hourOfDay()),
+            out.add(new AnchorSample(s.horizonMin(), s.predicted() + residual.correctionAt(s.hourOfDay()),
                     s.actual(), s.baseline(), s.regime(), s.hourOfDay()));
         }
         return out;

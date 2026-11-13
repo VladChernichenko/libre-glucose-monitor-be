@@ -65,4 +65,34 @@ class ScenarioFixtureGuardTest {
     void aCleanFixtureHasNoViolations() {
         assertThat(ScenarioFixture.privacyViolations("{\"id\":\"correction-drop-03\",\"hourOfDay\":14}")).isEmpty();
     }
+
+    @Test
+    void theGuardCatchesAnEpochTimestamp() {
+        assertThat(ScenarioFixture.privacyViolations("{\"t\":1704110400000}")).isNotEmpty();
+        assertThat(ScenarioFixture.privacyViolations("{\"t\":1704110400}")).isNotEmpty();
+        assertThat(ScenarioFixture.privacyViolations("{\"mmol\":12.987012987012987,\"minute\":-480}")).isEmpty();
+    }
+
+    @Test
+    void onlyJsonFilesMayLiveInTheFixtureFolder(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("ok.json"), "{}");
+        assertThat(strayFiles(dir)).isEmpty();
+
+        Files.writeString(dir.resolve("export.csv"), "a,b");
+
+        assertThat(strayFiles(dir)).containsExactly("export.csv");
+    }
+
+    @Test
+    void theRealFixtureFolderHoldsOnlyJsonFiles() throws Exception {
+        assertThat(strayFiles(fixturesDir())).isEmpty();
+    }
+
+    /** Names of files in {@code dir} that are not fixtures. */
+    static List<String> strayFiles(Path dir) throws IOException {
+        if (!Files.isDirectory(dir)) return List.of();
+        try (Stream<Path> files = Files.list(dir)) {
+            return files.map(p -> p.getFileName().toString()).filter(n -> !n.endsWith(".json")).sorted().toList();
+        }
+    }
 }
