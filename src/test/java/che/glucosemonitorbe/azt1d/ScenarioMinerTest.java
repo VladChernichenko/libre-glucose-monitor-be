@@ -123,4 +123,101 @@ class ScenarioMinerTest {
         assertThat(found.get(0).startEpochMs()).isEqualTo(at(0, 14, 0));
         assertThat(found.get(5).startEpochMs()).isEqualTo(at(9, 14, 0));
     }
+
+    private static List<ScenarioEpisode> mined(ScenarioKind kind, Azt1dDataset.Subject s, Azt1dDataset.BolusRecord... log) {
+        return ScenarioMiner.mine(s, List.of(log), kind);
+    }
+
+    @Test
+    void aMealWithAManualBolusInFifteenMinutesQualifiesAsMealWithBolus() {
+        long t = at(0, 12, 0);
+
+        List<ScenarioEpisode> found = mined(ScenarioKind.MEAL_WITH_BOLUS, subject(7.0, 2),
+                carbsOnly(t, 45), correction(t + 10 * MIN, 4.5));
+
+        assertThat(found).hasSize(1);
+        assertThat(found.get(0).startEpochMs()).isEqualTo(t);
+        assertThat(found.get(0).kind()).isEqualTo(ScenarioKind.MEAL_WITH_BOLUS);
+    }
+
+    @Test
+    void aMealRowThatCarriesItsOwnBolusQualifiesAsMealWithBolus() {
+        long t = at(0, 12, 0);
+
+        List<ScenarioEpisode> found = mined(ScenarioKind.MEAL_WITH_BOLUS, subject(7.0, 2),
+                new Azt1dDataset.BolusRecord(t, "Standard", 45, 4.5, 0, 4.5));
+
+        assertThat(found).hasSize(1);
+    }
+
+    @Test
+    void aMealWithABolusSixteenMinutesLaterIsNotMealWithBolus() {
+        long t = at(0, 12, 0);
+
+        assertThat(mined(ScenarioKind.MEAL_WITH_BOLUS, subject(7.0, 2),
+                carbsOnly(t, 45), correction(t + 16 * MIN, 4.5))).isEmpty();
+    }
+
+    @Test
+    void aMealWithNoBolusForThreeHoursQualifiesAsMealNoBolus() {
+        long t = at(0, 12, 0);
+
+        List<ScenarioEpisode> found = mined(ScenarioKind.MEAL_NO_BOLUS, subject(7.0, 2), carbsOnly(t, 45));
+
+        assertThat(found).hasSize(1);
+        assertThat(found.get(0).kind()).isEqualTo(ScenarioKind.MEAL_NO_BOLUS);
+    }
+
+    @Test
+    void aMealWithABolusInsideTheWindowIsNotMealNoBolus() {
+        long t = at(0, 12, 0);
+
+        assertThat(mined(ScenarioKind.MEAL_NO_BOLUS, subject(7.0, 2),
+                carbsOnly(t, 45), correction(t + 150 * MIN, 2.0))).isEmpty();
+    }
+
+    @Test
+    void aMealUnderThirtyGramsDoesNotQualify() {
+        long t = at(0, 12, 0);
+
+        assertThat(mined(ScenarioKind.MEAL_NO_BOLUS, subject(7.0, 2), carbsOnly(t, 25))).isEmpty();
+        assertThat(mined(ScenarioKind.MEAL_WITH_BOLUS, subject(7.0, 2),
+                carbsOnly(t, 25), correction(t + 5 * MIN, 2.5))).isEmpty();
+    }
+
+    @Test
+    void aSecondMealInsideTheWindowDisqualifies() {
+        long t = at(0, 12, 0);
+
+        assertThat(mined(ScenarioKind.MEAL_NO_BOLUS, subject(7.0, 2),
+                carbsOnly(t, 45), carbsOnly(t + 60 * MIN, 20))).isEmpty();
+    }
+
+    @Test
+    void anAutomaticBolusAfterAMealDisqualifiesIt() {
+        long t = at(0, 12, 0);
+
+        assertThat(mined(ScenarioKind.MEAL_WITH_BOLUS, subject(7.0, 2),
+                carbsOnly(t, 45), correction(t + 5 * MIN, 4.5), automatic(t + 60 * MIN))).isEmpty();
+    }
+
+    @Test
+    void anOvernightStretchQualifiesBetweenMidnightAndTwo() {
+        List<ScenarioEpisode> found = mined(ScenarioKind.OVERNIGHT_STEADY, subject(6.0, 1));
+
+        assertThat(found).hasSize(1);
+        long minutesAfterMidnight = (found.get(0).startEpochMs() - DAY0) / MIN;
+        assertThat(minutesAfterMidnight).isBetween(0L, 120L);
+        assertThat(found.get(0).startMmol()).isEqualTo(6.0);
+    }
+
+    @Test
+    void anOvernightWithAManualBolusAtMidnightDisqualifies() {
+        assertThat(mined(ScenarioKind.OVERNIGHT_STEADY, subject(6.0, 1), correction(at(0, 0, 0), 2.0))).isEmpty();
+    }
+
+    @Test
+    void anOvernightWithABolusJustBeforeTheLastStartStillFindsNoCleanStart() {
+        assertThat(mined(ScenarioKind.OVERNIGHT_STEADY, subject(6.0, 1), correction(at(0, 2, 55), 2.0))).isEmpty();
+    }
 }
