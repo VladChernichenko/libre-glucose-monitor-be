@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.azt1d;
 
+import che.glucosemonitorbe.hovorka.learning.TwinScales;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class Azt1dScenarioSweepTest {
 
+    private static final String TWIN_SANITY_KEY = "TWIN_SANITY|all";
+
     private record Cell(ScenarioKind kind, String subjectId, int n, int pass, int fail, int notApplicable,
                         double medianTwin, double medianNeutral, boolean fallbackProfile) {}
 
@@ -36,6 +39,7 @@ class Azt1dScenarioSweepTest {
 
         List<Cell> cells = new ArrayList<>();
         List<String> knownGaps = new ArrayList<>();
+        java.util.Set<String> subjectsAtALimit = new java.util.TreeSet<>();
         for (Azt1dDataset.Subject s : subjects) {
             ScenarioForecaster forecaster = new ScenarioForecaster(s);
             List<Azt1dDataset.BolusRecord> log = logs.getOrDefault(s.id(), List.of());
@@ -45,7 +49,9 @@ class Azt1dScenarioSweepTest {
                 int pass = 0, fail = 0, na = 0;
                 List<Double> twinErrors = new ArrayList<>(), neutralErrors = new ArrayList<>();
                 for (ScenarioEpisode ep : episodes) {
-                    Verdict twin = ScenarioRules.evaluate(forecaster.forecast(ep, ScaleMode.TWIN));
+                    ForecastResult twinResult = forecaster.forecast(ep, ScaleMode.TWIN);
+                    if (twinResult.twinApplied() && sitsAtALimit(twinResult.scales())) subjectsAtALimit.add(s.id());
+                    Verdict twin = ScenarioRules.evaluate(twinResult);
                     Verdict neutral = ScenarioRules.evaluate(forecaster.forecast(ep, ScaleMode.NEUTRAL));
                     switch (twin.outcome()) {
                         case PASS -> pass++;
@@ -65,11 +71,21 @@ class Azt1dScenarioSweepTest {
         }
 
         System.out.print(render(cells, knownGaps));
-        holdBaseline(cells);
+        System.out.printf("TWIN SANITY: %d subject(s) with an applied twin whose ISF or meal scale sits at a clamp limit: %s%n",
+                subjectsAtALimit.size(), subjectsAtALimit);
+        holdBaseline(cells, subjectsAtALimit.size());
     }
 
-    private static void holdBaseline(List<Cell> cells) throws Exception {
+    /** A fitted scale at its floor or ceiling is the signature of a twin that could not explain the data. */
+    private static boolean sitsAtALimit(TwinScales t) {
+        double tol = 1e-3;
+        return Math.abs(t.isfScale() - TwinScales.MIN_SCALE) < tol || Math.abs(t.isfScale() - TwinScales.MAX_SCALE) < tol
+                || Math.abs(t.agScale() - TwinScales.MIN_SCALE) < tol || Math.abs(t.agScale() - TwinScales.MAX_SCALE) < tol;
+    }
+
+    private static void holdBaseline(List<Cell> cells, int subjectsAtALimit) throws Exception {
         ScenarioBaseline current = new ScenarioBaseline();
+        current.put(TWIN_SANITY_KEY, 0.0, subjectsAtALimit);
         for (Cell c : cells) {
             if (!Double.isNaN(c.medianTwin())) {
                 current.put(ScenarioBaseline.key(c.kind(), c.subjectId()), c.medianTwin(), c.fail());
