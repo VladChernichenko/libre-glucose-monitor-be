@@ -5,9 +5,9 @@ package che.glucosemonitorbe.hovorka;
  *
  * <p>Population constants are from Hovorka et al., "Nonlinear model predictive control of
  * glucose concentration in subjects with type 1 diabetes", Physiol Meas 2004.
- * User-specific values (isf, weight, carb half-life) are derived from settings.
- * {@code carbRatio} is deliberately NOT among them: it is a dosing coefficient
- * (gramsPerUnit = 10 x isf / carbRatio) with no reader anywhere in this package.</p>
+ * User-specific values (isf, weight, carb half-life, meal magnitude) are derived from settings.
+ * The legacy {@code carbRatio} (mmol/L per 10 g) is not among them; the insulin-to-carb ratio
+ * {@code gramsPerUnit} reaches the model through {@code aG}.</p>
  *
  * <h3>ODE system (4 state variables)</h3>
  * <pre>
@@ -30,10 +30,10 @@ package che.glucosemonitorbe.hovorka;
  * @param k12       Intercompartmental transfer rate Q1->Q2 [/min] (population 0.066)
  * @param k21       Intercompartmental transfer rate Q2->Q1 [/min] (population 0.066)
  * @param tMaxG     Gut absorption time constant [min] = carbHalfLife / 1.68
- * @param aG        Per-user meal-magnitude calibration trim [dimensionless, centred on 1.0].
- *                  NOT a bioavailability factor - physiological carb bioavailability (~0.90) is
- *                  applied once, downstream, by {@code DallaManGutModel.F}. Must not be derived
- *                  from the carb ratio (an insulin-dosing quantity).
+ * @param aG        Per-user meal magnitude [dimensionless], set so that {@code gramsPerUnit} grams
+ *                  raise glucose by one unit's ISF ({@code HovorkaParameterService.mealMagnitude});
+ *                  1.0 without a usable ratio. NOT a bioavailability factor - physiological carb
+ *                  bioavailability (~0.90) is applied once, downstream, by {@code DallaManGutModel.F}.
  * @param isf       Insulin sensitivity factor [mmol/L per unit] - from user settings
  * @param weightKg  Body weight [kg] - from user_settings or 70 kg default
  */

@@ -89,48 +89,62 @@ class HovorkaParameterServiceTest {
         assertThat(p.tMaxG()).isCloseTo(60.0 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, within(0.001));
     }
 
-    // -- A_G meal-magnitude calibration -----------------------------------------
+    // -- A_G meal magnitude -----------------------------------------------------
     //
-    // RECALIBRATION (carb-bioavailability double-discount fix):
-    //   Previously A_G = clamp(0.8 × carbRatio/CR_DEFAULT, 0.5, 0.95). That had two defects:
-    //     (1) It was a SECOND bioavailability discount on top of DallaManGutModel.F = 0.90,
-    //         so net carbs reaching blood were A_G × F ≈ 0.8 × 0.9 = 0.72 - ~28% vanished,
-    //         systematically under-predicting the post-meal rise.
-    //     (2) It was derived from the carb RATIO (an insulin-dosing quantity), which has no
-    //         physiological relation to the absorbed carb fraction - corrupting meal magnitude
-    //         per user with no basis.
-    //   Fix: bioavailability is applied ONCE downstream (F = 0.90). A_G is now a pure per-user
-    //   meal-magnitude trim centred on 1.0, INDEPENDENT of carb ratio. These tests guard that
-    //   decoupling: A_G must be 1.0 regardless of the configured carb ratio.
+    // A_G ties meal magnitude to the insulin-to-carb ratio: one unit lowers glucose by ISF, so
+    // gramsPerUnit grams must raise it by ISF. Bioavailability (DallaManGutModel.F) is divided
+    // out, so it is still applied exactly once. The legacy mmol/L-per-10 g carbRatio has no say.
 
     @Test
-    void buildForUser_nullCarbRatio_agIsCalibrationDefault() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(null));
+    void buildForUser_gramsPerUnit_oneUnitsWorthOfCarbsRaisesGlucoseByIsf() {
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(10.0));
         HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
+        // Rise of gramsPerUnit grams once spread over both glucose compartments [mmol/L].
+        double rise = 10.0 * p.aG() / 0.18 * DallaManGutModel.F / p.effectiveInsulinVolume();
+        assertThat(rise).isCloseTo(p.isf(), within(0.001));
     }
 
     @Test
-    void buildForUser_zeroCarbRatio_agIsCalibrationDefault() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.0));
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
+    void buildForUser_doublingGramsPerUnit_halvesMealMagnitude() {
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(6.0));
+        double at6 = service.buildForUser(USER_ID).aG();
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(12.0));
+        double at12 = service.buildForUser(USER_ID).aG();
+        assertThat(at12).isCloseTo(at6 / 2.0, within(0.001));
     }
 
     @Test
-    void buildForUser_largeCarbRatio_agUnchanged_decoupledFromCarbRatio() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(10.0));
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        // A_G no longer scales with carb ratio - a large CR must NOT inflate meal magnitude.
-        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
+    void buildForUser_missingGramsPerUnit_agIsNeutral() {
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(null));
+        assertThat(service.buildForUser(USER_ID).aG()).isCloseTo(1.00, within(0.001));
     }
 
     @Test
-    void buildForUser_smallCarbRatio_agUnchanged_decoupledFromCarbRatio() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithCarbRatio(0.1));
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        // A_G no longer scales with carb ratio - a small CR must NOT shrink meal magnitude.
-        assertThat(p.aG()).isCloseTo(1.00, within(0.001));
+    void buildForUser_gramsPerUnitOutsideEnvelope_agIsNeutral() {
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(2.0));
+        assertThat(service.buildForUser(USER_ID).aG()).isCloseTo(1.00, within(0.001));
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(31.0));
+        assertThat(service.buildForUser(USER_ID).aG()).isCloseTo(1.00, within(0.001));
+    }
+
+    @Test
+    void buildForUser_inconsistentIsfAndRatio_agIsBounded() {
+        UserSettingsDTO dto = settingsWithGramsPerUnit(3.0);
+        dto.setIsf(9.0);
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(dto);
+        assertThat(service.buildForUser(USER_ID).aG()).isEqualTo(HovorkaParameterService.A_G_MAX);
+    }
+
+    @Test
+    void buildForUser_legacyCarbRatio_doesNotMoveMealMagnitude() {
+        UserSettingsDTO low = settingsWithGramsPerUnit(10.0);
+        low.setCarbRatio(0.1);
+        UserSettingsDTO high = settingsWithGramsPerUnit(10.0);
+        high.setCarbRatio(10.0);
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(low);
+        double atLow = service.buildForUser(USER_ID).aG();
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(high);
+        assertThat(service.buildForUser(USER_ID).aG()).isEqualTo(atLow);
     }
 
     // -- ISF fallback ----------------------------------------------------------
@@ -197,9 +211,9 @@ class HovorkaParameterServiceTest {
         return dto;
     }
 
-    private static UserSettingsDTO settingsWithCarbRatio(Double cr) {
+    private static UserSettingsDTO settingsWithGramsPerUnit(Double gramsPerUnit) {
         UserSettingsDTO dto = defaultSettings();
-        dto.setCarbRatio(cr);
+        dto.setGramsPerUnit(gramsPerUnit);
         return dto;
     }
 

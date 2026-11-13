@@ -269,6 +269,48 @@ class HovorkaGlucosePredictionServiceTest {
     // ---
 
     @Test
+    @DisplayName("One unit with exactly gramsPerUnit grams of carbs lands back at the starting glucose")
+    void mealCoveredAtTheUsersRatio_landsBackAtStart() {
+        double g0 = 7.0;
+        double gramsPerUnit = 12.0;
+        HovorkaParameters covered = withMealMagnitude(
+                HovorkaParameterService.mealMagnitude(params.isf(), params.vG(), gramsPerUnit));
+
+        CarbsEntry meal = CarbsEntry.builder().timestamp(NOW).carbs(gramsPerUnit).build();
+        InsulinDose bolus = InsulinDose.builder().timestamp(NOW).units(1.0).build();
+
+        List<PredictionPointDTO> curve = service.buildPredictionPath(
+                covered, g0, NOW, List.of(meal), List.of(bolus), List.of(), USER_ID, 480);
+
+        assertThat(curve.get(curve.size() - 1).getPredictedGlucose())
+                .as("carbs and insulin priced at the same ratio cancel once both are spent")
+                .isCloseTo(g0, within(0.3));
+    }
+
+    @Test
+    @DisplayName("A larger grams-per-unit ratio lowers the forecast for the same meal")
+    void largerGramsPerUnit_lowersTheMealRise() {
+        CarbsEntry meal = CarbsEntry.builder().timestamp(NOW).carbs(40.0).build();
+        double peakAt6 = peak(service.buildPredictionPath(
+                withMealMagnitude(HovorkaParameterService.mealMagnitude(params.isf(), params.vG(), 6.0)),
+                6.0, NOW, List.of(meal), List.of(), List.of(), USER_ID, 240));
+        double peakAt12 = peak(service.buildPredictionPath(
+                withMealMagnitude(HovorkaParameterService.mealMagnitude(params.isf(), params.vG(), 12.0)),
+                6.0, NOW, List.of(meal), List.of(), List.of(), USER_ID, 240));
+        assertThat(peakAt12).isLessThan(peakAt6 - 1.0);
+    }
+
+    private HovorkaParameters withMealMagnitude(double aG) {
+        return new HovorkaParameters(
+                params.vG(), params.f01(), params.egpNet(), params.egp0(), params.k12(), params.k21(),
+                params.tMaxG(), aG, params.isf(), params.weightKg());
+    }
+
+    private static double peak(List<PredictionPointDTO> curve) {
+        return curve.stream().mapToDouble(PredictionPointDTO::getPredictedGlucose).max().orElseThrow();
+    }
+
+    @Test
     @DisplayName("future-timestamped insulin dose: prediction matches no-dose curve until delivery, "
                   + "then diverges lower")
     void prospectiveInsulinDose_matchesBaselineUntilDelivery_thenDivergesLower() {

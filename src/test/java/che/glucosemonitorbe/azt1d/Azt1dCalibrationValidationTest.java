@@ -299,8 +299,10 @@ class Azt1dCalibrationValidationTest {
 
     /**
      * Build the Hovorka parameter set from a subject's estimated personal profile: body weight scales
-     * the physiological volumes, ISF sets insulin action. tMaxG (45-min carb half-life), A_G (1.0) and
-     * the intercompartmental rates keep their population defaults - the twin refines the rest.
+     * the physiological volumes, ISF sets insulin action, and the observed carb ratio sets meal
+     * magnitude A_G exactly as {@link HovorkaParameterService#mealMagnitude} does for a live user.
+     * tMaxG (45-min carb half-life) and the intercompartmental rates keep their population defaults.
+     * Env {@code AZT1D_NEUTRAL_MEAL_MAGNITUDE=true} pins A_G to 1.0, for a with/without comparison.
      */
     static HovorkaParameters personalParams(Azt1dDataset.Profile p) {
         double w = p.weightKg() > 0 ? p.weightKg() : HovorkaParameters.DEFAULT_WEIGHT;
@@ -308,9 +310,11 @@ class Azt1dCalibrationValidationTest {
         double vG = HovorkaParameters.VG_PER_KG * w;
         double f01 = HovorkaParameters.F01_PER_KG * w;
         double egp0 = HovorkaParameters.EGP0_PER_KG * w;
+        double aG = "true".equalsIgnoreCase(System.getenv("AZT1D_NEUTRAL_MEAL_MAGNITUDE")) ? 1.0
+                : HovorkaParameterService.mealMagnitude(isf, vG, p.carbRatioGPerU());
         return new HovorkaParameters(vG, f01, f01, egp0,
                 HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
-                45.0 / 1.68, 1.0, isf, w);
+                45.0 / 1.68, aG, isf, w);
     }
 
     /** Per-subject personal-settings table - the "profile" seeded for each test user from their data. */

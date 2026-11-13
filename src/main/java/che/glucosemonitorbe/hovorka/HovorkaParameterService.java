@@ -17,6 +17,7 @@ import java.util.UUID;
  * <ul>
  *   <li>ISF from {@code user_settings.isf}</li>
  *   <li>Carb half-life from {@code user_settings.carb_half_life} -> {@code tMaxG}</li>
+ *   <li>Insulin-to-carb ratio from {@code user_settings.grams_per_unit} -> {@code A_G}</li>
  *   <li>Body weight from {@code user_settings.body_weight_kg} (or population default 70 kg)</li>
  * </ul>
  *
@@ -26,17 +27,14 @@ import java.util.UUID;
  *   F01          = F01_PER_KG × weight                  [mmol/min]
  *   tMaxG        = carbHalfLife / 1.68                  [min]
  *                  (1.68 = 2-compartment half-time factor)
- *   A_G          = A_G_CALIBRATION (= 1.0, per-user meal-magnitude trim)
+ *   A_G          = ISF × 2·VG × 0.18 / (F × gramsPerUnit)   (see {@link #mealMagnitude})
  * </pre>
  *
  * <h3>Carbohydrate bioavailability (single application)</h3>
  * <p>Physiological carb bioavailability (~0.90) is applied <b>once</b>, downstream, by
- * {@link DallaManGutModel#ra} via {@code F = 0.90}. {@code A_G} here is <b>not</b> a second
- * bioavailability factor - it is a dimensionless per-user meal-magnitude calibration trim,
- * centred on 1.0. It must not be derived from the carb ratio (an insulin-dosing quantity with
- * no relation to the absorbed fraction); doing so previously double-discounted carbs
- * (A_G × F ≈ 0.8 × 0.9 = 0.72, i.e. ~28 % of carbs silently vanished) and corrupted meal
- * magnitude per user.</p>
+ * {@link DallaManGutModel#ra} via {@code F = 0.90}. {@code A_G} is <b>not</b> a second
+ * bioavailability factor: {@link #mealMagnitude} divides {@code F} out, so the product
+ * {@code A_G × F} is the user's own carb sensitivity and nothing is discounted twice.</p>
  */
 @Slf4j
 @Service
@@ -46,16 +44,46 @@ public class HovorkaParameterService {
     /** Default ISF when user has no ISF setting [mmol/L per unit]. */
     private static final double DEFAULT_ISF       = 2.2;
 
+    /** {@code A_G} when the user has no usable insulin-to-carb ratio: meal magnitude from weight alone. */
+    private static final double A_G_NEUTRAL = 1.00;
+
     /**
-     * Per-user meal-magnitude calibration trim {@code A_G} [dimensionless, centred on 1.0].
-     *
-     * <p>This is <b>not</b> a bioavailability factor. Physiological carb bioavailability (~0.90)
-     * is applied exactly once, downstream, by {@link DallaManGutModel#ra} ({@code F = 0.90}).
-     * {@code A_G} exists only to let a future per-user calibration (e.g. a meal-rise fit)
-     * scale total meal magnitude around 1.0. It must <b>never</b> be derived from the carb ratio -
-     * that coupling double-discounted carbs (0.8 × 0.9 = 0.72) and had no physiological basis.</p>
+     * Bounds on {@code A_G}. An ISF and a ratio that disagree this much are a settings mistake, not
+     * a physiology; the forecast stays inside a plausible meal magnitude instead of following them.
      */
-    private static final double A_G_CALIBRATION  = 1.00;
+    static final double A_G_MIN = 0.3;
+    static final double A_G_MAX = 3.0;
+
+    /** Same envelope as the dose calculator: a ratio outside it is not a ratio. */
+    private static final double MIN_GRAMS_PER_UNIT = 3.0;
+    private static final double MAX_GRAMS_PER_UNIT = 30.0;
+
+    /** Molar mass of glucose [g/mmol], as in the prediction service's grams-to-mmol conversion. */
+    private static final double GLUCOSE_G_PER_MMOL = 0.18;
+
+    /**
+     * Meal magnitude {@code A_G} that makes the forecast agree with the user's insulin-to-carb
+     * ratio: {@code gramsPerUnit} grams of carbs raise glucose by exactly what one unit lowers it.
+     *
+     * <pre>
+     *   one unit lowers G by            isf                                  [mmol/L]
+     *   g grams raise G by              g × A_G / 0.18 × F / (2·VG)          [mmol/L]
+     *   equal at g = gramsPerUnit  =>   A_G = isf × 2·VG × 0.18 / (F × gramsPerUnit)
+     * </pre>
+     * {@code 2·VG} is {@link HovorkaParameters#effectiveInsulinVolume()}: absorbed glucose spreads
+     * over both compartments exactly as the insulin effect does. {@code isf} is the user's base
+     * ISF - a meal-window ISF override moves a dose, not the carbs.
+     *
+     * <p>Returns the neutral 1.0 when the ratio is missing or outside 3-30 g/U.</p>
+     */
+    public static double mealMagnitude(double isf, double vG, Double gramsPerUnit) {
+        if (gramsPerUnit == null || !Double.isFinite(gramsPerUnit)
+                || gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
+            return A_G_NEUTRAL;
+        }
+        double aG = isf * 2.0 * vG * GLUCOSE_G_PER_MMOL / (DallaManGutModel.F * gramsPerUnit);
+        return Math.max(A_G_MIN, Math.min(A_G_MAX, aG));
+    }
 
     /**
      * Factor converting exponential COB half-life to Hovorka 2-compartment tMaxG.
@@ -123,16 +151,13 @@ public class HovorkaParameterService {
                 : 45;
         double tMaxG = halfLife / HALF_LIFE_TO_TMAX_G;
 
-        // -- Carb meal-magnitude calibration A_G -------------------------------
-        // A_G is a per-user trim centred on 1.0 - NOT a bioavailability factor (that is applied
-        // once downstream as DallaManGutModel.F = 0.90). It is deliberately independent of the
-        // carb ratio: coupling them double-discounted carbs and corrupted meal magnitude.
-        double aG = A_G_CALIBRATION;
-
         // -- ISF from user settings ----------------------------------------
         double isf = (settings.getIsf() != null && settings.getIsf() > 0)
                 ? settings.getIsf()
                 : DEFAULT_ISF;
+
+        // -- Meal magnitude A_G from the insulin-to-carb ratio -----------------
+        double aG = mealMagnitude(isf, vG, settings.getGramsPerUnit());
 
         // -- Raw hepatic glucose production before insulin suppression --------
         double egp0 = HovorkaParameters.EGP0_PER_KG * weight;

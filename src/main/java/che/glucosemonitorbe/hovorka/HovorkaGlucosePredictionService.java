@@ -1057,12 +1057,11 @@ public class HovorkaGlucosePredictionService {
      * </pre>
      * where 0.18 is the molar mass of glucose (g/mmol, MW = 180 g/mol / 1000).
      *
-     * <p>{@code A_G} is a per-user meal-magnitude calibration trim (≈ 1.0), <b>not</b> a
-     * bioavailability factor. Physiological carb bioavailability (~0.90) is applied exactly
-     * once, downstream, by {@link DallaManGutModel#ra} ({@code F = 0.90}): the full meal dose
-     * D = grams × A_G / 0.18 enters the stomach, and only {@code F} of it ultimately appears
-     * in blood. Applying a second sub-1.0 factor here (as the old CR-coupled A_G did) would
-     * double-discount carbs and systematically under-predict the post-meal rise.</p>
+     * <p>{@code A_G} is the per-user meal magnitude from the insulin-to-carb ratio
+     * ({@link HovorkaParameterService#mealMagnitude}), <b>not</b> a bioavailability factor.
+     * Physiological carb bioavailability (~0.90) is applied exactly once, downstream, by
+     * {@link DallaManGutModel#ra} ({@code F = 0.90}): the meal dose D = grams × A_G / 0.18 enters
+     * the stomach, and only {@code F} of it ultimately appears in blood.</p>
      */
     private double toCarbMmol(CarbsEntry entry, HovorkaParameters p) {
         if (entry.getCarbs() == null || entry.getCarbs() <= 0) return 0.0;

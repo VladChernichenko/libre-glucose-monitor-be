@@ -605,8 +605,8 @@ public class GlucoseCalculationsService {
     
     /**
      * Trend of the forecast the user is actually looking at: the change from "now" to the horizon
-     * point of {@code path}. Previously derived from carbContribution, which is priced with
-     * {@code carbRatio} - a parameter with no influence on the Hovorka path (audit finding F12), so
+     * point of {@code path}. Previously derived from carbContribution, a separate analytical
+     * formula rather than the path's own model (audit finding F12), so
      * the chip could read "rising" while the curve beside it fell toward hypo. Falls back to the
      * analytical factors only when the path is unexpectedly empty, mirroring twoHourPrediction.
      */
