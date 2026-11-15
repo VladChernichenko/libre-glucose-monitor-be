@@ -56,6 +56,7 @@ public class NotesService {
     private final NotePhotoStorageService notePhotoStorageService;
     private final ForecastSnapshotTrigger forecastSnapshotTrigger;
     private final ApplicationEventPublisher eventPublisher;
+    private final UserInsulinPreferencesService userInsulinPreferencesService;
     
     /**
      * Get all notes for a user.
@@ -110,6 +111,9 @@ public class NotesService {
         note.setContextTags(request.getContextTags());
         applyActivityFields(note, request.getActivityType(), request.getIntensity(), request.getDurationMin());
         applySiteZone(note, request.getSiteZone());
+        // Record which insulin this dose is. Stamped once, here: a later change of the user's
+        // preference must not re-label doses already taken.
+        note.setInsulinCode(userInsulinPreferencesService.currentCodeFor(userId, note));
         note.setMockData(Boolean.TRUE.equals(request.getMockData()));
         if (request.getAbsorptionMode() != null) {
             note.setAbsorptionMode(request.getAbsorptionMode());

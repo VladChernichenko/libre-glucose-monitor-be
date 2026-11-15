@@ -58,6 +58,10 @@ ALTER TABLE notes
     ADD COLUMN IF NOT EXISTS context_tags    JSONB,
     ADD COLUMN IF NOT EXISTS chat_message_id UUID;
 
+-- notes: which insulin each dose was (V1 on this branch)
+ALTER TABLE notes
+    ADD COLUMN IF NOT EXISTS insulin_code VARCHAR(32);
+
 -- user_digital_twin: learned activity gains (V8 on this branch)
 ALTER TABLE user_digital_twin
     ADD COLUMN IF NOT EXISTS activity_gain_scale         DOUBLE PRECISION NOT NULL DEFAULT 1.0,

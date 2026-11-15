@@ -858,6 +858,9 @@ public class HovorkaGlucosePredictionService {
         for (InsulinDose dose : doses) {
             if (dose.getTimestamp() == null || dose.getUnits() == null) continue;
             double minsAgoDose = minsAgoFromNow(dose.getTimestamp(), now);
+            // The dose's own insulin curve when it records one, else the user's current insulin.
+            double diaHours    = dose.hasOwnCurve() ? dose.getDiaHours()    : rapidIob.diaHours();
+            double peakMinutes = dose.hasOwnCurve() ? dose.getPeakMinutes() : rapidIob.peakMinutes();
             double[] iob = new double[size];
             for (int m = 0; m < size; m++) {
                 // Elapsed time since this dose at prediction step m. For past doses
@@ -867,8 +870,7 @@ public class HovorkaGlucosePredictionService {
                 // minute; iobOpenApsExponential returns 0 for negative input.
                 double minsAgoAtStep = minsAgoDose + m;
                 iob[m] = InsulinCalculatorService.iobOpenApsExponential(
-                        dose.getUnits(), minsAgoAtStep,
-                        rapidIob.diaHours(), rapidIob.peakMinutes());
+                        dose.getUnits(), minsAgoAtStep, diaHours, peakMinutes);
             }
             double isf = resolveIsf(settings, fallbackIsf, dose.getTimestamp()) * isfScale;
             activities.add(new DoseActivity(iob, isf));

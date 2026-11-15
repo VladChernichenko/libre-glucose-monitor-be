@@ -339,6 +339,8 @@ public class GlucoseCalculationsService {
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         RapidInsulinIobParameters rapidIob = userInsulinPreferencesService.getRapidIobParameters(userId);
         List<Note> notes = getRecentNotes(userId, now);
+        java.util.function.Function<String, RapidInsulinIobParameters> curveByCode =
+                userInsulinPreferencesService.rapidCurveByCode(userId);
         List<CarbsEntry> carbsEntries = new ArrayList<>(notes.stream()
                 .filter(note -> note.getCarbs() != null && note.getCarbs() > 0)
                 .map(this::convertNoteToCarbsEntry)
@@ -346,7 +348,7 @@ public class GlucoseCalculationsService {
         List<InsulinDose> insulinEntries = new ArrayList<>(notes.stream()
                 // Long-acting (basal) doses are not rapid-acting boluses - exclude from bolus IOB.
                 .filter(note -> note.getInsulin() != null && note.getInsulin() > 0 && !note.isLongActing())
-                .map(this::convertNoteToInsulinDose)
+                .map(note -> convertNoteToInsulinDose(note, curveByCode))
                 .toList());
         return new ActiveCobIobInputs(notes, carbsEntries, insulinEntries, settings, rapidIob);
     }
@@ -918,9 +920,12 @@ public class GlucoseCalculationsService {
     /**
      * Convert a Note with insulin data to an InsulinDose object
      */
-    private InsulinDose convertNoteToInsulinDose(Note note) {
+    private InsulinDose convertNoteToInsulinDose(
+            Note note, java.util.function.Function<String, RapidInsulinIobParameters> curveByCode) {
         // Determine insulin type based on meal type and carbs
         InsulinDose.InsulinType insulinType = determineInsulinType(note);
+        // The curve of the insulin this dose was, not of whatever the user has selected today.
+        RapidInsulinIobParameters curve = curveByCode != null ? curveByCode.apply(note.getInsulinCode()) : null;
         
         return InsulinDose.builder()
             .id(note.getId())
@@ -930,6 +935,8 @@ public class GlucoseCalculationsService {
             .note(note.getComment())
             .mealType(note.getMeal())
             .userId(note.getUserId())
+            .diaHours(curve != null ? curve.diaHours() : null)
+            .peakMinutes(curve != null ? curve.peakMinutes() : null)
             .build();
     }
     

@@ -58,8 +58,30 @@ class NotesServiceTest {
     @Mock
     private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private UserInsulinPreferencesService userInsulinPreferencesService;
+
     @InjectMocks
     private NotesService notesService;
+
+    @Test
+    void createNoteStampsTheUsersCurrentInsulinOnTheDose() {
+        UUID userId = UUID.randomUUID();
+        CreateNoteRequest request = new CreateNoteRequest();
+        request.setTimestamp(LocalDateTime.now());
+        request.setCarbs(0.0);
+        request.setInsulin(2.0);
+        request.setMeal("Correction");
+        when(userInsulinPreferencesService.currentCodeFor(org.mockito.ArgumentMatchers.eq(userId), any(Note.class)))
+                .thenReturn("FIASP");
+        when(noteRepository.save(any(Note.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        notesService.createNote(userId, request);
+
+        org.mockito.ArgumentCaptor<Note> saved = org.mockito.ArgumentCaptor.forClass(Note.class);
+        org.mockito.Mockito.verify(noteRepository).save(saved.capture());
+        org.junit.jupiter.api.Assertions.assertEquals("FIASP", saved.getValue().getInsulinCode());
+    }
 
     @Test
     void createNoteShouldPersistAndMapDto() throws Exception {

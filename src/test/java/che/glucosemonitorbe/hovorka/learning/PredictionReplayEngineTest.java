@@ -8,6 +8,7 @@ import che.glucosemonitorbe.hovorka.ActivityProvider;
 import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
 import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.hovorka.DallaManGutModel;
+import che.glucosemonitorbe.hovorka.ActivityGains;
 import che.glucosemonitorbe.hovorka.HovorkaGlucosePredictionService;
 import che.glucosemonitorbe.hovorka.HovorkaOdeSolver;
 import che.glucosemonitorbe.hovorka.HovorkaParameters;
@@ -63,6 +64,116 @@ class PredictionReplayEngineTest {
             assertThat(s.actual()).isFinite();
             assertThat(s.hourOfDay()).isBetween(0, 23);
         }
+    }
+
+    // ---
+    // Regime: only a bolus logged as a correction at a high reading may identify insulin
+    // sensitivity. Insulin without carbs is otherwise as likely a meal whose carbs went unlogged.
+    // ---
+
+    @Test
+    void aLabelledCorrectionAtAHighReadingIsACorrectionRegime() {
+        assertThat(regimesAround(11.0, bolus().asCorrection()))
+                .contains(Regime.CORRECTION).doesNotContain(Regime.INSULIN_ONLY, Regime.MEAL);
+    }
+
+    @Test
+    void aLabelledCorrectionNearTargetIsNotTrusted() {
+        assertThat(regimesAround(6.5, bolus().asCorrection()))
+                .contains(Regime.INSULIN_ONLY).doesNotContain(Regime.CORRECTION);
+    }
+
+    @Test
+    void anUnlabelledCarbFreeBolusIsNotTrusted() {
+        assertThat(regimesAround(11.0, bolus()))
+                .contains(Regime.INSULIN_ONLY).doesNotContain(Regime.CORRECTION);
+    }
+
+    @Test
+    void oneUntrustedBolusNearbySpoilsTheCorrection() {
+        PredictionReplayEngine.Event preBolus =
+                new PredictionReplayEngine.Event(T0 + 240 * 60_000L, 0.0, 2.0, false, 0, 0, 0);
+        assertThat(regimesAround(11.0, bolus().asCorrection(), preBolus))
+                .doesNotContain(Regime.CORRECTION);
+    }
+
+    @Test
+    void carbsNearACorrectionMakeItAMeal() {
+        PredictionReplayEngine.Event meal =
+                new PredictionReplayEngine.Event(T0 + 240 * 60_000L, 30.0, 0.0, false, 0, 0, 0);
+        assertThat(regimesAround(11.0, bolus().asCorrection(), meal))
+                .contains(Regime.MEAL).doesNotContain(Regime.CORRECTION);
+    }
+
+    // ---
+    // Per-dose insulin: a dose replays on the curve of the insulin it was, and the curve stage
+    // reshapes only the doses of the insulin being fitted.
+    // ---
+
+    @Test
+    void aDoseReplaysOnTheCurveOfItsOwnInsulin() {
+        List<AnchorSample> onCurrent = replayFlat(null, bolus());
+        List<AnchorSample> onApidra  = replayFlat(code -> "APIDRA".equals(code)
+                ? new RapidInsulinIobParameters(4.5, 75.0) : new RapidInsulinIobParameters(4.0, 55.0),
+                bolus().withInsulinCode("APIDRA"));
+
+        assertThat(maxAbsDiff(onCurrent, onApidra))
+                .as("a slower insulin must move the replayed curve").isGreaterThan(0.05);
+    }
+
+    @Test
+    void theCurveOverrideReshapesOnlyTheFittedInsulin() {
+        PredictionReplayEngine.Event fiasp = bolus().withInsulinCode("FIASP");
+        PredictionReplayEngine engine = flatEngine(null, fiasp);
+        CurveScale slower = new CurveScale(1.5, 1.4);
+
+        List<AnchorSample> base    = engine.replay(TwinScales.neutral());
+        List<AnchorSample> fitted  = engine.replay(TwinScales.neutral(), ActivityGains.NEUTRAL, "FIASP", slower);
+        List<AnchorSample> another = engine.replay(TwinScales.neutral(), ActivityGains.NEUTRAL, "APIDRA", slower);
+
+        assertThat(maxAbsDiff(base, fitted)).isGreaterThan(0.05);
+        assertThat(maxAbsDiff(base, another)).as("a FIASP dose is not an APIDRA dose").isZero();
+    }
+
+    private static List<AnchorSample> replayFlat(
+            java.util.function.Function<String, RapidInsulinIobParameters> curveByCode,
+            PredictionReplayEngine.Event... events) {
+        return flatEngine(curveByCode, events).replay(TwinScales.neutral());
+    }
+
+    private static PredictionReplayEngine flatEngine(
+            java.util.function.Function<String, RapidInsulinIobParameters> curveByCode,
+            PredictionReplayEngine.Event... events) {
+        List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
+        for (int m = 0; m <= 480; m += 5) cgm.add(new PredictionReplayEngine.Reading(T0 + m * 60_000L, 11.0));
+        PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
+        cfg.curveByCode = curveByCode;
+        return new PredictionReplayEngine(rawPredictor(), params70kg(),
+                new RapidInsulinIobParameters(4.0, 55.0), null, USER, cgm, List.of(events), cfg);
+    }
+
+    private static double maxAbsDiff(List<AnchorSample> a, List<AnchorSample> b) {
+        assertThat(a).hasSameSizeAs(b).isNotEmpty();
+        double max = 0.0;
+        for (int i = 0; i < a.size(); i++) max = Math.max(max, Math.abs(a.get(i).predicted() - b.get(i).predicted()));
+        return max;
+    }
+
+    /** 3 U, no carbs, four hours into the trace. */
+    private static PredictionReplayEngine.Event bolus() {
+        return new PredictionReplayEngine.Event(T0 + 240 * 60_000L, 0.0, 3.0, false, 0, 0, 0);
+    }
+
+    /** Regimes of every sample replayed over 8 h of flat CGM at {@code level}. */
+    private static java.util.Set<Regime> regimesAround(double level, PredictionReplayEngine.Event... events) {
+        List<PredictionReplayEngine.Reading> cgm = new ArrayList<>();
+        for (int m = 0; m <= 480; m += 5) cgm.add(new PredictionReplayEngine.Reading(T0 + m * 60_000L, level));
+        PredictionReplayEngine engine = new PredictionReplayEngine(
+                rawPredictor(), params70kg(), new RapidInsulinIobParameters(4.5, 55.0), null, USER,
+                cgm, List.of(events), new PredictionReplayEngine.Config());
+        java.util.Set<Regime> regimes = java.util.EnumSet.noneOf(Regime.class);
+        for (AnchorSample sample : engine.replay(TwinScales.neutral())) regimes.add(sample.regime());
+        return regimes;
     }
 
     // ---

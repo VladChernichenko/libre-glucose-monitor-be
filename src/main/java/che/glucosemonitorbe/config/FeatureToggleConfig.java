@@ -47,4 +47,9 @@ public class FeatureToggleConfig {
     // similar past meals vs the calculator. Advisory only, never changes settings. Default on.
     private boolean historyDoseEnabled = true;
 
+    // Personal insulin action curve: a per-user peak / duration for the user's rapid insulin, fitted
+    // from their own corrections in the nightly twin calibration and used in forecasts once it beats
+    // the catalog curve out-of-sample. Off by default until validated on real data.
+    private boolean personalInsulinCurveEnabled = false;
+
 }

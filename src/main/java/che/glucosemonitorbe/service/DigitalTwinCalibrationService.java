@@ -59,12 +59,16 @@ public class DigitalTwinCalibrationService {
     private static final int MIN_CGM_READINGS = 200;
     private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
 
+    /** {@code notes.meal} value the clients and the assistant use for a correction bolus. */
+    static final String CORRECTION_LABEL = "Correction";
+
     private static final String MACRO_FMT = "\"%s\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)";
 
     private final CgmReadingRepository cgmReadingRepository;
     private final NoteRepository noteRepository;
     private final UserRepository userRepository;
     private final UserDigitalTwinRepository twinRepository;
+    private final che.glucosemonitorbe.repository.UserInsulinCurveRepository insulinCurveRepository;
     private final che.glucosemonitorbe.repository.GlycemicEventRepository glycemicEventRepository;
 
     private final HovorkaParameterService paramService;
@@ -193,6 +197,7 @@ public class DigitalTwinCalibrationService {
 
         PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
         cfg.basalDurationHours = insulinPrefsService.getLongActingDurationHours(userId);
+        cfg.curveByCode = insulinPrefsService.rapidCurveByCode(userId);
         PredictionReplayEngine train = new PredictionReplayEngine(
                 rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userZone);
         PredictionReplayEngine val = new PredictionReplayEngine(
@@ -216,10 +221,68 @@ public class DigitalTwinCalibrationService {
 
         persist(userId, result, activityFit, now);
         digitalTwinService.invalidate(userId);
+
+        if (featureToggleConfig.isPersonalInsulinCurveEnabled()) {
+            fitPersonalInsulinCurve(userId, result, rawPredictor, baseParams, settings, trainCgm, valCgm,
+                    events, cfg.basalDurationHours, activity, userZone, now);
+        }
         log.info("Digital-twin calibration user={} -> {} (isf×{}, aG×{})",
                 userId, result.status(),
                 round(result.scales().isfScale()), round(result.scales().agScale()));
         return result;
+    }
+
+    /** Horizon of the insulin-curve replay [min]: long enough to see a rapid insulin's tail. */
+    static final int CURVE_HORIZON_MIN = 240;
+
+    /**
+     * Insulin-curve stage: fit the personal peak / duration of the user's current rapid insulin on
+     * top of the twin just fitted, and store the outcome. Runs on its own replay pair - a 4-hour
+     * horizon, and catalog curves as the base the fit reshapes.
+     */
+    private void fitPersonalInsulinCurve(
+            UUID userId, DigitalTwinCalibrator.Result result, HovorkaGlucosePredictionService rawPredictor,
+            HovorkaParameters baseParams, UserSettingsDTO settings,
+            List<PredictionReplayEngine.Reading> trainCgm, List<PredictionReplayEngine.Reading> valCgm,
+            List<PredictionReplayEngine.Event> events, double basalDurationHours,
+            che.glucosemonitorbe.hovorka.ActivityProvider activity, java.time.ZoneId userZone, LocalDateTime now) {
+        String code = insulinPrefsService.currentRapidCode(userId);
+        RapidInsulinIobParameters catalog = insulinPrefsService.getCatalogRapidIobParameters(userId);
+
+        PredictionReplayEngine.Config cfg = new PredictionReplayEngine.Config();
+        cfg.horizonMin = CURVE_HORIZON_MIN;
+        cfg.sampleHorizons = new int[]{60, 120, 180, 240};
+        cfg.basalDurationHours = basalDurationHours;
+        cfg.curveByCode = insulinPrefsService.catalogCurveByCode(userId);
+        PredictionReplayEngine train = new PredictionReplayEngine(
+                rawPredictor, baseParams, catalog, settings, userId, trainCgm, events, cfg, activity, userZone);
+        PredictionReplayEngine val = new PredictionReplayEngine(
+                rawPredictor, baseParams, catalog, settings, userId, valCgm, events, cfg, activity, userZone);
+
+        long trainEndMs = trainCgm.isEmpty() ? Long.MIN_VALUE : trainCgm.get(trainCgm.size() - 1).epochMs();
+        int doseCount = (int) events.stream()
+                .filter(e -> e.correction() && e.epochMs() <= trainEndMs)
+                .filter(e -> e.insulinCode() == null || e.insulinCode().equalsIgnoreCase(code))
+                .count();
+        TwinScales fixed = result.improved() ? result.scales() : TwinScales.neutral();
+        DigitalTwinCalibrator.CurveFit fit =
+                calibratorFactory.get().fitInsulinCurve(train, val, fixed, code, doseCount);
+
+        che.glucosemonitorbe.entity.UserInsulinCurve row = insulinCurveRepository
+                .findByUserIdAndInsulinCode(userId, code)
+                .orElseGet(() -> che.glucosemonitorbe.entity.UserInsulinCurve.builder()
+                        .userId(userId).insulinCode(code).build());
+        row.setDiaHours(round(fit.scale().diaHours(catalog.diaHours())));
+        row.setPeakMinutes(round(fit.scale().peakMinutes(catalog.peakMinutes(), catalog.diaHours())));
+        row.setApplied(fit.applied());
+        row.setMaeWithout(nanToNull(fit.maeWithout()));
+        row.setMaeWith(nanToNull(fit.maeWith()));
+        row.setDoseCount(fit.doseCount());
+        row.setStatus(fit.status());
+        row.setFittedAt(now);
+        insulinCurveRepository.save(row);
+        log.info("Insulin-curve calibration user={} insulin={} -> {} (peak {} min, duration {} h)",
+                userId, code, fit.status(), row.getPeakMinutes(), row.getDiaHours());
     }
 
     /**
@@ -357,13 +420,19 @@ public class DigitalTwinCalibrationService {
      */
     static PredictionReplayEngine.Event toEvent(Note n, java.time.ZoneId userZone) {
         String profile = n.getNutritionProfile();
-        return new PredictionReplayEngine.Event(
+        double carbs   = n.getCarbs()   != null ? n.getCarbs()   : 0.0;
+        double insulin = n.getInsulin() != null ? n.getInsulin() : 0.0;
+        PredictionReplayEngine.Event event = new PredictionReplayEngine.Event(
                 PredictionReplayEngine.toEpochMs(n.getTimestamp(), userZone),
-                n.getCarbs()   != null ? n.getCarbs()   : 0.0,
-                n.getInsulin() != null ? n.getInsulin() : 0.0,
-                n.isLongActing(),
+                carbs, insulin, n.isLongActing(),
                 macro(profile, "protein"), macro(profile, "fat"), macro(profile, "fiber"),
                 n.isHypoTreatment(), macro(profile, "estimatedGi"));
+        // The label is the user's own statement that this dose was a correction; the engine still
+        // checks the reading at dose time before trusting it for the ISF fit.
+        boolean correction = CORRECTION_LABEL.equalsIgnoreCase(n.getMeal())
+                && insulin > 0 && carbs == 0 && !n.isLongActing();
+        event = event.withInsulinCode(n.getInsulinCode());
+        return correction ? event.asCorrection() : event;
     }
 
     /** Extract a numeric field (protein/fat/fiber/estimatedGi) from a nutrition_profile JSON blob; 0 if absent. */

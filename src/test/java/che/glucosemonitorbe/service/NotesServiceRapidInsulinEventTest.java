@@ -44,7 +44,7 @@ class NotesServiceRapidInsulinEventTest {
         when(mapper.toDto(any(Note.class))).thenReturn(new NoteDto());
         service = new NotesService(notes, mapper, mock(FoodCompositionService.class), new ObjectMapper(),
                 mock(GlucoseAlertService.class), mock(UserService.class), mock(NotePhotoStorageService.class),
-                mock(ForecastSnapshotTrigger.class), events);
+                mock(ForecastSnapshotTrigger.class), events, mock(UserInsulinPreferencesService.class));
     }
 
     private CreateNoteRequest note(double insulin, double carbs, String type, UUID chatMessageId) {

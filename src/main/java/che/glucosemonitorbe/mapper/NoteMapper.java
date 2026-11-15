@@ -33,6 +33,7 @@ public class NoteMapper {
         dto.setIntensity(note.getIntensity());
         dto.setDurationMin(note.getDurationMin());
         dto.setSiteZone(note.getSiteZone());
+        dto.setInsulinCode(note.getInsulinCode());
         dto.setCarbsLow(note.getCarbsLow());
         dto.setCarbsHigh(note.getCarbsHigh());
         dto.setContextTags(note.getContextTags());

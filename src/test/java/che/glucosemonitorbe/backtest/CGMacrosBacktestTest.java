@@ -162,7 +162,7 @@ class CGMacrosBacktestTest {
         double isf        = 2.5;   // mmol/L per unit - typical T1D
         double cr         = 10.0;  // g carbs per unit
         double diaMin     = 270.0; // 4.5 h duration
-        double peakMin    = 75.0;  // Fiasp-like peak
+        double peakMin    = 75.0;  // standard rapid-analog peak
 
         double carbsG   = 60.0;
         double bolusUnits = carbsG / cr;  // 6 units

@@ -29,6 +29,10 @@ public class InsulinCatalogService {
                 .collect(Collectors.toList());
     }
 
+    public java.util.Optional<InsulinCatalog> findByCode(String code) {
+        return insulinCatalogRepository.findByCode(code);
+    }
+
     public InsulinCatalog getRequiredByCode(String code) {
         return insulinCatalogRepository.findByCode(code)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown insulin code: " + code));

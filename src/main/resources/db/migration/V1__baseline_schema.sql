@@ -99,6 +99,9 @@ CREATE TABLE IF NOT EXISTS notes (
     duration_min        INTEGER,
     -- Injection site of an insulin note (InjectionSiteZone code, e.g. 'abd_ur', or 'unknown'); NULL = not asked
     site_zone           VARCHAR(16),
+    -- Catalog code of the insulin this dose was (insulin_catalog.code), stamped from the user's
+    -- preferences when the note is saved; NULL = not recorded (treated as the current preference)
+    insulin_code        VARCHAR(32),
     -- Assistant chat: uncertainty band on estimated carbs, context tags (JSON array of ContextTag names)
     -- and the chat message that produced this note.
     carbs_low           DOUBLE PRECISION,

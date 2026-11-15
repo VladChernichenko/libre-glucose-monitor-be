@@ -139,6 +139,8 @@ public class IsfMealWindowProfileService {
     @Transactional
     public IsfMealWindowProfileResponse recomputeForUser(UUID userId) {
         RapidInsulinIobParameters rapid = userInsulinPreferencesService.getRapidIobParameters(userId);
+        java.util.function.Function<String, RapidInsulinIobParameters> curveByCode =
+                userInsulinPreferencesService.rapidCurveByCode(userId);
         UserSettingsDTO userSettings = userSettingsService.getUserSettings(userId);
 
         // Meal-window labels use the user's IANA zone. Note↔CGM matching does not: see
@@ -168,7 +170,8 @@ public class IsfMealWindowProfileService {
             if (bolus.getTimestamp() == null) continue;
             candidates++;
 
-            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, gramsPerUnit, userZone);
+            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, gramsPerUnit,
+                    userZone, curveByCode);
             if (est != null) {
                 estimates.add(est);
             } else {
@@ -271,6 +274,23 @@ public class IsfMealWindowProfileService {
             UserSettingsDTO userSettings,
             Double gramsPerUnit,
             ZoneId userZone) {
+        return estimateForBolus(bolus, allNotes, cgmReadings, rapid, userSettings, gramsPerUnit,
+                userZone, code -> rapid);
+    }
+
+    /**
+     * As above, with each earlier dose's IOB taken on the curve of the insulin that dose was
+     * ({@code curveByCode}). The window length stays on {@code rapid}, the user's current insulin.
+     */
+    EventEstimate estimateForBolus(
+            Note bolus,
+            List<Note> allNotes,
+            List<CgmReading> cgmReadings,
+            RapidInsulinIobParameters rapid,
+            UserSettingsDTO userSettings,
+            Double gramsPerUnit,
+            ZoneId userZone,
+            java.util.function.Function<String, RapidInsulinIobParameters> curveByCode) {
 
         LocalDateTime t0 = bolus.getTimestamp();
         LocalDateTime tEnd = t0.plusMinutes((long) (rapid.diaHours() * 60));
@@ -304,8 +324,10 @@ public class IsfMealWindowProfileService {
             if (other.getInsulin() == null || other.getInsulin() <= 0) continue;
             if (other.getTimestamp() == null || other.getTimestamp().isAfter(t0)) continue;
             double minsAgo = java.time.Duration.between(other.getTimestamp(), t0).toMinutes();
+            RapidInsulinIobParameters curve = curveByCode != null
+                    ? curveByCode.apply(other.getInsulinCode()) : rapid;
             priorIob += InsulinCalculatorService.iobOpenApsExponential(
-                    other.getInsulin(), minsAgo, rapid.diaHours(), rapid.peakMinutes());
+                    other.getInsulin(), minsAgo, curve.diaHours(), curve.peakMinutes());
         }
 
         // Carbs in [-30 min, +DIA] are considered part of this event's nutrient envelope. Earlier

@@ -63,7 +63,7 @@ class DigitalTwinActivityStageTest {
                 HovorkaParameters.VG_PER_KG * w, HovorkaParameters.F01_PER_KG * w, HovorkaParameters.F01_PER_KG * w,
                 HovorkaParameters.EGP0_PER_KG * w, HovorkaParameters.K12_POP, HovorkaParameters.K21_POP,
                 45 / HovorkaParameterService.HALF_LIFE_TO_TMAX_G, 1.0, 2.2, w));
-        calibration = new DigitalTwinCalibrationService(cgmRepo, noteRepo, null, twinRepo, null,
+        calibration = new DigitalTwinCalibrationService(cgmRepo, noteRepo, null, twinRepo, null, null,
                 params, null, null, null,
                 mock(UserInsulinPreferencesService.class), settings, mock(DigitalTwinService.class), toggles);
         calibration.calibratorFactory = () -> fitter;

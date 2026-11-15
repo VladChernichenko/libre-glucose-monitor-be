@@ -171,7 +171,8 @@ public class GlycemicEventScanService {
         return new GlycemicEventDetector.Input(userId, zone, end, cgm, notes, paramService.buildRawForUser(userId),
                 insulinPrefsService.getRapidIobParameters(userId), settings,
                 t -> carbsOnBoardService.calculateTotalCarbsOnBoard(carbEntries, t, settings),
-                featureToggleConfig.isActivityLoggingEnabled());
+                featureToggleConfig.isActivityLoggingEnabled(),
+                insulinPrefsService.rapidCurveByCode(userId));
     }
 
     EventClassifier.Config classifierConfig(RapidInsulinIobParameters iob) {

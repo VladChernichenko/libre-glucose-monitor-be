@@ -85,6 +85,14 @@ public class Note {
     @Column(name = "site_zone", length = 16)
     private String siteZone;
 
+    /**
+     * Catalog code of the insulin this dose was ({@code insulin_catalog.code}), stamped from the
+     * user's preferences when the note is saved. Null when not recorded: the dose is then treated
+     * as the user's currently selected insulin.
+     */
+    @Column(name = "insulin_code", length = 32)
+    private String insulinCode;
+
     /** Lower bound of the estimated carbs range (g); null when carbs are exact. */
     @Column(name = "carbs_low")
     private Double carbsLow;
@@ -295,6 +303,14 @@ public class Note {
 
     public void setSiteZone(String siteZone) {
         this.siteZone = siteZone;
+    }
+
+    public String getInsulinCode() {
+        return insulinCode;
+    }
+
+    public void setInsulinCode(String insulinCode) {
+        this.insulinCode = insulinCode;
     }
 
     public Double getCarbsLow() { return carbsLow; }

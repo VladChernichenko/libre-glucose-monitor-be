@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Builds the {@link EventFeatures} vector for a run at its onset (spec sections 1.3, 2.3). Pure: uses only
@@ -24,7 +25,24 @@ public final class FeatureExtractor {
 
     public record Input(ResidualSeries series, ResidualRun run, int onsetIndex, ZoneId zone,
                         List<Note> notes, RapidInsulinIobParameters iob, double isfMmolPerU,
-                        double cobAtOnsetGrams, int matchLeadMinutes) {}
+                        double cobAtOnsetGrams, int matchLeadMinutes,
+                        Function<String, RapidInsulinIobParameters> curveByCode) {
+
+        public Input {
+            if (curveByCode == null) {
+                RapidInsulinIobParameters single = iob;
+                curveByCode = code -> single;
+            }
+        }
+
+        /** Every dose on the single {@code iob} curve. */
+        public Input(ResidualSeries series, ResidualRun run, int onsetIndex, ZoneId zone,
+                     List<Note> notes, RapidInsulinIobParameters iob, double isfMmolPerU,
+                     double cobAtOnsetGrams, int matchLeadMinutes) {
+            this(series, run, onsetIndex, zone, notes, iob, isfMmolPerU, cobAtOnsetGrams,
+                    matchLeadMinutes, code -> iob);
+        }
+    }
 
     private FeatureExtractor() {}
 
@@ -56,10 +74,11 @@ public final class FeatureExtractor {
                 if (inMatch) insulinLogged = true;
                 if (minsAgo >= 0) {
                     minSinceBolus = minSinceBolus == null ? minsAgo : Math.min(minSinceBolus, minsAgo);
+                    RapidInsulinIobParameters curve = in.curveByCode().apply(n.getInsulinCode());
                     double now = InsulinCalculatorService.iobOpenApsExponential(
-                            n.getInsulin(), minsAgo, in.iob().diaHours(), in.iob().peakMinutes());
+                            n.getInsulin(), minsAgo, curve.diaHours(), curve.peakMinutes());
                     double later = InsulinCalculatorService.iobOpenApsExponential(
-                            n.getInsulin(), minsAgo + 60, in.iob().diaHours(), in.iob().peakMinutes());
+                            n.getInsulin(), minsAgo + 60, curve.diaHours(), curve.peakMinutes());
                     iobAtOnset += now;
                     iobDrop += now - later;
                 }

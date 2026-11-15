@@ -50,6 +50,7 @@ public class GlycemicEventService {
     private final GlycemicLearnerTrainingCache trainingCache;
     private final ForecastSnapshotTrigger forecastSnapshotTrigger;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final UserInsulinPreferencesService userInsulinPreferencesService;
 
     @Transactional(readOnly = true)
     public List<GlycemicEventDTO> listRange(UUID userId, LocalDateTime from, LocalDateTime to, State state) {
@@ -201,6 +202,7 @@ public class GlycemicEventService {
         note.setInsulin(insulin);
         note.setMeal("Unlogged (backfilled)");
         note.setType(Note.TYPE_NORMAL);
+        note.setInsulinCode(userInsulinPreferencesService.currentCodeFor(userId, note));
         note.setCreatedAt(LocalDateTime.now());
         note.setUpdatedAt(LocalDateTime.now());
         Note saved = noteRepository.save(note);

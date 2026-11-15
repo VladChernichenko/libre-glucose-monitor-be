@@ -18,6 +18,7 @@ import che.glucosemonitorbe.hovorka.NotesActivityProvider;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToDoubleFunction;
 
@@ -33,7 +34,23 @@ public final class GlycemicEventDetector {
     /** Everything one user's scan needs. {@code end} is the user's local "now". */
     public record Input(UUID userId, ZoneId zone, LocalDateTime end, List<CgmPoint> cgm, List<Note> notes,
                         HovorkaParameters params, RapidInsulinIobParameters iob, UserSettingsDTO settings,
-                        ToDoubleFunction<LocalDateTime> cobAt, boolean activityAware) {}
+                        ToDoubleFunction<LocalDateTime> cobAt, boolean activityAware,
+                        Function<String, RapidInsulinIobParameters> curveByCode) {
+
+        public Input {
+            if (curveByCode == null) {
+                RapidInsulinIobParameters single = iob;
+                curveByCode = code -> single;
+            }
+        }
+
+        /** Every dose on the single {@code iob} curve (sources with one insulin throughout). */
+        public Input(UUID userId, ZoneId zone, LocalDateTime end, List<CgmPoint> cgm, List<Note> notes,
+                     HovorkaParameters params, RapidInsulinIobParameters iob, UserSettingsDTO settings,
+                     ToDoubleFunction<LocalDateTime> cobAt, boolean activityAware) {
+            this(userId, zone, end, cgm, notes, params, iob, settings, cobAt, activityAware, code -> iob);
+        }
+    }
 
     public record Detection(ResidualRun run, int onsetIndex, long onsetMs, EventFeatures features,
                             ResidualSeries series) {
@@ -73,7 +90,7 @@ public final class GlycemicEventDetector {
             LocalDateTime onset = UserZones.toWallTime(onsetMs, in.zone());
             EventFeatures f = FeatureExtractor.extract(new FeatureExtractor.Input(series, run, onsetIdx, in.zone(),
                     in.notes(), in.iob(), in.params().isf(), in.cobAt().applyAsDouble(onset),
-                    props.getMatchLeadMinutes()));
+                    props.getMatchLeadMinutes(), in.curveByCode()));
             out.add(new Detection(run, onsetIdx, onsetMs, f, series));
         }
         return out;
@@ -92,8 +109,10 @@ public final class GlycemicEventDetector {
             if (n.isLongActing()) { longActing.add(n); continue; }
             if (n.getCarbs() != null && n.getCarbs() > 0) carbs.add(toCarbsEntry(n));
             if (n.getInsulin() != null && n.getInsulin() > 0 && !dropBolus.test(n)) {
+                RapidInsulinIobParameters curve = in.curveByCode().apply(n.getInsulinCode());
                 insulin.add(InsulinDose.builder().timestamp(n.getTimestamp())
-                        .units(n.getInsulin()).type(InsulinDose.InsulinType.BOLUS).build());
+                        .units(n.getInsulin()).type(InsulinDose.InsulinType.BOLUS)
+                        .diaHours(curve.diaHours()).peakMinutes(curve.peakMinutes()).build());
             }
         }
         // Activity-aware so a drop from a logged activity is explained, not flagged. Inert when logging is off.

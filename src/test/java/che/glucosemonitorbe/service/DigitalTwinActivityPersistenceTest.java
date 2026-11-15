@@ -39,7 +39,7 @@ class DigitalTwinActivityPersistenceTest {
         toggles = mock(FeatureToggleConfig.class);
         when(toggles.isDigitalTwinEnabled()).thenReturn(true);
         twinService = new DigitalTwinService(repo, toggles);
-        calibration = new DigitalTwinCalibrationService(null, null, null, repo, null, null, null, null,
+        calibration = new DigitalTwinCalibrationService(null, null, null, repo, null, null, null, null, null,
                 null, null, null, twinService, toggles);
         when(repo.findByUserId(USER)).thenReturn(Optional.empty());
     }

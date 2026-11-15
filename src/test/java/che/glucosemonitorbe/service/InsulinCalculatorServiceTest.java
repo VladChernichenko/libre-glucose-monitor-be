@@ -63,6 +63,46 @@ class InsulinCalculatorServiceTest {
         assertEquals(4.0, service.calculateRemainingInsulin(dose, t), 0.02);
     }
 
+    // -- A dose that records its own insulin keeps that insulin's curve ----------
+
+    @Test
+    void aDoseWithItsOwnCurveIgnoresTheCallersCurve() {
+        LocalDateTime doseTime = LocalDateTime.of(2025, 6, 1, 8, 0);
+        LocalDateTime now = doseTime.plusMinutes(120);
+        InsulinDose apidra = InsulinDose.builder().timestamp(doseTime).units(4.0)
+                .diaHours(4.5).peakMinutes(75.0).build();
+
+        // Asked on the user's current insulin (4.0 h / 55 min), the dose still answers on its own.
+        double iob = service.calculateRemainingInsulin(apidra, now, 4.0, 55.0);
+
+        assertEquals(InsulinCalculatorService.iobOpenApsExponential(4.0, 120, 4.5, 75.0), iob, 1e-9);
+        org.junit.jupiter.api.Assertions.assertNotEquals(InsulinCalculatorService.iobOpenApsExponential(4.0, 120, 4.0, 55.0), iob, 1e-3);
+    }
+
+    @Test
+    void aDoseWithoutItsOwnCurveUsesTheCallersCurve() {
+        LocalDateTime doseTime = LocalDateTime.of(2025, 6, 1, 8, 0);
+        LocalDateTime now = doseTime.plusMinutes(120);
+        InsulinDose unrecorded = InsulinDose.builder().timestamp(doseTime).units(4.0).build();
+
+        assertEquals(InsulinCalculatorService.iobOpenApsExponential(4.0, 120, 4.0, 55.0),
+                service.calculateRemainingInsulin(unrecorded, now, 4.0, 55.0), 1e-9);
+    }
+
+    @Test
+    void totalIobSumsEachDoseOnItsOwnCurve() {
+        LocalDateTime now = LocalDateTime.of(2025, 6, 1, 12, 0);
+        InsulinDose apidra = InsulinDose.builder().timestamp(now.minusMinutes(200)).units(5.0)
+                .diaHours(4.5).peakMinutes(75.0).build();
+        InsulinDose fiasp = InsulinDose.builder().timestamp(now.minusMinutes(30)).units(2.0)
+                .diaHours(4.0).peakMinutes(55.0).build();
+
+        double expected = InsulinCalculatorService.iobOpenApsExponential(5.0, 200, 4.5, 75.0)
+                + InsulinCalculatorService.iobOpenApsExponential(2.0, 30, 4.0, 55.0);
+
+        assertEquals(expected, service.calculateTotalActiveInsulin(List.of(apidra, fiasp), now, 4.0, 55.0), 1e-9);
+    }
+
     @Test
     void beyondDiaReturnsZero() {
         LocalDateTime doseTime = LocalDateTime.of(2025, 6, 1, 8, 0);

@@ -26,20 +26,23 @@ import java.util.function.Predicate;
  * folded in as one extra residual row per parameter (see {@link Config#priorSd}), and physiological
  * <b>hard clamps</b> keep every parameter in {@code [MIN_SCALE, MAX_SCALE]}.</p>
  *
- * <h3>Two-stage fit</h3>
+ * <h3>Three-stage fit</h3>
  * <ol>
  *   <li><b>BASAL_CHECK</b> - EGP₀ (endogenous glucose production, {@code egpScale}) is identifiable
  *       only away from meals, so it is fitted first on the <b>fasting</b> anchors alone, with insulin
  *       sensitivity and meal magnitude held neutral. Skipped (egpScale = 1.0) when there are too few
  *       fasting anchors to trust.</li>
- *   <li><b>Sensitivity / meal fit</b> - {@code isfScale} and {@code agScale} are then fitted over all
- *       anchors with EGP₀ fixed at the stage-1 value.</li>
+ *   <li><b>Sensitivity fit</b> - {@code isfScale} is fitted on the trusted <b>correction</b> anchors
+ *       alone ({@link Regime#CORRECTION}), with EGP₀ fixed. Skipped (isfScale = 1.0) when there are
+ *       too few. Fitted over all anchors, every bolus whose carbs went unlogged read as insulin that
+ *       did nothing and drove the scale to its lower bound.</li>
+ *   <li><b>Meal fit</b> - {@code agScale} is then fitted over all anchors with the other two fixed.</li>
  * </ol>
  *
  * <p>Finally a {@link ResidualBiasModel} and {@link PredictionUncertaintyModel} are fitted on what the
  * calibrated physiology leaves behind, and baseline vs. calibrated MAE are scored on the held-out
  * validation window - the twin only reports {@code improved} when it genuinely beats the un-calibrated
- * model out-of-sample.</p>
+ * model out-of-sample, and never when a fitted scale rests on a clamp bound.</p>
  *
  * <p>No Spring/DB dependencies - it operates entirely on {@link AnchorSampleSource}s, which makes the
  * learning logic unit-testable against synthetic data.</p>
@@ -73,6 +76,8 @@ public final class DigitalTwinCalibrator {
         public double minImprovement = 0.02;
         /** Minimum fasting samples before BASAL_CHECK attempts to personalise EGP₀. */
         public int    minFastingSamples = 20;
+        /** Minimum trusted-correction samples before the ISF scale is personalised. */
+        public int    minCorrectionSamples = 20;
         /** Huber cut-off (in robust-σ units) beyond which a residual is down-weighted. */
         public double huberDelta = 1.345;
         /** Number of IRLS re-weighting passes. */
@@ -127,28 +132,32 @@ public final class DigitalTwinCalibrator {
         // 1) BASAL_CHECK - fit EGP₀ on fasting anchors only (identifiable without meal confounders).
         double egpScale = fitEgpFromFasting(train);
 
-        // 2) Fit ISF + meal-magnitude scales over all anchors, EGP₀ fixed at the BASAL_CHECK value.
-        double[] isfAg = robustFit(
-                train,
-                new double[]{1.0, 1.0},
-                new double[]{TwinScales.MIN_SCALE, TwinScales.MIN_SCALE},
-                new double[]{TwinScales.MAX_SCALE, TwinScales.MAX_SCALE},
-                p -> new TwinScales(p[0], p[1], 1.0, egpScale),
-                null);
-        TwinScales scales = new TwinScales(isfAg[0], isfAg[1], 1.0, egpScale).clamped();
+        // 2) Fit ISF on trusted corrections only. A bolus whose carbs were never logged looks like
+        //    insulin that does nothing, and over all anchors that pulled ISF to its lower bound.
+        double isfScale = fitIsfFromCorrections(train, egpScale);
 
-        // 3) Fit the residual grid on the calibrated model's leftover error (training set).
+        // 3) Fit the meal-magnitude scale over all anchors, ISF and EGP₀ fixed.
+        double[] ag = robustFit(
+                train,
+                new double[]{1.0},
+                new double[]{TwinScales.MIN_SCALE},
+                new double[]{TwinScales.MAX_SCALE},
+                p -> new TwinScales(isfScale, p[0], 1.0, egpScale),
+                null);
+        TwinScales scales = new TwinScales(isfScale, ag[0], 1.0, egpScale).clamped();
+
+        // 4) Fit the residual grid on the calibrated model's leftover error (training set).
         List<AnchorSample> trainCalibrated = train.replay(scales);
         ResidualBiasModel residual = ResidualBiasModel.fit(trainCalibrated);
 
-        // 4) Score out-of-sample: baseline (neutral, no residual) vs. calibrated (scales + residual).
+        // 5) Score out-of-sample: baseline (neutral, no residual) vs. calibrated (scales + residual).
         List<AnchorSample> valBaseline = val.replay(TwinScales.neutral());
         List<AnchorSample> valScaled   = val.replay(scales);
         double maeBaseline   = RobustLoss.mae(valBaseline);
         double maeCalibrated = maeWithResidual(valScaled, residual);
         int valSamples = valBaseline.size();
 
-        // 5) Fit the prediction band's per-horizon σ from the out-of-sample calibrated residuals
+        // 6) Fit the prediction band's per-horizon σ from the out-of-sample calibrated residuals
         //    (honest predictive spread; falls back to the population prior when val is thin).
         PredictionUncertaintyModel uncertainty = valScaled.isEmpty()
                 ? PredictionUncertaintyModel.fit(train.replay(scales), residual)
@@ -156,7 +165,11 @@ public final class DigitalTwinCalibrator {
 
         double improvement = (maeBaseline > 0)
                 ? (maeBaseline - maeCalibrated) / maeBaseline : 0.0;
-        boolean improved = valSamples >= cfg.minValSamples
+        // A scale resting on its clamp did not converge: the fit wanted to go further and is using
+        // that parameter to absorb an error it cannot express. Never apply such a twin.
+        String pinned = pinnedScale(scales);
+        boolean improved = pinned == null
+                && valSamples >= cfg.minValSamples
                 && improvement >= cfg.minImprovement
                 && maeCalibrated < maeBaseline;
 
@@ -164,6 +177,9 @@ public final class DigitalTwinCalibrator {
         String status = improved
                 ? String.format("calibrated: val MAE %.2f->%.2f mmol/L (%.0f%% better)",
                         maeBaseline, maeCalibrated, improvement * 100.0)
+                : pinned != null
+                ? String.format("rejected: %s pinned at bound (val MAE %.2f->%.2f, n=%d)",
+                        pinned, maeBaseline, maeCalibrated, valSamples)
                 : String.format("no improvement out-of-sample (val MAE %.2f->%.2f, n=%d)",
                         maeBaseline, maeCalibrated, valSamples);
 
@@ -226,6 +242,72 @@ public final class DigitalTwinCalibrator {
         return new ActivityFit(fitted, applied, maeWithout, maeWith, activityCount, status);
     }
 
+    // -- Insulin curve stage ------------------------------------------------------
+
+    /** Minimum logged corrections of an insulin before its curve is personalised at all. */
+    public static final int MIN_CURVE_DOSES = 8;
+
+    /** Outcome of the insulin-curve stage. */
+    public record CurveFit(
+            CurveScale scale,
+            boolean applied,        // gate: beat the catalog curve out-of-sample, enough data, not pinned
+            double maeWithout,      // validation MAE on corrections with the catalog curve [mmol/L]
+            double maeWith,         // validation MAE on corrections with the fitted curve [mmol/L]
+            int doseCount,
+            String status) {}
+
+    /**
+     * Fit the personal action curve of {@code insulinCode} on top of an already-fitted twin: the
+     * vector {@code [peakScale, diaScale]}, with the same robust LM and prior at 1.0, on the trusted
+     * {@link Regime#CORRECTION} samples only - the one regime where a curve's shape is not confounded
+     * by meal absorption. Scored on the validation corrections against the catalog curve, and only
+     * {@code applied} when it beats it by {@code minImprovement}, on at least
+     * {@code minCorrectionSamples} validation samples, with neither multiplier resting on a bound.
+     *
+     * <p>The sources should replay a horizon long enough to see the curve's tail (about the
+     * insulin's duration); at a 2-hour horizon the duration is not identifiable.</p>
+     */
+    public CurveFit fitInsulinCurve(AnchorSampleSource train, AnchorSampleSource val,
+                                    TwinScales fixed, String insulinCode, int doseCount) {
+        if (doseCount < MIN_CURVE_DOSES) {
+            return new CurveFit(CurveScale.NEUTRAL, false, Double.NaN, Double.NaN, doseCount,
+                    "fewer than " + MIN_CURVE_DOSES + " corrections of " + insulinCode);
+        }
+        Predicate<AnchorSample> corrections = s -> s.regime() == Regime.CORRECTION;
+        List<AnchorSample> valWithout = select(
+                val.replay(fixed, ActivityGains.NEUTRAL, insulinCode, CurveScale.NEUTRAL), corrections);
+        double maeWithout = RobustLoss.mae(valWithout);
+        if (valWithout.size() < cfg.minCorrectionSamples) {
+            return new CurveFit(CurveScale.NEUTRAL, false, maeWithout, Double.NaN, doseCount,
+                    "too few correction samples to validate on");
+        }
+
+        double[] p = robustFit(
+                q -> train.replay(fixed, ActivityGains.NEUTRAL, insulinCode, new CurveScale(q[0], q[1])),
+                new double[]{1.0, 1.0},
+                new double[]{CurveScale.MIN_PEAK_SCALE, CurveScale.MIN_DIA_SCALE},
+                new double[]{CurveScale.MAX_PEAK_SCALE, CurveScale.MAX_DIA_SCALE},
+                corrections);
+        CurveScale fitted = new CurveScale(p[0], p[1]).clamped();
+
+        double maeWith = RobustLoss.mae(select(
+                val.replay(fixed, ActivityGains.NEUTRAL, insulinCode, fitted), corrections));
+        boolean pinned = onBound(fitted.peakScale(), CurveScale.MIN_PEAK_SCALE, CurveScale.MAX_PEAK_SCALE)
+                || onBound(fitted.diaScale(), CurveScale.MIN_DIA_SCALE, CurveScale.MAX_DIA_SCALE);
+        boolean applied = !pinned && maeWithout > 0
+                && (maeWithout - maeWith) / maeWithout >= cfg.minImprovement;
+        String status = applied
+                ? String.format("curve applied: val MAE %.2f->%.2f mmol/L", maeWithout, maeWith)
+                : pinned
+                ? String.format("curve rejected: pinned at bound (val MAE %.2f->%.2f)", maeWithout, maeWith)
+                : String.format("curve not applied: val MAE %.2f->%.2f mmol/L", maeWithout, maeWith);
+        return new CurveFit(fitted, applied, maeWithout, maeWith, doseCount, status);
+    }
+
+    private static boolean onBound(double v, double lo, double hi) {
+        return v <= lo + PINNED_TOLERANCE || v >= hi - PINNED_TOLERANCE;
+    }
+
     private static ActivityGains toGains(double[] p, double halfLifeUnit) {
         return new ActivityGains(p[0], p[1] * halfLifeUnit).clamped();
     }
@@ -250,6 +332,45 @@ public final class DigitalTwinCalibrator {
                 p -> new TwinScales(1.0, 1.0, 1.0, p[0]),
                 s -> s.regime() == Regime.FASTING);
         return TwinScales.clamp(egp[0]);
+    }
+
+    // -- ISF from corrections -----------------------------------------------------
+
+    /**
+     * Fit {@code isfScale} on the {@link Regime#CORRECTION} anchors alone, with EGP₀ fixed. Returns
+     * 1.0 (neutral) when the window holds too few trusted corrections to personalise sensitivity.
+     */
+    private double fitIsfFromCorrections(AnchorSampleSource train, double egpScale) {
+        TwinScales start = new TwinScales(1.0, 1.0, 1.0, egpScale);
+        long corrections = train.replay(start).stream()
+                .filter(s -> s.regime() == Regime.CORRECTION).count();
+        if (corrections < cfg.minCorrectionSamples) {
+            return 1.0;
+        }
+        double[] isf = robustFit(
+                train,
+                new double[]{1.0},
+                new double[]{TwinScales.MIN_SCALE},
+                new double[]{TwinScales.MAX_SCALE},
+                p -> new TwinScales(p[0], 1.0, 1.0, egpScale),
+                s -> s.regime() == Regime.CORRECTION);
+        return TwinScales.clamp(isf[0]);
+    }
+
+    /** How close to a clamp a fitted scale may sit before it counts as pinned. */
+    static final double PINNED_TOLERANCE = 1e-3;
+
+    /** Name of the first scale resting on a clamp bound, or null when none is. */
+    static String pinnedScale(TwinScales s) {
+        if (isPinned(s.isfScale())) return "isfScale";
+        if (isPinned(s.agScale()))  return "agScale";
+        if (isPinned(s.egpScale())) return "egpScale";
+        return null;
+    }
+
+    private static boolean isPinned(double scale) {
+        return scale <= TwinScales.MIN_SCALE + PINNED_TOLERANCE
+                || scale >= TwinScales.MAX_SCALE - PINNED_TOLERANCE;
     }
 
     // -- Robust Levenberg-Marquardt (IRLS + Huber) --------------------------------

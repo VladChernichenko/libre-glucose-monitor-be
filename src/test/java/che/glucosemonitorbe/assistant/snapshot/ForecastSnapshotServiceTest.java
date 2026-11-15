@@ -219,7 +219,8 @@ class ForecastSnapshotServiceTest {
         NotesService notesService = new NotesService(notes, mapper, mock(FoodCompositionService.class),
                 new ObjectMapper(), mock(GlucoseAlertService.class), mock(UserService.class),
                 mock(NotePhotoStorageService.class), trigger,
-                mock(org.springframework.context.ApplicationEventPublisher.class));
+                mock(org.springframework.context.ApplicationEventPublisher.class),
+                mock(che.glucosemonitorbe.service.UserInsulinPreferencesService.class));
         CreateNoteRequest req = new CreateNoteRequest();
         req.setTimestamp(NOON);
         req.setCarbs(40.0);

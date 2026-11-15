@@ -203,6 +203,12 @@ public class NoteDto {
     public String getSiteZone() { return siteZone; }
     public void setSiteZone(String siteZone) { this.siteZone = siteZone; }
 
+    /** Catalog code of the insulin this dose was; read-only, stamped by the server on save. */
+    private String insulinCode;
+
+    public String getInsulinCode() { return insulinCode; }
+    public void setInsulinCode(String insulinCode) { this.insulinCode = insulinCode; }
+
     private Double carbsLow;
     private Double carbsHigh;
     /** JSON array of context tag names, or null. */

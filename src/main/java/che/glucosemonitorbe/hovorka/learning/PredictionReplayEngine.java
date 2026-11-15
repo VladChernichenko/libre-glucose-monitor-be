@@ -38,6 +38,12 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     private static final long BASAL_LOOKBACK_MS =
             che.glucosemonitorbe.hovorka.BasalInsulinResolver.LOOKBACK_HOURS * 3600_000L;
 
+    /**
+     * Lowest reading at dose time for a labelled correction to count as one [mmol/L]. A "correction"
+     * taken near target is, in practice, a meal bolus whose carbs were never logged.
+     */
+    public static final double MIN_CORRECTION_GLUCOSE_MMOL = 8.0;
+
     /** Minutes of CGM history the anchor trend is taken over. */
     private static final int TREND_WINDOW_MIN = 15;
 
@@ -57,9 +63,21 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
      * <p>{@code gi} is the meal's estimated glycemic index, 0 when the note carries none. Like the
      * macros it has to travel on the event, or a logged low-GI meal is replayed at the default GI
      * while the live forecast absorbs it at its own.
+     *
+     * <p>{@code correction} marks a bolus the user logged as a correction (no carbs). Only such
+     * doses, taken at a high reading, are trusted to identify insulin sensitivity - see
+     * {@link Regime#CORRECTION}. {@code insulinCode} is the catalog code of the insulin the dose
+     * was, or null when the note does not record one.
      */
     public record Event(long epochMs, double carbs, double insulin, boolean longActing,
-                        double protein, double fat, double fiber, boolean rescue, double gi) {
+                        double protein, double fat, double fiber, boolean rescue, double gi,
+                        boolean correction, String insulinCode) {
+
+        /** An event that is not a labelled correction and records no insulin code. */
+        public Event(long epochMs, double carbs, double insulin, boolean longActing,
+                     double protein, double fat, double fiber, boolean rescue, double gi) {
+            this(epochMs, carbs, insulin, longActing, protein, fat, fiber, rescue, gi, false, null);
+        }
 
         /** An event with no glycemic-index estimate. */
         public Event(long epochMs, double carbs, double insulin, boolean longActing,
@@ -78,7 +96,20 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
         /** The same event as the live path sees it with nutrition-aware prediction switched off. */
         public Event withoutNutrition() {
-            return new Event(epochMs, carbs, insulin, longActing, 0.0, 0.0, 0.0, rescue, 0.0);
+            return new Event(epochMs, carbs, insulin, longActing, 0.0, 0.0, 0.0, rescue, 0.0,
+                    correction, insulinCode);
+        }
+
+        /** The same event, marked as a bolus the user logged as a correction. */
+        public Event asCorrection() {
+            return new Event(epochMs, carbs, insulin, longActing, protein, fat, fiber, rescue, gi,
+                    true, insulinCode);
+        }
+
+        /** The same event, recording which insulin the dose was. */
+        public Event withInsulinCode(String code) {
+            return new Event(epochMs, carbs, insulin, longActing, protein, fat, fiber, rescue, gi,
+                    correction, code);
         }
     }
 
@@ -101,6 +132,12 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         public boolean fpuEquiv       = true;
         /** Duration of action of the user's long-acting insulin [hours] (mirrors the live forecast). */
         public double basalDurationHours = che.glucosemonitorbe.hovorka.BasalInsulinResolver.DEFAULT_DURATION_HOURS;
+        /**
+         * Resolves a dose's action curve from the insulin code its event carries, so a dose taken on
+         * an earlier insulin replays on that insulin's curve. Null = every dose uses the engine's
+         * single {@code rapidIob} (sources with one insulin throughout).
+         */
+        public java.util.function.Function<String, RapidInsulinIobParameters> curveByCode = null;
         /** Horizons (min) to emit samples at - must be a subset of the model's emission schedule. */
         public int[]  sampleHorizons  = {30, 60, 90, 120};
     }
@@ -130,8 +167,8 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     /** Per-anchor inputs, assembled once (scale-independent). */
     private record AnchorContext(
             double g0, LocalDateTime now,
-            List<CarbsEntry> carbs, List<InsulinDose> insulin, List<Note> longActing,
-            Regime regime, HovorkaParameters params, double trend) {}
+            List<CarbsEntry> carbs, List<InsulinDose> insulin, List<String> insulinCodes,
+            List<Note> longActing, Regime regime, HovorkaParameters params, double trend) {}
 
     /**
      * @param predicted  a predictor wired with {@link PredictionResidualProvider#NONE} (raw model)
@@ -208,16 +245,23 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
     @Override
     public List<AnchorSample> replay(TwinScales scales, ActivityGains gains) {
+        return replay(scales, gains, null, null);
+    }
+
+    @Override
+    public List<AnchorSample> replay(TwinScales scales, ActivityGains gains,
+                                     String insulinCode, CurveScale curve) {
         TwinScales s = scales.clamped();
         List<AnchorSample> out = new ArrayList<>();
         for (AnchorContext a : anchors) {
             HovorkaParameters p = applyScales(a.params(), s);
-            List<PredictionPointDTO> curve = predictor.buildPredictionPath(
-                    p, rapidIob, settings, a.g0(), a.now(), a.carbs(), a.insulin(), a.longActing(),
+            List<InsulinDose> doses = curve == null ? a.insulin() : reshaped(a, insulinCode, curve.clamped());
+            List<PredictionPointDTO> path = predictor.buildPredictionPath(
+                    p, rapidIob, settings, a.g0(), a.now(), a.carbs(), doses, a.longActing(),
                     userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours, gains,
                     s.isfScale(), a.trend());
             long t0 = toEpochMs(a.now(), userZone);
-            for (PredictionPointDTO pt : curve) {
+            for (PredictionPointDTO pt : path) {
                 int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
                 if (!isSampleHorizon(h)) continue;
                 Double actual = nearest(cgmT, cgmG, t0 + h * 60_000L, cfg.alignToleranceMs);
@@ -257,8 +301,9 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
             List<CarbsEntry> carbs = new ArrayList<>();
             List<InsulinDose> insulin = new ArrayList<>();
+            List<String> insulinCodes = new ArrayList<>();
             List<Note> longActing = new ArrayList<>();
-            boolean carbActive = false, insulinActive = false;
+            boolean carbActive = false, insulinActive = false, onlyTrustedCorrections = true;
 
             for (Event n : events) {
                 long age = t0 - n.epochMs();
@@ -290,14 +335,23 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                     carbs.add(entry);
                 }
                 if (n.insulin() > 0) {
+                    RapidInsulinIobParameters curve = cfg.curveByCode != null
+                            ? cfg.curveByCode.apply(n.insulinCode()) : null;
                     insulin.add(InsulinDose.builder().timestamp(toLdt(n.epochMs(), userZone))
-                            .units(n.insulin()).type(InsulinDose.InsulinType.BOLUS).build());
+                            .units(n.insulin()).type(InsulinDose.InsulinType.BOLUS)
+                            .diaHours(curve != null ? curve.diaHours() : null)
+                            .peakMinutes(curve != null ? curve.peakMinutes() : null)
+                            .build());
+                    insulinCodes.add(n.insulinCode());
                 }
 
                 boolean active = age <= 3 * 3600_000L && -age <= horizonMs;
                 if (active) {
                     if (n.carbs() > 0 || n.protein() > 0 || n.fat() > 0) carbActive = true;
-                    if (n.insulin() > 0) insulinActive = true;
+                    if (n.insulin() > 0) {
+                        insulinActive = true;
+                        if (!isTrustedCorrection(n)) onlyTrustedCorrections = false;
+                    }
                 }
             }
 
@@ -305,13 +359,16 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 carbs = ProteinGluconeogenesis.withDelayedProteinGlucose(carbs);
             }
 
-            Regime regime = carbActive ? Regime.MEAL : (insulinActive ? Regime.CORRECTION : Regime.FASTING);
+            Regime regime = carbActive ? Regime.MEAL
+                    : !insulinActive ? Regime.FASTING
+                    : onlyTrustedCorrections ? Regime.CORRECTION : Regime.INSULIN_ONLY;
 
             // CGM trend at the anchor, as the dashboard receives it from the client: the slope
             // over the preceding reading window. 0 when there is no earlier reading to take it from.
             Double before = nearest(cgmT, cgmG, t0 - TREND_WINDOW_MIN * 60_000L, cfg.alignToleranceMs);
             double trend = before == null ? 0.0 : (g0 - before) / TREND_WINDOW_MIN;
-            result.add(new AnchorContext(g0, now, carbs, insulin, longActing, regime, baseParams, trend));
+            result.add(new AnchorContext(g0, now, carbs, insulin, insulinCodes, longActing, regime,
+                    baseParams, trend));
         }
         return result;
     }
@@ -331,6 +388,39 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
                 p.egp0()   * c.egpScale(),
                 p.k12(), p.k21(),
                 p.tMaxG(), p.aG() * c.agScale(), p.isf(), p.weightKg());
+    }
+
+    /**
+     * A bolus that can identify insulin sensitivity: logged as a correction, and taken at a reading
+     * of at least {@link #MIN_CORRECTION_GLUCOSE_MMOL}. With no reading at dose time it is not trusted.
+     */
+    private boolean isTrustedCorrection(Event n) {
+        if (!n.correction()) return false;
+        Double atDose = nearest(cgmT, cgmG, n.epochMs(), cfg.alignToleranceMs);
+        return atDose != null && atDose >= MIN_CORRECTION_GLUCOSE_MMOL;
+    }
+
+    /**
+     * The anchor's doses with the curve of every dose of {@code insulinCode} reshaped. A dose that
+     * records no insulin counts as the insulin being fitted, as it does everywhere else.
+     */
+    private List<InsulinDose> reshaped(AnchorContext a, String insulinCode, CurveScale curve) {
+        List<InsulinDose> out = new ArrayList<>(a.insulin().size());
+        for (int i = 0; i < a.insulin().size(); i++) {
+            InsulinDose d = a.insulin().get(i);
+            String code = a.insulinCodes().get(i);
+            if (code != null && !code.equalsIgnoreCase(insulinCode)) {
+                out.add(d);
+                continue;
+            }
+            double baseDia  = d.hasOwnCurve() ? d.getDiaHours()    : rapidIob.diaHours();
+            double basePeak = d.hasOwnCurve() ? d.getPeakMinutes() : rapidIob.peakMinutes();
+            out.add(InsulinDose.builder().timestamp(d.getTimestamp()).units(d.getUnits()).type(d.getType())
+                    .diaHours(curve.diaHours(baseDia))
+                    .peakMinutes(curve.peakMinutes(basePeak, baseDia))
+                    .build());
+        }
+        return out;
     }
 
     private boolean isSampleHorizon(int h) {

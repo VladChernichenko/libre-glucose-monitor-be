@@ -34,7 +34,7 @@ public class InsulinCalculatorService {
     private final UserSettingsService userSettingsService;
 
     /** Defaults match catalog {@code FIASP} (user-specific curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}). */
-    public static final double DEFAULT_DIA_HOURS = 4.5;
+    public static final double DEFAULT_DIA_HOURS = 4.0;
     public static final double DEFAULT_PEAK_MINUTES = 55.0;
 
     public double calculateRemainingInsulin(InsulinDose dose, LocalDateTime currentTime) {
@@ -50,6 +50,12 @@ public class InsulinCalculatorService {
             LocalDateTime currentTime,
             double diaHours,
             double peakMinutes) {
+        // A dose that records its own insulin keeps that insulin's curve; the arguments are the
+        // user's current insulin and only apply to doses that do not.
+        if (dose.hasOwnCurve()) {
+            diaHours = dose.getDiaHours();
+            peakMinutes = dose.getPeakMinutes();
+        }
         double units = dose.getUnits();
         if (units <= 0 || dose.getTimestamp() == null || currentTime == null) {
             return 0.0;

@@ -21,4 +21,13 @@ public interface AnchorSampleSource {
     default List<AnchorSample> replay(TwinScales scales, ActivityGains gains) {
         return replay(scales);
     }
+
+    /**
+     * As above, with the action curve of every dose of {@code insulinCode} reshaped by {@code curve}.
+     * Sources that do not model the curve ignore it.
+     */
+    default List<AnchorSample> replay(TwinScales scales, ActivityGains gains,
+                                      String insulinCode, CurveScale curve) {
+        return replay(scales, gains);
+    }
 }
