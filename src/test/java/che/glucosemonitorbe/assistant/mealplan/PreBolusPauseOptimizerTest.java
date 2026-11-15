@@ -364,10 +364,14 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
-        @DisplayName("60 g GI 35 at 7.0 mmol/L, 2.5 U: a shorter pause than the same meal at GI 75, not 30")
+        @DisplayName("60 g GI 35 at 7.0 mmol/L, calculator dose: a shorter pause than the same meal at GI 75, not 30")
         void slowCarbsGetShorterPauseThanFastCarbs() {
-            PauseChoice slow = optimizer.choose(USER, NOW, 7.0, 2.5, new MealMacros(60, 0, 0, 0, 35.0));
-            PauseChoice fast = optimizer.choose(USER, NOW, 7.0, 2.5, new MealMacros(60, 0, 0, 0, 75.0));
+            // The calculator dose, so the slow meal is covered. Under-dosed (2.5 U ends near 8.7 and
+            // still rising) every extra minute of pause is cheaper whatever the GI, and the choice
+            // says nothing about absorption speed.
+            double dose = RealDashboardForecast.DOSE_FOR_60G;
+            PauseChoice slow = optimizer.choose(USER, NOW, 7.0, dose, new MealMacros(60, 0, 0, 0, 35.0));
+            PauseChoice fast = optimizer.choose(USER, NOW, 7.0, dose, new MealMacros(60, 0, 0, 0, 75.0));
 
             assertThat(slow.pauseMinutes()).isNotNull().isLessThanOrEqualTo(15);
             assertThat(fast.pauseMinutes()).isNotNull().isGreaterThan(slow.pauseMinutes());
