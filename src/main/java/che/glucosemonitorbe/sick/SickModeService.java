@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.sick;
 
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
+import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
@@ -17,6 +19,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -40,24 +43,28 @@ public class SickModeService {
     private final BasalInsulinResolver basalResolver;
     private final StubbornHighEvaluator stubbornHigh;
     private final SickStepUpDecisionRepository decisions;
+    private final CgmFreshnessService cgmFreshness;
     private final Clock clock;
 
     @Autowired
     public SickModeService(SickSegmentRepository segments, NoteRepository notes,
                            UserSettingsService userSettingsService, BasalInsulinResolver basalResolver,
-                           StubbornHighEvaluator stubbornHigh, SickStepUpDecisionRepository decisions) {
-        this(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, Clock.systemUTC());
+                           StubbornHighEvaluator stubbornHigh, SickStepUpDecisionRepository decisions,
+                           CgmFreshnessService cgmFreshness) {
+        this(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, cgmFreshness, Clock.systemUTC());
     }
 
     SickModeService(SickSegmentRepository segments, NoteRepository notes,
                     UserSettingsService userSettingsService, BasalInsulinResolver basalResolver,
-                    StubbornHighEvaluator stubbornHigh, SickStepUpDecisionRepository decisions, Clock clock) {
+                    StubbornHighEvaluator stubbornHigh, SickStepUpDecisionRepository decisions,
+                    CgmFreshnessService cgmFreshness, Clock clock) {
         this.segments = segments;
         this.notes = notes;
         this.userSettingsService = userSettingsService;
         this.basalResolver = basalResolver;
         this.stubbornHigh = stubbornHigh;
         this.decisions = decisions;
+        this.cgmFreshness = cgmFreshness;
         this.clock = clock;
     }
 
@@ -68,25 +75,30 @@ public class SickModeService {
         return statusOf(userId, now);
     }
 
-    /** {@link #status} plus the stubborn-high proposal, when sick mode is active and one is due. */
+    /**
+     * {@link #status} plus the stubborn-high proposal, when sick mode is active and one is due. The
+     * current glucose is the server's own fresh stored CGM reading; without one there is no proposal.
+     */
     @Transactional(noRollbackFor = IllegalArgumentException.class)
-    public SickModeStatusDTO statusForDashboard(UUID userId, double readingNow) {
+    public SickModeStatusDTO statusForDashboard(UUID userId) {
         LocalDateTime now = now(userId);
         closeLapsed(userId, now);
         SickModeStatusDTO status = statusOf(userId, now);
         if (!status.active()) {
             return status;
         }
-        return segments.findByUserIdAndEndedAtIsNull(userId)
-                .flatMap(open -> stubbornHigh.evaluate(userId, open, status.since(), now, readingNow))
+        return freshReading(userId)
+                .flatMap(reading -> segments.findByUserIdAndEndedAtIsNull(userId)
+                        .flatMap(open -> stubbornHigh.evaluate(userId, open, status.since(), now, reading)))
                 .map(stepUp -> withStepUp(status, stepUp))
                 .orElse(status);
     }
 
     /**
      * Records the user's answer to the proposal for {@code noteId}; a repeat for the same correction
-     * changes nothing. Accepting moves one severity level up. {@code noteId} must be the episode's
-     * current correction, otherwise the request is rejected and nothing is stored.
+     * changes nothing. The proposal conditions are re-checked now against the server's fresh CGM
+     * reading: {@code noteId} must be the correction the evaluator names at this moment, otherwise the
+     * request is rejected and nothing is stored. Accepting applies the proposal's level.
      */
     @Transactional(noRollbackFor = IllegalArgumentException.class)
     public SickModeStatusDTO decideStepUp(UUID userId, UUID noteId, boolean accept) {
@@ -100,16 +112,21 @@ public class SickModeService {
         }
         SickSegment open = requireOpen(userId);
         LocalDateTime since = statusOf(userId, now).since();
-        if (!stubbornHigh.currentCorrectionId(userId, since, now).filter(noteId::equals).isPresent()) {
-            throw new IllegalArgumentException("No step-up proposal for note " + noteId);
-        }
+        double reading = freshReading(userId)
+                .orElseThrow(() -> new IllegalArgumentException("No current glucose reading"));
+        SickModeStatusDTO.StepUp stepUp = stubbornHigh.evaluate(userId, open, since, now, reading)
+                .filter(p -> noteId.equals(p.noteId()))
+                .orElseThrow(() -> new IllegalArgumentException("No step-up proposal for note " + noteId));
         decisions.save(SickStepUpDecision.builder()
                 .userId(userId).noteId(noteId).accepted(accept).decidedAt(now).build());
-        SickSeverity next = open.getSeverity().next().orElse(null);
-        if (accept && next != null) {
-            return changeSeverityInternal(userId, next);
+        if (accept && stepUp.toSeverity() != null) {
+            return changeSeverityInternal(userId, stepUp.toSeverity());
         }
         return finish(userId, now);
+    }
+
+    private Optional<Double> freshReading(UUID userId) {
+        return cgmFreshness.freshReading(userId, clock.instant()).map(CgmReadingDTO::mmol);
     }
 
     @Transactional(noRollbackFor = IllegalArgumentException.class)

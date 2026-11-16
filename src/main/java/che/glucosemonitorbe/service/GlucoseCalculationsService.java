@@ -161,10 +161,7 @@ public class GlucoseCalculationsService {
                 if (userUUID == null) {
                     userUUID = userService.getUserByUsername(request.getUserId()).getId();
                 }
-                Double reading = response.getCurrentGlucose();
-                SickModeStatusDTO sick = reading != null
-                        ? sickModeService.statusForDashboard(userUUID, reading)
-                        : sickModeService.status(userUUID);
+                SickModeStatusDTO sick = sickModeService.statusForDashboard(userUUID);
                 if (sick.active()) {
                     response.setSickMode(sick);
                 }

@@ -75,12 +75,6 @@ public class StubbornHighEvaluator {
                 severity == SickSeverity.SEVERE || severity == SickSeverity.SEVERE_UNRESPONSIVE));
     }
 
-    /** The id of the episode's newest correction bolus, the only note a step-up decision may name. */
-    public Optional<UUID> currentCorrectionId(UUID userId, LocalDateTime episodeStart, LocalDateTime now) {
-        return newestCorrection(notes.findByUserIdAndTimestampBetween(userId, episodeStart, now), episodeStart, now)
-                .map(Note::getId);
-    }
-
     private static Optional<Note> newestCorrection(List<Note> episodeNotes, LocalDateTime episodeStart,
                                                    LocalDateTime now) {
         return episodeNotes.stream()

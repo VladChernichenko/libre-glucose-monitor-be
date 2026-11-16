@@ -1,6 +1,9 @@
 package che.glucosemonitorbe.sick;
 
+import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
+import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
+import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.hovorka.BasalInsulinResolver;
 import che.glucosemonitorbe.repository.NoteRepository;
@@ -40,6 +43,8 @@ class SickModeServiceTest {
     @Mock BasalInsulinResolver basalResolver;
     @Mock StubbornHighEvaluator stubbornHigh;
     @Mock SickStepUpDecisionRepository decisions;
+    @Mock CgmFreshnessService cgmFreshness;
+    @Mock CgmReadingRepository cgmReadings;
 
     private final UUID userId = UUID.randomUUID();
     private SickModeService service;
@@ -55,7 +60,7 @@ class SickModeServiceTest {
         lenient().when(notes.findByUserIdAndTimestampBetween(any(), any(), any())).thenReturn(List.of());
         lenient().when(basalResolver.usualDailyUnits(any(), any())).thenReturn(0.0);
         Clock clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
-        service = new SickModeService(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, clock);
+        service = new SickModeService(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, cgmFreshness, clock);
     }
 
     private SickSegment open(SickSeverity severity, LocalDateTime startedAt, LocalDateTime confirmedAt) {
@@ -115,7 +120,7 @@ class SickModeServiceTest {
     @Test
     void aBackdatedStartLaterThanNowIsClampedToNow() {
         Clock early = Clock.fixed(LocalDateTime.of(2026, 11, 16, 3, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
-        SickModeService s = new SickModeService(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, early);
+        SickModeService s = new SickModeService(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, cgmFreshness, early);
         s.start(userId, SickSeverity.MILD, Since.THIS_MORNING);
         assertThat(saved(0).getStartedAt()).isEqualTo(LocalDateTime.of(2026, 11, 16, 3, 0));
     }
@@ -280,16 +285,25 @@ class SickModeServiceTest {
         assertThat(status.stepUp()).isNull();
     }
 
-    private UUID stubCurrentCorrection(SickSegment open) {
+    private static final double HIGH = 15.0;
+
+    private UUID stubProposal(SickSegment open, SickSeverity to) {
         UUID noteId = UUID.randomUUID();
-        when(stubbornHigh.currentCorrectionId(userId, open.getStartedAt(), NOW)).thenReturn(Optional.of(noteId));
+        when(stubbornHigh.evaluate(userId, open, open.getStartedAt(), NOW, HIGH))
+                .thenReturn(Optional.of(new SickModeStatusDTO.StepUp(noteId, to, false)));
         return noteId;
+    }
+
+    private void freshReading(double mmol) {
+        lenient().when(cgmFreshness.freshReading(userId, NOW.toInstant(ZoneOffset.UTC)))
+                .thenReturn(Optional.of(new CgmReadingDTO(mmol, NOW, 0, "Flat")));
     }
 
     @Test
     void acceptingMovesExactlyOneLevelAndRecordsTheDecision() {
         SickSegment mild = open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
-        UUID noteId = stubCurrentCorrection(mild);
+        UUID noteId = stubProposal(mild, SickSeverity.MODERATE);
+        freshReading(HIGH);
 
         service.decideStepUp(userId, noteId, true);
 
@@ -304,7 +318,8 @@ class SickModeServiceTest {
     @Test
     void acceptingAtSevereReachesSevereUnresponsive() {
         SickSegment severe = open(SickSeverity.SEVERE, NOW.minusHours(5), NOW.minusHours(1));
-        UUID noteId = stubCurrentCorrection(severe);
+        UUID noteId = stubProposal(severe, SickSeverity.SEVERE_UNRESPONSIVE);
+        freshReading(HIGH);
 
         service.decideStepUp(userId, noteId, true);
 
@@ -314,7 +329,8 @@ class SickModeServiceTest {
     @Test
     void acceptingAtTheTopLevelOnlyRecordsTheDecision() {
         SickSegment top = open(SickSeverity.SEVERE_UNRESPONSIVE, NOW.minusHours(5), NOW.minusHours(1));
-        UUID noteId = stubCurrentCorrection(top);
+        UUID noteId = stubProposal(top, null);
+        freshReading(HIGH);
 
         service.decideStepUp(userId, noteId, true);
 
@@ -325,7 +341,8 @@ class SickModeServiceTest {
     @Test
     void decliningOnlyRecordsTheDecision() {
         SickSegment moderate = open(SickSeverity.MODERATE, NOW.minusHours(5), NOW.minusHours(1));
-        UUID noteId = stubCurrentCorrection(moderate);
+        UUID noteId = stubProposal(moderate, SickSeverity.SEVERE);
+        freshReading(HIGH);
 
         service.decideStepUp(userId, noteId, false);
 
@@ -352,7 +369,8 @@ class SickModeServiceTest {
     @Test
     void aStaleOrForeignNoteIdIsRejectedAndNothingIsStored() {
         SickSegment mild = open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
-        stubCurrentCorrection(mild);
+        stubProposal(mild, SickSeverity.MODERATE);
+        freshReading(HIGH);
 
         assertThatThrownBy(() -> service.decideStepUp(userId, UUID.randomUUID(), true))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -363,16 +381,98 @@ class SickModeServiceTest {
 
     @Test
     void statusForDashboardCarriesTheProposalOnlyWhenActive() {
-        assertThat(service.statusForDashboard(userId, 15.0).active()).isFalse();
+        assertThat(service.statusForDashboard(userId).active()).isFalse();
         verify(stubbornHigh, never()).evaluate(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyDouble());
 
         SickSegment moderate = open(SickSeverity.MODERATE, NOW.minusHours(5), NOW.minusHours(1));
+        freshReading(HIGH);
         SickModeStatusDTO.StepUp stepUp = new SickModeStatusDTO.StepUp(UUID.randomUUID(), SickSeverity.SEVERE, false);
-        when(stubbornHigh.evaluate(userId, moderate, NOW.minusHours(5), NOW, 15.0)).thenReturn(Optional.of(stepUp));
+        when(stubbornHigh.evaluate(userId, moderate, NOW.minusHours(5), NOW, HIGH)).thenReturn(Optional.of(stepUp));
 
-        SickModeStatusDTO status = service.statusForDashboard(userId, 15.0);
+        SickModeStatusDTO status = service.statusForDashboard(userId);
 
         assertThat(status.stepUp()).isEqualTo(stepUp);
         assertThat(status.severity()).isEqualTo(SickSeverity.MODERATE);
+    }
+
+    // -- decisions are re-checked against the real evaluator and a server-side reading ----------
+
+    private SickModeService withRealEvaluator() {
+        StubbornHighEvaluator real = new StubbornHighEvaluator(notes, cgmReadings, decisions, userSettingsService);
+        Clock clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
+        return new SickModeService(segments, notes, userSettingsService, basalResolver, real, decisions,
+                cgmFreshness, clock);
+    }
+
+    private Note correction(int minutesAgo, double glucose) {
+        Note n = new Note();
+        n.setId(UUID.randomUUID());
+        n.setTimestamp(NOW.minusMinutes(minutesAgo));
+        n.setMeal(Note.CORRECTION_LABEL);
+        n.setCarbs(0.0);
+        n.setInsulin(2.0);
+        n.setGlucoseLevel(glucose);
+        lenient().when(notes.findByUserIdAndTimestampBetween(userId, NOW.minusHours(5), NOW)).thenReturn(List.of(n));
+        return n;
+    }
+
+    private void assertRejected(UUID noteId) {
+        assertThatThrownBy(() -> withRealEvaluator().decideStepUp(userId, noteId, true))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(decisions, never()).save(any(SickStepUpDecision.class));
+        verify(segments, never()).save(any(SickSegment.class));
+    }
+
+    @Test
+    void aCorrectionLessThanTwoHoursOldCannotBeDecided() {
+        open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        freshReading(15.0);
+        assertRejected(correction(119, 15.0).getId());
+    }
+
+    @Test
+    void carbsLoggedAfterTheCorrectionBlockTheDecision() {
+        open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        freshReading(15.0);
+        Note c = correction(130, 15.0);
+        Note meal = new Note();
+        meal.setId(UUID.randomUUID());
+        meal.setTimestamp(NOW.minusMinutes(60));
+        meal.setCarbs(20.0);
+        when(notes.findByUserIdAndTimestampBetween(userId, NOW.minusHours(5), NOW)).thenReturn(List.of(meal, c));
+        assertRejected(c.getId());
+    }
+
+    @Test
+    void glucoseAtOrBelowThirteenBlocksTheDecision() {
+        open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        freshReading(13.0);
+        assertRejected(correction(130, 13.5).getId());
+    }
+
+    @Test
+    void aDropOfOneOrMoreBlocksTheDecision() {
+        open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        freshReading(14.0);
+        assertRejected(correction(130, 15.0).getId());
+    }
+
+    @Test
+    void withoutAFreshReadingTheDecisionIsRejected() {
+        open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        when(cgmFreshness.freshReading(any(), any())).thenReturn(Optional.empty());
+        assertRejected(correction(130, 15.0).getId());
+    }
+
+    @Test
+    void anEligibleCorrectionIsAcceptedThroughTheRealEvaluator() {
+        SickSegment mild = open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        freshReading(15.0);
+        Note c = correction(130, 15.0);
+
+        withRealEvaluator().decideStepUp(userId, c.getId(), true);
+
+        assertThat(mild.getEndReason()).isEqualTo(SickModeService.REASON_SEVERITY_CHANGE);
+        assertThat(saved(1).getSeverity()).isEqualTo(SickSeverity.MODERATE);
     }
 }
