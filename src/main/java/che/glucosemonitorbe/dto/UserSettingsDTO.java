@@ -6,8 +6,12 @@ import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import che.glucosemonitorbe.sick.SickProfile;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Getter;
 import lombok.Setter;
+
+import org.springframework.beans.BeanUtils;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -58,6 +62,10 @@ public class UserSettingsDTO {
     @Max(value = 40, message = "rescueCarbsG must be between 5 and 40")
     private Integer rescueCarbsG;
 
+    /** Illness profile attached by the settings service on read; never serialised, never read from clients. */
+    @JsonIgnore
+    private SickProfile sickProfile = SickProfile.EMPTY;
+
     // Constructors
     public UserSettingsDTO() {}
 
@@ -105,15 +113,34 @@ public class UserSettingsDTO {
 
     /**
      * Returns the ISF (mmol/L per unit) in effect at {@code time}: the manual per-meal-window
-     * override if the user has set one for that window, otherwise the autotuned {@link #isf}.
+     * override if the user has set one for that window, otherwise the autotuned {@link #isf},
+     * scaled by the illness multiplier at {@code time}. Null when no base value is set.
      */
     public Double getEffectiveIsf(LocalDateTime time) {
-        return MealWindow.fromTimestamp(time)
+        Double base = MealWindow.fromTimestamp(time)
                 .map(w -> {
                     Double override = overrideFor(w);
                     return override != null ? override : isf;
                 })
                 .orElse(isf);
+        return base == null ? null : base * sickMultiplierAt(time);
+    }
+
+    /** Insulin-to-carb ratio (grams per unit) in effect at {@code time}, scaled like the ISF while sick. */
+    public Double getEffectiveGramsPerUnit(LocalDateTime time) {
+        return gramsPerUnit == null ? null : gramsPerUnit * sickMultiplierAt(time);
+    }
+
+    /** Shallow copy carrying {@code profile}; the receiver (possibly a cached instance) is not mutated. */
+    public UserSettingsDTO withSickProfile(SickProfile profile) {
+        UserSettingsDTO copy = new UserSettingsDTO();
+        BeanUtils.copyProperties(this, copy);
+        copy.setSickProfile(profile);
+        return copy;
+    }
+
+    private double sickMultiplierAt(LocalDateTime time) {
+        return (sickProfile == null ? SickProfile.EMPTY : sickProfile).isfMultiplierAt(time);
     }
 
     private Double overrideFor(MealWindow window) {

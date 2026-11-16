@@ -9,6 +9,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import che.glucosemonitorbe.sick.SickProfile;
+import che.glucosemonitorbe.sick.SickProfileService;
+import che.glucosemonitorbe.sick.SickSeverity;
+
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,8 +30,40 @@ class UserSettingsServiceTest {
     @Mock
     private UserSettingsRepository repository;
 
+    @Mock
+    private SickProfileService sickProfileService;
+
     @InjectMocks
     private UserSettingsService service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void noSickness() {
+        lenient().when(sickProfileService.profile(any(UUID.class))).thenReturn(SickProfile.EMPTY);
+    }
+
+    @Test
+    void getUserSettingsAttachesTheSickProfile() {
+        UUID userId = UUID.randomUUID();
+        LocalDateTime from = LocalDateTime.of(2026, 11, 10, 8, 0);
+        SickProfile sick = new SickProfile(List.of(new SickProfile.Span(
+                from, null, from.plusHours(5), SickSeverity.SEVERE)), null);
+        when(sickProfileService.profile(userId)).thenReturn(sick);
+        when(repository.findByUserId(userId)).thenReturn(Optional.empty());
+
+        UserSettingsDTO result = service.getUserSettings(userId);
+
+        assertEquals(sick, result.getSickProfile());
+    }
+
+    @Test
+    void evictIsACacheEvictOnTheUserSettingsCache() throws Exception {
+        var method = UserSettingsService.class.getMethod("evict", UUID.class);
+        var evict = method.getAnnotation(org.springframework.cache.annotation.CacheEvict.class);
+
+        assertNotNull(evict);
+        assertEquals("userSettings", evict.value()[0]);
+        assertEquals("#userId", evict.key());
+    }
 
     @Test
     void getUserSettingsCreatesDefaultsWhenMissing() {

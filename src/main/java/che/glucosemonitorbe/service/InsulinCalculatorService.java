@@ -253,7 +253,8 @@ public class InsulinCalculatorService {
      * 2.0 mmol/L per 10 g must not be read as 2 g/U.
      *
      * <p>The envelope is a refusal boundary, not a clamp. A missing ratio, or one outside
-     * 3-30, is typed in rather than invented.
+     * 3-30, is typed in rather than invented. The check is on the stored value; the value
+     * returned is scaled by the illness multiplier at {@code at}, so it may fall below 3.
      */
     private double resolveGramsPerUnit(UserSettingsDTO settings, LocalDateTime at) {
         Double explicit = settings.getGramsPerUnit();
@@ -262,7 +263,7 @@ public class InsulinCalculatorService {
             throw new DosingRefusedException(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
                     "gramsPerUnit=" + explicit + " at=" + at);
         }
-        return explicit;
+        return settings.getEffectiveGramsPerUnit(at);
     }
 
     /** Weight-scaled ceiling, so the bound is sane for a child and for an adult alike. */

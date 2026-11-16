@@ -6,6 +6,7 @@ import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.UserSettings;
 import che.glucosemonitorbe.exception.InvalidConfigurationException;
 import che.glucosemonitorbe.repository.UserSettingsRepository;
+import che.glucosemonitorbe.sick.SickProfileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -24,6 +25,7 @@ public class UserSettingsService {
 
     private final UserSettingsRepository userSettingsRepository;
     private final FeatureToggleConfig featureToggleConfig;
+    private final SickProfileService sickProfileService;
     
     /**
      * Get COB settings for a user, creating default settings if none exist
@@ -48,7 +50,13 @@ public class UserSettingsService {
                     d.setTargetGlucoseMmol(UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL);
                     d.setRescueCarbsG(15);
                     return d;
-                });
+                })
+                .withSickProfile(sickProfileService.profile(userId));
+    }
+
+    /** Drops the cached settings so the next read re-attaches the current illness profile. */
+    @CacheEvict(value = "userSettings", key = "#userId")
+    public void evict(UUID userId) {
     }
     
     /**

@@ -379,7 +379,7 @@ public class GlucoseCalculationsService {
     ) {
         // The user's own ISF (for the meal window "now" falls in), carb ratio and insulin profile.
         EmpiricalTwinParams params = EmpiricalTwinParams.forUser(
-                userSettings.getEffectiveIsf(currentTime), userSettings.getGramsPerUnit(),
+                userSettings.getEffectiveIsf(currentTime), userSettings.getEffectiveGramsPerUnit(currentTime),
                 rapidIob.diaHours(), rapidIob.peakMinutes());
         List<EmpiricalEvent> events = new ArrayList<>();
         carbsEntries.forEach(c -> events.add(EmpiricalEventMapper.carbs(c)));
@@ -510,7 +510,7 @@ public class GlucoseCalculationsService {
 
             double stepIsf = resolveIsf(userSettings, t);
             double carbsDeliveredEffect = carbRiseMmol(
-                    activeCobNow - cobAtT, userSettings.getGramsPerUnit(), stepIsf);
+                    activeCobNow - cobAtT, userSettings.getEffectiveGramsPerUnit(t), stepIsf);
             cumulativeInsulinEffect += -((previousIob - iobAtT) * stepIsf);
             previousIob = iobAtT;
             double insulinDeliveredEffect = cumulativeInsulinEffect;
@@ -560,7 +560,7 @@ public class GlucoseCalculationsService {
         // Use delivered effect over horizon (delta now -> horizon), same model as prediction path.
         // This prevents overestimating both carb rise and insulin drop when part of effect is outside horizon.
         double carbContribution = carbRiseMmol(
-                currentCOB - futureCOB, userSettings.getGramsPerUnit(), userISF);
+                currentCOB - futureCOB, userSettings.getEffectiveGramsPerUnit(predictionTime), userISF);
         double insulinContribution = -((currentIOB - futureIOB) * userISF);
         
         // Baseline contribution: assume minimal baseline drift

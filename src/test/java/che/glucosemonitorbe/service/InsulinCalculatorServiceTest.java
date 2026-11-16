@@ -6,6 +6,8 @@ import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.exception.DosingRefusalReason;
 import che.glucosemonitorbe.exception.DosingRefusedException;
+import che.glucosemonitorbe.sick.SickProfile;
+import che.glucosemonitorbe.sick.SickSeverity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -567,6 +569,51 @@ class InsulinCalculatorServiceTest {
                 .activeInsulin(0.0)
                 .userId(USER_ID.toString())
                 .build();
+    }
+
+    // -- Sick mode: ISF and grams-per-unit scale with the illness profile --------
+
+    private void givenSickSettings(double gramsPerUnit, SickSeverity severity) {
+        LocalDateTime now = LocalDateTime.now();
+        UserSettingsDTO settings = new UserSettingsDTO(
+                UUID.randomUUID(), USER_ID, 2.0, 2.2, 45, 240, 70.0);
+        settings.setGramsPerUnit(gramsPerUnit);
+        settings.setSickProfile(new SickProfile(List.of(new SickProfile.Span(
+                now.minusDays(1), null, now, severity)), null));
+        when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
+    }
+
+    @Test
+    void mealAndCorrectionDosesBothRiseByOneOverTheMultiplier() {
+        givenSettings(2.0, 2.2, 70.0, 10.0);
+        double healthyMeal = service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)).getRecommendedInsulin();
+        double healthyCorrection = service.calculateRecommendedInsulin(doseRequest(0.0, 11.0, 6.0)).getRecommendedInsulin();
+
+        givenSickSettings(10.0, SickSeverity.MODERATE);
+        double sickMeal = service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)).getRecommendedInsulin();
+        double sickCorrection = service.calculateRecommendedInsulin(doseRequest(0.0, 11.0, 6.0)).getRecommendedInsulin();
+
+        // Doses are rounded to 0.01 U, hence the tolerance of one rounding step.
+        assertThat(sickMeal).isCloseTo(healthyMeal / 0.70, within(0.01));
+        assertThat(sickCorrection).isCloseTo(healthyCorrection / 0.70, within(0.01));
+    }
+
+    @Test
+    void aScaledGramsPerUnitBelowThreeStillPricesADose() {
+        givenSickSettings(5.0, SickSeverity.SEVERE_UNRESPONSIVE); // 5 x 0.40 = 2.0 g/U
+
+        assertThat(service.calculateRecommendedInsulin(doseRequest(20.0, 6.0, 6.0))
+                .getRecommendedInsulin()).isEqualTo(10.0); // 20 g / 2.0 g/U
+    }
+
+    @Test
+    void anInvalidStoredGramsPerUnitIsStillRefused() {
+        givenSickSettings(2.0, SickSeverity.MILD);
+
+        assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)))
+                .isInstanceOf(DosingRefusedException.class)
+                .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
+                .isEqualTo(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT);
     }
 
     private static DosingRefusalReason refusalReasonOf(Throwable ex) {
