@@ -67,7 +67,7 @@ class ExistingDbUpgradeIT {
         Flyway current = Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load();
-        assertThatThrownBy(current::validate).as("edited V1/V4/V5/V6 checksums (and pending V13-V20) fail validation before repair");
+        assertThatThrownBy(current::validate).as("edited V1/V4/V5/V6 checksums (and pending V13-V21) fail validation before repair");
 
         // 2. the script, twice
         String script = Files.readString(Path.of("scripts/upgrade-existing-db.sql"));
@@ -75,7 +75,7 @@ class ExistingDbUpgradeIT {
             st.execute(script);
             st.execute(script);
         }
-        // 3. flyway repair; 4. the app start below runs V13-V20 and validates the schema
+        // 3. flyway repair; 4. the app start below runs V13-V21 and validates the schema
         current.repair();
     }
 
@@ -93,10 +93,10 @@ class ExistingDbUpgradeIT {
     @Autowired private JdbcTemplate jdbc;
 
     @Test
-    @DisplayName("main's V12 database + script + repair: the app boots (Flyway V20, Hibernate validate) and keeps the data")
+    @DisplayName("main's V12 database + script + repair: the app boots (Flyway V21, Hibernate validate) and keeps the data")
     void legacyDatabaseUpgradesAndBoots() {
         assertThat(jdbc.queryForObject(
-                "SELECT max(version::int) FROM flyway_schema_history WHERE success", Integer.class)).isEqualTo(20);
+                "SELECT max(version::int) FROM flyway_schema_history WHERE success", Integer.class)).isEqualTo(21);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM insulin_catalog", Integer.class)).isEqualTo(10);
         assertThat(jdbc.queryForObject("SELECT dia_hours FROM insulin_catalog WHERE code = 'FIASP'", Double.class)).isEqualTo(4.0);
         assertThat(jdbc.queryForObject("SELECT dia_hours FROM insulin_catalog WHERE code = 'APIDRA'", Double.class)).isEqualTo(4.5);
@@ -114,5 +114,6 @@ class ExistingDbUpgradeIT {
         assertThat(jdbc.queryForObject("SELECT to_regclass('experiments') IS NULL", Boolean.class)).isTrue();
         assertThat(jdbc.queryForObject("SELECT to_regclass('meal_episode') IS NOT NULL", Boolean.class)).isTrue();
         assertThat(jdbc.queryForObject("SELECT to_regclass('user_insulin_curve') IS NOT NULL", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT to_regclass('sick_segment') IS NOT NULL", Boolean.class)).isTrue();
     }
 }
