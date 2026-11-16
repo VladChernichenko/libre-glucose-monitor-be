@@ -38,6 +38,8 @@ class SickModeServiceTest {
     @Mock NoteRepository notes;
     @Mock UserSettingsService userSettingsService;
     @Mock BasalInsulinResolver basalResolver;
+    @Mock StubbornHighEvaluator stubbornHigh;
+    @Mock SickStepUpDecisionRepository decisions;
 
     private final UUID userId = UUID.randomUUID();
     private SickModeService service;
@@ -53,7 +55,7 @@ class SickModeServiceTest {
         lenient().when(notes.findByUserIdAndTimestampBetween(any(), any(), any())).thenReturn(List.of());
         lenient().when(basalResolver.usualDailyUnits(any(), any())).thenReturn(0.0);
         Clock clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
-        service = new SickModeService(segments, notes, userSettingsService, basalResolver, clock);
+        service = new SickModeService(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, clock);
     }
 
     private SickSegment open(SickSeverity severity, LocalDateTime startedAt, LocalDateTime confirmedAt) {
@@ -113,7 +115,7 @@ class SickModeServiceTest {
     @Test
     void aBackdatedStartLaterThanNowIsClampedToNow() {
         Clock early = Clock.fixed(LocalDateTime.of(2026, 11, 16, 3, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
-        SickModeService s = new SickModeService(segments, notes, userSettingsService, basalResolver, early);
+        SickModeService s = new SickModeService(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, early);
         s.start(userId, SickSeverity.MILD, Since.THIS_MORNING);
         assertThat(saved(0).getStartedAt()).isEqualTo(LocalDateTime.of(2026, 11, 16, 3, 0));
     }
@@ -276,5 +278,101 @@ class SickModeServiceTest {
         assertThat(status.isfPercent()).isEqualTo(-30);
         assertThat(status.basalNeedPercent()).isEqualTo(15);
         assertThat(status.stepUp()).isNull();
+    }
+
+    private UUID stubCurrentCorrection(SickSegment open) {
+        UUID noteId = UUID.randomUUID();
+        when(stubbornHigh.currentCorrectionId(userId, open.getStartedAt(), NOW)).thenReturn(Optional.of(noteId));
+        return noteId;
+    }
+
+    @Test
+    void acceptingMovesExactlyOneLevelAndRecordsTheDecision() {
+        SickSegment mild = open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        UUID noteId = stubCurrentCorrection(mild);
+
+        service.decideStepUp(userId, noteId, true);
+
+        ArgumentCaptor<SickStepUpDecision> decision = ArgumentCaptor.forClass(SickStepUpDecision.class);
+        verify(decisions).save(decision.capture());
+        assertThat(decision.getValue().getNoteId()).isEqualTo(noteId);
+        assertThat(decision.getValue().isAccepted()).isTrue();
+        assertThat(mild.getEndReason()).isEqualTo(SickModeService.REASON_SEVERITY_CHANGE);
+        assertThat(saved(1).getSeverity()).isEqualTo(SickSeverity.MODERATE);
+    }
+
+    @Test
+    void acceptingAtSevereReachesSevereUnresponsive() {
+        SickSegment severe = open(SickSeverity.SEVERE, NOW.minusHours(5), NOW.minusHours(1));
+        UUID noteId = stubCurrentCorrection(severe);
+
+        service.decideStepUp(userId, noteId, true);
+
+        assertThat(saved(1).getSeverity()).isEqualTo(SickSeverity.SEVERE_UNRESPONSIVE);
+    }
+
+    @Test
+    void acceptingAtTheTopLevelOnlyRecordsTheDecision() {
+        SickSegment top = open(SickSeverity.SEVERE_UNRESPONSIVE, NOW.minusHours(5), NOW.minusHours(1));
+        UUID noteId = stubCurrentCorrection(top);
+
+        service.decideStepUp(userId, noteId, true);
+
+        verify(decisions).save(any(SickStepUpDecision.class));
+        verify(segments, never()).save(any(SickSegment.class));
+    }
+
+    @Test
+    void decliningOnlyRecordsTheDecision() {
+        SickSegment moderate = open(SickSeverity.MODERATE, NOW.minusHours(5), NOW.minusHours(1));
+        UUID noteId = stubCurrentCorrection(moderate);
+
+        service.decideStepUp(userId, noteId, false);
+
+        ArgumentCaptor<SickStepUpDecision> decision = ArgumentCaptor.forClass(SickStepUpDecision.class);
+        verify(decisions).save(decision.capture());
+        assertThat(decision.getValue().isAccepted()).isFalse();
+        verify(segments, never()).save(any(SickSegment.class));
+        assertThat(moderate.getSeverity()).isEqualTo(SickSeverity.MODERATE);
+    }
+
+    @Test
+    void aSecondDecisionForTheSameCorrectionChangesNothing() {
+        SickSegment mild = open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        UUID noteId = UUID.randomUUID();
+        when(decisions.existsByUserIdAndNoteId(userId, noteId)).thenReturn(true);
+
+        SickModeStatusDTO status = service.decideStepUp(userId, noteId, true);
+
+        assertThat(status.severity()).isEqualTo(SickSeverity.MILD);
+        verify(decisions, never()).save(any(SickStepUpDecision.class));
+        verify(segments, never()).save(any(SickSegment.class));
+    }
+
+    @Test
+    void aStaleOrForeignNoteIdIsRejectedAndNothingIsStored() {
+        SickSegment mild = open(SickSeverity.MILD, NOW.minusHours(5), NOW.minusHours(1));
+        stubCurrentCorrection(mild);
+
+        assertThatThrownBy(() -> service.decideStepUp(userId, UUID.randomUUID(), true))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verify(decisions, never()).save(any(SickStepUpDecision.class));
+        verify(segments, never()).save(any(SickSegment.class));
+    }
+
+    @Test
+    void statusForDashboardCarriesTheProposalOnlyWhenActive() {
+        assertThat(service.statusForDashboard(userId, 15.0).active()).isFalse();
+        verify(stubbornHigh, never()).evaluate(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyDouble());
+
+        SickSegment moderate = open(SickSeverity.MODERATE, NOW.minusHours(5), NOW.minusHours(1));
+        SickModeStatusDTO.StepUp stepUp = new SickModeStatusDTO.StepUp(UUID.randomUUID(), SickSeverity.SEVERE, false);
+        when(stubbornHigh.evaluate(userId, moderate, NOW.minusHours(5), NOW, 15.0)).thenReturn(Optional.of(stepUp));
+
+        SickModeStatusDTO status = service.statusForDashboard(userId, 15.0);
+
+        assertThat(status.stepUp()).isEqualTo(stepUp);
+        assertThat(status.severity()).isEqualTo(SickSeverity.MODERATE);
     }
 }

@@ -21,6 +21,8 @@ import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.nutrition.NoteToCarbsEntryMapper;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
+import che.glucosemonitorbe.sick.SickModeService;
+import che.glucosemonitorbe.sick.SickModeStatusDTO;
 import che.glucosemonitorbe.watch.WatchStripService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -102,6 +104,11 @@ public class GlucoseCalculationsService {
     @Autowired(required = false)
     private WatchStripService watchStripService;
 
+    /** Lazy and optional: sick-mode status and the stubborn-high proposal for the dashboard. */
+    @Lazy
+    @Autowired(required = false)
+    private SickModeService sickModeService;
+
     /** Lazy and optional: the stored CGM trend, for requests that carry none (web, alerts, chat). */
     @Lazy
     @Autowired(required = false)
@@ -146,6 +153,23 @@ public class GlucoseCalculationsService {
                 watchStripService.evaluate(userUUID, response).ifPresent(response::setWatch);
             } catch (RuntimeException e) {
                 log.warn("Watch strip unavailable for user={}: {}", request.getUserId(), e.getMessage(), e);
+            }
+        }
+        if (sickModeService != null) {
+            // Own try/catch so a failure leaves sickMode null.
+            try {
+                if (userUUID == null) {
+                    userUUID = userService.getUserByUsername(request.getUserId()).getId();
+                }
+                Double reading = response.getCurrentGlucose();
+                SickModeStatusDTO sick = reading != null
+                        ? sickModeService.statusForDashboard(userUUID, reading)
+                        : sickModeService.status(userUUID);
+                if (sick.active()) {
+                    response.setSickMode(sick);
+                }
+            } catch (RuntimeException e) {
+                log.warn("Sick mode status unavailable for user={}: {}", request.getUserId(), e.getMessage(), e);
             }
         }
         return response;

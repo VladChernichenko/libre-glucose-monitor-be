@@ -54,4 +54,7 @@ public class GlucoseCalculationsResponse {
 
     // Dashboard watch strip; null = no strip
     private che.glucosemonitorbe.watch.WatchStrip watch;
+
+    // Sick-mode status with any pending step-up proposal; null when sick mode is off
+    private che.glucosemonitorbe.sick.SickModeStatusDTO sickMode;
 }

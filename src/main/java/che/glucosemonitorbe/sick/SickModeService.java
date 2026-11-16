@@ -38,20 +38,26 @@ public class SickModeService {
     private final NoteRepository notes;
     private final UserSettingsService userSettingsService;
     private final BasalInsulinResolver basalResolver;
+    private final StubbornHighEvaluator stubbornHigh;
+    private final SickStepUpDecisionRepository decisions;
     private final Clock clock;
 
     @Autowired
     public SickModeService(SickSegmentRepository segments, NoteRepository notes,
-                           UserSettingsService userSettingsService, BasalInsulinResolver basalResolver) {
-        this(segments, notes, userSettingsService, basalResolver, Clock.systemUTC());
+                           UserSettingsService userSettingsService, BasalInsulinResolver basalResolver,
+                           StubbornHighEvaluator stubbornHigh, SickStepUpDecisionRepository decisions) {
+        this(segments, notes, userSettingsService, basalResolver, stubbornHigh, decisions, Clock.systemUTC());
     }
 
     SickModeService(SickSegmentRepository segments, NoteRepository notes,
-                    UserSettingsService userSettingsService, BasalInsulinResolver basalResolver, Clock clock) {
+                    UserSettingsService userSettingsService, BasalInsulinResolver basalResolver,
+                    StubbornHighEvaluator stubbornHigh, SickStepUpDecisionRepository decisions, Clock clock) {
         this.segments = segments;
         this.notes = notes;
         this.userSettingsService = userSettingsService;
         this.basalResolver = basalResolver;
+        this.stubbornHigh = stubbornHigh;
+        this.decisions = decisions;
         this.clock = clock;
     }
 
@@ -60,6 +66,50 @@ public class SickModeService {
         LocalDateTime now = now(userId);
         closeLapsed(userId, now);
         return statusOf(userId, now);
+    }
+
+    /** {@link #status} plus the stubborn-high proposal, when sick mode is active and one is due. */
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
+    public SickModeStatusDTO statusForDashboard(UUID userId, double readingNow) {
+        LocalDateTime now = now(userId);
+        closeLapsed(userId, now);
+        SickModeStatusDTO status = statusOf(userId, now);
+        if (!status.active()) {
+            return status;
+        }
+        return segments.findByUserIdAndEndedAtIsNull(userId)
+                .flatMap(open -> stubbornHigh.evaluate(userId, open, status.since(), now, readingNow))
+                .map(stepUp -> withStepUp(status, stepUp))
+                .orElse(status);
+    }
+
+    /**
+     * Records the user's answer to the proposal for {@code noteId}; a repeat for the same correction
+     * changes nothing. Accepting moves one severity level up. {@code noteId} must be the episode's
+     * current correction, otherwise the request is rejected and nothing is stored.
+     */
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
+    public SickModeStatusDTO decideStepUp(UUID userId, UUID noteId, boolean accept) {
+        if (noteId == null) {
+            throw new IllegalArgumentException("noteId is required");
+        }
+        LocalDateTime now = now(userId);
+        closeLapsed(userId, now);
+        if (decisions.existsByUserIdAndNoteId(userId, noteId)) {
+            return statusOf(userId, now);
+        }
+        SickSegment open = requireOpen(userId);
+        LocalDateTime since = statusOf(userId, now).since();
+        if (!stubbornHigh.currentCorrectionId(userId, since, now).filter(noteId::equals).isPresent()) {
+            throw new IllegalArgumentException("No step-up proposal for note " + noteId);
+        }
+        decisions.save(SickStepUpDecision.builder()
+                .userId(userId).noteId(noteId).accepted(accept).decidedAt(now).build());
+        SickSeverity next = open.getSeverity().next().orElse(null);
+        if (accept && next != null) {
+            return changeSeverityInternal(userId, next);
+        }
+        return finish(userId, now);
     }
 
     @Transactional(noRollbackFor = IllegalArgumentException.class)
@@ -163,6 +213,11 @@ public class SickModeService {
         } else {
             userSettingsService.evict(userId);
         }
+    }
+
+    private static SickModeStatusDTO withStepUp(SickModeStatusDTO s, SickModeStatusDTO.StepUp stepUp) {
+        return new SickModeStatusDTO(s.active(), s.severity(), s.since(), s.dayNumber(), s.isfPercent(),
+                s.basalNeedPercent(), s.confirmationDue(), stepUp);
     }
 
     private SickModeStatusDTO statusOf(UUID userId, LocalDateTime now) {

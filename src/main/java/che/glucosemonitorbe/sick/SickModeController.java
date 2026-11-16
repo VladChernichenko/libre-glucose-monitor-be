@@ -26,6 +26,8 @@ public class SickModeController {
 
     public record EndRequest(String reason) {}
 
+    public record StepUpRequest(UUID noteId, boolean accept) {}
+
     private final SickModeService sickModeService;
     private final UserService userService;
 
@@ -59,6 +61,14 @@ public class SickModeController {
     @PostMapping("/end")
     public ResponseEntity<?> end(Authentication authentication, @RequestBody EndRequest request) {
         return run(authentication, id -> sickModeService.end(id, request.reason()));
+    }
+
+    @Operation(summary = "Accept or decline the proposal to move up one severity level")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "Decision recorded (or already recorded)"),
+                    @ApiResponse(responseCode = "400", description = "Not active, or the note is not the current proposal") })
+    @PostMapping("/step-up")
+    public ResponseEntity<?> stepUp(Authentication authentication, @RequestBody StepUpRequest request) {
+        return run(authentication, id -> sickModeService.decideStepUp(id, request.noteId(), request.accept()));
     }
 
     private ResponseEntity<?> run(Authentication authentication, Function<UUID, SickModeStatusDTO> command) {
