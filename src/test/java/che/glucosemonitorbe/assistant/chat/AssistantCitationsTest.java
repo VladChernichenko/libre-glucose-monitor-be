@@ -72,7 +72,7 @@ class AssistantCitationsTest {
         service = new AssistantService(new QuickLogParser(), mock(AssistantNoteWriter.class), history,
                 calculations, insulinCalculator, freshness, mock(UserService.class), objectMapper,
                 new IntentClassifier(llm, objectMapper), mock(MealPrepFlow.class), facts, retrieval, mock(RecentPlanFacts.class), mock(NoteRemovalFlow.class),
-                new GuardedReplyService(llm, traces, objectMapper));
+                new GuardedReplyService(llm, traces, objectMapper), mock(SickModeFlow.class));
     }
 
     private IncomingMessage text(String t) {

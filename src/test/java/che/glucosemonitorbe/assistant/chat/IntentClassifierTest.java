@@ -125,4 +125,46 @@ class IntentClassifierTest {
         when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"QUESTION\"}");
         assertEquals(IntentClassifier.Filters.NONE, classifier.classify("x", TODAY).filters());
     }
+
+    @Test
+    void presentTenseIllnessIsASickModeIntent() {
+        IntentClassifier.Classification c = classify(
+                "{\"intent\":\"SICK_MODE\",\"sick\":{\"action\":\"START\",\"severity\":\"MODERATE\"}}");
+        assertEquals(IntentClassifier.Intent.SICK_MODE, c.intent());
+        assertEquals(new IntentClassifier.SickCommand(IntentClassifier.SickCommand.Action.START,
+                che.glucosemonitorbe.sick.SickSeverity.MODERATE), c.sick());
+        assertEquals(IntentClassifier.SickCommand.Action.END, classify(
+                "{\"intent\":\"SICK_MODE\",\"sick\":{\"action\":\"end\",\"severity\":null}}").sick().action());
+        assertTrue(IntentClassifier.prompt("x").contains("SICK_MODE"));
+    }
+
+    @Test
+    void aPastRemarkStaysATaggedEvent() {
+        IntentClassifier.Classification c = classify(
+                "{\"intent\":\"EVENT\",\"items\":[],\"tags\":[\"ILLNESS\"]}");
+        assertEquals(IntentClassifier.Intent.EVENT, c.intent());
+        assertEquals(List.of(ContextTag.ILLNESS), c.tags());
+        assertNull(c.sick());
+    }
+
+    @Test
+    void anUnselectableSeverityFromTheModelIsDropped() {
+        for (String sev : new String[] {"\"SEVERE_UNRESPONSIVE\"", "\"EXTREME\"", "5"}) {
+            IntentClassifier.Classification c = classify(
+                    "{\"intent\":\"SICK_MODE\",\"sick\":{\"action\":\"START\",\"severity\":" + sev + "}}");
+            assertEquals(IntentClassifier.Intent.SICK_MODE, c.intent());
+            assertNull(c.sick().severity(), sev);
+        }
+    }
+
+    @Test
+    void aMissingOrBadSickObjectDegradesToAQuestion() {
+        for (String json : new String[] {"{\"intent\":\"SICK_MODE\"}", "{\"intent\":\"SICK_MODE\",\"sick\":\"yes\"}",
+                "{\"intent\":\"SICK_MODE\",\"sick\":{\"action\":\"PAUSE\"}}",
+                "{\"intent\":\"SICK_MODE\",\"sick\":{\"severity\":\"MILD\"}}"}) {
+            IntentClassifier.Classification c = classify(json);
+            assertEquals(IntentClassifier.Intent.QUESTION, c.intent(), json);
+            assertNull(c.sick());
+        }
+    }
 }

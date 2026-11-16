@@ -7,12 +7,14 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import che.glucosemonitorbe.sick.SickModeStatusDTO;
+import che.glucosemonitorbe.sick.SickSeverity;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * One NDJSON line of an assistant reply stream. Serialised with a {@code "type"} discriminator:
- * {@code logged, plan, proposal, removal, episodes, banner, token, citations, done, error}.
+ * {@code logged, plan, proposal, removal, sickMode, episodes, banner, token, citations, done, error}.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
@@ -20,6 +22,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = AssistantEvent.Plan.class, name = "plan"),
         @JsonSubTypes.Type(value = AssistantEvent.Proposal.class, name = "proposal"),
         @JsonSubTypes.Type(value = AssistantEvent.Removal.class, name = "removal"),
+        @JsonSubTypes.Type(value = AssistantEvent.SickMode.class, name = "sickMode"),
         @JsonSubTypes.Type(value = AssistantEvent.Episodes.class, name = "episodes"),
         @JsonSubTypes.Type(value = AssistantEvent.Banner.class, name = "banner"),
         @JsonSubTypes.Type(value = AssistantEvent.Token.class, name = "token"),
@@ -28,7 +31,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = AssistantEvent.Error.class, name = "error")
 })
 public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantEvent.Plan, AssistantEvent.Proposal,
-        AssistantEvent.Removal, AssistantEvent.Episodes, AssistantEvent.Banner, AssistantEvent.Token, AssistantEvent.Citations,
+        AssistantEvent.Removal, AssistantEvent.SickMode, AssistantEvent.Episodes, AssistantEvent.Banner, AssistantEvent.Token, AssistantEvent.Citations,
         AssistantEvent.Done, AssistantEvent.Error {
 
     /** The wire discriminator for this event. */
@@ -39,6 +42,7 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
             case Plan p -> "plan";
             case Proposal p -> "proposal";
             case Removal r -> "removal";
+            case SickMode s -> "sickMode";
             case Episodes e -> "episodes";
             case Banner b -> "banner";
             case Token t -> "token";
@@ -72,6 +76,15 @@ public sealed interface AssistantEvent permits AssistantEvent.Logged, AssistantE
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record Removal(UUID messageId, UUID noteId, String at, Double insulin, Double carbs, String label)
+            implements AssistantEvent {}
+
+    /**
+     * Sick mode proposed to start or end ({@code action} is "START" or "END"); nothing changes until the user
+     * taps the card, which calls the sick-mode REST resource. {@code severity} is the one the message stated, or
+     * null; {@code current} is the status now, so the card can show the right state.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record SickMode(UUID messageId, String action, SickSeverity severity, SickModeStatusDTO current)
             implements AssistantEvent {}
 
     /**

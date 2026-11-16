@@ -94,6 +94,7 @@ public class AssistantService {
     private final RecentPlanFacts recentPlanFacts;
     private final NoteRemovalFlow noteRemovalFlow;
     private final GuardedReplyService guardedReply;
+    private final SickModeFlow sickModeFlow;
     /** Overridable in tests. */
     Duration forecastBudget = FORECAST_BUDGET;
 
@@ -127,6 +128,10 @@ public class AssistantService {
         }
         if (c.intent() == IntentClassifier.Intent.REMOVE) {
             noteRemovalFlow.propose(userId, userMessage, c.remove(), msg.clientNow(), language, sink);
+            return;
+        }
+        if (c.intent() == IntentClassifier.Intent.SICK_MODE && c.sick() != null) {
+            sickModeFlow.propose(userId, userMessage, c.sick(), language, sink);
             return;
         }
         if (c.intent() == IntentClassifier.Intent.EVENT && !c.tags().isEmpty()) {

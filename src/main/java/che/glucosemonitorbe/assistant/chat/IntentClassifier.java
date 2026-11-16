@@ -2,6 +2,7 @@ package che.glucosemonitorbe.assistant.chat;
 
 import che.glucosemonitorbe.ai.LlmGatewayService;
 import che.glucosemonitorbe.assistant.common.ContextTag;
+import che.glucosemonitorbe.sick.SickSeverity;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
@@ -32,7 +33,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class IntentClassifier {
 
-    public enum Intent { MEAL_PREP, EVENT, REMOVE, QUESTION }
+    public enum Intent { MEAL_PREP, EVENT, REMOVE, QUESTION, SICK_MODE }
 
     public record FoodItem(String name, Double grams) {}
 
@@ -49,8 +50,18 @@ public class IntentClassifier {
         public static final RemoveTarget NONE = new RemoveTarget(null, null);
     }
 
+    /** What a SICK_MODE message asks for; {@code severity} is null when the message states none. */
+    public record SickCommand(Action action, SickSeverity severity) {
+        public enum Action { START, END }
+    }
+
     public record Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags, Filters filters,
-                                 RemoveTarget remove) {
+                                 RemoveTarget remove, SickCommand sick) {
+        public Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags, Filters filters,
+                              RemoveTarget remove) {
+            this(intent, items, tags, filters, remove, null);
+        }
+
         public Classification(Intent intent, List<FoodItem> items, List<ContextTag> tags, Filters filters) {
             this(intent, items, tags, filters, RemoveTarget.NONE);
         }
@@ -99,17 +110,24 @@ public class IntentClassifier {
 
     static String prompt(String text, LocalDate today) {
         return "Classify a message a person with type 1 diabetes sent to their assistant. "
-                + "Return ONLY a JSON object: {\"intent\": \"MEAL_PREP\" | \"EVENT\" | \"QUESTION\", "
+                + "Return ONLY a JSON object: {\"intent\": \"MEAL_PREP\" | \"EVENT\" | \"REMOVE\" | \"SICK_MODE\" | \"QUESTION\", "
                 + "\"items\": [{\"name\": string, \"grams\": number (only if the user stated a weight)}], "
                 + "\"tags\": [string], "
                 + "\"filters\": {\"fromDate\": \"YYYY-MM-DD\", \"toDate\": \"YYYY-MM-DD\", \"foodWords\": [string], "
                 + "\"eventKind\": \"MEAL\" | \"CORRECTION\" | \"ACTIVITY\" | \"LOW\"}, "
-                + "\"remove\": {\"insulin\": number, \"carbs\": number}}. "
+                + "\"remove\": {\"insulin\": number, \"carbs\": number}, "
+                + "\"sick\": {\"action\": \"START\" | \"END\", \"severity\": \"MILD\" | \"MODERATE\" | \"SEVERE\" | null}}. "
                 + "MEAL_PREP: the user is about to eat or asks to prepare for a meal; list each food item. "
                 + "EVENT: the user reports something that happened (not food); tags may only be from: "
                 + TAG_NAMES + ". "
                 + "REMOVE: the user asks to remove, delete or undo something they logged (a dose, carbs, a "
                 + "note); remove holds the insulin units and/or carb grams they name, omitted when not stated. "
+                + "SICK_MODE: a present-tense statement about the user's own current state: being ill "
+                + "(\"I'm sick\", \"I have a fever\", \"я заболел\", \"у меня температура\") is action START; "
+                + "recovering (\"I'm better\", \"I've recovered\", \"выздоровел\") is action END. A remark about a "
+                + "past moment (\"felt sick after lunch\") is EVENT with tag ILLNESS, not SICK_MODE. Give "
+                + "severity only when the message states it (a temperature of 37.5-38.5 C is MODERATE, above "
+                + "38.5 C is SEVERE, \"mild cold\" or \"runny nose\" is MILD), otherwise null. "
                 + "QUESTION: anything else. Items are empty unless MEAL_PREP; tags are empty unless EVENT. "
                 + "filters only for a QUESTION about past events and only what the question states: a date "
                 + "range it mentions, food words it names, and the kind of past event it asks about; omit "
@@ -137,9 +155,35 @@ public class IntentClassifier {
         } catch (IllegalArgumentException e) {
             return Classification.question();
         }
+        SickCommand sick = null;
+        if (intent == Intent.SICK_MODE) {
+            sick = sickCommand(root.path("sick"));
+            if (sick == null) return Classification.question();
+        }
         Filters filters = intent == Intent.QUESTION ? filters(root.path("filters"), today) : Filters.NONE;
         RemoveTarget remove = intent == Intent.REMOVE ? removeTarget(root.path("remove")) : RemoveTarget.NONE;
-        return new Classification(intent, items(root.path("items")), tags(root.path("tags")), filters, remove);
+        return new Classification(intent, items(root.path("items")), tags(root.path("tags")), filters, remove, sick);
+    }
+
+    /** Null when the action is missing or unknown; an unknown or unselectable severity becomes null. */
+    static SickCommand sickCommand(JsonNode node) {
+        if (!node.isObject() || !node.path("action").isTextual()) return null;
+        SickCommand.Action action;
+        try {
+            action = SickCommand.Action.valueOf(node.path("action").asText().strip().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        SickSeverity severity = null;
+        if (node.path("severity").isTextual()) {
+            try {
+                SickSeverity s = SickSeverity.valueOf(node.path("severity").asText().strip().toUpperCase(Locale.ROOT));
+                severity = s.selectable() ? s : null;
+            } catch (IllegalArgumentException ignored) {
+                // unknown severity: dropped
+            }
+        }
+        return new SickCommand(action, severity);
     }
 
     static RemoveTarget removeTarget(JsonNode node) {

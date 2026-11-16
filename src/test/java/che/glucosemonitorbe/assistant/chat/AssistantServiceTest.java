@@ -54,6 +54,7 @@ class AssistantServiceTest {
     private final UserService userService = mock(UserService.class);
 
     private final MealPrepFlow mealPrepFlow = mock(MealPrepFlow.class);
+    private final SickModeFlow sickModeFlow = mock(SickModeFlow.class);
     private AssistantService service;
     private final UUID user = UUID.randomUUID();
     private final List<AssistantEvent> events = new ArrayList<>();
@@ -83,7 +84,7 @@ class AssistantServiceTest {
         GuardedReplyService guarded = new GuardedReplyService(llm, traces, objectMapper);
         service = new AssistantService(new QuickLogParser(), writer, history,
                 calculations, insulinCalculator, freshness, userService, objectMapper,
-                new IntentClassifier(llm, objectMapper), mealPrepFlow, facts, retrieval, recentPlan, removalFlow, guarded);
+                new IntentClassifier(llm, objectMapper), mealPrepFlow, facts, retrieval, recentPlan, removalFlow, guarded, sickModeFlow);
     }
 
     private IncomingMessage text(String t) {
@@ -493,5 +494,18 @@ class AssistantServiceTest {
         assertNull(logged.forecastMin());
         assertTrue(elapsedMs < AssistantService.FORECAST_BUDGET.toMillis() + 700,
                 "Logged took " + elapsedMs + " ms");
+    }
+
+    @Test
+    void sickModeIntentGoesToTheSickModeFlow() {
+        when(llm.completeJson(anyString())).thenReturn(
+                "{\"intent\":\"SICK_MODE\",\"sick\":{\"action\":\"START\",\"severity\":\"MILD\"}}");
+
+        service.handle(user, text("I have a runny nose"), sink);
+
+        verify(sickModeFlow).propose(eq(user), any(),
+                eq(new IntentClassifier.SickCommand(IntentClassifier.SickCommand.Action.START,
+                        che.glucosemonitorbe.sick.SickSeverity.MILD)), eq("en"), any());
+        verifyNoInteractions(mealPrepFlow);
     }
 }
