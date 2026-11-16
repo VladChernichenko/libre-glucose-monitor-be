@@ -73,6 +73,8 @@ jar {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // The suite keeps many Spring contexts cached in one JVM; Gradle's 512 MB default no longer fits.
+    maxHeapSize = '2g'
     finalizedBy jacocoTestReport
     // Forward opt-in, data-gated harness properties (AZT1D / backtest CSV paths) from the Gradle
     // invocation to the test JVM. Only forwarded when explicitly set on the command line.
