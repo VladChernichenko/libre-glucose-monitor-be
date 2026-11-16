@@ -12,6 +12,7 @@ import che.glucosemonitorbe.hovorka.learning.TwinScales;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
+import che.glucosemonitorbe.sick.SickProfile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -460,9 +461,13 @@ public class HovorkaGlucosePredictionService {
         HovorkaState state = warmUp.state();
 
         // -- EGP net from long-acting insulin ----------------------------------
+        // While sick the reference is the raised basal need, so an unchanged dose covers less of it.
+        SickProfile sickProfile = settings == null || settings.getSickProfile() == null
+                ? SickProfile.EMPTY : settings.getSickProfile();
         double x3Basal  = basalResolver.resolveEgpSuppression(
                 longActingNotes, currentTime, basalDurationHours,
-                basalResolver.usualDailyUnits(longActingNotes, currentTime));
+                sickProfile.basalReferenceUnits(
+                        basalResolver.usualDailyUnits(longActingNotes, currentTime), currentTime));
         double egp0Abs  = p.egp0();
         double egpNow   = basalResolver.netEgp(p.f01(), egp0Abs, x3Basal);
         // No basal logged, or the newest logged dose is too old to say anything about current
