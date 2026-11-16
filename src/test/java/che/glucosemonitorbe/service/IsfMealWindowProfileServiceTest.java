@@ -11,6 +11,8 @@ import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.IsfMealWindowSnapshotRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.sick.SickProfile;
+import che.glucosemonitorbe.sick.SickSeverity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -150,6 +152,28 @@ class IsfMealWindowProfileServiceTest {
         assertThat(response.getHistoryDays()).isEqualTo(14);
         assertThat(response.getMinWeightedSamples())
                 .isEqualTo(IsfMealWindowProfileService.MIN_WEIGHTED_SAMPLES);
+    }
+
+    @Test
+    @DisplayName("Boluses taken while sick (or in the 6 h tail) are not learned from")
+    void isfProfileIgnoresBolusesTakenWhileSick() {
+        LocalDateTime healthy = today(7, 30);
+        LocalDateTime sick = today(7, 30).minusDays(2);
+        UserSettingsDTO settings = userSettings(2.0, 2.5, 45, 240).withSickProfile(new SickProfile(List.of(
+                new SickProfile.Span(sick.minusHours(1), sick.plusHours(3), sick.plusHours(3), SickSeverity.MODERATE)),
+                null));
+        when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
+        List<Note> notes = List.of(bolus(healthy, 2.0), bolus(sick, 2.0));
+        List<CgmReading> cgm = new ArrayList<>();
+        for (LocalDateTime t : List.of(healthy, sick)) {
+            cgm.add(cgmReading(t, 9.0));
+            cgm.add(cgmReading(t.plusMinutes((long) (RAPID.diaHours() * 60)), 4.0));
+        }
+        stub(notes, cgm);
+
+        service.recomputeForUser(userId);
+
+        assertThat(captureSavedSnapshot(MealWindow.BREAKFAST).getRawSampleCount()).isEqualTo(1);
     }
 
     // -- Pure correction bolus, no carbs ---------------------------------------

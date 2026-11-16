@@ -103,6 +103,7 @@ public class HistoryDoseService {
             if (taken >= QUALIFYING_LIMIT) break;
             MealEpisode e = se.episode();
             if (!qualifies(e)) continue;
+            if (settings.getSickProfile() != null && settings.getSickProfile().excludedFromLearning(e.getMealAt())) continue;
             Double isf = settings.getEffectiveIsf(e.getMealAt());
             if (isf == null || !Double.isFinite(isf) || isf <= 0) continue;
             taken++; // one of the top 10 qualifying; the meal <= 0 drop applies within them

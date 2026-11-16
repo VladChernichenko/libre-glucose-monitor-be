@@ -19,6 +19,7 @@ import che.glucosemonitorbe.hovorka.learning.DigitalTwinCalibrator;
 import che.glucosemonitorbe.hovorka.learning.PredictionReplayEngine;
 import che.glucosemonitorbe.hovorka.learning.PredictionResidualProvider;
 import che.glucosemonitorbe.hovorka.learning.TwinScales;
+import che.glucosemonitorbe.sick.SickProfile;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.repository.UserDigitalTwinRepository;
@@ -162,6 +163,19 @@ public class DigitalTwinCalibrationService {
         // can't bias the fit - unless doing so would starve the fit of data.
         cgm = excludeFlaggedWindows(userId, cgm, userZone);
 
+        // Sick time (and its 6 h tail) is never learned from: sick-day resistance would otherwise be
+        // remembered as normal. Unconditional - too little healthy data means no fit at all.
+        SickProfile sick = settings == null || settings.getSickProfile() == null
+                ? SickProfile.EMPTY : settings.getSickProfile();
+        cgm.removeIf(r -> sick.excludedFromLearning(PredictionReplayEngine.toLdt(r.epochMs(), userZone)));
+        if (cgm.size() < MIN_CGM_READINGS) {
+            log.info("User {}: only {} healthy CGM readings left after excluding sick time - skipping calibration",
+                    userId, cgm.size());
+            return null;
+        }
+        // Replays run on healthy settings so no replayed dose is priced with a sick multiplier.
+        UserSettingsDTO replaySettings = settings == null ? null : settings.withSickProfile(SickProfile.EMPTY);
+
         // -- Load events (meals / boluses / basal) -------------------------------
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, windowStart, nowUserWall);
         List<PredictionReplayEngine.Event> events = new ArrayList<>(notes.size());
@@ -196,9 +210,9 @@ public class DigitalTwinCalibrationService {
         cfg.basalDurationHours = insulinPrefsService.getLongActingDurationHours(userId);
         cfg.curveByCode = insulinPrefsService.rapidCurveByCode(userId);
         PredictionReplayEngine train = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, trainCgm, events, cfg, activity, userZone);
+                rawPredictor, baseParams, rapidIob, replaySettings, userId, trainCgm, events, cfg, activity, userZone);
         PredictionReplayEngine val = new PredictionReplayEngine(
-                rawPredictor, baseParams, rapidIob, settings, userId, valCgm, events, cfg, activity, userZone);
+                rawPredictor, baseParams, rapidIob, replaySettings, userId, valCgm, events, cfg, activity, userZone);
 
         // -- Fit -----------------------------------------------------------------
         DigitalTwinCalibrator.Result result = calibratorFactory.get().calibrate(train, val);
@@ -220,7 +234,7 @@ public class DigitalTwinCalibrationService {
         digitalTwinService.invalidate(userId);
 
         if (featureToggleConfig.isPersonalInsulinCurveEnabled()) {
-            fitPersonalInsulinCurve(userId, result, rawPredictor, baseParams, settings, trainCgm, valCgm,
+            fitPersonalInsulinCurve(userId, result, rawPredictor, baseParams, replaySettings, trainCgm, valCgm,
                     events, cfg.basalDurationHours, activity, userZone, now);
         }
         log.info("Digital-twin calibration user={} -> {} (isf×{}, aG×{})",

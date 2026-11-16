@@ -10,6 +10,8 @@ import che.glucosemonitorbe.service.FeatureToggleService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.IsfMealWindowSuggestionService;
 import che.glucosemonitorbe.service.UserSettingsService;
+import che.glucosemonitorbe.sick.SickProfile;
+import che.glucosemonitorbe.sick.SickSeverity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -384,5 +386,23 @@ class HistoryDoseServiceTest {
 
         assertThat(h.units()).isEqualTo(5.0);
         assertThat(h.episodeIds()).hasSize(10);
+    }
+
+    @Test
+    void historyDoseIgnoresMealsEatenWhileSick() {
+        // Two sick-day meals needed 20 U (resistance). Healthy meals: 4, 5, 6 U -> median 0.10 x 50 = 5.0 U.
+        // Had the sick meals counted the median would be 6.0 U.
+        LocalDateTime mealAt = LocalDateTime.of(2026, 10, 20, 12, 0);
+        settings.setSickProfile(new SickProfile(List.of(new SickProfile.Span(
+                mealAt.minusHours(2), mealAt.plusHours(8), mealAt.plusHours(8), SickSeverity.SEVERE)), null));
+        MealEpisode s1 = ep(50, 20, 5.5, 5.5), s2 = ep(50, 20, 5.5, 5.5);
+        MealEpisode h1 = ep(50, 4, 5.5, 5.5), h2 = ep(50, 5, 5.5, 5.5), h3 = ep(50, 6, 5.5, 5.5);
+        for (MealEpisode h : List.of(h1, h2, h3)) h.setMealAt(mealAt.minusDays(10));
+        found(s1, s2, h1, h2, h3);
+
+        HistoryDose h = service.evaluate(USER, situation, 4.0, 0.0, 0.0, 50).orElseThrow();
+
+        assertThat(h.units()).isEqualTo(5.0);
+        assertThat(h.episodeIds()).containsExactly(h1.getId(), h2.getId(), h3.getId());
     }
 }

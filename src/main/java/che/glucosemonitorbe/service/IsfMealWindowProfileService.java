@@ -168,6 +168,8 @@ public class IsfMealWindowProfileService {
             if (bolus.getInsulin() == null || bolus.getInsulin() <= 0) continue;
             if (bolus.isLongActing()) continue;
             if (bolus.getTimestamp() == null) continue;
+            if (userSettings != null && userSettings.getSickProfile() != null
+                    && userSettings.getSickProfile().excludedFromLearning(bolus.getTimestamp())) continue;
             candidates++;
 
             EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, gramsPerUnit,

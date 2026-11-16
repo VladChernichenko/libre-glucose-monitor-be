@@ -230,6 +230,11 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         this.anchors = prepareAnchors(sortedEvents);
     }
 
+    /** The settings snapshot this engine replays with. */
+    public UserSettingsDTO settings() {
+        return settings;
+    }
+
     /** Number of usable anchors found in the window. */
     public int anchorCount() {
         return anchors.size();
