@@ -59,9 +59,6 @@ public class DigitalTwinCalibrationService {
     private static final int MIN_CGM_READINGS = 200;
     private static final double MGDL_PER_MMOL = che.glucosemonitorbe.domain.GlucoseConversion.MGDL_PER_MMOL;
 
-    /** {@code notes.meal} value the clients and the assistant use for a correction bolus. */
-    static final String CORRECTION_LABEL = "Correction";
-
     private static final String MACRO_FMT = "\"%s\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)";
 
     private final CgmReadingRepository cgmReadingRepository;
@@ -429,10 +426,8 @@ public class DigitalTwinCalibrationService {
                 n.isHypoTreatment(), macro(profile, "estimatedGi"));
         // The label is the user's own statement that this dose was a correction; the engine still
         // checks the reading at dose time before trusting it for the ISF fit.
-        boolean correction = CORRECTION_LABEL.equalsIgnoreCase(n.getMeal())
-                && insulin > 0 && carbs == 0 && !n.isLongActing();
         event = event.withInsulinCode(n.getInsulinCode());
-        return correction ? event.asCorrection() : event;
+        return n.isCorrectionBolus() ? event.asCorrection() : event;
     }
 
     /** Extract a numeric field (protein/fat/fiber/estimatedGi) from a nutrition_profile JSON blob; 0 if absent. */

@@ -16,4 +16,6 @@ public interface SickSegmentRepository extends JpaRepository<SickSegment, UUID> 
     List<SickSegment> findByUserIdAndStartedAtAfterOrderByStartedAtAsc(UUID userId, LocalDateTime after);
 
     Optional<SickSegment> findFirstByUserIdOrderByStartedAtDesc(UUID userId);
+
+    Optional<SickSegment> findFirstByUserIdAndEpisodeIdOrderByStartedAtAsc(UUID userId, UUID episodeId);
 }

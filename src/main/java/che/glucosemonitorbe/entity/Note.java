@@ -263,6 +263,21 @@ public class Note {
         return TYPE_LONG_ACTING.equals(type);
     }
 
+    /** {@code meal} value the clients and the assistant use for a correction bolus. */
+    public static final String CORRECTION_LABEL = "Correction";
+
+    /**
+     * True when this note is a correction bolus: labelled "Correction", insulin only (no carbs) and
+     * not a long-acting injection. The label is the user's own statement; consumers still check the
+     * glucose reading at dose time before trusting it.
+     */
+    public boolean isCorrectionBolus() {
+        return CORRECTION_LABEL.equalsIgnoreCase(meal)
+                && insulin != null && insulin > 0
+                && (carbs == null || carbs == 0)
+                && !isLongActing();
+    }
+
     /** True when this note logs physical activity. */
     public boolean isActivity() {
         return TYPE_ACTIVITY.equals(type);
