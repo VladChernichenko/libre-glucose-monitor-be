@@ -9,6 +9,8 @@ import che.glucosemonitorbe.service.UserSettingsService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -53,14 +55,14 @@ public class SickModeService {
         this.clock = clock;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
     public SickModeStatusDTO status(UUID userId) {
         LocalDateTime now = now(userId);
         closeLapsed(userId, now);
         return statusOf(userId, now);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
     public SickModeStatusDTO start(UUID userId, SickSeverity severity, Since since) {
         requireSelectable(severity);
         LocalDateTime now = now(userId);
@@ -85,14 +87,14 @@ public class SickModeService {
         return finish(userId, now);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
     public SickModeStatusDTO changeSeverity(UUID userId, SickSeverity severity) {
         requireSelectable(severity);
         return changeSeverityInternal(userId, severity);
     }
 
     /** Like {@link #changeSeverity} but without the {@code selectable()} check; for accepted step-ups. */
-    @Transactional
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
     SickModeStatusDTO changeSeverityInternal(UUID userId, SickSeverity severity) {
         if (severity == null) {
             throw new IllegalArgumentException("severity is required");
@@ -114,7 +116,7 @@ public class SickModeService {
         return finish(userId, now);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
     public SickModeStatusDTO confirm(UUID userId) {
         LocalDateTime now = now(userId);
         closeLapsed(userId, now);
@@ -124,7 +126,7 @@ public class SickModeService {
         return finish(userId, now);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
     public SickModeStatusDTO end(UUID userId, String reason) {
         if (!REASON_USER.equals(reason) && !REASON_MORNING_NO.equals(reason)) {
             throw new IllegalArgumentException("reason must be USER or MORNING_NO");
@@ -142,8 +144,25 @@ public class SickModeService {
     // -- internals -------------------------------------------------------------
 
     private SickModeStatusDTO finish(UUID userId, LocalDateTime now) {
-        userSettingsService.evict(userId);
+        evictAfterCommit(userId);
         return statusOf(userId, now);
+    }
+
+    /**
+     * Drops the cached settings once the change is committed, so a concurrent reader cannot
+     * re-cache the old state in between; evicts at once when no transaction is active.
+     */
+    private void evictAfterCommit(UUID userId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    userSettingsService.evict(userId);
+                }
+            });
+        } else {
+            userSettingsService.evict(userId);
+        }
     }
 
     private SickModeStatusDTO statusOf(UUID userId, LocalDateTime now) {
@@ -168,7 +187,7 @@ public class SickModeService {
                 open.setEndedAt(lapseAt);
                 open.setEndReason(REASON_LAPSED);
                 segments.save(open);
-                userSettingsService.evict(userId);
+                evictAfterCommit(userId);
             }
         });
     }
