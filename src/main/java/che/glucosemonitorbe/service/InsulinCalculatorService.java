@@ -33,7 +33,11 @@ public class InsulinCalculatorService {
 
     private final UserSettingsService userSettingsService;
 
-    /** Defaults match catalog {@code FIASP} (user-specific curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}). */
+    /**
+     * Fallback curve for the no-argument overloads, which only tests use; production passes the
+     * user's catalog curve via {@link #calculateRemainingInsulin(InsulinDose, LocalDateTime, double, double)}.
+     * These are the OpenAPS ultra-rapid defaults, no longer the catalog's {@code FIASP} (see V22).
+     */
     public static final double DEFAULT_DIA_HOURS = 4.0;
     public static final double DEFAULT_PEAK_MINUTES = 55.0;
 
