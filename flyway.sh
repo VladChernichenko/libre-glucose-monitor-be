@@ -1,0 +1,1 @@
+flyway -url=jdbc:postgresql://localhost:5432/glucose_monitor -user=glucose_monitor_user -password=glucose -locations=filesystem:/Users/vlad/IdeaProjects/glucose-monitor-project/glucose-monitor-be/src/main/resources/db/migration repair
