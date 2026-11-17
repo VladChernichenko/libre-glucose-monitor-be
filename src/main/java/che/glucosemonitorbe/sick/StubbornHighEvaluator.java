@@ -7,6 +7,7 @@ import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -37,10 +38,12 @@ public class StubbornHighEvaluator {
     private final CgmReadingRepository cgmReadings;
     private final SickStepUpDecisionRepository decisions;
     private final UserSettingsService userSettingsService;
+    private final UserInsulinPreferencesService insulinPreferences;
 
     /**
      * The proposal for the episode's newest correction, or empty unless: it was logged at least
-     * {@link #MIN_MINUTES} ago, glucose now is above {@link #HIGH_MMOL} and fell by less than
+     * {@link #MIN_MINUTES} ago but no longer ago than the user's rapid-insulin duration of action, was
+     * priced at the current level (logged at or after the open segment began and was declared), glucose now is above {@link #HIGH_MMOL} and fell by less than
      * {@link #MIN_DROP_MMOL} since the correction, no carbs were logged after it, it has no recorded
      * decision, and a reading at the correction is known.
      */
@@ -50,12 +53,13 @@ public class StubbornHighEvaluator {
             return Optional.empty();
         }
         List<Note> episodeNotes = notes.findByUserIdAndTimestampBetween(userId, episodeStart, now);
-        Optional<Note> found = newestCorrection(episodeNotes, episodeStart, now);
+        Optional<Note> found = newestCorrection(episodeNotes, pricedFrom(open, episodeStart), now);
         if (found.isEmpty()) {
             return Optional.empty();
         }
         Note correction = found.get();
-        if (Duration.between(correction.getTimestamp(), now).toMinutes() < MIN_MINUTES) {
+        Duration age = Duration.between(correction.getTimestamp(), now);
+        if (age.toMinutes() < MIN_MINUTES || age.compareTo(rapidDuration(userId)) > 0) {
             return Optional.empty();
         }
         if (decisions.existsByUserIdAndNoteId(userId, correction.getId())) {
@@ -75,6 +79,20 @@ public class StubbornHighEvaluator {
                 severity == SickSeverity.SEVERE || severity == SickSeverity.SEVERE_UNRESPONSIVE));
     }
 
+    /**
+     * Corrections before this were priced at a lower level: logged before the user declared the
+     * segment (a backdated span) or before the severity last changed.
+     */
+    private static LocalDateTime pricedFrom(SickSegment open, LocalDateTime episodeStart) {
+        LocalDateTime from = open.getStartedAt() == null ? episodeStart : open.getStartedAt();
+        LocalDateTime declared = open.getDeclaredAt();
+        return declared != null && declared.isAfter(from) ? declared : from;
+    }
+
+    private Duration rapidDuration(UUID userId) {
+        return Duration.ofSeconds(Math.round(insulinPreferences.getRapidIobParameters(userId).diaHours() * 3600));
+    }
+
     private static Optional<Note> newestCorrection(List<Note> episodeNotes, LocalDateTime episodeStart,
                                                    LocalDateTime now) {
         return episodeNotes.stream()
@@ -86,7 +104,7 @@ public class StubbornHighEvaluator {
 
     /** The glucose logged with the correction, else the CGM reading nearest it within the match window. */
     private Double glucoseAt(UUID userId, Note correction) {
-        if (correction.getGlucoseLevel() != null) {
+        if (correction.getGlucoseLevel() != null && correction.getGlucoseLevel() > 0) {
             return correction.getGlucoseLevel();
         }
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);

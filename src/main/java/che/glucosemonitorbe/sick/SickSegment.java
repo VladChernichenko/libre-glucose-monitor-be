@@ -44,6 +44,10 @@ public class SickSegment {
     @Column(name = "last_confirmed_at", nullable = false)
     private LocalDateTime lastConfirmedAt;
 
+    /** When the user created this segment (their wall clock); unlike {@code startedAt} never backdated. */
+    @Column(name = "declared_at", nullable = false)
+    private LocalDateTime declaredAt;
+
     /** USER, MORNING_NO, LAPSED or SEVERITY_CHANGE; null while the segment is open. */
     @Column(name = "end_reason", length = 16)
     private String endReason;

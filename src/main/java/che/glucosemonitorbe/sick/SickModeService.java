@@ -148,6 +148,7 @@ public class SickModeService {
                 .episodeId(UUID.randomUUID())
                 .severity(severity)
                 .startedAt(startedAt)
+                .declaredAt(now)
                 .lastConfirmedAt(now)
                 .healthyBasalUnits(healthyBasalBefore(userId, startedAt))
                 .build());
@@ -177,6 +178,7 @@ public class SickModeService {
                 .episodeId(open.getEpisodeId())
                 .severity(severity)
                 .startedAt(now)
+                .declaredAt(now)
                 .lastConfirmedAt(now)
                 .healthyBasalUnits(open.getHealthyBasalUnits())
                 .build());

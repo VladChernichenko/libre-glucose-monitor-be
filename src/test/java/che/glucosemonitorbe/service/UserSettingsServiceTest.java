@@ -33,12 +33,19 @@ class UserSettingsServiceTest {
     @Mock
     private SickProfileService sickProfileService;
 
-    @InjectMocks
+    @Mock
+    private che.glucosemonitorbe.config.FeatureToggleConfig featureToggleConfig;
+
+    private final org.springframework.cache.concurrent.ConcurrentMapCacheManager cacheManager =
+            new org.springframework.cache.concurrent.ConcurrentMapCacheManager("userSettings");
+
     private UserSettingsService service;
 
     @org.junit.jupiter.api.BeforeEach
     void noSickness() {
-        lenient().when(sickProfileService.profile(any(UUID.class))).thenReturn(SickProfile.EMPTY);
+        service = new UserSettingsService(repository, featureToggleConfig, sickProfileService, cacheManager);
+        lenient().when(sickProfileService.profile(any(UUID.class), any(java.time.ZoneId.class)))
+                .thenReturn(SickProfile.EMPTY);
     }
 
     @Test
@@ -47,12 +54,33 @@ class UserSettingsServiceTest {
         LocalDateTime from = LocalDateTime.of(2026, 11, 10, 8, 0);
         SickProfile sick = new SickProfile(List.of(new SickProfile.Span(
                 from, null, from.plusHours(5), SickSeverity.SEVERE)), null);
-        when(sickProfileService.profile(userId)).thenReturn(sick);
+        when(sickProfileService.profile(eq(userId), any(java.time.ZoneId.class))).thenReturn(sick);
         when(repository.findByUserId(userId)).thenReturn(Optional.empty());
 
         UserSettingsDTO result = service.getUserSettings(userId);
 
         assertEquals(sick, result.getSickProfile());
+    }
+
+    @Test
+    void theIllnessProfileIsReReadOnEveryCallEvenWhenTheSettingsAreCached() {
+        UUID userId = UUID.randomUUID();
+        LocalDateTime from = LocalDateTime.of(2026, 11, 10, 8, 0);
+        SickProfile sick = new SickProfile(List.of(new SickProfile.Span(
+                from, null, from.plusHours(5), SickSeverity.SEVERE)), null);
+        when(repository.findByUserId(userId)).thenReturn(Optional.empty());
+        when(sickProfileService.profile(eq(userId), any(java.time.ZoneId.class)))
+                .thenReturn(sick).thenReturn(SickProfile.EMPTY);
+
+        UserSettingsDTO during = service.getUserSettings(userId);
+        // the episode ends: no evict, no cache clear
+        UserSettingsDTO after = service.getUserSettings(userId);
+
+        assertEquals(1.0, after.getSickProfile().isfMultiplierAt(from.plusHours(1)));
+        assertEquals(sick, during.getSickProfile(), "the earlier result is not mutated");
+        verify(repository, times(1)).findByUserId(userId); // settings themselves came from the cache
+        assertSame(SickProfile.EMPTY, cacheManager.getCache("userSettings").get(userId, UserSettingsDTO.class)
+                .getSickProfile(), "the cached instance carries no profile");
     }
 
     @Test

@@ -48,8 +48,8 @@ public class SickModeFlow {
     private static String text(boolean starting, boolean active, boolean ru) {
         if (starting) {
             if (active) {
-                return ru ? "Режим болезни уже включён. Нажмите на карточку, чтобы изменить тяжесть."
-                        : "Sick mode is already on. Tap the card to change the severity.";
+                return ru ? "Режим болезни уже включён. Чтобы изменить тяжесть, откройте карточку на главном экране."
+                        : "Sick mode is already on. To change the severity, use the card on the dashboard.";
             }
             return ru ? "Выздоравливайте! Включить режим болезни? Нажмите на карточку."
                     : "Sorry you are unwell. Turn on sick mode? Tap the card.";

@@ -55,7 +55,8 @@ class SickModeLapseRollbackIT {
 
         LocalDateTime confirmed = LocalDateTime.now().minusDays(5);
         SickSegment stale = segments.save(SickSegment.builder().userId(userId).episodeId(UUID.randomUUID())
-                .severity(SickSeverity.MILD).startedAt(confirmed.minusHours(2)).lastConfirmedAt(confirmed).build());
+                .severity(SickSeverity.MILD).startedAt(confirmed.minusHours(2))
+                .declaredAt(confirmed.minusHours(2)).lastConfirmedAt(confirmed).build());
 
         assertThatThrownBy(() -> service.confirm(userId)).isInstanceOf(IllegalArgumentException.class);
 

@@ -45,6 +45,7 @@ class SickModeServiceTest {
     @Mock SickStepUpDecisionRepository decisions;
     @Mock CgmFreshnessService cgmFreshness;
     @Mock CgmReadingRepository cgmReadings;
+    @Mock che.glucosemonitorbe.service.UserInsulinPreferencesService insulinPreferences;
 
     private final UUID userId = UUID.randomUUID();
     private SickModeService service;
@@ -54,6 +55,8 @@ class SickModeServiceTest {
         UserSettingsDTO settings = new UserSettingsDTO();
         settings.setTimezone("UTC");
         lenient().when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
+        lenient().when(insulinPreferences.getRapidIobParameters(userId))
+                .thenReturn(new che.glucosemonitorbe.dto.RapidInsulinIobParameters(4.0, 75));
         lenient().when(segments.save(any(SickSegment.class))).thenAnswer(i -> i.getArgument(0));
         lenient().when(segments.findByUserIdAndEndedAtIsNull(userId)).thenReturn(Optional.empty());
         lenient().when(segments.findFirstByUserIdOrderByStartedAtDesc(userId)).thenReturn(Optional.empty());
@@ -93,6 +96,7 @@ class SickModeServiceTest {
         SickSegment s = saved(0);
         assertThat(s.getSeverity()).isEqualTo(SickSeverity.MILD);
         assertThat(s.getStartedAt()).isEqualTo(NOW);
+        assertThat(s.getDeclaredAt()).isEqualTo(NOW);
         assertThat(s.getLastConfirmedAt()).isEqualTo(NOW);
         assertThat(s.getEpisodeId()).isNotNull();
         assertThat(s.getHealthyBasalUnits()).isEqualTo(24.0);
@@ -115,6 +119,7 @@ class SickModeServiceTest {
     void startBackdatedToYesterdayBeginsAtSixTheDayBefore() {
         service.start(userId, SickSeverity.MODERATE, Since.YESTERDAY);
         assertThat(saved(0).getStartedAt()).isEqualTo(LocalDateTime.of(2026, 11, 15, 6, 0));
+        assertThat(saved(0).getDeclaredAt()).isEqualTo(NOW); // declaration is never backdated
     }
 
     @Test
@@ -166,6 +171,7 @@ class SickModeServiceTest {
         assertThat(next.getSeverity()).isEqualTo(SickSeverity.SEVERE);
         assertThat(next.getEpisodeId()).isEqualTo(before.getEpisodeId());
         assertThat(next.getStartedAt()).isEqualTo(NOW);
+        assertThat(next.getDeclaredAt()).isEqualTo(NOW);
         assertThat(next.getLastConfirmedAt()).isEqualTo(NOW);
     }
 
@@ -395,10 +401,22 @@ class SickModeServiceTest {
         assertThat(status.severity()).isEqualTo(SickSeverity.MODERATE);
     }
 
+    @Test
+    void statusForDashboardHasNoProposalWithoutAFreshReading() {
+        open(SickSeverity.MODERATE, NOW.minusHours(5), NOW.minusHours(1));
+        when(cgmFreshness.freshReading(userId, NOW.toInstant(ZoneOffset.UTC))).thenReturn(Optional.empty());
+
+        SickModeStatusDTO status = service.statusForDashboard(userId);
+
+        assertThat(status.active()).isTrue();
+        assertThat(status.stepUp()).isNull();
+        verify(stubbornHigh, never()).evaluate(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyDouble());
+    }
+
     // -- decisions are re-checked against the real evaluator and a server-side reading ----------
 
     private SickModeService withRealEvaluator() {
-        StubbornHighEvaluator real = new StubbornHighEvaluator(notes, cgmReadings, decisions, userSettingsService);
+        StubbornHighEvaluator real = new StubbornHighEvaluator(notes, cgmReadings, decisions, userSettingsService, insulinPreferences);
         Clock clock = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
         return new SickModeService(segments, notes, userSettingsService, basalResolver, real, decisions,
                 cgmFreshness, clock);

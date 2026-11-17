@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
+import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.domain.PredictionEngine;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.UserSettings;
@@ -10,10 +11,12 @@ import che.glucosemonitorbe.sick.SickProfileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,6 +29,9 @@ public class UserSettingsService {
     private final UserSettingsRepository userSettingsRepository;
     private final FeatureToggleConfig featureToggleConfig;
     private final SickProfileService sickProfileService;
+    private final CacheManager cacheManager;
+
+    private static final String USER_SETTINGS_CACHE = "userSettings";
     
     /**
      * Get COB settings for a user, creating default settings if none exist
@@ -40,8 +46,25 @@ public class UserSettingsService {
      * DataIntegrityViolationExceptions under concurrency (see C1).
      * Returns a default DTO (not persisted) when no settings row exists.
      */
-    @Cacheable(value = "userSettings", key = "#userId")
     public UserSettingsDTO getUserSettings(UUID userId) {
+        UserSettingsDTO raw = rawSettings(userId);
+        ZoneId zone = UserZones.resolve(raw.getTimezone(), raw.getUtcOffsetMinutes());
+        // The illness profile is read on every call, outside the cache: it changes on commands that
+        // race with readers, and a stale cached profile would misprice doses until evicted.
+        return raw.withSickProfile(sickProfileService.profile(userId, zone));
+    }
+
+    /**
+     * The settings without the illness profile, cached in the {@code userSettings} cache. Programmatic
+     * rather than {@code @Cacheable}: a self-call would bypass the Spring proxy, and a separate bean
+     * would only move {@code convertToDTO}. The key matches the {@code @CacheEvict} methods.
+     */
+    private UserSettingsDTO rawSettings(UUID userId) {
+        Cache cache = cacheManager.getCache(USER_SETTINGS_CACHE);
+        return cache == null ? loadRaw(userId) : cache.get(userId, () -> loadRaw(userId));
+    }
+
+    private UserSettingsDTO loadRaw(UUID userId) {
         return userSettingsRepository.findByUserId(userId)
                 .map(this::convertToDTO)
                 .orElseGet(() -> {
@@ -50,11 +73,10 @@ public class UserSettingsService {
                     d.setTargetGlucoseMmol(UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL);
                     d.setRescueCarbsG(15);
                     return d;
-                })
-                .withSickProfile(sickProfileService.profile(userId));
+                });
     }
 
-    /** Drops the cached settings so the next read re-attaches the current illness profile. */
+    /** Drops the cached settings. Not needed for the illness profile, which is never cached. */
     @CacheEvict(value = "userSettings", key = "#userId")
     public void evict(UUID userId) {
     }

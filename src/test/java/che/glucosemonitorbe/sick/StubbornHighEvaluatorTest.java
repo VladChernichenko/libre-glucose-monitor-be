@@ -5,6 +5,8 @@ import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.NoteRepository;
+import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
+import che.glucosemonitorbe.service.UserInsulinPreferencesService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,7 @@ class StubbornHighEvaluatorTest {
     @Mock CgmReadingRepository cgm;
     @Mock SickStepUpDecisionRepository decisions;
     @Mock UserSettingsService userSettingsService;
+    @Mock UserInsulinPreferencesService insulinPreferences;
 
     private final UUID userId = UUID.randomUUID();
     private final List<Note> episodeNotes = new ArrayList<>();
@@ -47,7 +50,9 @@ class StubbornHighEvaluatorTest {
         lenient().when(notes.findByUserIdAndTimestampBetween(userId, START, NOW)).thenReturn(episodeNotes);
         lenient().when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(any(), any(), any()))
                 .thenReturn(List.of());
-        evaluator = new StubbornHighEvaluator(notes, cgm, decisions, userSettingsService);
+        lenient().when(insulinPreferences.getRapidIobParameters(userId))
+                .thenReturn(new RapidInsulinIobParameters(4.0, 75));
+        evaluator = new StubbornHighEvaluator(notes, cgm, decisions, userSettingsService, insulinPreferences);
     }
 
     private SickSegment open(SickSeverity severity) {
@@ -161,6 +166,63 @@ class StubbornHighEvaluatorTest {
     void aCorrectionWithoutAnyReadingYieldsNoProposal() {
         correction(130, null);
         assertThat(evaluate(SickSeverity.MODERATE, 14.5)).isEmpty();
+    }
+
+    @Test
+    void aNonPositiveLoggedGlucoseIsTreatedAsMissing() {
+        Note c = correction(130, 0.0);
+        assertThat(evaluate(SickSeverity.MODERATE, 14.5)).isEmpty();
+
+        long at = c.getTimestamp().toInstant(ZoneOffset.UTC).toEpochMilli();
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, at - 900_000, at + 900_000))
+                .thenReturn(List.of(CgmReading.builder().sgv(270).dateTimestamp(at).build()));
+        assertThat(evaluate(SickSeverity.MODERATE, 14.2)).isPresent();
+        assertThat(evaluate(SickSeverity.MODERATE, 13.9)).isEmpty();
+    }
+
+    @Test
+    void aCorrectionOlderThanTheInsulinDurationIsIgnored() {
+        correction(4 * 60 + 1, 14.5);
+        assertThat(evaluate(SickSeverity.MODERATE, 14.5)).isEmpty();
+    }
+
+    @Test
+    void aCorrectionJustInsideTheInsulinDurationStillCounts() {
+        correction(4 * 60 - 1, 14.5);
+        assertThat(evaluate(SickSeverity.MODERATE, 14.5)).isPresent();
+    }
+
+    @Test
+    void theDurationFollowsTheUsersCurrentRapidInsulin() {
+        when(insulinPreferences.getRapidIobParameters(userId)).thenReturn(new RapidInsulinIobParameters(5.0, 75));
+        correction(4 * 60 + 1, 14.5);
+        assertThat(evaluate(SickSeverity.MODERATE, 14.5)).isPresent();
+    }
+
+    @Test
+    void aCorrectionLoggedBeforeTheSegmentWasDeclaredIsIgnored() {
+        // backdated span: started 24 h ago, declared 100 min ago; the correction at 130 min ago was priced healthy
+        correction(130, 14.5);
+        SickSegment declaredLate = open(SickSeverity.MODERATE);
+        declaredLate.setDeclaredAt(NOW.minusMinutes(100));
+        assertThat(evaluator.evaluate(userId, declaredLate, START, NOW, 14.5)).isEmpty();
+    }
+
+    @Test
+    void aCorrectionLoggedBeforeASeverityChangeIsIgnored() {
+        correction(130, 14.5);
+        SickSegment changed = open(SickSeverity.SEVERE);
+        changed.setStartedAt(NOW.minusMinutes(125));
+        changed.setDeclaredAt(NOW.minusMinutes(125));
+        assertThat(evaluator.evaluate(userId, changed, START, NOW, 14.5)).isEmpty();
+    }
+
+    @Test
+    void aCorrectionLoggedAfterTheDeclarationCounts() {
+        correction(130, 14.5);
+        SickSegment declared = open(SickSeverity.MODERATE);
+        declared.setDeclaredAt(NOW.minusMinutes(131));
+        assertThat(evaluator.evaluate(userId, declared, START, NOW, 14.5)).isPresent();
     }
 
     @Test

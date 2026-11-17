@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS sick_segment (
     started_at          TIMESTAMPTZ      NOT NULL,
     ended_at            TIMESTAMPTZ,
     last_confirmed_at   TIMESTAMPTZ      NOT NULL,
+    declared_at         TIMESTAMPTZ      NOT NULL, -- user wall clock when the segment was created; never backdated
     end_reason          VARCHAR(16),     -- USER, MORNING_NO, LAPSED, SEVERITY_CHANGE
     healthy_basal_units DOUBLE PRECISION,
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
