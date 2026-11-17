@@ -59,7 +59,9 @@ class GlycemicEventPipelineE2ETest extends AbstractGlycemicEventE2ETest {
     void riseUnderActiveInsulinIsProvisionalStress() {
         UUID u = userId();
         long riseAt = seedStepRise(u);
-        note(u, toLdt(riseAt - 30 * 60_000L), 0, 5.0, Note.TYPE_NORMAL);
+        // 10 U: on Fiasp's clamp curve (peak 120 min / 5 h, V22) a dose 30 min before onset delivers
+        // ~23% of itself over the next hour, so 5 U no longer clears significantIobDropMmol.
+        note(u, toLdt(riseAt - 30 * 60_000L), 0, 10.0, Note.TYPE_NORMAL);
         GlycemicEvent e = scanService.scanUserEvents(u).stream()
                 .filter(x -> x.getDirection() == Direction.RISE).findFirst().orElseThrow();
         assertThat(e.getCategory()).isEqualTo(Category.STRESS);
