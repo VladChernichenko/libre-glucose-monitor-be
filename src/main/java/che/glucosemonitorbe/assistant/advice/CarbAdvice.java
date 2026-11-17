@@ -18,8 +18,8 @@ import java.util.List;
  *                     {@link State#STILL_LANDING}
  * @param curveWithout the dashboard forecast (no new carbs)
  * @param curveWith    the forecast with {@code grams} taken now; null when {@link State#STILL_LANDING}
- * @param recheckAt    when to look again: now + 15 min, now + 10 min when even 40 g is not enough,
- *                     or the newest logged fast carbs' time + 15 min when {@link State#STILL_LANDING}
+ * @param recheckAt    when to look again: now + 15 min, or the newest logged fast carbs' time + 15 min
+ *                     when {@link State#STILL_LANDING}
  * @param landingGrams fast carbs [g] logged in the last 15 min (sum of {@code hypo_treatment} notes)
  *                     when {@link State#STILL_LANDING}; null when {@link State#TAKE_NOW}
  */

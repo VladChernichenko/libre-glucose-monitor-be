@@ -22,6 +22,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -101,6 +106,36 @@ class LibreLinkUpServiceReloginTest {
         service.getConnections(userId);
 
         verify(client, never()).postLogin(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("two callers after a restart log in once")
+    void twoCallersAfterRestart_logInOnce() throws Exception {
+        storeCredentials();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(client.postLogin(anyString(), any())).thenAnswer(inv -> {
+            entered.countDown();
+            assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+            return ResponseEntity.ok(LOGIN_OK.getBytes(StandardCharsets.UTF_8));
+        });
+        when(client.parse(any())).thenReturn(json.readTree(LOGIN_OK));
+        when(client.authenticatedGet(eq(userId), anyString())).thenReturn(json.readTree(CONNECTIONS));
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<List<LibreConnection>> first = pool.submit(() -> service.getConnections(userId));
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<List<LibreConnection>> second = pool.submit(() -> service.getConnections(userId));
+            Thread.sleep(100);
+            release.countDown();
+
+            assertThat(first.get(5, TimeUnit.SECONDS)).hasSize(1);
+            assertThat(second.get(5, TimeUnit.SECONDS)).hasSize(1);
+            verify(client, times(1)).postLogin(anyString(), any());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

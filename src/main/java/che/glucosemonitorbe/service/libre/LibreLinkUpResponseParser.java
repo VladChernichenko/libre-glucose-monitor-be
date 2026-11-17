@@ -180,7 +180,7 @@ public class LibreLinkUpResponseParser {
         // LLU graph envelope: {"status":0,"data":{"graphData":[...],...}}
         JsonNode dataEnvelope = jsonResponse.get("data");
         JsonNode graphData = dataEnvelope != null ? dataEnvelope.get("graphData") : jsonResponse.get("graphData");
-        logger.info("LLU graph response structure: dataEnvelope={}, graphData size={}",
+        logger.debug("LLU graph response structure: dataEnvelope={}, graphData size={}",
                 dataEnvelope != null ? "present" : "absent",
                 graphData != null && graphData.isArray() ? graphData.size() : "null/not-array");
         if (graphData != null && graphData.isArray()) {
@@ -326,7 +326,7 @@ public class LibreLinkUpResponseParser {
             else if (dtid == 5) model = "FreeStyle Libre";
         }
 
-        logger.info("Sensor info for patient {}: model={}, sn={}, age={}d, remaining={}d, status={}",
+        logger.debug("Sensor info for patient {}: model={}, sn={}, age={}d, remaining={}d, status={}",
                 patientId, model, sn, ageDays, remaining, status);
         return new LibreSensorInfo(sn, model, activationDate, expiryDate,
                 ageDays, sensorMaxDays, status, remaining);

@@ -56,7 +56,6 @@ class LibreLinkUpSyncServiceCircuitTest {
         when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
                 eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)))
                 .thenReturn(Optional.of(libreConfig()));
-        when(libreLinkUpService.isAuthenticated(userId)).thenReturn(true);
     }
 
     @Test
@@ -120,9 +119,8 @@ class LibreLinkUpSyncServiceCircuitTest {
     @Test
     @DisplayName("a failed re-login counts as an upstream failure")
     void authFailure_countsAsUpstreamFailure() throws Exception {
-        when(libreLinkUpService.isAuthenticated(userId)).thenReturn(false);
-        when(libreLinkUpService.authenticate(any(), eq(userId)))
-                .thenThrow(new RuntimeException("LibreLinkUp authentication failed: connect timed out"));
+        doThrow(new RuntimeException("LibreLinkUp authentication failed: connect timed out"))
+                .when(libreLinkUpService).ensureSession(userId);
 
         assertThat(sut.syncUser(userId, false)).isEqualTo(LibreLinkUpSyncService.Outcome.ERROR);
         assertThat(sut.upstreamStatus(userId).available()).isFalse();

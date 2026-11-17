@@ -65,7 +65,6 @@ class LibreLinkUpSyncServiceCgmTagTest {
         when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
                 eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)))
                 .thenReturn(Optional.of(libreConfig()));
-        when(libreLinkUpService.isAuthenticated(userId)).thenReturn(true);
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
                 .thenReturn(libreData(7.2, 7.5));
 
@@ -87,13 +86,54 @@ class LibreLinkUpSyncServiceCgmTagTest {
     }
 
     @Test
+    @DisplayName("syncUser stores only readings after the last recorded timestamp")
+    void syncUser_storesOnlyReadingsAfterLastRecorded() throws Exception {
+        long recorded = 1_700_000_000_000L;
+        when(syncStateService.getOrCreate(userId)).thenReturn(UserGlucoseSyncState.builder()
+                .lastSeenEntryTimestamp(recorded)
+                .build());
+        when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
+                eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)))
+                .thenReturn(Optional.of(libreConfig()));
+        when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
+                .thenReturn(libreDataAt(recorded - 60_000L, recorded, recorded + 60_000L));
+
+        LibreLinkUpSyncService.Outcome outcome = sut.syncUser(userId, true);
+
+        assertThat(outcome).isEqualTo(LibreLinkUpSyncService.Outcome.NEW_DATA);
+        ArgumentCaptor<List<NightscoutEntryDto>> entriesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(cgmReadingService).storeChartData(
+                eq(userId), entriesCaptor.capture(), eq(CgmReading.DataSource.LIBRE_LINK_UP));
+        assertThat(entriesCaptor.getValue()).extracting(NightscoutEntryDto::getDate)
+                .containsExactly(recorded + 60_000L);
+    }
+
+    @Test
+    @DisplayName("syncUser does not write when every graph point is already recorded")
+    void syncUser_skipsStoreWhenNothingIsNewer() throws Exception {
+        long recorded = 1_700_000_120_000L;
+        when(syncStateService.getOrCreate(userId)).thenReturn(UserGlucoseSyncState.builder()
+                .lastSeenEntryTimestamp(recorded)
+                .build());
+        when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
+                eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)))
+                .thenReturn(Optional.of(libreConfig()));
+        when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
+                .thenReturn(libreDataAt(recorded - 60_000L, recorded));
+
+        LibreLinkUpSyncService.Outcome outcome = sut.syncUser(userId, true);
+
+        assertThat(outcome).isEqualTo(LibreLinkUpSyncService.Outcome.NO_CHANGE);
+        verify(cgmReadingService, never()).storeChartData(any(), any(), any());
+    }
+
+    @Test
     @DisplayName("syncUser never calls storeChartData with NIGHTSCOUT")
     void syncUser_neverTagsAsNightscout() throws Exception {
         when(syncStateService.getOrCreate(userId)).thenReturn(UserGlucoseSyncState.builder().build());
         when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
                 eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)))
                 .thenReturn(Optional.of(libreConfig()));
-        when(libreLinkUpService.isAuthenticated(userId)).thenReturn(true);
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
                 .thenReturn(libreData(6.0));
 
@@ -119,13 +159,27 @@ class LibreLinkUpSyncServiceCgmTagTest {
     }
 
     private LibreGlucoseData libreData(double... mmolValues) {
+        long base = System.currentTimeMillis();
+        long[] times = new long[mmolValues.length];
+        for (int i = 0; i < mmolValues.length; i++) {
+            times[i] = base + i * 60_000L;
+        }
+        return libreDataAt(mmolValues, times);
+    }
+
+    private LibreGlucoseData libreDataAt(long... epochMs) {
+        double[] values = new double[epochMs.length];
+        java.util.Arrays.fill(values, 6.0);
+        return libreDataAt(values, epochMs);
+    }
+
+    private LibreGlucoseData libreDataAt(double[] mmolValues, long[] epochMs) {
         LibreGlucoseData out = new LibreGlucoseData();
         out.setPatientId("patient-1");
         java.util.List<LibreGlucoseReading> readings = new java.util.ArrayList<>();
-        long base = System.currentTimeMillis();
-        for (int i = 0; i < mmolValues.length; i++) {
+        for (int i = 0; i < epochMs.length; i++) {
             LibreGlucoseReading r = new LibreGlucoseReading();
-            r.setTimestamp(new Date(base + i * 60_000L));
+            r.setTimestamp(new Date(epochMs[i]));
             r.setValue(mmolValues[i]);
             r.setTrend(0);
             readings.add(r);

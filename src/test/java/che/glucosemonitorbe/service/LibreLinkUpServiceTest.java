@@ -2,6 +2,8 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.dto.LibreConnection;
+import che.glucosemonitorbe.dto.LibreGlucoseData;
+import che.glucosemonitorbe.dto.LibreSensorInfo;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
@@ -16,14 +18,24 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -188,6 +200,92 @@ class LibreLinkUpServiceTest {
         assertThatThrownBy(() -> service.getSensorInfo("patient-1", userId))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Not authenticated");
+    }
+
+    @Test
+    @DisplayName("getSensorInfo calls LibreLinkUp once per day")
+    void getSensorInfo_callsLibreOncePerDay() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
+        long activation = Instant.parse("2026-11-13T17:00:11Z").getEpochSecond();
+        JsonNode graph = new ObjectMapper().readTree(
+                "{\"data\":{\"activeSensors\":[{\"sensor\":{\"sn\":\"0390RA9L50\",\"a\":" + activation
+                        + "},\"device\":{\"dtid\":5}}]}}");
+        when(mockClient.authenticatedGet(eq(userId), anyString())).thenReturn(graph);
+
+        LibreLinkUpService svc = new LibreLinkUpService(
+                new CircuitBreakerManager(), mockClient, sessionStore,
+                new LibreLinkUpRegionResolver(), responseParser, configRepository);
+        svc.sensorClock = Clock.fixed(Instant.parse("2026-11-18T00:00:00Z"), ZoneOffset.UTC);
+
+        LibreSensorInfo first = svc.getSensorInfo("p1", userId);
+        LibreSensorInfo second = svc.getSensorInfo("p1", userId);
+
+        verify(mockClient, times(1)).authenticatedGet(eq(userId), anyString());
+        assertThat(first.getSerialNumber()).isEqualTo("0390RA9L50");
+        assertThat(second.getSensorAgeDays()).isEqualTo(first.getSensorAgeDays());
+
+        svc.sensorClock = Clock.fixed(Instant.parse("2026-11-19T00:00:01Z"), ZoneOffset.UTC);
+        LibreSensorInfo nextDay = svc.getSensorInfo("p1", userId);
+
+        verify(mockClient, times(2)).authenticatedGet(eq(userId), anyString());
+        assertThat(nextDay.getSensorAgeDays()).isEqualTo(first.getSensorAgeDays() + 1);
+    }
+
+    @Test
+    @DisplayName("getSensorInfo does not cache a missing sensor")
+    void getSensorInfo_unknownIsNotCached() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
+        when(mockClient.authenticatedGet(eq(userId), anyString()))
+                .thenReturn(new ObjectMapper().readTree("{\"data\":{\"activeSensors\":[]}}"));
+        LibreLinkUpService svc = new LibreLinkUpService(
+                new CircuitBreakerManager(), mockClient, sessionStore,
+                new LibreLinkUpRegionResolver(), responseParser, configRepository);
+
+        svc.getSensorInfo("p1", userId);
+        svc.getSensorInfo("p1", userId);
+
+        verify(mockClient, times(2)).authenticatedGet(eq(userId), anyString());
+    }
+
+    @Test
+    @DisplayName("glucose sync and sensor info share one graph download")
+    void glucoseAndSensorShareOneGraphDownload() throws Exception {
+        UUID userId = UUID.randomUUID();
+        sessionStore.putToken(userId, "tok");
+        LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
+        long activation = Instant.parse("2026-11-13T17:00:11Z").getEpochSecond();
+        JsonNode graph = new ObjectMapper().readTree(
+                "{\"data\":{\"graphData\":[],\"activeSensors\":[{\"sensor\":{\"sn\":\"0390RA9L50\",\"a\":"
+                        + activation + "},\"device\":{\"dtid\":5}}]}}");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(mockClient.authenticatedGet(eq(userId), anyString())).thenAnswer(inv -> {
+            entered.countDown();
+            assertThat(release.await(5, TimeUnit.SECONDS)).isTrue();
+            return graph;
+        });
+        LibreLinkUpService svc = new LibreLinkUpService(
+                new CircuitBreakerManager(), mockClient, sessionStore,
+                new LibreLinkUpRegionResolver(), responseParser, configRepository);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<LibreGlucoseData> glucose = pool.submit(() -> svc.getGlucoseData("p1", 1, userId));
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<LibreSensorInfo> sensor = pool.submit(() -> svc.getSensorInfo("p1", userId));
+            Thread.sleep(100);
+            release.countDown();
+
+            assertThat(glucose.get(5, TimeUnit.SECONDS).getData()).isEmpty();
+            assertThat(sensor.get(5, TimeUnit.SECONDS).getSerialNumber()).isEqualTo("0390RA9L50");
+            verify(mockClient, times(1)).authenticatedGet(eq(userId), anyString());
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     @Test

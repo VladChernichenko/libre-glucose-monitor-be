@@ -7,11 +7,13 @@ import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
 import che.glucosemonitorbe.dto.ProspectiveNoteDTO;
+import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.entity.Note;
 import che.glucosemonitorbe.repository.NoteRepository;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.HypoEventService;
 import che.glucosemonitorbe.service.UserService;
+import che.glucosemonitorbe.service.UserSettingsService;
 import che.glucosemonitorbe.service.observer.HypoThresholds;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -31,30 +33,25 @@ import java.util.UUID;
  * <ol>
  *   <li>No advice without a fresh CGM reading, or when the low flow owns the screen (under
  *       {@link HypoThresholds#HYPO_MMOL} now, or an open hypo event).</li>
- *   <li>Trigger: forecast minimum within 60 min under {@link #TRIGGER_MIN_60}, or trend at or below
- *       {@link #FALL_RATE} and forecast minimum within 90 min under {@link #TRIGGER_MIN_90}.</li>
+ *   <li>Trigger: forecast minimum within 60 min under {@link HypoThresholds#HYPO_MMOL}, or trend at
+ *       or below {@link #FALL_RATE} and forecast minimum within 90 min under the same line. A landing
+ *       above 3.9 mmol/L is not a low.</li>
  *   <li>Fast carbs logged in the last {@link #LANDING_MINUTES} min: {@code STILL_LANDING}, no grams.</li>
- *   <li>Else the smallest of 5, 10 … 40 g whose forecast (re-run with a {@code hypo_treatment} note
- *       taken now) stays at or above {@link #TARGET_MIN} over 2 h; 40 g with a 10-min recheck if none
- *       does.</li>
+ *   <li>Else one rescue dose, the user's {@code rescueCarbsG} (15 g when unset), forecast once with a
+ *       {@code hypo_treatment} note taken now. Recheck in {@link #RECHECK_MINUTES} min.</li>
  *   <li>{@link CarbAdviceHold} keeps it shown until two new stored readings clear the trigger.</li>
  * </ol>
  */
 @Service
 public class CarbAdviceService {
 
-    public static final double TRIGGER_MIN_60 = 4.5;
     public static final double FALL_RATE = -0.1;
-    public static final double TRIGGER_MIN_90 = 5.0;
-    public static final double TARGET_MIN = 5.0;
-    public static final int GRAMS_MIN = 5;
-    public static final int GRAMS_MAX = 40;
-    public static final int GRAMS_STEP = 5;
+    /** Rescue carbs [g] when the user has not set {@code rescueCarbsG}. */
+    public static final int DEFAULT_RESCUE_CARBS_G = 15;
     public static final int LANDING_MINUTES = 15;
 
     static final int RECHECK_MINUTES = 15;
-    static final int RECHECK_AT_CAP_MINUTES = 10;
-    /** Window of the gram target and of the "without carbs" minimum shown on the card [min]. */
+    /** Window of the "without carbs" minimum shown on the card [min]. */
     static final int TARGET_WINDOW_MINUTES = 120;
 
     private final GlucoseCalculationsService calculations;
@@ -62,24 +59,26 @@ public class CarbAdviceService {
     private final HypoEventService hypoEvents;
     private final NoteRepository notes;
     private final UserService users;
+    private final UserSettingsService settings;
     private final CarbAdviceHold hold;
     private final Clock clock;
 
     @Autowired
     public CarbAdviceService(GlucoseCalculationsService calculations, CgmFreshnessService cgmFreshness,
                              HypoEventService hypoEvents, NoteRepository notes, UserService users,
-                             CarbAdviceHold hold) {
-        this(calculations, cgmFreshness, hypoEvents, notes, users, hold, Clock.systemUTC());
+                             UserSettingsService settings, CarbAdviceHold hold) {
+        this(calculations, cgmFreshness, hypoEvents, notes, users, settings, hold, Clock.systemUTC());
     }
 
     CarbAdviceService(GlucoseCalculationsService calculations, CgmFreshnessService cgmFreshness,
                       HypoEventService hypoEvents, NoteRepository notes, UserService users,
-                      CarbAdviceHold hold, Clock clock) {
+                      UserSettingsService settings, CarbAdviceHold hold, Clock clock) {
         this.calculations = calculations;
         this.cgmFreshness = cgmFreshness;
         this.hypoEvents = hypoEvents;
         this.notes = notes;
         this.users = users;
+        this.settings = settings;
         this.hold = hold;
         this.clock = clock;
     }
@@ -122,16 +121,16 @@ public class CarbAdviceService {
 
         CarbAdvice advice = landingSince.isPresent()
                 ? without.stillLanding(landingSince.get())
-                : withGrams(userId, now, currentGlucose, trendMmolPerMin, without);
+                : withRescueDose(userId, now, currentGlucose, trendMmolPerMin, without);
         return Optional.of(hold.triggered(userId, readingTime, advice));
     }
 
     private static boolean triggered(LocalDateTime now, double trend, List<PredictionPointDTO> forecast) {
-        boolean lowWithin60 = minimum(forecast, now, 60)
-                .map(p -> p.getPredictedGlucose() < TRIGGER_MIN_60).orElse(false);
+        boolean hypoWithin60 = minimum(forecast, now, 60)
+                .map(p -> p.getPredictedGlucose() < HypoThresholds.HYPO_MMOL).orElse(false);
         boolean fastFall = trend <= FALL_RATE && minimum(forecast, now, 90)
-                .map(p -> p.getPredictedGlucose() < TRIGGER_MIN_90).orElse(false);
-        return lowWithin60 || fastFall;
+                .map(p -> p.getPredictedGlucose() < HypoThresholds.HYPO_MMOL).orElse(false);
+        return hypoWithin60 || fastFall;
     }
 
     /** The lowest forecast point in (now, now + minutes]. */
@@ -157,22 +156,27 @@ public class CarbAdviceService {
         return Optional.of(new CarbAdvice.Landing(newest, (int) Math.round(grams)));
     }
 
-    private CarbAdvice withGrams(UUID userId, LocalDateTime now, double currentGlucose, double trend,
-                                 CarbAdvice without) {
+    /** The user's rescue dose [g], or {@link #DEFAULT_RESCUE_CARBS_G} when settings omit it. */
+    private int rescueGrams(UUID userId) {
+        UserSettingsDTO saved = settings.getUserSettings(userId);
+        Integer grams = saved == null ? null : saved.getRescueCarbsG();
+        if (grams == null || grams < 5 || grams > 40) return DEFAULT_RESCUE_CARBS_G;
+        return grams;
+    }
+
+    /**
+     * One forecast with the rescue dose taken now. The dose is not titrated: a rescue is 10-15 g,
+     * not whatever amount would pin the next two hours at 5.0 mmol/L.
+     */
+    private CarbAdvice withRescueDose(UUID userId, LocalDateTime now, double currentGlucose, double trend,
+                                      CarbAdvice without) {
+        int grams = rescueGrams(userId);
         String username = users.getUserById(userId).getUsername();
-        List<PredictionPointDTO> curve = null;
-        Double min = null;
-        for (int grams = GRAMS_MIN; grams <= GRAMS_MAX; grams += GRAMS_STEP) {
-            curve = forecastWithFastCarbs(username, now, currentGlucose, trend, grams);
-            min = minimum(curve, now, TARGET_WINDOW_MINUTES).map(PredictionPointDTO::getPredictedGlucose).orElse(null);
-            if (min != null && min >= TARGET_MIN) {
-                return new CarbAdvice(CarbAdvice.State.TAKE_NOW, grams, without.minWithout(), without.minWithoutAt(),
-                        min, without.curveWithout(), curve, now.plusMinutes(RECHECK_MINUTES), null);
-            }
-        }
-        // Even 40 g does not keep the forecast at the target: advise 40 g and recheck sooner.
-        return new CarbAdvice(CarbAdvice.State.TAKE_NOW, GRAMS_MAX, without.minWithout(), without.minWithoutAt(),
-                min, without.curveWithout(), curve, now.plusMinutes(RECHECK_AT_CAP_MINUTES), null);
+        List<PredictionPointDTO> curve = forecastWithFastCarbs(username, now, currentGlucose, trend, grams);
+        Double min = minimum(curve, now, TARGET_WINDOW_MINUTES)
+                .map(PredictionPointDTO::getPredictedGlucose).orElse(null);
+        return new CarbAdvice(CarbAdvice.State.TAKE_NOW, grams, without.minWithout(), without.minWithoutAt(),
+                min, without.curveWithout(), curve, now.plusMinutes(RECHECK_MINUTES), null);
     }
 
     /**

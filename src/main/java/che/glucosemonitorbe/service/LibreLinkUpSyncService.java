@@ -6,7 +6,6 @@ import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
-import che.glucosemonitorbe.dto.LibreAuthRequest;
 import che.glucosemonitorbe.dto.LibreGlucoseData;
 import che.glucosemonitorbe.dto.LibreUpstreamStatusDTO;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
@@ -22,7 +21,6 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -214,10 +212,17 @@ public class LibreLinkUpSyncService {
                 return Outcome.NO_CHANGE;
             }
 
+            // /graph always returns the ~12 h window. Keep only points after the last one
+            // already recorded; the rest are already in cgm_readings.
+            long prevSeen = state.getLastSeenEntryTimestamp() == null ? Long.MIN_VALUE
+                    : state.getLastSeenEntryTimestamp();
+            int graphCount = glucoseData.getData().size();
+
             List<NightscoutEntryDto> entries = new ArrayList<>();
             for (var reading : glucoseData.getData()) {
                 if (reading.getTimestamp() == null) continue;
                 long epochMs = reading.getTimestamp().getTime();
+                if (epochMs <= prevSeen) continue;
                 // Convert mmol/L back to mg/dL for storage (NightscoutEntryDto uses mg/dL).
                 int sgv = (int) Math.round(reading.getValue() * 18.0);
                 String direction = LibreLinkUpTrend.toNightscoutDirection(
@@ -233,25 +238,21 @@ public class LibreLinkUpSyncService {
                 entries.add(entry);
             }
 
-            cgmReadingService.storeChartData(userId, entries, CgmReading.DataSource.LIBRE_LINK_UP);
-
-            OptionalLong newestTs = entries.stream().mapToLong(NightscoutEntryDto::getDate).max();
-            long prevSeen = state.getLastSeenEntryTimestamp() == null ? Long.MIN_VALUE
-                    : state.getLastSeenEntryTimestamp();
-            boolean hasNew = newestTs.isPresent() && newestTs.getAsLong() > prevSeen;
-
-            if (hasNew) {
-                syncStateService.markNewData(userId, newestTs.getAsLong(), now,
-                        now.plusMinutes(fastIntervalMinutes));
-                log.info("LibreLinkUp sync user={} new data (readings={}, newestTs={}, force={})",
-                        userId, entries.size(), newestTs.getAsLong(), force);
-                return Outcome.NEW_DATA;
+            log.info("LibreLinkUp sync user={} graph={}, after last recorded={} (lastSeen={})",
+                    userId, graphCount, entries.size(),
+                    state.getLastSeenEntryTimestamp());
+            if (entries.isEmpty()) {
+                syncStateService.markNoChange(userId, now, now.plusMinutes(slowIntervalMinutes));
+                return Outcome.NO_CHANGE;
             }
 
-            syncStateService.markNoChange(userId, now, now.plusMinutes(slowIntervalMinutes));
-            log.info("LibreLinkUp sync user={} no new data (readings={}, force={})",
-                    userId, entries.size(), force);
-            return Outcome.NO_CHANGE;
+            cgmReadingService.storeChartData(userId, entries, CgmReading.DataSource.LIBRE_LINK_UP);
+
+            long newestTs = entries.stream().mapToLong(NightscoutEntryDto::getDate).max().orElseThrow();
+            syncStateService.markNewData(userId, newestTs, now, now.plusMinutes(fastIntervalMinutes));
+            log.info("LibreLinkUp sync user={} new data (readings={}, newestTs={}, force={})",
+                    userId, entries.size(), newestTs, force);
+            return Outcome.NEW_DATA;
 
         } catch (Exception e) {
             // If the LLU API rejected the token (401 / "not authenticated"), evict it so the next
@@ -271,15 +272,7 @@ public class LibreLinkUpSyncService {
     /** The LibreLinkUp calls themselves: re-authenticate if needed, then fetch the graph. */
     private LibreGlucoseData fetchFromLibre(UUID userId, UserDataSourceConfig cfg) {
         try {
-            // Ensure authenticated - re-authenticate if the in-memory token is missing (e.g. restart).
-            if (!libreLinkUpService.isAuthenticated(userId)) {
-                log.info("LibreLinkUp sync user={} re-authenticating (no in-memory token)", userId);
-                LibreAuthRequest authReq = new LibreAuthRequest();
-                authReq.setEmail(cfg.getLibreEmail());
-                authReq.setPassword(cfg.getLibrePassword());
-                authReq.setLocale(cfg.getLibreLocale());
-                libreLinkUpService.authenticate(authReq, userId);
-            }
+            libreLinkUpService.ensureSession(userId);
             return libreLinkUpService.getGlucoseData(cfg.getLibrePatientId(), 1, userId);
         } catch (RuntimeException e) {
             throw e;

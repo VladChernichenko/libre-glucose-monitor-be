@@ -19,11 +19,17 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Orchestrates LibreLinkUp authentication and data retrieval (auth, connections, glucose graph,
@@ -51,6 +57,14 @@ public class LibreLinkUpService {
     /** Stored LibreLinkUp logins, for silently logging in again when the in-memory session is gone. */
     private final UserDataSourceConfigRepository configRepository;
     private final ConcurrentHashMap<UUID, Object> reloginLocks = new ConcurrentHashMap<>();
+    /** Sensor info is read from the same /graph call as glucose. One LibreLinkUp fetch per user per day. */
+    static final Duration SENSOR_INFO_TTL = Duration.ofDays(1);
+    private final ConcurrentHashMap<String, CachedSensor> sensorInfoCache = new ConcurrentHashMap<>();
+    /** One /graph download at a time per user and patient, shared by glucose sync and sensor info. */
+    private final ConcurrentHashMap<String, CompletableFuture<JsonNode>> graphInflight = new ConcurrentHashMap<>();
+    Clock sensorClock = Clock.systemUTC();
+
+    private record CachedSensor(LibreSensorInfo info, long fetchedAtMs) {}
 
     public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager,
                               LibreLinkUpClient client,
@@ -277,19 +291,17 @@ public class LibreLinkUpService {
      */
     public LibreGlucoseData getGlucoseData(String patientId, int days, UUID userId) throws Exception {
         ensureAuthenticated(userId);
-        String baseUrl = baseUrlFor(userId);
         CircuitBreaker circuitBreaker = circuitBreakerManager.getCircuitBreaker("libre-glucose-data:" + userId);
 
         try {
             return circuitBreaker.execute(() -> {
                 try {
-                    String url = baseUrl + "/llu/connections/" + patientId + "/graph";
-                    logger.info("Fetching LibreLinkUp glucose data for patient {} from {}", patientId, url);
-                    JsonNode jsonResponse = authenticatedGet(userId, url);
+                    JsonNode jsonResponse = fetchGraph(userId, patientId);
                     throwIfApiError(jsonResponse, "LibreLinkUp glucose data error: ");
 
                     LibreGlucoseData glucoseData = responseParser.toGlucoseData(jsonResponse, patientId);
-                    logger.info("Successfully fetched {} glucose readings for patient {}", glucoseData.getData().size(), patientId);
+                    logger.debug("LibreLinkUp graph for patient {} returned {} readings",
+                            patientId, glucoseData.getData().size());
                     return glucoseData;
                 } catch (Exception e) {
                     logger.error("Failed to fetch LibreLinkUp glucose data for patient {}: {}", patientId, e.getMessage());
@@ -344,16 +356,21 @@ public class LibreLinkUpService {
      * Returns null-safe sensor info when no active sensor is present.
      */
     public LibreSensorInfo getSensorInfo(String patientId, UUID userId) throws Exception {
+        String key = cacheKey(userId, patientId);
+        long now = sensorClock.millis();
+        CachedSensor cached = sensorInfoCache.get(key);
+        if (cached != null && now - cached.fetchedAtMs() < SENSOR_INFO_TTL.toMillis()) {
+            logger.debug("Sensor info for patient {} served from the daily cache", patientId);
+            return withCurrentAge(cached.info(), now);
+        }
+
         ensureAuthenticated(userId);
-        String baseUrl = baseUrlFor(userId);
         CircuitBreaker cb = circuitBreakerManager.getCircuitBreaker("libre-sensor-info:" + userId);
 
-        return cb.executeWithFallback(
+        LibreSensorInfo info = cb.executeWithFallback(
             () -> {
                 try {
-                    String url = baseUrl + "/llu/connections/" + patientId + "/graph";
-                    logger.info("Fetching sensor info for patient {} from {}", patientId, url);
-                    JsonNode json = authenticatedGet(userId, url);
+                    JsonNode json = fetchGraph(userId, patientId);
                     return responseParser.toSensorInfo(json, patientId);
                 } catch (Exception e) {
                     logger.error("Failed to fetch sensor info for patient {}: {}", patientId, e.getMessage());
@@ -365,6 +382,76 @@ public class LibreLinkUpService {
                 return responseParser.unknownSensorInfo();
             }
         );
+        withCurrentAge(info, now);
+        if (info.getSerialNumber() != null) {
+            sensorInfoCache.put(key, new CachedSensor(info, now));
+        }
+        return info;
+    }
+
+    /**
+     * The /graph document, downloaded once even when glucose sync and sensor info ask together.
+     * A successful body also refreshes the daily sensor cache, so the sensor request does not
+     * download the graph again.
+     */
+    private JsonNode fetchGraph(UUID userId, String patientId) throws Exception {
+        String key = cacheKey(userId, patientId);
+        CompletableFuture<JsonNode> created = new CompletableFuture<>();
+        CompletableFuture<JsonNode> existing = graphInflight.putIfAbsent(key, created);
+        if (existing != null) {
+            logger.info("Joining in-flight LibreLinkUp graph for patient {}", patientId);
+            return awaitGraph(existing);
+        }
+        try {
+            String url = baseUrlFor(userId) + "/llu/connections/" + patientId + "/graph";
+            logger.info("Fetching LibreLinkUp graph for patient {} from {}", patientId, url);
+            JsonNode json = authenticatedGet(userId, url);
+            rememberSensor(userId, patientId, json);
+            created.complete(json);
+            return json;
+        } catch (Exception e) {
+            created.completeExceptionally(e);
+            throw e;
+        } finally {
+            graphInflight.remove(key, created);
+        }
+    }
+
+    private static JsonNode awaitGraph(CompletableFuture<JsonNode> inflight) throws Exception {
+        try {
+            return inflight.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while waiting for LibreLinkUp graph", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception ex) throw ex;
+            throw new RuntimeException(cause);
+        }
+    }
+
+    private void rememberSensor(UUID userId, String patientId, JsonNode json) {
+        LibreSensorInfo info = responseParser.toSensorInfo(json, patientId);
+        if (info.getSerialNumber() != null) {
+            sensorInfoCache.put(cacheKey(userId, patientId), new CachedSensor(info, sensorClock.millis()));
+        }
+    }
+
+    private static String cacheKey(UUID userId, String patientId) {
+        return userId + "\0" + patientId;
+    }
+
+    /** Age and days left move on with the clock; the LibreLinkUp fetch does not. */
+    private static LibreSensorInfo withCurrentAge(LibreSensorInfo info, long nowMs) {
+        if (info.getActivationDate() == null || info.getSensorMaxDays() == null) {
+            return info;
+        }
+        int ageDays = (int) ((nowMs - info.getActivationDate().getTime()) / 86_400_000L);
+        int remaining = info.getSensorMaxDays() - ageDays;
+        info.setSensorAgeDays(ageDays);
+        info.setDaysRemaining(remaining);
+        info.setStatus(ageDays < 0 ? "warmup" : remaining >= 0 ? "active" : "expired");
+        return info;
     }
 
     /** True if the user has a stored LibreLinkUp token. BE-1: per-user. */
@@ -375,6 +462,20 @@ public class LibreLinkUpService {
     /** Clear all LibreLinkUp session state for a user. BE-1: per-user. */
     public void logout(UUID userId) {
         sessionStore.clear(userId);
+        if (userId == null) return;
+        String prefix = userId + "\0";
+        Iterator<Map.Entry<String, CachedSensor>> it = sensorInfoCache.entrySet().iterator();
+        while (it.hasNext()) {
+            if (it.next().getKey().startsWith(prefix)) it.remove();
+        }
+    }
+
+    /**
+     * Log in from the stored credentials when the in-memory token is gone. Sync and sensor info both
+     * call this, and the per-user lock means a burst after a restart logs in once.
+     */
+    public void ensureSession(UUID userId) throws Exception {
+        ensureAuthenticated(userId);
     }
 
     /**
