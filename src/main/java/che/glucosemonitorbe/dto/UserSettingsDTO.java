@@ -117,13 +117,21 @@ public class UserSettingsDTO {
      * scaled by the illness multiplier at {@code time}. Null when no base value is set.
      */
     public Double getEffectiveIsf(LocalDateTime time) {
-        Double base = MealWindow.fromTimestamp(time)
+        Double base = getWindowIsf(time);
+        return base == null ? null : base * sickMultiplierAt(time);
+    }
+
+    /**
+     * The ISF the user's settings give for {@code time}'s meal window (the override, else the
+     * autotuned {@link #isf}), without the illness multiplier. Null when no base value is set.
+     */
+    public Double getWindowIsf(LocalDateTime time) {
+        return MealWindow.fromTimestamp(time)
                 .map(w -> {
                     Double override = overrideFor(w);
                     return override != null ? override : isf;
                 })
                 .orElse(isf);
-        return base == null ? null : base * sickMultiplierAt(time);
     }
 
     /** Insulin-to-carb ratio (grams per unit) in effect at {@code time}, scaled like the ISF while sick. */

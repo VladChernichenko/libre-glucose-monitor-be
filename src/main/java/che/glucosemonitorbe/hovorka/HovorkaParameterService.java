@@ -58,6 +58,12 @@ public class HovorkaParameterService {
     private static final double MIN_GRAMS_PER_UNIT = 3.0;
     private static final double MAX_GRAMS_PER_UNIT = 30.0;
 
+    /** True when {@code gramsPerUnit} is a ratio {@link #mealMagnitude} sizes meals from. */
+    public static boolean usableGramsPerUnit(Double gramsPerUnit) {
+        return gramsPerUnit != null && Double.isFinite(gramsPerUnit)
+                && gramsPerUnit >= MIN_GRAMS_PER_UNIT && gramsPerUnit <= MAX_GRAMS_PER_UNIT;
+    }
+
     /** Molar mass of glucose [g/mmol], as in the prediction service's grams-to-mmol conversion. */
     private static final double GLUCOSE_G_PER_MMOL = 0.18;
 
@@ -72,13 +78,13 @@ public class HovorkaParameterService {
      * </pre>
      * {@code 2·VG} is {@link HovorkaParameters#effectiveInsulinVolume()}: absorbed glucose spreads
      * over both compartments exactly as the insulin effect does. {@code isf} is the user's base
-     * ISF - a meal-window ISF override moves a dose, not the carbs.
+     * ISF; the forecast rescales each meal to the ISF of the window it is eaten in
+     * ({@code HovorkaGlucosePredictionService.mealWindowFactor}), so the ratio holds at meal time.
      *
      * <p>Returns the neutral 1.0 when the ratio is missing or outside 3-30 g/U.</p>
      */
     public static double mealMagnitude(double isf, double vG, Double gramsPerUnit) {
-        if (gramsPerUnit == null || !Double.isFinite(gramsPerUnit)
-                || gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
+        if (!usableGramsPerUnit(gramsPerUnit)) {
             return A_G_NEUTRAL;
         }
         double aG = isf * 2.0 * vG * GLUCOSE_G_PER_MMOL / (DallaManGutModel.F * gramsPerUnit);

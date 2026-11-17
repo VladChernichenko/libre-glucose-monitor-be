@@ -457,7 +457,7 @@ public class HovorkaGlucosePredictionService {
         // The ODE state is plasma glucose; the anchor is a sensor reading, which trails plasma.
         double plasmaNow = Math.max(G_MIN, Math.min(G_MAX,
                 InterstitialLagModel.plasmaFromSensor(currentGlucose, anchorTrendMmolPerMin)));
-        WarmUp warmUp = buildWarmState(plasmaNow, pastCarbsEntries, currentTime, p);
+        WarmUp warmUp = buildWarmState(plasmaNow, pastCarbsEntries, currentTime, p, settings);
         HovorkaState state = warmUp.state();
 
         // -- EGP net from long-acting insulin ----------------------------------
@@ -491,7 +491,7 @@ public class HovorkaGlucosePredictionService {
         // -- Future carb timeline (prospective notes already in pastCarbsEntries
         //    with future timestamps - carbs at t <= now were in the warm-up) ---
         Map<Integer, Double> futureCarbs = buildFutureCarbTimeline(
-                pastCarbsEntries, currentTime, pAdj);
+                pastCarbsEntries, currentTime, pAdj, settings);
 
         // -- Future GI timeline: parallel map of minute -> GI for future meals --
         Map<Integer, Integer> futureGiMap = buildFutureGiTimeline(pastCarbsEntries, currentTime);
@@ -666,7 +666,8 @@ public class HovorkaGlucosePredictionService {
             double currentGlucose,
             List<CarbsEntry> pastCarbs,
             LocalDateTime now,
-            HovorkaParameters p) {
+            HovorkaParameters p,
+            UserSettingsDTO settings) {
 
         HovorkaState ss = HovorkaState.steadyState(currentGlucose, p);
 
@@ -706,7 +707,7 @@ public class HovorkaGlucosePredictionService {
                 oldestAge = Math.max(oldestAge, ageMin);
             }
 
-            double carbMmol = toCarbMmol(entry, p);
+            double carbMmol = toCarbMmol(entry, p, settings);
             if (carbMmol <= 0) continue;
             mealsByAge.merge(ageMin, carbMmol, Double::sum);
             // Carb-weighted GI, matching buildFutureGiTimeline: meals landing on the same
@@ -925,7 +926,8 @@ public class HovorkaGlucosePredictionService {
     private Map<Integer, Double> buildFutureCarbTimeline(
             List<CarbsEntry> carbsEntries,
             LocalDateTime now,
-            HovorkaParameters p) {
+            HovorkaParameters p,
+            UserSettingsDTO settings) {
 
         Map<Integer, Double> timeline = new HashMap<>();
         for (CarbsEntry entry : carbsEntries) {
@@ -937,7 +939,7 @@ public class HovorkaGlucosePredictionService {
             // Clamp to 1: minsAgo=0 (meal logged at exactly "now") must still enter the ODE loop,
             // which starts at min=1 - storing at key=0 would cause the meal to be silently dropped.
             int futureMin = Math.max(1, (int) Math.abs(minsAgo));
-            double carbMmol = toCarbMmol(entry, p);
+            double carbMmol = toCarbMmol(entry, p, settings);
             if (carbMmol > 0) {
                 timeline.merge(futureMin, carbMmol, Double::sum);
             }
@@ -1070,9 +1072,36 @@ public class HovorkaGlucosePredictionService {
      * {@link DallaManGutModel#ra} ({@code F = 0.90}): the meal dose D = grams × A_G / 0.18 enters
      * the stomach, and only {@code F} of it ultimately appears in blood.</p>
      */
-    private double toCarbMmol(CarbsEntry entry, HovorkaParameters p) {
+    private double toCarbMmol(CarbsEntry entry, HovorkaParameters p, UserSettingsDTO settings) {
         if (entry.getCarbs() == null || entry.getCarbs() <= 0) return 0.0;
-        return entry.getCarbs() * p.aG() / 0.18;
+        return entry.getCarbs() * p.aG() * mealWindowFactor(entry.getTimestamp(), p, settings) / 0.18;
+    }
+
+    /** Bounds on {@link #mealWindowFactor}: settings this far apart are a mistake, not a physiology. */
+    static final double MEAL_WINDOW_FACTOR_MIN = 0.33;
+    static final double MEAL_WINDOW_FACTOR_MAX = 3.0;
+
+    /**
+     * Sizes a meal by the ISF of its own meal window. {@code A_G} makes {@code gramsPerUnit} grams
+     * raise glucose as much as one unit lowers it at the user's base ISF, but a dose acts at the
+     * ISF of the window it is taken in. With a window override that differs from the base, a meal
+     * dosed exactly by the ratio then forecast a large low (lunch ISF 1.47 vs base 1.0: every
+     * ratio-priced lunch dose looked ~47% too big). Scaling each meal by window ISF / base ISF
+     * keeps "gramsPerUnit grams per unit" true at the time the meal is eaten.
+     *
+     * <p>The window ISF excludes the illness multiplier and the twin's ISF scale: illness changes
+     * how insulin acts, not how much glucose a gram of carbs adds. 1.0 when the ratio did not
+     * shape {@code A_G} (no usable grams-per-unit) or either ISF is unusable.</p>
+     */
+    static double mealWindowFactor(LocalDateTime mealTime, HovorkaParameters p, UserSettingsDTO settings) {
+        if (settings == null || mealTime == null) return 1.0;
+        if (!HovorkaParameterService.usableGramsPerUnit(settings.getGramsPerUnit())) return 1.0;
+        Double window = settings.getWindowIsf(mealTime);
+        double base = p.isf();
+        if (window == null || !Double.isFinite(window) || window <= 0 || !Double.isFinite(base) || base <= 0) {
+            return 1.0;
+        }
+        return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, window / base));
     }
 
     /**
