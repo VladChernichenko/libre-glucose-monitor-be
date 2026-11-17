@@ -44,86 +44,16 @@ public class CgmReadingService {
             return;
         }
 
-        // 1) Dedupe within the incoming batch and split by key space.
-        Set<String> batchIds = new HashSet<>();
-        Set<Long> batchTimestamps = new HashSet<>();
-        List<NightscoutEntryDto> candidates = new ArrayList<>(entries.size());
-        int skippedInBatch = 0;
-
-        for (NightscoutEntryDto entry : entries) {
-            if (StringUtils.hasText(entry.getId())) {
-                if (batchIds.add(entry.getId())) {
-                    candidates.add(entry);
-                } else {
-                    skippedInBatch++;
-                }
-            } else if (entry.getDate() != null) {
-                if (batchTimestamps.add(entry.getDate())) {
-                    candidates.add(entry);
-                } else {
-                    skippedInBatch++;
-                }
-            } else {
-                skippedInBatch++;
-                log.trace("Skipping CGM entry with no external id and no date for user {} ({})",
-                        userId, dataSource);
-            }
-        }
-
-        if (candidates.isEmpty()) {
+        IncomingBatch batch = dedupe(userId, dataSource, entries);
+        if (batch.candidates.isEmpty()) {
             log.info("CGM readings for user {} ({}): inserted 0, skipped {} (all duplicates in batch)",
-                    userId, dataSource, skippedInBatch);
+                    userId, dataSource, batch.skipped);
             return;
         }
 
-        // 2) Two bulk existence queries instead of one per row.
-        Set<String> alreadyStoredIds = batchIds.isEmpty()
-                ? Set.of()
-                : new HashSet<>(repository.findExistingExternalIds(
-                        userId, dataSource, new ArrayList<>(batchIds)));
-        Set<Long> alreadyStoredTs = batchTimestamps.isEmpty()
-                ? Set.of()
-                : new HashSet<>(repository.findExistingDateTimestamps(
-                        userId, dataSource, new ArrayList<>(batchTimestamps)));
-
-        // 3) Build the insert list.
-        LocalDateTime now = LocalDateTime.now();
-        List<CgmReading> toInsert = new ArrayList<>(candidates.size());
-        int skippedAlreadyStored = 0;
-
-        for (NightscoutEntryDto entry : candidates) {
-            if (StringUtils.hasText(entry.getId())) {
-                if (alreadyStoredIds.contains(entry.getId())) {
-                    // Back-fill trend when the stored record was written from a graph point
-                    // that had no TrendArrow (trend=0) and the incoming entry now carries one.
-                    if (entry.getTrend() != null && entry.getTrend() > 0) {
-                        repository.updateTrendIfZero(userId, dataSource, entry.getId(),
-                                entry.getTrend(), entry.getDirection());
-                    }
-                    skippedAlreadyStored++;
-                    continue;
-                }
-            } else if (alreadyStoredTs.contains(entry.getDate())) {
-                skippedAlreadyStored++;
-                continue;
-            }
-
-            toInsert.add(CgmReading.builder()
-                    .userId(userId)
-                    .dataSource(dataSource)
-                    .externalId(entry.getId())
-                    .sgv(entry.getSgv())
-                    .dateTimestamp(entry.getDate())
-                    .dateString(entry.getDateString())
-                    .trend(entry.getTrend())
-                    .direction(entry.getDirection())
-                    .device(entry.getDevice())
-                    .type(entry.getType())
-                    .utcOffset(entry.getUtcOffset())
-                    .sysTime(entry.getSysTime())
-                    .lastUpdated(now)
-                    .build());
-        }
+        StoredKeys stored = findAlreadyStored(userId, dataSource, batch);
+        List<CgmReading> toInsert = new ArrayList<>(batch.candidates.size());
+        int skippedAlreadyStored = collectInserts(userId, dataSource, batch.candidates, stored, toInsert);
 
         if (!toInsert.isEmpty()) {
             // saveAll + Hibernate jdbc.batch_size issues multi-row INSERTs in a single round-trip.
@@ -131,8 +61,8 @@ public class CgmReadingService {
         }
 
         log.info("CGM readings for user {} ({}): inserted {}, skipped {} (batch dupes: {}, already stored: {})",
-                userId, dataSource, toInsert.size(), skippedInBatch + skippedAlreadyStored,
-                skippedInBatch, skippedAlreadyStored);
+                userId, dataSource, toInsert.size(), batch.skipped + skippedAlreadyStored,
+                batch.skipped, skippedAlreadyStored);
     }
 
     /**
@@ -187,6 +117,116 @@ public class CgmReadingService {
         log.info("Cleaning up CGM readings older than {}", cutoffDate);
         return repository.deleteOlderThan(cutoffDate);
     }
+
+    /** First occurrence of each external id, or of each timestamp when the entry has no id. */
+    private IncomingBatch dedupe(UUID userId, CgmReading.DataSource dataSource, List<NightscoutEntryDto> entries) {
+        IncomingBatch batch = new IncomingBatch(entries.size());
+        for (NightscoutEntryDto entry : entries) {
+            if (StringUtils.hasText(entry.getId())) {
+                keepFirst(batch.ids.add(entry.getId()), entry, batch);
+            } else if (entry.getDate() != null) {
+                keepFirst(batch.timestamps.add(entry.getDate()), entry, batch);
+            } else {
+                batch.skipped++;
+                log.trace("Skipping CGM entry with no external id and no date for user {} ({})",
+                        userId, dataSource);
+            }
+        }
+        return batch;
+    }
+
+    private static void keepFirst(boolean firstSeen, NightscoutEntryDto entry, IncomingBatch batch) {
+        if (firstSeen) {
+            batch.candidates.add(entry);
+        } else {
+            batch.skipped++;
+        }
+    }
+
+    /** Two bulk existence queries, one per key space, instead of one query per row. */
+    private StoredKeys findAlreadyStored(UUID userId, CgmReading.DataSource dataSource, IncomingBatch batch) {
+        Set<String> ids = batch.ids.isEmpty()
+                ? Set.of()
+                : new HashSet<>(repository.findExistingExternalIds(
+                        userId, dataSource, new ArrayList<>(batch.ids)));
+        Set<Long> timestamps = batch.timestamps.isEmpty()
+                ? Set.of()
+                : new HashSet<>(repository.findExistingDateTimestamps(
+                        userId, dataSource, new ArrayList<>(batch.timestamps)));
+        return new StoredKeys(ids, timestamps);
+    }
+
+    /**
+     * Fills {@code toInsert} with readings that are not already stored.
+     * An id that is already stored may still back-fill a missing trend.
+     *
+     * @return how many candidates were already stored
+     */
+    private int collectInserts(UUID userId,
+                               CgmReading.DataSource dataSource,
+                               List<NightscoutEntryDto> candidates,
+                               StoredKeys stored,
+                               List<CgmReading> toInsert) {
+        LocalDateTime now = LocalDateTime.now();
+        int skippedAlreadyStored = 0;
+        for (NightscoutEntryDto entry : candidates) {
+            if (StringUtils.hasText(entry.getId()) && stored.ids.contains(entry.getId())) {
+                backfillTrend(userId, dataSource, entry);
+                skippedAlreadyStored++;
+            } else if (!StringUtils.hasText(entry.getId()) && stored.timestamps.contains(entry.getDate())) {
+                skippedAlreadyStored++;
+            } else {
+                toInsert.add(toReading(userId, dataSource, entry, now));
+            }
+        }
+        return skippedAlreadyStored;
+    }
+
+    /**
+     * A graph point is stored with trend 0 when LibreLinkUp sent no TrendArrow.
+     * A later entry for the same id can carry the arrow; write it only while the stored trend is still 0.
+     */
+    private void backfillTrend(UUID userId, CgmReading.DataSource dataSource, NightscoutEntryDto entry) {
+        if (entry.getTrend() != null && entry.getTrend() > 0) {
+            repository.updateTrendIfZero(userId, dataSource, entry.getId(),
+                    entry.getTrend(), entry.getDirection());
+        }
+    }
+
+    private static CgmReading toReading(UUID userId,
+                                        CgmReading.DataSource dataSource,
+                                        NightscoutEntryDto entry,
+                                        LocalDateTime now) {
+        return CgmReading.builder()
+                .userId(userId)
+                .dataSource(dataSource)
+                .externalId(entry.getId())
+                .sgv(entry.getSgv())
+                .dateTimestamp(entry.getDate())
+                .dateString(entry.getDateString())
+                .trend(entry.getTrend())
+                .direction(entry.getDirection())
+                .device(entry.getDevice())
+                .type(entry.getType())
+                .utcOffset(entry.getUtcOffset())
+                .sysTime(entry.getSysTime())
+                .lastUpdated(now)
+                .build();
+    }
+
+    /** Candidates kept after in-batch dedupe, plus the keys used to look them up. */
+    private static final class IncomingBatch {
+        final List<NightscoutEntryDto> candidates;
+        final Set<String> ids = new HashSet<>();
+        final Set<Long> timestamps = new HashSet<>();
+        int skipped;
+
+        IncomingBatch(int size) {
+            candidates = new ArrayList<>(size);
+        }
+    }
+
+    private record StoredKeys(Set<String> ids, Set<Long> timestamps) {}
 
     private NightscoutEntryDto convertToEntryDto(CgmReading reading) {
         return new NightscoutEntryDto(
