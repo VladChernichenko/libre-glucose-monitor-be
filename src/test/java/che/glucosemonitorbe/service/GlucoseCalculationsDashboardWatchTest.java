@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.doReturn;
@@ -102,5 +104,42 @@ class GlucoseCalculationsDashboardWatchTest {
         assertNotNull(out.getPredictionPath());
         assertEquals(1, out.getPredictionPath().size());
         assertNull(out.getWatch());
+    }
+
+    // -- latest dashboard forecast, reused by the CGM-cycle alerts ----------------
+
+    @Test
+    void latestDashboardForecast_returnsTheDashboardResponse_whenFreshAndSameReading() {
+        forecast.setCurrentGlucose(13.5);
+        service.calculateDashboard(request());
+
+        assertSame(forecast, service.latestDashboardForecast(userId, 13.3, Instant.now()).orElseThrow());
+    }
+
+    @Test
+    void latestDashboardForecast_emptyWhenStale() {
+        forecast.setCurrentGlucose(13.5);
+        service.calculateDashboard(request());
+
+        Instant later = Instant.now().plus(GlucoseCalculationsService.DASHBOARD_FORECAST_MAX_AGE).plusSeconds(1);
+        assertTrue(service.latestDashboardForecast(userId, 13.5, later).isEmpty());
+    }
+
+    @Test
+    void latestDashboardForecast_emptyWhenReadingMovedAway() {
+        forecast.setCurrentGlucose(13.5);
+        service.calculateDashboard(request());
+
+        assertTrue(service.latestDashboardForecast(userId, 12.9, Instant.now()).isEmpty());
+    }
+
+    @Test
+    void latestDashboardForecast_neverStoresWhatIf() {
+        forecast.setCurrentGlucose(13.5);
+        GlucoseCalculationsRequest r = request();
+        r.setProspectiveNotes(List.of(mock(ProspectiveNoteDTO.class)));
+        service.calculateDashboard(r);
+
+        assertTrue(service.latestDashboardForecast(userId, 13.5, Instant.now()).isEmpty());
     }
 }

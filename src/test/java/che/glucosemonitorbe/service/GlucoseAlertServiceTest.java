@@ -132,6 +132,20 @@ class GlucoseAlertServiceTest {
         assertThat(request.getValue().getCurrentTrendMmolPerMin()).isNull();
     }
 
+    @Test
+    void evaluateAll_reusesTheDashboardForecast_whenOneIsAvailable() {
+        UUID userId = UUID.randomUUID();
+        GlucoseCalculationsResponse dashboard = mock(GlucoseCalculationsResponse.class);
+        when(calculationsService.latestDashboardForecast(eq(userId), eq(13.5), any()))
+                .thenReturn(Optional.of(dashboard));
+        when(evaluator.evaluateAll(any(), any(), anyDouble(), any(), any())).thenReturn(List.of());
+
+        alertService.evaluateAll(userId, "testuser", 13.5, -0.07, null);
+
+        verify(calculationsService, never()).calculateGlucoseData(any());
+        verify(evaluator).evaluateAll(eq(userId), same(dashboard), eq(-0.07), any(), any());
+    }
+
     // -- C4: cooldownMap TOCTOU race - duplicate alerts under concurrency ------
 
     /**

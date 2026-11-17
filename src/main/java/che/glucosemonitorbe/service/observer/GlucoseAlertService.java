@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -97,8 +98,12 @@ public class GlucoseAlertService {
 
         try {
             LocalDateTime now = LocalDateTime.now();
-            // No trend: this glucose is the latest stored reading, so the server applies the stored one.
-            GlucoseCalculationsResponse calc = runCalculations(username, currentGlucose, null, now);
+            // Prefer the forecast the dashboard just showed, so RAPID_DROP & co. judge the same curve
+            // as the chart and watch strip. Otherwise run one: no trend, as this glucose is the latest
+            // stored reading and the server applies the stored trend.
+            GlucoseCalculationsResponse calc = calculationsService
+                    .latestDashboardForecast(userId, currentGlucose, Instant.now())
+                    .orElseGet(() -> runCalculations(username, currentGlucose, null, now));
             if (calc == null) return;
 
             List<GlucoseAlert> alerts =

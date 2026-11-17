@@ -31,12 +31,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -169,7 +173,41 @@ public class GlucoseCalculationsService {
                 log.warn("Sick mode status unavailable for user={}: {}", request.getUserId(), e.getMessage(), e);
             }
         }
+        if (userUUID != null && response.getCurrentGlucose() != null) {
+            latestDashboard.put(userUUID, new DashboardForecast(response, Instant.now()));
+        }
         return response;
+    }
+
+    /** A dashboard forecast older than this is not reused by the CGM-cycle alerts. */
+    static final Duration DASHBOARD_FORECAST_MAX_AGE = Duration.ofMinutes(10);
+
+    /** Reused only when its starting glucose is within this of the reading being alerted on. */
+    static final double DASHBOARD_FORECAST_READING_TOLERANCE_MMOL = 0.5;
+
+    private record DashboardForecast(GlucoseCalculationsResponse response, Instant computedAt) {}
+
+    /** Last non-what-if dashboard forecast per user. In-memory: single instance only. */
+    private final Map<UUID, DashboardForecast> latestDashboard = new ConcurrentHashMap<>();
+
+    /**
+     * The forecast the user's dashboard last showed, so the CGM-cycle alerts judge the same curve
+     * as the on-screen chart and watch strip instead of a second run with server-side inputs (the
+     * phone sends its own trend and clock). Empty when none exists, it is older than
+     * {@link #DASHBOARD_FORECAST_MAX_AGE}, or it started from a glucose more than
+     * {@link #DASHBOARD_FORECAST_READING_TOLERANCE_MMOL} away from {@code reading}; callers then
+     * compute their own. Callers must treat the response as read-only.
+     */
+    public Optional<GlucoseCalculationsResponse> latestDashboardForecast(UUID userId, double reading, Instant now) {
+        DashboardForecast f = latestDashboard.get(userId);
+        if (f == null || f.computedAt().plus(DASHBOARD_FORECAST_MAX_AGE).isBefore(now)) {
+            return Optional.empty();
+        }
+        Double start = f.response().getCurrentGlucose();
+        if (start == null || Math.abs(start - reading) > DASHBOARD_FORECAST_READING_TOLERANCE_MMOL) {
+            return Optional.empty();
+        }
+        return Optional.of(f.response());
     }
 
     /**
