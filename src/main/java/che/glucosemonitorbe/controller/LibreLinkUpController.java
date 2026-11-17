@@ -33,6 +33,7 @@ public class LibreLinkUpController {
     private final LibreLinkUpSyncService libreLinkUpSyncService;
     private final UserService userService;
     private final UserDataSourceConfigService dataSourceConfigService;
+    private final che.glucosemonitorbe.assistant.common.CgmFreshnessService cgmFreshness;
 
     /** Resolve the UUID for the currently authenticated user. */
     private UUID userId(Authentication authentication) {
@@ -169,7 +170,13 @@ public class LibreLinkUpController {
     @ApiResponse(responseCode = "200", description = "Upstream status returned")
     @GetMapping("/status")
     public ResponseEntity<LibreUpstreamStatusDTO> upstreamStatus(Authentication authentication) {
-        return ResponseEntity.ok(libreLinkUpSyncService.upstreamStatus(userId(authentication)));
+        java.util.UUID userId = userId(authentication);
+        // LibreLinkUp can answer normally and still have nothing new (sensor or phone app not
+        // uploading): report the newest reading's age too, or that outage never reaches the app.
+        java.util.Optional<Long> newest = cgmFreshness.newestReadingAt(userId);
+        return ResponseEntity.ok(libreLinkUpSyncService.upstreamStatus(userId).withNewestReading(
+                newest.orElse(null),
+                che.glucosemonitorbe.assistant.common.CgmFreshnessService.isStale(newest, java.time.Instant.now())));
     }
 
     /**

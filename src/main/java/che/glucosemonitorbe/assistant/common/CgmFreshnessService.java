@@ -80,6 +80,22 @@ public class CgmFreshnessService {
         return OptionalDouble.of((newest.getSgv() - earlier.getSgv()) / MGDL_PER_MMOL / minutes);
     }
 
+    /**
+     * Epoch milliseconds of the newest stored reading that has a value, whatever its age; empty when
+     * the user has none. Unlike {@link #freshReading} this does not consult LibreLinkUp upstream.
+     */
+    public Optional<Long> newestReadingAt(UUID userId) {
+        return readingRepository.findFirstByUserIdOrderByDateTimestampDesc(userId)
+                .filter(r -> r.getDateTimestamp() != null && r.getSgv() != null)
+                .map(CgmReading::getDateTimestamp);
+    }
+
+    /** True when {@code readingAt} is missing or more than {@link #MAX_AGE} before {@code now}. */
+    public static boolean isStale(Optional<Long> readingAt, Instant now) {
+        return readingAt.map(ms -> Duration.between(Instant.ofEpochMilli(ms), now).compareTo(MAX_AGE) > 0)
+                .orElse(true);
+    }
+
     /** The newest stored reading when it has a value and a timestamp and is fresh; the raw row. */
     private Optional<CgmReading> freshNewest(UUID userId, Instant now) {
         Optional<CgmReading> newest = readingRepository.findFirstByUserIdOrderByDateTimestampDesc(userId);

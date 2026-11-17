@@ -144,4 +144,26 @@ class CgmFreshnessServiceTest {
         newestReadingAgeMinutes(2);
         assertThat(service.freshTrendMmolPerMin(userId, NOW)).isEmpty();
     }
+
+    // -- newest reading age, regardless of upstream (drives the app's stale banner) ----------
+
+    @Test
+    @DisplayName("the newest reading's time is reported whatever its age, and LibreLinkUp is not consulted")
+    void newestReadingAtIgnoresAgeAndUpstream() {
+        newestReadingAgeMinutes(55);
+        when(libre.upstreamStatus(userId)).thenReturn(new LibreUpstreamStatusDTO(false, "OPEN", 30L));
+
+        assertThat(service.newestReadingAt(userId)).contains(NOW.minus(Duration.ofMinutes(55)).toEpochMilli());
+    }
+
+    @Test
+    @DisplayName("readings are stale past 15 minutes and when there is none at all")
+    void isStaleFollowsTheDoseSuggestionLimit() {
+        long fourteen = NOW.minus(Duration.ofMinutes(14)).toEpochMilli();
+        long sixteen = NOW.minus(Duration.ofMinutes(16)).toEpochMilli();
+
+        assertThat(CgmFreshnessService.isStale(Optional.of(fourteen), NOW)).isFalse();
+        assertThat(CgmFreshnessService.isStale(Optional.of(sixteen), NOW)).isTrue();
+        assertThat(CgmFreshnessService.isStale(Optional.empty(), NOW)).isTrue();
+    }
 }

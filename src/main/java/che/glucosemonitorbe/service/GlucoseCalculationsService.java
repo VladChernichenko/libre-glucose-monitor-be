@@ -124,8 +124,8 @@ public class GlucoseCalculationsService {
      * once per request ({@link #withResolvedTrend}) and that one value goes to the forecast and to the
      * advice, so the advice's own re-runs start from the same plasma glucose as the forecast they are
      * compared with. Requests carrying prospective (what-if)
-     * notes skip the advice, so a what-if never touches the advice hold and the gram search's own
-     * re-runs cannot recurse. Internal callers (alerts, chat, snapshots) call
+     * notes skip the advice, so a what-if never touches the advice hold and the rescue-dose
+     * re-run cannot recurse. Internal callers (alerts, chat, snapshots) call
      * {@link #calculateGlucoseData} directly and do not evaluate advice, so only dashboard requests
      * count against the hold.
      */
@@ -914,7 +914,7 @@ public class GlucoseCalculationsService {
                 .userId(userUUID)
                 .build();
         entry.setAbsorptionMode("DEFAULT_DECAY");
-        // A prospective fast sugar (the carb-advice gram search) gets the one rescue profile, as a
+        // A prospective fast sugar (the carb-advice rescue dose) gets the one rescue profile, as a
         // logged hypo_treatment note does in NoteToCarbsEntryMapper.
         if (Note.TYPE_HYPO_TREATMENT.equals(pn.getType())) {
             return RescueCarbProfile.mark(entry);

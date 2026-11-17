@@ -39,6 +39,8 @@ class LibreLinkUpControllerTest {
     @Mock LibreLinkUpService libreLinkUpService;
     @Mock UserService userService;
     @Mock UserDataSourceConfigService dataSourceConfigService;
+    @Mock che.glucosemonitorbe.service.LibreLinkUpSyncService libreLinkUpSyncService;
+    @Mock che.glucosemonitorbe.assistant.common.CgmFreshnessService cgmFreshness;
 
     @InjectMocks LibreLinkUpController controller;
 
@@ -55,6 +57,34 @@ class LibreLinkUpControllerTest {
         when(userService.getUserByUsername("testuser")).thenReturn(userDto);
         auth = new UsernamePasswordAuthenticationToken(
                 "testuser", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+    }
+
+    // -- GET /api/libre/status --------------------------------------------------
+
+    @Test
+    @DisplayName("GET /status - LibreLinkUp answering but no new reading for 55 min is reported stale")
+    void status_reportsStaleReadingsWhileUpstreamIsUp() throws Exception {
+        long readingAt = System.currentTimeMillis() - 55 * 60_000L;
+        when(libreLinkUpSyncService.upstreamStatus(userId)).thenReturn(new LibreUpstreamStatusDTO(true, "CLOSED", null));
+        when(cgmFreshness.newestReadingAt(userId)).thenReturn(java.util.Optional.of(readingAt));
+
+        mockMvc.perform(get("/api/libre/status").principal(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(true))
+                .andExpect(jsonPath("$.lastReadingAt").value(readingAt))
+                .andExpect(jsonPath("$.readingsStale").value(true));
+    }
+
+    @Test
+    @DisplayName("GET /status - a reading 5 min old is not stale")
+    void status_freshReadingIsNotStale() throws Exception {
+        when(libreLinkUpSyncService.upstreamStatus(userId)).thenReturn(new LibreUpstreamStatusDTO(true, "CLOSED", null));
+        when(cgmFreshness.newestReadingAt(userId))
+                .thenReturn(java.util.Optional.of(System.currentTimeMillis() - 5 * 60_000L));
+
+        mockMvc.perform(get("/api/libre/status").principal(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.readingsStale").value(false));
     }
 
     // -- POST /api/libre/auth/login --------------------------------------------
