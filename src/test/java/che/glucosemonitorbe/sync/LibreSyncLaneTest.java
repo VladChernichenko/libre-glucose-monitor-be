@@ -296,6 +296,65 @@ class LibreSyncLaneTest {
     }
 
     @Test
+    void onResultThrowsError_stillRequeues() {
+        Instant due = T0.plusSeconds(10);
+        UUID a = dueUserAt(due);
+        when(syncService.syncUser(a, false)).thenReturn(SyncResult.newData(1L));
+        doThrow(new AssertionError("fatal")).when(state).markNewData(any(), anyLong(), any(), any());
+        Instant now = T0.plusSeconds(11);
+        clock.set(now);
+        lane.pump(executor);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> executor.runAll())
+                .isInstanceOf(AssertionError.class);
+        assertThat(lane.inFlight()).isZero();
+        assertThat(lane.keyOf(a)).contains(SyncSlot.followingSlot(a, due, now));
+    }
+
+    @Test
+    void skippedNoCreds_removedFromMembers_thenReaddedByReconcile() {
+        Instant due = T0.plusSeconds(10);
+        UUID a = dueUserAt(due);
+        when(syncService.syncUser(a, false)).thenReturn(SyncResult.of(SyncOutcome.SKIPPED_NO_CREDS));
+        Instant now = T0.plusSeconds(11);
+        clock.set(now);
+        lane.pump(executor);
+        executor.runAll();
+        assertThat(lane.keyOf(a)).isEmpty();
+        // credentials restored: the user is still listed, the next reconcile re-adds it
+        lane.reconcile();
+        assertThat(lane.keyOf(a)).isPresent();
+        assertThat(lane.keyOf(a).get()).isAfter(now);
+    }
+
+    @Test
+    void reconcile_concurrentCall_returnsImmediately() throws Exception {
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        UUID a = UUID.randomUUID();
+        stored.put(a, T0.plusSeconds(100));
+        when(repo.findActiveLibreUserIdsWithCredentials()).thenAnswer(inv -> {
+            entered.countDown();
+            release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            return List.of(a);
+        });
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(lane::reconcile);
+            assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            pool.submit(lane::reconcile).get(2, java.util.concurrent.TimeUnit.SECONDS);
+            // second call returned without reading members again or writing a schedule
+            verify(repo, times(2)).findActiveLibreUserIdsWithCredentials(); // setUp + the blocked first call
+            verify(state, never()).schedule(any(), any());
+            release.countDown();
+            first.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(lane.keyOf(a)).isPresent();
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void reconcile_nullNextPoll_assignsFutureSlot() {
         UUID a = UUID.randomUUID();
         when(repo.findActiveLibreUserIdsWithCredentials()).thenReturn(List.of(a));

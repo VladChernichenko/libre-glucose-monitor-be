@@ -83,6 +83,18 @@ class LibreLinkUpControllerTest {
         verify(libreSyncLane).onForcedSync(userId, result);
     }
 
+    @Test
+    @DisplayName("POST /sync-now - lane bookkeeping failure still returns the sync outcome")
+    void syncNow_laneBookkeepingFails_stillReturnsOutcomeStatus() throws Exception {
+        che.glucosemonitorbe.sync.SyncResult result = che.glucosemonitorbe.sync.SyncResult.newData(42L);
+        when(libreLinkUpSyncService.syncUser(userId, true)).thenReturn(result);
+        doThrow(new RuntimeException("db down")).when(libreSyncLane).onForcedSync(userId, result);
+
+        mockMvc.perform(post("/api/libre/sync-now").principal(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("NEW_DATA"));
+    }
+
     // -- GET /api/libre/status --------------------------------------------------
 
     @Test

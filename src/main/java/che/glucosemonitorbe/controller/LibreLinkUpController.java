@@ -152,7 +152,11 @@ public class LibreLinkUpController {
         logger.info("User {} requested on-demand LibreLinkUp sync", authentication.getName());
 
         che.glucosemonitorbe.sync.SyncResult result = libreLinkUpSyncService.syncUser(uid, true);
-        libreSyncLane.onForcedSync(uid, result);
+        try {
+            libreSyncLane.onForcedSync(uid, result);
+        } catch (RuntimeException e) {
+            logger.warn("Lane bookkeeping after on-demand sync failed for user {}: {}", uid, e.toString());
+        }
         che.glucosemonitorbe.sync.SyncOutcome outcome = result.outcome();
         logger.info("On-demand LibreLinkUp sync for user {} -> {}", authentication.getName(), outcome);
 

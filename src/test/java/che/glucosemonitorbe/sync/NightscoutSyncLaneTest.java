@@ -132,13 +132,50 @@ class NightscoutSyncLaneTest {
 
     @Test
     void nightscoutError_doesNotPauseLibre() {
-        LibreSyncLane libreLane = new LibreSyncLane(repo, mock(LibreLinkUpSyncService.class), state, clock);
-        UUID a = nsUserAt(T0.plusSeconds(10));
-        when(syncService.syncUser(a)).thenReturn(SyncResult.of(SyncOutcome.RATE_LIMITED));
-        clock.set(T0.plusSeconds(12));
+        LibreLinkUpSyncService libreService = mock(LibreLinkUpSyncService.class);
+        LibreSyncLane libreLane = new LibreSyncLane(repo, libreService, state, clock);
+        UUID libreUser = UUID.randomUUID();
+        stored.put(libreUser, T0.plusSeconds(10));
+        libreIds.add(libreUser);
+        when(repo.findActiveLibreUserIdsWithCredentials()).thenReturn(List.of(libreUser));
+        when(libreService.syncUser(libreUser, false)).thenReturn(SyncResult.of(SyncOutcome.NO_CHANGE));
+        libreLane.reconcile(); // startup: the Libre user is due immediately
+
+        Instant due = T0.plusSeconds(10);
+        UUID a = nsUserAt(due);
+        when(syncService.syncUser(a)).thenReturn(SyncResult.of(SyncOutcome.ERROR));
+        Instant now = T0.plusSeconds(12);
+        clock.set(now);
         lane.pump(executor);
         executor.runAll();
+
+        Instant next = SyncSlot.followingSlot(a, due, now);
+        verify(state).markError(a, ldt(now), ldt(next));
+        assertThat(lane.keyOf(a)).contains(next);
+
+        ManualExecutor libreExecutor = new ManualExecutor();
+        libreLane.pump(libreExecutor);
+        assertThat(libreLane.inFlight()).isEqualTo(1);
+        libreExecutor.runAll();
+        verify(libreService).syncUser(libreUser, false);
         assertThat(libreLane.pausedUntil()).isNull();
         assertThat(lane.pausedUntil()).isNull();
+    }
+
+    @Test
+    void startup_fewUsers_dueImmediately() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        stored.put(a, T0.plusSeconds(600));
+        nsIds.add(a);
+        nsIds.add(b);
+        NightscoutSyncLane startup = new NightscoutSyncLane(repo, syncService, state, clock);
+        startup.reconcile();
+        for (UUID id : List.of(a, b)) {
+            assertThat(startup.keyOf(id)).contains(T0);
+            verify(state).schedule(id, ldt(T0));
+        }
+        startup.pump(executor);
+        assertThat(startup.inFlight()).isEqualTo(2);
     }
 }

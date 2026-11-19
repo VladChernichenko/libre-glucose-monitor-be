@@ -177,11 +177,10 @@ app:
     scan-interval-ms: ${GLYCEMIC_EVENTS_SCAN_INTERVAL_MS:600000}
     window-minutes: 240
 
-  # Background Nightscout -> DB sync (stored chart data), every 5 minutes per user with active config
+  # Background glucose sync (stored chart data): a per-user 5-minute due-queue. The scheduler pumps
+  # every 1 s (starting due users, max 8 in flight) and reconciles lane membership every 60 s.
   glucose-sync:
     enabled: true
-    fixed-delay-ms: 300000
-    initial-delay-ms: 15000
     entry-count: 100
     pump-interval-ms: 1000
     reconcile-interval-ms: 60000

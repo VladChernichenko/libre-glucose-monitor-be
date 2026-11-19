@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -44,6 +45,7 @@ public abstract class SyncLane {
 
     private final Object lock = new Object();
     private final AtomicBoolean deciding = new AtomicBoolean(false);
+    private final AtomicBoolean reconciling = new AtomicBoolean(false);
 
     // ---- guarded by lock ----
     private final TreeSet<SyncPump.QueueEntry> heap = new TreeSet<>(SyncPump.ORDER);
@@ -70,8 +72,21 @@ public abstract class SyncLane {
      * Syncs membership with {@link #members()}: drops departed users, schedules new ones. On the first
      * call after construction, a lane with at most {@link #IMMEDIATE_STARTUP_MAX_USERS} members makes
      * every member due now (stored value ignored); afterwards new users get their next future slot.
+     * An empty first reconcile still consumes the startup-immediate chance ("startup only" by design).
+     * Single-flight: a concurrent call returns immediately.
      */
     public void reconcile() {
+        if (!reconciling.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            doReconcile();
+        } finally {
+            reconciling.set(false);
+        }
+    }
+
+    private void doReconcile() {
         Set<UUID> current = members();
         List<UUID> added = new ArrayList<>();
         boolean immediate;
@@ -146,7 +161,11 @@ public abstract class SyncLane {
                 try {
                     executor.execute(() -> complete(id, due, safeRun(id)));
                 } catch (RejectedExecutionException e) {
-                    log.warn("{} sync: executor rejected user {}", name, id);
+                    if (executor instanceof ExecutorService es && es.isShutdown()) {
+                        log.debug("{} sync: executor shut down, requeued user {}", name, id);
+                    } else {
+                        log.warn("{} sync: executor rejected user {}", name, id);
+                    }
                     synchronized (lock) {
                         inFlight.remove(id);
                         if (members.contains(id)) {
@@ -173,22 +192,30 @@ public abstract class SyncLane {
     private void complete(UUID id, Instant dueAt, SyncResult r) {
         Instant now = clock.instant();
         Instant key = null;
+        Error fatal = null;
         try {
             key = onResult(id, dueAt, r, now);
-        } catch (RuntimeException e) {
-            log.warn("{} sync: recording outcome for user {} failed: {}", name, id, e.toString());
+        } catch (Throwable t) {
+            log.warn("{} sync: recording outcome for user {} failed: {}", name, id, t.toString());
             key = SyncSlot.followingSlot(id, dueAt, now);
-        } finally {
-            synchronized (lock) {
-                inFlight.remove(id);
-                if (members.contains(id) && key != null) {
-                    // A lock miss writes nothing: the DB value stays dueAt.
-                    dbDue.put(id, r.outcome() == SyncOutcome.IN_PROGRESS ? dueAt : key);
-                    putKey(id, key);
-                } else if (key == null) {
-                    dbDue.remove(id);
-                }
+            if (t instanceof Error err) {
+                fatal = err;
             }
+        }
+        synchronized (lock) {
+            inFlight.remove(id);
+            if (members.contains(id) && key != null) {
+                // A lock miss writes nothing: the DB value stays dueAt.
+                dbDue.put(id, r.outcome() == SyncOutcome.IN_PROGRESS ? dueAt : key);
+                putKey(id, key);
+            } else if (key == null) {
+                // No credentials: leave membership so the next reconcile re-adds the user once restored.
+                members.remove(id);
+                dbDue.remove(id);
+            }
+        }
+        if (fatal != null) {
+            throw fatal;
         }
     }
 
