@@ -41,6 +41,7 @@ class LibreLinkUpControllerTest {
     @Mock UserDataSourceConfigService dataSourceConfigService;
     @Mock che.glucosemonitorbe.service.LibreLinkUpSyncService libreLinkUpSyncService;
     @Mock che.glucosemonitorbe.assistant.common.CgmFreshnessService cgmFreshness;
+    @Mock che.glucosemonitorbe.sync.LibreSyncLane libreSyncLane;
 
     @InjectMocks LibreLinkUpController controller;
 
@@ -68,6 +69,18 @@ class LibreLinkUpControllerTest {
         mockMvc.perform(post("/api/libre/sync-now").principal(auth))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.outcome").value("RATE_LIMITED"));
+    }
+
+    @Test
+    @DisplayName("POST /sync-now - notifies the Libre lane with the result")
+    void syncNow_notifiesLane() throws Exception {
+        che.glucosemonitorbe.sync.SyncResult result = che.glucosemonitorbe.sync.SyncResult.newData(42L);
+        when(libreLinkUpSyncService.syncUser(userId, true)).thenReturn(result);
+
+        mockMvc.perform(post("/api/libre/sync-now").principal(auth))
+                .andExpect(status().isOk());
+
+        verify(libreSyncLane).onForcedSync(userId, result);
     }
 
     // -- GET /api/libre/status --------------------------------------------------

@@ -217,6 +217,19 @@ public abstract class SyncLane {
         }
     }
 
+    /**
+     * Moves a member that is neither in flight nor departed to {@code key} (also the DB value just
+     * written). An in-flight user is left alone: its completion sets the key.
+     */
+    protected void rekeyIfIdle(UUID id, Instant key) {
+        synchronized (lock) {
+            if (members.contains(id) && !inFlight.contains(id)) {
+                dbDue.put(id, key);
+                putKey(id, key);
+            }
+        }
+    }
+
     private void maybeLogLag(Instant now) {
         if (inFlight.size() < MAX_IN_FLIGHT || heap.isEmpty()) {
             return;

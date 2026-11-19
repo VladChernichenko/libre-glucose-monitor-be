@@ -307,4 +307,59 @@ class LibreSyncLaneTest {
         dueUserAt(T0.plusSeconds(10));
         verify(state, never()).schedule(any(), any());
     }
+
+    @Test
+    void forcedSync_setsNextPollAtLeast300Out() {
+        UUID a = dueUserAt(T0.plusSeconds(100));
+        Instant now = T0.plusSeconds(20);
+        clock.set(now);
+        lane.onForcedSync(a, SyncResult.newData(456L));
+
+        Instant expected = SyncSlot.slotAtLeast300After(a, now);
+        assertThat(expected).isAfterOrEqualTo(now.plusSeconds(300));
+        assertThat(SyncSlot.slotAtOrAfter(a, expected)).isEqualTo(expected);
+        verify(state).markNewData(a, 456L, ldt(now), ldt(expected));
+        assertThat(lane.keyOf(a)).contains(expected);
+    }
+
+    @Test
+    void forcedSync_noChangeAndError_writeMatchingMark() {
+        UUID a = dueUserAt(T0.plusSeconds(100));
+        UUID b = dueUserAt(T0.plusSeconds(100));
+        lane.onForcedSync(a, SyncResult.of(SyncOutcome.NO_CHANGE));
+        lane.onForcedSync(b, SyncResult.of(SyncOutcome.ERROR));
+        verify(state).markNoChange(a, ldt(T0), ldt(SyncSlot.slotAtLeast300After(a, T0)));
+        verify(state).markError(b, ldt(T0), ldt(SyncSlot.slotAtLeast300After(b, T0)));
+    }
+
+    @Test
+    void forcedSync_rateLimited_pausesLane() {
+        UUID a = dueUserAt(T0.plusSeconds(100));
+        lane.onForcedSync(a, SyncResult.of(SyncOutcome.RATE_LIMITED));
+        assertThat(lane.pausedUntil()).isEqualTo(T0.plusSeconds(60));
+        Instant expected = SyncSlot.slotAtLeast300After(a, T0);
+        verify(state).markError(a, ldt(T0), ldt(expected));
+        assertThat(lane.keyOf(a)).contains(expected);
+    }
+
+    @Test
+    void forcedSync_inFlight_writesDbButLeavesHeap() {
+        UUID a = dueUserAt(T0.plusSeconds(10));
+        clock.set(T0.plusSeconds(10));
+        lane.pump(executor);
+        assertThat(lane.inFlight()).isEqualTo(1);
+        lane.onForcedSync(a, SyncResult.of(SyncOutcome.NO_CHANGE));
+        verify(state).markNoChange(eq(a), any(), any());
+        assertThat(lane.keyOf(a)).isEmpty();
+    }
+
+    @Test
+    void forcedSync_inProgressAndNoCreds_noOp() {
+        UUID a = dueUserAt(T0.plusSeconds(100));
+        lane.onForcedSync(a, SyncResult.of(SyncOutcome.IN_PROGRESS));
+        lane.onForcedSync(a, SyncResult.of(SyncOutcome.SKIPPED_NO_CREDS));
+        verify(state, never()).markError(any(), any(), any());
+        verify(state, never()).markNoChange(any(), any(), any());
+        assertThat(lane.keyOf(a)).contains(T0.plusSeconds(100));
+    }
 }

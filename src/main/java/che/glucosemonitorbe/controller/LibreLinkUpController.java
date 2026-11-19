@@ -34,6 +34,7 @@ public class LibreLinkUpController {
     private final UserService userService;
     private final UserDataSourceConfigService dataSourceConfigService;
     private final che.glucosemonitorbe.assistant.common.CgmFreshnessService cgmFreshness;
+    private final che.glucosemonitorbe.sync.LibreSyncLane libreSyncLane;
 
     /** Resolve the UUID for the currently authenticated user. */
     private UUID userId(Authentication authentication) {
@@ -150,7 +151,9 @@ public class LibreLinkUpController {
         UUID uid = userId(authentication);
         logger.info("User {} requested on-demand LibreLinkUp sync", authentication.getName());
 
-        che.glucosemonitorbe.sync.SyncOutcome outcome = libreLinkUpSyncService.syncUser(uid, true).outcome();
+        che.glucosemonitorbe.sync.SyncResult result = libreLinkUpSyncService.syncUser(uid, true);
+        libreSyncLane.onForcedSync(uid, result);
+        che.glucosemonitorbe.sync.SyncOutcome outcome = result.outcome();
         logger.info("On-demand LibreLinkUp sync for user {} -> {}", authentication.getName(), outcome);
 
         HttpStatus status = switch (outcome) {

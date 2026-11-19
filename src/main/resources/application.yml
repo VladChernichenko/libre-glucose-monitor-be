@@ -183,6 +183,8 @@ app:
     fixed-delay-ms: 300000
     initial-delay-ms: 15000
     entry-count: 100
+    pump-interval-ms: 1000
+    reconcile-interval-ms: 60000
 
 management:
   endpoints:

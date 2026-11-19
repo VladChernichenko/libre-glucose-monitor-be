@@ -18,7 +18,6 @@ public class UserGlucoseSyncStateService {
     public static final String STATUS_NEW_DATA = "NEW_DATA";
     public static final String STATUS_NO_CHANGE = "NO_CHANGE";
     public static final String STATUS_ERROR = "ERROR";
-    public static final String STATUS_SKIPPED_BACKOFF = "SKIPPED_BACKOFF";
 
     private final UserGlucoseSyncStateRepository repository;
 
@@ -47,15 +46,6 @@ public class UserGlucoseSyncStateService {
                                 .build());
             }
         });
-    }
-
-    @Transactional
-    public void markSkippedBackoff(UUID userId, LocalDateTime now) {
-        UserGlucoseSyncState state = getOrCreate(userId);
-        state.setLastCheckedAt(now);
-        state.setLastStatus(STATUS_SKIPPED_BACKOFF);
-        state.setUpdatedAt(now);
-        repository.save(state);
     }
 
     @Transactional

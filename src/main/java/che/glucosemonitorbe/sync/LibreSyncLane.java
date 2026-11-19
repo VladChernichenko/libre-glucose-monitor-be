@@ -49,6 +49,36 @@ public class LibreSyncLane extends SyncLane {
         return syncService.syncUser(userId, false);
     }
 
+    /**
+     * Records an on-demand (sync-now) result: next poll at least 300 s out on the user's grid
+     * (a 429 also pauses the lane for 60 s, and the key is the later of the two). DB writes happen
+     * outside the lane lock; the heap key is only moved when the user is not in flight.
+     */
+    public void onForcedSync(UUID userId, SyncResult result) {
+        if (result == null) {
+            return;
+        }
+        Instant now = clock.instant();
+        Instant key = SyncSlot.slotAtLeast300After(userId, now);
+        switch (result.outcome()) {
+            case NEW_DATA -> state.markNewData(userId,
+                    result.newestTimestamp() == null ? 0L : result.newestTimestamp(), toLocal(now), toLocal(key));
+            case NO_CHANGE -> state.markNoChange(userId, toLocal(now), toLocal(key));
+            case ERROR, UNAVAILABLE -> state.markError(userId, toLocal(now), toLocal(key));
+            case RATE_LIMITED -> {
+                Instant pause = extendPause(now.plus(RATE_LIMIT_PAUSE));
+                if (pause.isAfter(key)) {
+                    key = pause;
+                }
+                state.markError(userId, toLocal(now), toLocal(key));
+            }
+            default -> {
+                return;
+            }
+        }
+        rekeyIfIdle(userId, key);
+    }
+
     @Override
     protected Instant onResult(UUID id, Instant dueAt, SyncResult r, Instant now) {
         switch (r.outcome()) {
