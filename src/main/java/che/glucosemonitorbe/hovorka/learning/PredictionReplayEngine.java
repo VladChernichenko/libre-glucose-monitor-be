@@ -163,6 +163,8 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
     private final long[] cgmT;
     private final double[] cgmG;
     private final List<AnchorContext> anchors;
+    /** Events sorted by time, kept so an anchor can be assembled at any instant (see {@link #replayAt}). */
+    private final List<Event> sortedEvents;
 
     /** Per-anchor inputs, assembled once (scale-independent). */
     private record AnchorContext(
@@ -227,6 +229,7 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
 
         List<Event> sortedEvents = new ArrayList<>(events);
         sortedEvents.sort((a, b) -> Long.compare(a.epochMs(), b.epochMs()));
+        this.sortedEvents = sortedEvents;
         this.anchors = prepareAnchors(sortedEvents);
     }
 
@@ -259,25 +262,44 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         TwinScales s = scales.clamped();
         List<AnchorSample> out = new ArrayList<>();
         for (AnchorContext a : anchors) {
-            HovorkaParameters p = applyScales(a.params(), s);
-            List<InsulinDose> doses = curve == null ? a.insulin() : reshaped(a, insulinCode, curve.clamped());
-            List<PredictionPointDTO> path = predictor.buildPredictionPath(
-                    p, rapidIob, settings, a.g0(), a.now(), a.carbs(), doses, a.longActing(),
-                    userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours, gains,
-                    s.isfScale(), a.trend());
-            long t0 = toEpochMs(a.now(), userZone);
-            for (PredictionPointDTO pt : path) {
-                int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
-                if (!isSampleHorizon(h)) continue;
-                Double actual = nearest(cgmT, cgmG, t0 + h * 60_000L, cfg.alignToleranceMs);
-                if (actual == null) continue;
-                // Unrounded: the fit differentiates this numerically with a 1e-3 step, and a value
-                // rounded to 0.1 mmol/L does not move under a step that small.
-                double predicted = pt.getRawPredictedGlucose() != null
-                        ? pt.getRawPredictedGlucose() : pt.getPredictedGlucose();
-                out.add(new AnchorSample(h, predicted, actual, a.g0(),
-                        a.regime(), pt.getTimestamp().getHour()));
-            }
+            out.addAll(samplesAt(a, s, gains, insulinCode, curve));
+        }
+        return out;
+    }
+
+    /**
+     * Run the model at one exact instant, which need not sit on the stride grid, and collect its
+     * (predicted, actual) samples. The anchor is assembled exactly as {@link #replay} assembles one
+     * (same events window, CGM trend and sampling), so the two cannot drift apart. Empty when no
+     * CGM reading lies within the alignment tolerance of {@code anchorEpochMs}.
+     */
+    public List<AnchorSample> replayAt(long anchorEpochMs, TwinScales scales) {
+        AnchorContext a = prepareAnchorAt(anchorEpochMs, sortedEvents);
+        if (a == null) return List.of();
+        return samplesAt(a, scales.clamped(), ActivityGains.NEUTRAL, null, null);
+    }
+
+    private List<AnchorSample> samplesAt(AnchorContext a, TwinScales s, ActivityGains gains,
+                                         String insulinCode, CurveScale curve) {
+        List<AnchorSample> out = new ArrayList<>();
+        HovorkaParameters p = applyScales(a.params(), s);
+        List<InsulinDose> doses = curve == null ? a.insulin() : reshaped(a, insulinCode, curve.clamped());
+        List<PredictionPointDTO> path = predictor.buildPredictionPath(
+                p, rapidIob, settings, a.g0(), a.now(), a.carbs(), doses, a.longActing(),
+                userId, cfg.horizonMin, activityProvider, cfg.basalDurationHours, gains,
+                s.isfScale(), a.trend());
+        long t0 = toEpochMs(a.now(), userZone);
+        for (PredictionPointDTO pt : path) {
+            int h = (int) Duration.between(a.now(), pt.getTimestamp()).toMinutes();
+            if (!isSampleHorizon(h)) continue;
+            Double actual = nearest(cgmT, cgmG, t0 + h * 60_000L, cfg.alignToleranceMs);
+            if (actual == null) continue;
+            // Unrounded: the fit differentiates this numerically with a 1e-3 step, and a value
+            // rounded to 0.1 mmol/L does not move under a step that small.
+            double predicted = pt.getRawPredictedGlucose() != null
+                    ? pt.getRawPredictedGlucose() : pt.getPredictedGlucose();
+            out.add(new AnchorSample(h, predicted, actual, a.g0(),
+                    a.regime(), pt.getTimestamp().getHour()));
         }
         return out;
     }
@@ -299,83 +321,89 @@ public final class PredictionReplayEngine implements AnchorSampleSource {
         int step = Math.max(1, (int) Math.ceil(candidates.size() / (double) cfg.maxAnchors));
 
         for (int idx = 0; idx < candidates.size(); idx += step) {
-            long t0 = candidates.get(idx);
-            Double g0 = nearest(cgmT, cgmG, t0, cfg.alignToleranceMs);
-            if (g0 == null) continue;
-            LocalDateTime now = toLdt(t0, userZone);
-
-            List<CarbsEntry> carbs = new ArrayList<>();
-            List<InsulinDose> insulin = new ArrayList<>();
-            List<String> insulinCodes = new ArrayList<>();
-            List<Note> longActing = new ArrayList<>();
-            boolean carbActive = false, insulinActive = false, onlyTrustedCorrections = true;
-
-            for (Event n : events) {
-                long age = t0 - n.epochMs();
-                boolean inPast   = age >= 0 && age <= 8 * 3600_000L;
-                boolean inFuture = age < 0 && -age <= horizonMs;
-                if (n.longActing()) {
-                    if (age >= 0 && age <= BASAL_LOOKBACK_MS) longActing.add(makeLongActing(n, userZone));
-                    continue;
-                }
-                if (!inPast && !inFuture) continue;
-
-                // Same entries the dashboard builds: a meal carries its GI, fiber, protein and fat
-                // into the gut model, and a carb-free note with macros (a salad or eggs eaten first)
-                // still counts, because its fiber and protein/fat act on the carbs that follow.
-                boolean hasMacros = n.protein() > 0 || n.fat() > 0 || n.fiber() > 0;
-                if (n.carbs() > 0 || (hasMacros && !n.rescue())) {
-                    CarbsEntry entry = CarbsEntry.builder()
-                            .timestamp(toLdt(n.epochMs(), userZone)).carbs(n.carbs()).build();
-                    if (n.rescue()) {
-                        // The marker is what makes the gut model use the rescue tMaxG rather than
-                        // the user's own; a rescue has one fixed profile and no macros.
-                        RescueCarbProfile.mark(entry);
-                    } else {
-                        if (n.gi() > 0) entry.setEstimatedGi(n.gi());
-                        entry.setFiber(n.fiber());
-                        entry.setProtein(n.protein());
-                        entry.setFat(n.fat());
-                    }
-                    carbs.add(entry);
-                }
-                if (n.insulin() > 0) {
-                    RapidInsulinIobParameters curve = cfg.curveByCode != null
-                            ? cfg.curveByCode.apply(n.insulinCode()) : null;
-                    insulin.add(InsulinDose.builder().timestamp(toLdt(n.epochMs(), userZone))
-                            .units(n.insulin()).type(InsulinDose.InsulinType.BOLUS)
-                            .diaHours(curve != null ? curve.diaHours() : null)
-                            .peakMinutes(curve != null ? curve.peakMinutes() : null)
-                            .build());
-                    insulinCodes.add(n.insulinCode());
-                }
-
-                boolean active = age <= 3 * 3600_000L && -age <= horizonMs;
-                if (active) {
-                    if (n.carbs() > 0 || n.protein() > 0 || n.fat() > 0) carbActive = true;
-                    if (n.insulin() > 0) {
-                        insulinActive = true;
-                        if (!isTrustedCorrection(n)) onlyTrustedCorrections = false;
-                    }
-                }
-            }
-
-            if (cfg.fpuEquiv) {
-                carbs = ProteinGluconeogenesis.withDelayedProteinGlucose(carbs);
-            }
-
-            Regime regime = carbActive ? Regime.MEAL
-                    : !insulinActive ? Regime.FASTING
-                    : onlyTrustedCorrections ? Regime.CORRECTION : Regime.INSULIN_ONLY;
-
-            // CGM trend at the anchor, as the dashboard receives it from the client: the slope
-            // over the preceding reading window. 0 when there is no earlier reading to take it from.
-            Double before = nearest(cgmT, cgmG, t0 - TREND_WINDOW_MIN * 60_000L, cfg.alignToleranceMs);
-            double trend = before == null ? 0.0 : (g0 - before) / TREND_WINDOW_MIN;
-            result.add(new AnchorContext(g0, now, carbs, insulin, insulinCodes, longActing, regime,
-                    baseParams, trend));
+            AnchorContext anchor = prepareAnchorAt(candidates.get(idx), events);
+            if (anchor != null) result.add(anchor);
         }
         return result;
+    }
+
+    /** The scale-independent inputs of one anchor, or null when no CGM reading is near {@code t0}. */
+    private AnchorContext prepareAnchorAt(long t0, List<Event> events) {
+        long horizonMs = cfg.horizonMin * 60_000L;
+        Double g0 = nearest(cgmT, cgmG, t0, cfg.alignToleranceMs);
+        if (g0 == null) return null;
+        LocalDateTime now = toLdt(t0, userZone);
+
+        List<CarbsEntry> carbs = new ArrayList<>();
+        List<InsulinDose> insulin = new ArrayList<>();
+        List<String> insulinCodes = new ArrayList<>();
+        List<Note> longActing = new ArrayList<>();
+        boolean carbActive = false, insulinActive = false, onlyTrustedCorrections = true;
+
+        for (Event n : events) {
+            long age = t0 - n.epochMs();
+            boolean inPast   = age >= 0 && age <= 8 * 3600_000L;
+            boolean inFuture = age < 0 && -age <= horizonMs;
+            if (n.longActing()) {
+                if (age >= 0 && age <= BASAL_LOOKBACK_MS) longActing.add(makeLongActing(n, userZone));
+                continue;
+            }
+            if (!inPast && !inFuture) continue;
+
+            // Same entries the dashboard builds: a meal carries its GI, fiber, protein and fat
+            // into the gut model, and a carb-free note with macros (a salad or eggs eaten first)
+            // still counts, because its fiber and protein/fat act on the carbs that follow.
+            boolean hasMacros = n.protein() > 0 || n.fat() > 0 || n.fiber() > 0;
+            if (n.carbs() > 0 || (hasMacros && !n.rescue())) {
+                CarbsEntry entry = CarbsEntry.builder()
+                        .timestamp(toLdt(n.epochMs(), userZone)).carbs(n.carbs()).build();
+                if (n.rescue()) {
+                    // The marker is what makes the gut model use the rescue tMaxG rather than
+                    // the user's own; a rescue has one fixed profile and no macros.
+                    RescueCarbProfile.mark(entry);
+                } else {
+                    if (n.gi() > 0) entry.setEstimatedGi(n.gi());
+                    entry.setFiber(n.fiber());
+                    entry.setProtein(n.protein());
+                    entry.setFat(n.fat());
+                }
+                carbs.add(entry);
+            }
+            if (n.insulin() > 0) {
+                RapidInsulinIobParameters curve = cfg.curveByCode != null
+                        ? cfg.curveByCode.apply(n.insulinCode()) : null;
+                insulin.add(InsulinDose.builder().timestamp(toLdt(n.epochMs(), userZone))
+                        .units(n.insulin()).type(InsulinDose.InsulinType.BOLUS)
+                        .diaHours(curve != null ? curve.diaHours() : null)
+                        .peakMinutes(curve != null ? curve.peakMinutes() : null)
+                        .build());
+                insulinCodes.add(n.insulinCode());
+            }
+
+            boolean active = age <= 3 * 3600_000L && -age <= horizonMs;
+            if (active) {
+                if (n.carbs() > 0 || n.protein() > 0 || n.fat() > 0) carbActive = true;
+                if (n.insulin() > 0) {
+                    insulinActive = true;
+                    if (!isTrustedCorrection(n)) onlyTrustedCorrections = false;
+                }
+            }
+        }
+
+        if (cfg.fpuEquiv) {
+            carbs = ProteinGluconeogenesis.withDelayedProteinGlucose(carbs);
+        }
+
+        Regime regime = carbActive ? Regime.MEAL
+                : !insulinActive ? Regime.FASTING
+                : onlyTrustedCorrections ? Regime.CORRECTION : Regime.INSULIN_ONLY;
+
+        // CGM trend at the anchor, as the dashboard receives it from the client: the slope
+        // over the preceding reading window. 0 when there is no earlier reading to take it from.
+        Double before = nearest(cgmT, cgmG, t0 - TREND_WINDOW_MIN * 60_000L, cfg.alignToleranceMs);
+        double trend = before == null ? 0.0 : (g0 - before) / TREND_WINDOW_MIN;
+        return new AnchorContext(g0, now, carbs, insulin, insulinCodes, longActing, regime,
+                baseParams, trend);
     }
 
     // -- Parameter helpers -------------------------------------------------------
