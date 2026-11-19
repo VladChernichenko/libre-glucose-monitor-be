@@ -59,6 +59,17 @@ class LibreLinkUpControllerTest {
                 "testuser", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
     }
 
+    @Test
+    @DisplayName("POST /sync-now - RATE_LIMITED maps to 429")
+    void syncNow_rateLimited_returns429() throws Exception {
+        when(libreLinkUpSyncService.syncUser(userId, true))
+                .thenReturn(che.glucosemonitorbe.sync.SyncResult.of(che.glucosemonitorbe.sync.SyncOutcome.RATE_LIMITED));
+
+        mockMvc.perform(post("/api/libre/sync-now").principal(auth))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.outcome").value("RATE_LIMITED"));
+    }
+
     // -- GET /api/libre/status --------------------------------------------------
 
     @Test

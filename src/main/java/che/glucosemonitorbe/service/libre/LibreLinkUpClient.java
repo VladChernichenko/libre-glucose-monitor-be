@@ -118,6 +118,6 @@ public class LibreLinkUpClient {
             msg += " - " + detail;
         }
         msg += extra;
-        return new RuntimeException(msg, e);
+        return code == 429 ? new LibreRateLimitedException(msg, e) : new RuntimeException(msg, e);
     }
 }

@@ -3,7 +3,7 @@ package che.glucosemonitorbe.scheduler;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.LibreLinkUpSyncService;
-import che.glucosemonitorbe.service.LibreLinkUpSyncService.Outcome;
+import che.glucosemonitorbe.sync.SyncOutcome;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,18 +78,18 @@ public class LibreLinkUpGlucoseSyncScheduler {
         }
         log.info("LibreLinkUp sync: {} user(s) with active LibreLinkUp config", userIds.size());
 
-        List<CompletableFuture<Outcome>> futures = new ArrayList<>(userIds.size());
+        List<CompletableFuture<SyncOutcome>> futures = new ArrayList<>(userIds.size());
         for (UUID userId : userIds) {
-            futures.add(CompletableFuture.supplyAsync(() -> syncService.syncUser(userId, false), syncExecutor));
+            futures.add(CompletableFuture.supplyAsync(() -> syncService.syncUser(userId, false).outcome(), syncExecutor));
         }
 
         SyncTally tally = awaitAndTally(futures, userIds.size());
 
-        log.info("LibreLinkUp sync summary: users={}, completed={}, newData={}, noChange={}, skippedBackoff={}, "
+        log.info("LibreLinkUp sync summary: users={}, completed={}, newData={}, noChange={}, rateLimited={}, "
                         + "skippedNoCreds={}, inProgress={}, errors={}",
                 userIds.size(), tally.completed(),
-                tally.get(Outcome.NEW_DATA), tally.get(Outcome.NO_CHANGE), tally.get(Outcome.SKIPPED_BACKOFF),
-                tally.get(Outcome.SKIPPED_NO_CREDS), tally.get(Outcome.IN_PROGRESS), tally.get(Outcome.ERROR));
+                tally.get(SyncOutcome.NEW_DATA), tally.get(SyncOutcome.NO_CHANGE), tally.get(SyncOutcome.RATE_LIMITED),
+                tally.get(SyncOutcome.SKIPPED_NO_CREDS), tally.get(SyncOutcome.IN_PROGRESS), tally.get(SyncOutcome.ERROR));
     }
 
     /**
@@ -99,7 +99,7 @@ public class LibreLinkUpGlucoseSyncScheduler {
      * RestTemplate's own connect/read timeouts, but it stops them from racing the result computed
      * here).
      */
-    SyncTally awaitAndTally(List<CompletableFuture<Outcome>> futures, int totalUsers) {
+    SyncTally awaitAndTally(List<CompletableFuture<SyncOutcome>> futures, int totalUsers) {
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                     .get(syncTimeoutMs, TimeUnit.MILLISECONDS);
@@ -116,9 +116,9 @@ public class LibreLinkUpGlucoseSyncScheduler {
             log.warn("LibreLinkUp sync: unexpected error in a user sync task", e.getCause());
         }
 
-        Map<Outcome, Long> counts = new EnumMap<>(Outcome.class);
+        Map<SyncOutcome, Long> counts = new EnumMap<>(SyncOutcome.class);
         long completed = 0;
-        for (CompletableFuture<Outcome> future : futures) {
+        for (CompletableFuture<SyncOutcome> future : futures) {
             if (future.isDone() && !future.isCompletedExceptionally()) {
                 counts.merge(future.getNow(null), 1L, Long::sum);
                 completed++;
@@ -128,8 +128,8 @@ public class LibreLinkUpGlucoseSyncScheduler {
     }
 
     /** Per-tick outcome tally. {@link #counts} only includes futures that completed normally. */
-    record SyncTally(long completed, Map<Outcome, Long> counts) {
-        long get(Outcome outcome) {
+    record SyncTally(long completed, Map<SyncOutcome, Long> counts) {
+        long get(SyncOutcome outcome) {
             return counts.getOrDefault(outcome, 0L);
         }
     }

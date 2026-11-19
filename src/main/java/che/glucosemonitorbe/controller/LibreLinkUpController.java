@@ -142,6 +142,7 @@ public class LibreLinkUpController {
             @ApiResponse(responseCode = "200", description = "Sync completed (new or unchanged data)"),
             @ApiResponse(responseCode = "202", description = "A sync for this user is already in progress"),
             @ApiResponse(responseCode = "409", description = "No LibreLinkUp credentials configured"),
+            @ApiResponse(responseCode = "429", description = "LibreLinkUp rate-limited the request"),
             @ApiResponse(responseCode = "502", description = "Sync failed (auth/network error)")
     })
     @PostMapping("/sync-now")
@@ -149,15 +150,16 @@ public class LibreLinkUpController {
         UUID uid = userId(authentication);
         logger.info("User {} requested on-demand LibreLinkUp sync", authentication.getName());
 
-        LibreLinkUpSyncService.Outcome outcome = libreLinkUpSyncService.syncUser(uid, true);
+        che.glucosemonitorbe.sync.SyncOutcome outcome = libreLinkUpSyncService.syncUser(uid, true).outcome();
         logger.info("On-demand LibreLinkUp sync for user {} -> {}", authentication.getName(), outcome);
 
         HttpStatus status = switch (outcome) {
-            case NEW_DATA, NO_CHANGE, SKIPPED_BACKOFF -> HttpStatus.OK;
+            case NEW_DATA, NO_CHANGE                  -> HttpStatus.OK;
             case IN_PROGRESS                          -> HttpStatus.ACCEPTED;
             case SKIPPED_NO_CREDS                     -> HttpStatus.CONFLICT;
             case ERROR                                -> HttpStatus.BAD_GATEWAY;
             case UNAVAILABLE                          -> HttpStatus.SERVICE_UNAVAILABLE;
+            case RATE_LIMITED                         -> HttpStatus.TOO_MANY_REQUESTS;
         };
         return ResponseEntity.status(status).body(java.util.Map.of("outcome", outcome.name()));
     }

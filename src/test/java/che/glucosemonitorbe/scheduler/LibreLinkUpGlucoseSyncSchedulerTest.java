@@ -3,7 +3,8 @@ package che.glucosemonitorbe.scheduler;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.LibreLinkUpSyncService;
-import che.glucosemonitorbe.service.LibreLinkUpSyncService.Outcome;
+import che.glucosemonitorbe.sync.SyncOutcome;
+import che.glucosemonitorbe.sync.SyncResult;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,8 +65,8 @@ class LibreLinkUpGlucoseSyncSchedulerTest {
         when(configRepository.findDistinctUserIdsByDataSourceAndIsActiveTrue(
                 UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP))
                 .thenReturn(List.of(u1, u2));
-        when(syncService.syncUser(u1, false)).thenReturn(Outcome.NEW_DATA);
-        when(syncService.syncUser(u2, false)).thenReturn(Outcome.SKIPPED_NO_CREDS);
+        when(syncService.syncUser(u1, false)).thenReturn(SyncResult.of(SyncOutcome.NEW_DATA));
+        when(syncService.syncUser(u2, false)).thenReturn(SyncResult.of(SyncOutcome.SKIPPED_NO_CREDS));
 
         assertTimeoutPreemptively(Duration.ofSeconds(2), scheduler::syncLibreForAllUsers);
 
@@ -75,16 +76,16 @@ class LibreLinkUpGlucoseSyncSchedulerTest {
 
     @Test
     void awaitAndTally_excludesAndCancelsTasksStillRunningAtDeadline() {
-        CompletableFuture<Outcome> completed = CompletableFuture.completedFuture(Outcome.NEW_DATA);
-        CompletableFuture<Outcome> stillRunning = new CompletableFuture<>();
+        CompletableFuture<SyncOutcome> completed = CompletableFuture.completedFuture(SyncOutcome.NEW_DATA);
+        CompletableFuture<SyncOutcome> stillRunning = new CompletableFuture<>();
 
         LibreLinkUpGlucoseSyncScheduler.SyncTally tally = assertTimeoutPreemptively(
                 Duration.ofSeconds(2),
                 () -> scheduler.awaitAndTally(List.of(completed, stillRunning), 2));
 
         assertThat(tally.completed()).isEqualTo(1);
-        assertThat(tally.get(Outcome.NEW_DATA)).isEqualTo(1);
-        assertThat(tally.get(Outcome.ERROR)).isEqualTo(0);
+        assertThat(tally.get(SyncOutcome.NEW_DATA)).isEqualTo(1);
+        assertThat(tally.get(SyncOutcome.ERROR)).isEqualTo(0);
         assertThat(stillRunning.isCancelled()).isTrue();
     }
 
@@ -99,9 +100,9 @@ class LibreLinkUpGlucoseSyncSchedulerTest {
         CountDownLatch release = new CountDownLatch(1);
         when(syncService.syncUser(slowUser, false)).thenAnswer(invocation -> {
             release.await(5, TimeUnit.SECONDS);
-            return Outcome.NEW_DATA;
+            return SyncResult.of(SyncOutcome.NEW_DATA);
         });
-        when(syncService.syncUser(fastUser, false)).thenReturn(Outcome.NO_CHANGE);
+        when(syncService.syncUser(fastUser, false)).thenReturn(SyncResult.of(SyncOutcome.NO_CHANGE));
 
         assertTimeoutPreemptively(Duration.ofSeconds(2), scheduler::syncLibreForAllUsers);
 

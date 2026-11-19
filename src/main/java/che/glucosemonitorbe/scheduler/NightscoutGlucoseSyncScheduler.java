@@ -140,7 +140,7 @@ public class NightscoutGlucoseSyncScheduler {
                     }
                 } catch (Exception e) {
                     usersErrored.incrementAndGet();
-                    syncStateService.markError(userId, now);
+                    syncStateService.markError(userId, now, now.plusMinutes(5));
                     log.warn("Glucose sync failed for user {}: {}", userId, e.getMessage());
                 }
             }, syncExecutor));

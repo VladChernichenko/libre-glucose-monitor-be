@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
+import che.glucosemonitorbe.sync.SyncOutcome;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
 import che.glucosemonitorbe.dto.LibreGlucoseData;
@@ -50,8 +51,6 @@ class LibreLinkUpSyncServiceCircuitTest {
     @BeforeEach
     void wire() {
         userId = UUID.randomUUID();
-        ReflectionTestUtils.setField(sut, "fastIntervalMinutes", 5L);
-        ReflectionTestUtils.setField(sut, "slowIntervalMinutes", 15L);
         when(syncStateService.getOrCreate(userId)).thenReturn(UserGlucoseSyncState.builder().build());
         when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
                 eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)))
@@ -74,7 +73,7 @@ class LibreLinkUpSyncServiceCircuitTest {
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
                 .thenThrow(new RuntimeException("connect timed out"));
 
-        assertThat(sut.syncUser(userId, false)).isEqualTo(LibreLinkUpSyncService.Outcome.ERROR);
+        assertThat(sut.syncUser(userId, false).outcome()).isEqualTo(SyncOutcome.ERROR);
 
         LibreUpstreamStatusDTO status = sut.upstreamStatus(userId);
         assertThat(status.available()).isFalse();
@@ -88,10 +87,10 @@ class LibreLinkUpSyncServiceCircuitTest {
                 .thenThrow(new RuntimeException("503 Service Unavailable"));
 
         for (int i = 0; i < LibreLinkUpSyncService.UPSTREAM_FAILURE_THRESHOLD; i++) {
-            assertThat(sut.syncUser(userId, false)).isEqualTo(LibreLinkUpSyncService.Outcome.ERROR);
+            assertThat(sut.syncUser(userId, false).outcome()).isEqualTo(SyncOutcome.ERROR);
         }
 
-        assertThat(sut.syncUser(userId, false)).isEqualTo(LibreLinkUpSyncService.Outcome.UNAVAILABLE);
+        assertThat(sut.syncUser(userId, false).outcome()).isEqualTo(SyncOutcome.UNAVAILABLE);
         verify(libreLinkUpService, times(LibreLinkUpSyncService.UPSTREAM_FAILURE_THRESHOLD))
                 .getGlucoseData(any(), anyInt(), eq(userId));
 
@@ -112,7 +111,7 @@ class LibreLinkUpSyncServiceCircuitTest {
         sut.syncUser(userId, false);
         assertThat(sut.upstreamStatus(userId).available()).isFalse();
 
-        assertThat(sut.syncUser(userId, false)).isEqualTo(LibreLinkUpSyncService.Outcome.NEW_DATA);
+        assertThat(sut.syncUser(userId, false).outcome()).isEqualTo(SyncOutcome.NEW_DATA);
         assertThat(sut.upstreamStatus(userId).available()).isTrue();
     }
 
@@ -122,7 +121,7 @@ class LibreLinkUpSyncServiceCircuitTest {
         doThrow(new RuntimeException("LibreLinkUp authentication failed: connect timed out"))
                 .when(libreLinkUpService).ensureSession(userId);
 
-        assertThat(sut.syncUser(userId, false)).isEqualTo(LibreLinkUpSyncService.Outcome.ERROR);
+        assertThat(sut.syncUser(userId, false).outcome()).isEqualTo(SyncOutcome.ERROR);
         assertThat(sut.upstreamStatus(userId).available()).isFalse();
     }
 

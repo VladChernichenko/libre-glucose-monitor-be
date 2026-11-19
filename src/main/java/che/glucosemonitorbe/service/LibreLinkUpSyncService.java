@@ -11,6 +11,10 @@ import che.glucosemonitorbe.dto.LibreUpstreamStatusDTO;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.libre.LibreLinkUpTrend;
+import che.glucosemonitorbe.service.libre.LibreRateLimitedException;
+import che.glucosemonitorbe.sync.SyncOutcome;
+import che.glucosemonitorbe.sync.SyncResult;
+import org.springframework.web.client.HttpClientErrorException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +23,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -34,9 +39,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>Used by two callers:
  * <ul>
  *   <li>{@code LibreLinkUpGlucoseSyncScheduler} - periodic background sync ({@code force = false},
- *       respects per-user backoff).</li>
+ *       next poll is decided by the caller).</li>
  *   <li>{@code LibreLinkUpController#syncNow} - on-demand sync triggered by the iOS refresh button
- *       ({@code force = true}, bypasses backoff).</li>
+ *       ({@code force = true}, coalesced).</li>
  * </ul>
  *
  * <p><b>Concurrency.</b> Each user has a dedicated {@link ReentrantLock}, so:
@@ -54,23 +59,6 @@ import java.util.concurrent.locks.ReentrantLock;
 @RequiredArgsConstructor
 public class LibreLinkUpSyncService {
 
-    public enum Outcome {
-        /** New readings were fetched and stored. */
-        NEW_DATA,
-        /** Sync ran but no newer readings than last time (or none returned). */
-        NO_CHANGE,
-        /** Periodic sync skipped because the per-user backoff window has not elapsed. */
-        SKIPPED_BACKOFF,
-        /** No usable LibreLinkUp credentials / patientId stored for the user. */
-        SKIPPED_NO_CREDS,
-        /** Another sync for this user is already running and could not be coalesced in time. */
-        IN_PROGRESS,
-        /** Sync failed (auth/network/decrypt error). */
-        ERROR,
-        /** LibreLinkUp failed repeatedly; the upstream circuit is open and the call was not attempted. */
-        UNAVAILABLE
-    }
-
     /** Consecutive failed LibreLinkUp fetches that open the upstream circuit. */
     static final int UPSTREAM_FAILURE_THRESHOLD = 3;
     /** How long an open upstream circuit rejects calls before allowing one reconnect attempt. */
@@ -83,12 +71,6 @@ public class LibreLinkUpSyncService {
     private final CgmReadingService cgmReadingService;
     private final UserGlucoseSyncStateService syncStateService;
     private final CircuitBreakerManager circuitBreakerManager;
-
-    @Value("${app.libre-sync.fast-interval-minutes:5}")
-    private long fastIntervalMinutes;
-
-    @Value("${app.libre-sync.slow-interval-minutes:15}")
-    private long slowIntervalMinutes;
 
     /** How long an on-demand request waits for an in-flight sync of the same user before giving up. */
     @Value("${app.libre-sync.on-demand-wait-seconds:25}")
@@ -134,11 +116,11 @@ public class LibreLinkUpSyncService {
      * Sync a single user's LibreLinkUp readings into chart storage.
      *
      * @param userId the user to sync
-     * @param force  {@code true} for on-demand (ignore backoff, wait for any in-flight sync of the
-     *               same user); {@code false} for the scheduler (respect backoff, skip if busy)
-     * @return the {@link Outcome} of the attempt
+     * @param force  {@code true} for on-demand (wait for any in-flight sync of the
+     *               same user); {@code false} for the scheduler (skip if busy)
+     * @return the {@link SyncResult} of the attempt; this never writes {@code next_poll_at} (the caller does)
      */
-    public Outcome syncUser(UUID userId, boolean force) {
+    public SyncResult syncUser(UUID userId, boolean force) {
         ReentrantLock lock = lockFor(userId);
         boolean acquired;
         try {
@@ -148,11 +130,11 @@ public class LibreLinkUpSyncService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("LibreLinkUp sync user={} interrupted while waiting for lock", userId);
-            return Outcome.ERROR;
+            return SyncResult.of(SyncOutcome.ERROR);
         }
         if (!acquired) {
             log.debug("LibreLinkUp sync user={} skipped: another sync in progress (force={})", userId, force);
-            return Outcome.IN_PROGRESS;
+            return SyncResult.of(SyncOutcome.IN_PROGRESS);
         }
         try {
             // Coalesce rapid on-demand requests: if we just synced this user, the cache is already
@@ -163,11 +145,11 @@ public class LibreLinkUpSyncService {
                         && Duration.between(last, Instant.now()).getSeconds() < onDemandMinIntervalSeconds) {
                     log.debug("LibreLinkUp on-demand sync user={} coalesced (last forced sync {}s ago)",
                             userId, Duration.between(last, Instant.now()).getSeconds());
-                    return Outcome.NO_CHANGE;
+                    return SyncResult.of(SyncOutcome.NO_CHANGE);
                 }
             }
 
-            Outcome outcome = doSync(userId, force, LocalDateTime.now());
+            SyncResult outcome = doSync(userId, force);
             if (force) {
                 lastForcedSyncAt.put(userId, Instant.now());
             }
@@ -178,17 +160,9 @@ public class LibreLinkUpSyncService {
     }
 
     /** The actual fetch+store. Always called while holding this user's lock. */
-    private Outcome doSync(UUID userId, boolean force, LocalDateTime now) {
+    private SyncResult doSync(UUID userId, boolean force) {
         try {
             UserGlucoseSyncState state = syncStateService.getOrCreate(userId);
-
-            // Periodic syncs honour the adaptive backoff window; on-demand syncs ignore it.
-            if (!force && state.getNextPollAt() != null && now.isBefore(state.getNextPollAt())) {
-                syncStateService.markSkippedBackoff(userId, now);
-                log.debug("LibreLinkUp sync user={} skipped by backoff (nextPollAt={})",
-                        userId, state.getNextPollAt());
-                return Outcome.SKIPPED_BACKOFF;
-            }
 
             UserDataSourceConfig cfg = configRepository
                     .findByUserIdAndDataSourceAndIsActiveTrue(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)
@@ -196,7 +170,7 @@ public class LibreLinkUpSyncService {
             if (cfg == null || cfg.getLibreEmail() == null || cfg.getLibrePassword() == null
                     || cfg.getLibrePatientId() == null || cfg.getLibrePatientId().isBlank()) {
                 log.warn("LibreLinkUp sync user={} skipped: missing credentials or patientId in config", userId);
-                return Outcome.SKIPPED_NO_CREDS;
+                return SyncResult.of(SyncOutcome.SKIPPED_NO_CREDS);
             }
 
             LibreGlucoseData glucoseData;
@@ -204,12 +178,11 @@ public class LibreLinkUpSyncService {
                 glucoseData = upstreamBreaker(userId).execute(() -> fetchFromLibre(userId, cfg));
             } catch (CircuitBreakerException open) {
                 log.info("LibreLinkUp sync user={} skipped: upstream circuit is open", userId);
-                return Outcome.UNAVAILABLE;
+                return SyncResult.unavailable(retryAtInstant(userId));
             }
             if (glucoseData == null || glucoseData.getData() == null || glucoseData.getData().isEmpty()) {
-                syncStateService.markNoChange(userId, now, now.plusMinutes(slowIntervalMinutes));
                 log.info("LibreLinkUp sync user={} no readings returned", userId);
-                return Outcome.NO_CHANGE;
+                return SyncResult.of(SyncOutcome.NO_CHANGE);
             }
 
             // /graph always returns the ~12 h window. Keep only points after the last one
@@ -242,17 +215,15 @@ public class LibreLinkUpSyncService {
                     userId, graphCount, entries.size(),
                     state.getLastSeenEntryTimestamp());
             if (entries.isEmpty()) {
-                syncStateService.markNoChange(userId, now, now.plusMinutes(slowIntervalMinutes));
-                return Outcome.NO_CHANGE;
+                return SyncResult.of(SyncOutcome.NO_CHANGE);
             }
 
             cgmReadingService.storeChartData(userId, entries, CgmReading.DataSource.LIBRE_LINK_UP);
 
             long newestTs = entries.stream().mapToLong(NightscoutEntryDto::getDate).max().orElseThrow();
-            syncStateService.markNewData(userId, newestTs, now, now.plusMinutes(fastIntervalMinutes));
             log.info("LibreLinkUp sync user={} new data (readings={}, newestTs={}, force={})",
                     userId, entries.size(), newestTs, force);
-            return Outcome.NEW_DATA;
+            return SyncResult.newData(newestTs);
 
         } catch (Exception e) {
             // If the LLU API rejected the token (401 / "not authenticated"), evict it so the next
@@ -263,10 +234,26 @@ public class LibreLinkUpSyncService {
                 libreLinkUpService.logout(userId);
                 log.info("LibreLinkUp sync user={} - token rejected (401), evicted for re-auth", userId);
             }
-            syncStateService.markError(userId, now);
+            if (isRateLimited(e)) {
+                log.warn("LibreLinkUp sync user={} rate limited (HTTP 429): {}", userId, e.getMessage());
+                return SyncResult.of(SyncOutcome.RATE_LIMITED);
+            }
             log.warn("LibreLinkUp sync failed for user {}: {}", userId, e.getMessage());
-            return Outcome.ERROR;
+            return SyncResult.of(SyncOutcome.ERROR);
         }
+    }
+
+    private Instant retryAtInstant(UUID userId) {
+        LocalDateTime retryAt = upstreamBreaker(userId).getRetryAt();
+        return retryAt == null ? null : retryAt.atZone(ZoneId.systemDefault()).toInstant();
+    }
+
+    private static boolean isRateLimited(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof LibreRateLimitedException) return true;
+            if (t instanceof HttpClientErrorException h && h.getStatusCode().value() == 429) return true;
+        }
+        return false;
     }
 
     /** The LibreLinkUp calls themselves: re-authenticate if needed, then fetch the graph. */

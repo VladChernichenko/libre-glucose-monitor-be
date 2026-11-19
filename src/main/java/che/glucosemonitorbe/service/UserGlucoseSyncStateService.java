@@ -59,13 +59,12 @@ public class UserGlucoseSyncStateService {
     }
 
     @Transactional
-    public void markError(UUID userId, LocalDateTime now) {
+    public void markError(UUID userId, LocalDateTime checkedAt, LocalDateTime nextPollAt) {
         UserGlucoseSyncState state = getOrCreate(userId);
-        state.setLastCheckedAt(now);
+        state.setLastCheckedAt(checkedAt);
         state.setLastStatus(STATUS_ERROR);
-        state.setUpdatedAt(now);
-        // BUG C3 fix: set next poll time to backoff after error (5 min)
-        state.setNextPollAt(now.plusMinutes(5));
+        state.setUpdatedAt(checkedAt);
+        state.setNextPollAt(nextPollAt);
         repository.save(state);
     }
 

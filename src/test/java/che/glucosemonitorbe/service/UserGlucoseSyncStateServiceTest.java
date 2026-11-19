@@ -77,7 +77,8 @@ class UserGlucoseSyncStateServiceTest {
         when(repository.findByUserId(userId)).thenReturn(Optional.of(existing));
         when(repository.save(any(UserGlucoseSyncState.class))).thenAnswer(i -> i.getArgument(0));
 
-        service.markError(userId, now);
+        LocalDateTime nextPoll = now.plusMinutes(7);
+        service.markError(userId, now, nextPoll);
 
         ArgumentCaptor<UserGlucoseSyncState> captor = ArgumentCaptor.forClass(UserGlucoseSyncState.class);
         verify(repository, atLeastOnce()).save(captor.capture());
@@ -86,8 +87,7 @@ class UserGlucoseSyncStateServiceTest {
         // BUG: nextPollAt is null in current implementation - this FAILS
         assertThat(saved.getNextPollAt())
                 .as("markError must set nextPollAt to a future time for error backoff")
-                .isNotNull()
-                .isAfter(now);
+                .isEqualTo(nextPoll);
     }
 
     // -- C2: getOrCreate has a TOCTOU race condition ---------------------------
