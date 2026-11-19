@@ -71,7 +71,7 @@ class SyncLaneSimulationTest {
 
     private void addUsers(Instant storedNextPoll) {
         for (int i = 0; i < USERS; i++) {
-            UUID id = UUID.randomUUID();
+            UUID id = UUID.nameUUIDFromBytes(("user-" + i).getBytes());
             ids.add(id);
             if (storedNextPoll != null) {
                 stored.put(id, storedNextPoll);
@@ -81,10 +81,10 @@ class SyncLaneSimulationTest {
         lane.reconcile();
     }
 
-    /** One simulated second: finish running syncs, advance the clock, pump. */
+    /** One simulated second: syncs started earlier run for 1 s (finish at start+1s), then pump. */
     private void tick() {
-        executor.runAll();
         clock.set(clock.instant().plusSeconds(1));
+        executor.runAll();
         lane.pump(executor);
     }
 
@@ -103,13 +103,10 @@ class SyncLaneSimulationTest {
         }
 
         lane.pump(executor);
+        assertThat(lane.inFlight()).isLessThanOrEqualTo(SyncLane.MAX_IN_FLIGHT);
         executor.runAll();
 
-        assertThat(started.size()).isLessThanOrEqualTo(SyncLane.MAX_IN_FLIGHT);
-        for (UUID id : started) {
-            assertThat(stored.get(id)).as("started user must have been due").isNotNull();
-        }
-        // nothing is due at T0, so in fact nobody starts at the first pump
+        // nothing is due at T0 (all slots are in the future), so nobody starts at the first pump
         assertThat(started).isEmpty();
     }
 
@@ -147,18 +144,36 @@ class SyncLaneSimulationTest {
             return null;
         }).when(state).markNoChange(any(), any(), any());
 
+        int maxInFlight = 0;
         lane.pump(executor);
+        maxInFlight = Math.max(maxInFlight, lane.inFlight());
+        assertThat(executor.size()).isLessThanOrEqualTo(SyncLane.MAX_IN_FLIGHT);
         for (int s = 0; s < 300; s++) {
             tick();
+            assertThat(lane.inFlight()).isLessThanOrEqualTo(SyncLane.MAX_IN_FLIGHT);
+            assertThat(executor.size()).isLessThanOrEqualTo(SyncLane.MAX_IN_FLIGHT);
+            maxInFlight = Math.max(maxInFlight, lane.inFlight());
         }
+        assertThat(maxInFlight).as("burst saturates the lane").isEqualTo(SyncLane.MAX_IN_FLIGHT);
+
+        // after the last pump every user is either in flight (no key) or keyed strictly in the future
+        int keyless = 0;
+        for (UUID id : ids) {
+            if (lane.keyOf(id).isEmpty()) {
+                keyless++;
+            } else {
+                assertThat(lane.keyOf(id).get()).as("no overdue entry for %s", id).isAfter(clock.instant());
+            }
+        }
+        assertThat(keyless).isEqualTo(lane.inFlight());
 
         assertThat(burstStarts).hasSize(USERS);
         assertThat(burstStarts.values()).allMatch(c -> c == 1);
         for (UUID id : ids) {
             assertThat(completion.get(id)).isBeforeOrEqualTo(T0.plusSeconds(2 + 300));
             assertThat(actual.get(id)).as("stored next_poll_at for %s", id).isEqualTo(expected.get(id));
-            assertThat(lane.keyOf(id).map(k -> k.isAfter(clock.instant())).orElse(true))
-                    .as("no overdue entry left for %s", id).isTrue();
+            // first start is at T0+2s at the earliest and each sync takes 1 s
+            assertThat(completion.get(id)).isAfterOrEqualTo(T0.plusSeconds(3));
         }
     }
 }
