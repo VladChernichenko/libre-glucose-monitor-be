@@ -62,6 +62,8 @@ public class PreBolusPauseOptimizer {
     static final int PATH_MINUTES = POST_MEAL_MINUTES + 30;
     /** Notes searched for a pre-bolus in flight; the resolver itself caps its age at 2 h. */
     private static final int LOOKBACK_HOURS = 8;
+    /** An unlabeled bolus this recent, with no meal after it, is the meal's bolus given first. */
+    static final Duration UNLABELED_BOLUS_WINDOW = Duration.ofMinutes(60);
 
     private final GlucoseCalculationsService calculations;
     private final PreBolusResolver preBolusResolver;
@@ -98,7 +100,8 @@ public class PreBolusPauseOptimizer {
         }
 
         List<Note> recent = notes.findByUserIdAndTimestampBetween(userId, now.minusHours(LOOKBACK_HOURS), now);
-        Optional<PreBolusContext> inFlight = preBolusResolver.resolve(null, recent, now);
+        Optional<PreBolusContext> inFlight = preBolusResolver.resolve(null, recent, now)
+                .or(() -> unlabeledBolus(recent, now));
         if (inFlight.isPresent()) {
             PreBolusContext ctx = inFlight.get();
             // A calculator top-up is shown in the curve it would produce (meal now, top-up now).
@@ -159,6 +162,29 @@ public class PreBolusPauseOptimizer {
                         "A %d-min pause keeps the forecast closest to %.1f mmol/L, between %.1f and %.1f.",
                         bestPause, TARGET_GLUCOSE, chosen.min(), chosen.peak());
         return new PauseChoice(chosen.pauseMinutes(), chosen.curve(), chosen.peak(), chosen.min(), reason);
+    }
+
+    /**
+     * Inverted flow: the user injected first (a plain insulin note, no carbs, no "pre-bolus" label)
+     * and only then photographs the meal. That insulin is already counted in the calculator's IOB, so
+     * it is the pre-bolus: no new pause. Only a bolus within {@link #UNLABELED_BOLUS_WINDOW} with no
+     * meal logged at or after it counts; older insulin is plain IOB.
+     */
+    static Optional<PreBolusContext> unlabeledBolus(List<Note> recent, LocalDateTime now) {
+        if (recent == null) return Optional.empty();
+        Optional<Note> latest = recent.stream()
+                .filter(n -> n.getTimestamp() != null && !n.getTimestamp().isAfter(now))
+                .filter(n -> n.getInsulin() != null && n.getInsulin() > 0 && !n.isLongActing())
+                .filter(n -> n.getCarbs() == null || n.getCarbs() <= 0)
+                .filter(n -> Duration.between(n.getTimestamp(), now).compareTo(UNLABELED_BOLUS_WINDOW) <= 0)
+                .max(Comparator.comparing(Note::getTimestamp));
+        if (latest.isEmpty()) return Optional.empty();
+        LocalDateTime t = latest.get().getTimestamp();
+        boolean mealAfter = recent.stream().anyMatch(n -> n.getTimestamp() != null
+                && n.getCarbs() != null && n.getCarbs() > 0 && !n.getTimestamp().isBefore(t));
+        if (mealAfter) return Optional.empty();
+        return Optional.of(new PreBolusContext(t, latest.get().getInsulin(),
+                (int) Duration.between(t, now).toMinutes(), PreBolusContext.Source.DETECTED));
     }
 
     // -- forecast ----------------------------------------------------------------------------

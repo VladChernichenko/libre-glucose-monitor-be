@@ -401,4 +401,39 @@ class PreBolusPauseOptimizerTest {
             assertThat(direct.get(direct.size() - 1).getTimestamp()).isEqualTo(NOW.plusMinutes(270));
         }
     }
+
+    @Nested
+    @DisplayName("inverted flow: injected first, photo after")
+    class UnlabeledBolus {
+        private che.glucosemonitorbe.entity.Note note(int minutesAgo, double carbs, double insulin) {
+            che.glucosemonitorbe.entity.Note n = new che.glucosemonitorbe.entity.Note();
+            n.setTimestamp(NOW.minusMinutes(minutesAgo));
+            n.setCarbs(carbs);
+            n.setInsulin(insulin);
+            return n;
+        }
+
+        @Test
+        void recentPlainBolusIsInFlight() {
+            Optional<PreBolusContext> ctx = PreBolusPauseOptimizer.unlabeledBolus(List.of(note(10, 0, 4)), NOW);
+            assertThat(ctx).isPresent();
+            assertThat(ctx.get().units()).isEqualTo(4.0);
+            assertThat(ctx.get().elapsedMinutes()).isEqualTo(10);
+        }
+
+        @Test
+        void bolusOlderThanWindowIsJustIob() {
+            assertThat(PreBolusPauseOptimizer.unlabeledBolus(List.of(note(90, 0, 4)), NOW)).isEmpty();
+        }
+
+        @Test
+        void bolusFollowedByMealIsNotInFlight() {
+            assertThat(PreBolusPauseOptimizer.unlabeledBolus(List.of(note(20, 0, 4), note(5, 50, 0)), NOW)).isEmpty();
+        }
+
+        @Test
+        void mealBolusNoteIsNotInFlight() {
+            assertThat(PreBolusPauseOptimizer.unlabeledBolus(List.of(note(10, 60, 4)), NOW)).isEmpty();
+        }
+    }
 }
