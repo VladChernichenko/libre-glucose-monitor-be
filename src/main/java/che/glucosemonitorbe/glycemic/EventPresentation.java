@@ -25,6 +25,7 @@ public final class EventPresentation {
         return switch (c) {
             case UNLOGGED_FOOD -> "Unaccounted carbs";
             case UNDER_ESTIMATED_FOOD -> "More carbs than logged";
+            case OVER_ESTIMATED_FOOD -> "Fewer carbs than logged";
             case STRESS -> "Possible stress";
             case ABSORPTION_DELAY -> "Delayed insulin absorption";
             case LIPODYSTROPHY -> "Possible lipodystrophy / injection site issue";
@@ -41,7 +42,7 @@ public final class EventPresentation {
             return List.of(Category.STRESS, Category.ABSORPTION_DELAY, Category.LIPODYSTROPHY, Category.UNLOGGED_FOOD);
         }
         if (e.getPhase() == Phase.PROVISIONAL) {
-            return List.of(Category.UNLOGGED_INSULIN, Category.AEROBIC_ACTIVITY);
+            return List.of(Category.UNLOGGED_INSULIN, Category.AEROBIC_ACTIVITY, Category.OVER_ESTIMATED_FOOD);
         }
         if (e.getCategory() == Category.UNLOGGED_FOOD) {
             return List.of(Category.UNLOGGED_FOOD, Category.STRESS, Category.ANAEROBIC_ACTIVITY);
@@ -51,7 +52,11 @@ public final class EventPresentation {
         }
         List<Category> out = new ArrayList<>();
         out.add(e.getCategory());
-        Category.forDirection(e.getCategory().direction()).stream().filter(c -> c != e.getCategory()).forEach(out::add);
+        // "Took unlogged insulin" is not offered as an alternative: "Took more than logged" covers it.
+        Category.forDirection(e.getCategory().direction()).stream()
+                .filter(c -> c != e.getCategory())
+                .filter(c -> !(c == Category.UNLOGGED_INSULIN && e.getCategory() == Category.UNDER_ESTIMATED_INSULIN))
+                .forEach(out::add);
         return out;
     }
 }

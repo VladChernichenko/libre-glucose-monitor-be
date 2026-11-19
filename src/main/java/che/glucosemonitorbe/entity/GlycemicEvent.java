@@ -41,6 +41,8 @@ public class GlycemicEvent {
         ANAEROBIC_ACTIVITY(Direction.RISE),
         UNLOGGED_INSULIN(Direction.FALL),
         UNDER_ESTIMATED_INSULIN(Direction.FALL),
+        /** Ate fewer carbs than logged: a label only, the logged meal is not edited. */
+        OVER_ESTIMATED_FOOD(Direction.FALL),
         AEROBIC_ACTIVITY(Direction.FALL);
 
         private final Direction direction;

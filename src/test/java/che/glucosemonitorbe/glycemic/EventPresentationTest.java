@@ -28,11 +28,13 @@ class EventPresentationTest {
         assertThat(EventPresentation.promptOptions(ev(Category.STRESS, Direction.RISE, Phase.PROVISIONAL)))
                 .containsExactly(Category.STRESS, Category.ABSORPTION_DELAY, Category.LIPODYSTROPHY, Category.UNLOGGED_FOOD);
         assertThat(EventPresentation.promptOptions(ev(Category.UNLOGGED_INSULIN, Direction.FALL, Phase.PROVISIONAL)))
-                .containsExactly(Category.UNLOGGED_INSULIN, Category.AEROBIC_ACTIVITY);
+                .containsExactly(Category.UNLOGGED_INSULIN, Category.AEROBIC_ACTIVITY, Category.OVER_ESTIMATED_FOOD);
         assertThat(EventPresentation.promptOptions(ev(Category.UNLOGGED_FOOD, Direction.RISE, Phase.FINAL)))
                 .containsExactly(Category.UNLOGGED_FOOD, Category.STRESS, Category.ANAEROBIC_ACTIVITY);
         assertThat(EventPresentation.promptOptions(ev(Category.AEROBIC_ACTIVITY, Direction.FALL, Phase.FINAL)))
                 .startsWith(Category.AEROBIC_ACTIVITY).containsOnly(Category.forDirection(Direction.FALL).toArray(Category[]::new));
+        assertThat(EventPresentation.promptOptions(ev(Category.UNDER_ESTIMATED_INSULIN, Direction.FALL, Phase.FINAL)))
+                .startsWith(Category.UNDER_ESTIMATED_INSULIN).doesNotContain(Category.UNLOGGED_INSULIN).contains(Category.OVER_ESTIMATED_FOOD);
     }
     @Test void noLabelGivesDosingAdvice() {
         for (Category c : Category.values()) {
