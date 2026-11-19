@@ -2,8 +2,11 @@ package che.glucosemonitorbe.hovorka;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -70,5 +73,28 @@ public final class ProteinGluconeogenesis {
             out.add(delayed);
         }
         return out;
+    }
+
+    /** A protein rise that starts within the forecast, or started less than this long ago [min]. */
+    public static final int LATE_RISE_ACTIVE_MIN = 120;
+
+    /** The delayed protein glucose the forecast is about to show (or is showing). */
+    public record LateRise(LocalDateTime onsetAt, double carbEquivalentG) {}
+
+    /**
+     * The earliest delayed-protein entry in {@code modelEntries} (output of
+     * {@link #withDelayedProteinGlucose}) whose onset is in {@code (now - 2 h, now + horizon]},
+     * with the grams of all such entries summed; empty when there is none.
+     */
+    public static Optional<LateRise> lateRise(List<CarbsEntry> modelEntries, LocalDateTime now, int horizonMin) {
+        List<CarbsEntry> active = modelEntries.stream()
+                .filter(e -> MEAL_TYPE.equals(e.getMealType()) && e.getTimestamp() != null)
+                .filter(e -> e.getTimestamp().isAfter(now.minusMinutes(LATE_RISE_ACTIVE_MIN))
+                        && !e.getTimestamp().isAfter(now.plusMinutes(horizonMin)))
+                .sorted(Comparator.comparing(CarbsEntry::getTimestamp))
+                .toList();
+        if (active.isEmpty()) return Optional.empty();
+        double g = active.stream().mapToDouble(e -> e.getCarbs() == null ? 0 : e.getCarbs()).sum();
+        return Optional.of(new LateRise(active.get(0).getTimestamp(), Math.round(g * 10.0) / 10.0));
     }
 }

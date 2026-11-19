@@ -57,4 +57,7 @@ public class GlucoseCalculationsResponse {
 
     // Sick-mode status with any pending step-up proposal; null when sick mode is off
     private che.glucosemonitorbe.sick.SickModeStatusDTO sickMode;
+
+    // Delayed protein glucose (gluconeogenesis) starting within the forecast; null when none
+    private che.glucosemonitorbe.hovorka.ProteinGluconeogenesis.LateRise lateProteinRise;
 }

@@ -374,6 +374,8 @@ public class GlucoseCalculationsService {
                 .factors(factors)
                 .predictionPath(predictionPath)
                 .empiricalPredictionPath(engine == PredictionEngine.BOTH ? empiricalPath : null)
+                .lateProteinRise(ProteinGluconeogenesis.lateRise(
+                        modelMealEntries(carbsEntries, recentNotes), currentTime, PREDICTION_PATH_MINUTES).orElse(null))
                 .build();
     }
 

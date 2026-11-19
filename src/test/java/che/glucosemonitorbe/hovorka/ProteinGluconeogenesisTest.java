@@ -20,6 +20,19 @@ class ProteinGluconeogenesisTest {
     private static final LocalDateTime T = LocalDateTime.of(2024, 6, 1, 19, 0);
 
     @Test
+    @DisplayName("late rise: reported when the protein onset falls in the forecast, not when it is past or far ahead")
+    void lateRise_windowed() {
+        List<CarbsEntry> model = ProteinGluconeogenesis.withDelayedProteinGlucose(List.of(entry(T, 40.0, 60.0)));
+        var rise = ProteinGluconeogenesis.lateRise(model, T.plusMinutes(30), 240);
+        assertThat(rise).isPresent();
+        assertThat(rise.get().onsetAt()).isEqualTo(T.plusMinutes(ProteinGluconeogenesis.ONSET_MIN));
+        assertThat(rise.get().carbEquivalentG()).isEqualTo(12.0);
+        assertThat(ProteinGluconeogenesis.lateRise(model, T.plusMinutes(300), 240)).isEmpty();
+        assertThat(ProteinGluconeogenesis.lateRise(model, T.minusMinutes(200), 240)).isEmpty();
+        assertThat(ProteinGluconeogenesis.lateRise(List.of(entry(T, 40.0, 0.0)), T, 240)).isEmpty();
+    }
+
+    @Test
     @DisplayName("a big protein portion adds a slow-glucose entry at meal + onset")
     void bigProteinPortion_addsDelayedGlucoseEntry() {
         CarbsEntry steak = entry(T, 40.0, 60.0);
