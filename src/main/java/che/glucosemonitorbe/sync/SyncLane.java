@@ -209,7 +209,7 @@ public abstract class SyncLane {
                 dbDue.put(id, r.outcome() == SyncOutcome.IN_PROGRESS ? dueAt : key);
                 putKey(id, key);
             } else if (key == null) {
-                // No credentials: leave membership so the next reconcile re-adds the user once restored.
+                // No credentials: drop membership so the next reconcile re-adds the user once restored.
                 members.remove(id);
                 dbDue.remove(id);
             }
