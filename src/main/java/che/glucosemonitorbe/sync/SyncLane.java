@@ -32,6 +32,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public abstract class SyncLane {
 
     public static final int MAX_IN_FLIGHT = 8;
+    /** On the startup reconcile, a lane with at most this many members syncs them all immediately. */
+    static final int IMMEDIATE_STARTUP_MAX_USERS = MAX_IN_FLIGHT;
     public static final Duration LOCK_MISS_HIDE = Duration.ofSeconds(15);
     private static final Duration LAG_THRESHOLD = Duration.ofSeconds(60);
     private static final Duration LAG_LOG_INTERVAL = Duration.ofSeconds(60);
@@ -52,6 +54,7 @@ public abstract class SyncLane {
     private final Set<UUID> inFlight = new HashSet<>();
     private Instant pausedUntil;
     private Instant lastLagLog;
+    private boolean firstReconcileDone;
 
     protected SyncLane(String name, Clock clock, UserGlucoseSyncStateService state) {
         this.name = name;
@@ -63,11 +66,19 @@ public abstract class SyncLane {
 
     protected abstract SyncResult run(UUID userId);
 
-    /** Syncs membership with {@link #members()}: drops departed users, schedules new ones. */
+    /**
+     * Syncs membership with {@link #members()}: drops departed users, schedules new ones. On the first
+     * call after construction, a lane with at most {@link #IMMEDIATE_STARTUP_MAX_USERS} members makes
+     * every member due now (stored value ignored); afterwards new users get their next future slot.
+     */
     public void reconcile() {
         Set<UUID> current = members();
         List<UUID> added = new ArrayList<>();
+        boolean immediate;
         synchronized (lock) {
+            // Only the startup reconcile may sync immediately, and only when the lane is small.
+            immediate = !firstReconcileDone && current.size() <= IMMEDIATE_STARTUP_MAX_USERS;
+            firstReconcileDone = true;
             Iterator<UUID> it = members.iterator();
             while (it.hasNext()) {
                 UUID id = it.next();
@@ -87,7 +98,7 @@ public abstract class SyncLane {
             Instant now = clock.instant();
             UserGlucoseSyncState s = state.getOrCreate(id);
             Instant stored = s == null || s.getNextPollAt() == null ? null : toInstant(s.getNextPollAt());
-            Instant slot = SyncSlot.startupSlot(id, stored, now);
+            Instant slot = immediate ? now : SyncSlot.startupSlot(id, stored, now);
             if (!slot.equals(stored)) {
                 state.schedule(id, toLocal(slot));
             }

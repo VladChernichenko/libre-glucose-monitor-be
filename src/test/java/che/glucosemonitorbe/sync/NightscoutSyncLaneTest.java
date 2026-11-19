@@ -54,6 +54,8 @@ class NightscoutSyncLaneTest {
         when(repo.findDistinctUserIdsByDataSourceAndIsActiveTrue(DataSourceType.LIBRE_LINK_UP))
                 .thenAnswer(inv -> new ArrayList<>(libreIds));
         lane = new NightscoutSyncLane(repo, syncService, state, clock);
+        // Consume the startup reconcile (few users sync immediately) with no members.
+        lane.reconcile();
     }
 
     private static LocalDateTime ldt(Instant i) {

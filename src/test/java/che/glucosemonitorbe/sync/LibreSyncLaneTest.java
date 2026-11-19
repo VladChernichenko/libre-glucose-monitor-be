@@ -80,6 +80,10 @@ class LibreSyncLaneTest {
                     .nextPollAt(s == null ? null : ldt(s)).build();
         });
         lane = new LibreSyncLane(repo, syncService, state, clock);
+        // The first reconcile after construction is the startup one (few users sync immediately).
+        // Consume it with no members so the rest of the tests exercise the regular slot behavior.
+        when(repo.findActiveLibreUserIdsWithCredentials()).thenReturn(List.of());
+        lane.reconcile();
     }
 
     private static LocalDateTime ldt(Instant i) {
@@ -361,5 +365,94 @@ class LibreSyncLaneTest {
         verify(state, never()).markError(any(), any(), any());
         verify(state, never()).markNoChange(any(), any(), any());
         assertThat(lane.keyOf(a)).contains(T0.plusSeconds(100));
+    }
+
+    // ---- startup: immediate first sync when the lane has few users ----
+
+    /** A lane whose first (startup) reconcile has not run yet. */
+    private LibreSyncLane startupLane(List<UUID> ids) {
+        when(repo.findActiveLibreUserIdsWithCredentials()).thenReturn(new ArrayList<>(ids));
+        return new LibreSyncLane(repo, syncService, state, clock);
+    }
+
+    @Test
+    void startup_fewUsers_dueImmediately() {
+        UUID none = UUID.randomUUID();
+        UUID overdue = UUID.randomUUID();
+        UUID future = UUID.randomUUID();
+        stored.put(overdue, T0.minusSeconds(500));
+        stored.put(future, T0.plusSeconds(600));
+        LibreSyncLane startup = startupLane(List.of(none, overdue, future));
+        startup.reconcile();
+
+        for (UUID id : List.of(none, overdue, future)) {
+            assertThat(startup.keyOf(id)).contains(T0);
+            verify(state).schedule(id, ldt(T0));
+        }
+        startup.pump(executor);
+        assertThat(startup.inFlight()).isEqualTo(3);
+        assertThat(executor.size()).isEqualTo(3);
+    }
+
+    @Test
+    void startup_fewUsers_thenBackOnGrid() {
+        UUID a = UUID.randomUUID();
+        LibreSyncLane startup = startupLane(List.of(a));
+        startup.reconcile();
+        when(syncService.syncUser(a, false)).thenReturn(SyncResult.of(SyncOutcome.NO_CHANGE));
+        startup.pump(executor);
+        Instant done = T0.plusSeconds(1);
+        clock.set(done);
+        executor.runAll();
+
+        Instant next = SyncSlot.followingSlot(a, T0, done);
+        verify(state).markNoChange(a, ldt(done), ldt(next));
+        assertThat(SyncSlot.slotAtOrAfter(a, next)).isEqualTo(next);
+        assertThat(next).isAfter(done);
+        assertThat(startup.keyOf(a)).contains(next);
+    }
+
+    @Test
+    void startup_manyUsers_keepsSlots() {
+        List<UUID> ids = new ArrayList<>();
+        for (int i = 0; i < SyncLane.IMMEDIATE_STARTUP_MAX_USERS + 1; i++) {
+            ids.add(UUID.randomUUID());
+        }
+        LibreSyncLane startup = startupLane(ids);
+        startup.reconcile();
+
+        for (UUID id : ids) {
+            assertThat(startup.keyOf(id)).contains(SyncSlot.nextFutureSlot(id, T0));
+        }
+        startup.pump(executor);
+        assertThat(executor.size()).isZero();
+    }
+
+    @Test
+    void startup_exactlyMaxUsers_dueImmediately() {
+        List<UUID> ids = new ArrayList<>();
+        for (int i = 0; i < SyncLane.IMMEDIATE_STARTUP_MAX_USERS; i++) {
+            ids.add(UUID.randomUUID());
+        }
+        LibreSyncLane startup = startupLane(ids);
+        startup.reconcile();
+        startup.pump(executor);
+        assertThat(executor.size()).isEqualTo(SyncLane.IMMEDIATE_STARTUP_MAX_USERS);
+    }
+
+    @Test
+    void laterReconcile_newUser_getsFutureSlot() {
+        UUID first = UUID.randomUUID();
+        UUID added = UUID.randomUUID();
+        LibreSyncLane startup = startupLane(List.of(first));
+        startup.reconcile();
+        assertThat(startup.keyOf(first)).contains(T0);
+
+        when(repo.findActiveLibreUserIdsWithCredentials()).thenReturn(List.of(first, added));
+        startup.reconcile();
+
+        assertThat(startup.keyOf(added)).contains(SyncSlot.startupSlot(added, null, T0));
+        assertThat(startup.keyOf(added).get()).isAfter(T0);
+        assertThat(startup.keyOf(first)).contains(T0);
     }
 }
