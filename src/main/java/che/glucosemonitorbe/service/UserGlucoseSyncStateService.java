@@ -91,4 +91,13 @@ public class UserGlucoseSyncStateService {
         state.setUpdatedAt(now);
         repository.save(state);
     }
+
+    /** Sets only next_poll_at (and updated_at); used when a lane assigns a startup slot. */
+    @Transactional
+    public void schedule(UUID userId, LocalDateTime nextPollAt) {
+        UserGlucoseSyncState state = getOrCreate(userId);
+        state.setNextPollAt(nextPollAt);
+        state.setUpdatedAt(LocalDateTime.now());
+        repository.save(state);
+    }
 }

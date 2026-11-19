@@ -132,4 +132,25 @@ class UserGlucoseSyncStateServiceTest {
             service.getOrCreate(userId); // simulates concurrent second call - throws on save
         }).doesNotThrowAnyException();
     }
+
+    @Test
+    void scheduleSetsOnlyNextPollAt() {
+        UUID userId = UUID.randomUUID();
+        LocalDateTime next = LocalDateTime.now().plusMinutes(3);
+        UserGlucoseSyncState existing = UserGlucoseSyncState.builder()
+                .userId(userId).consecutiveNoChangeCount(4).lastStatus("NO_CHANGE").build();
+        when(repository.findByUserId(userId)).thenReturn(Optional.of(existing));
+        when(repository.save(any(UserGlucoseSyncState.class))).thenAnswer(i -> i.getArgument(0));
+
+        service.schedule(userId, next);
+
+        ArgumentCaptor<UserGlucoseSyncState> captor = ArgumentCaptor.forClass(UserGlucoseSyncState.class);
+        verify(repository).save(captor.capture());
+        UserGlucoseSyncState saved = captor.getValue();
+        assertEquals(next, saved.getNextPollAt());
+        assertEquals(4, saved.getConsecutiveNoChangeCount());
+        assertEquals("NO_CHANGE", saved.getLastStatus());
+        assertThat(saved.getUpdatedAt()).isNotNull();
+        assertThat(saved.getLastCheckedAt()).isNull();
+    }
 }
