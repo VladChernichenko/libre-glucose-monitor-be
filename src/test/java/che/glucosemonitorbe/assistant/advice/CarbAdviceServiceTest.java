@@ -180,6 +180,35 @@ class CarbAdviceServiceTest {
         verify(calculations, times(1)).calculateGlucoseData(any());
     }
 
+    @Test
+    void stepsUpUntilForecastStaysAboveSafeMin() {
+        // The reported case: 10 g still forecast 2.2; heavy IOB needs more.
+        UserSettingsDTO saved = new UserSettingsDTO();
+        saved.setRescueCarbsG(10);
+        when(settings.getUserSettings(USER)).thenReturn(saved);
+        gramMinimums(Map.of(10, 2.2, 15, 3.0, 20, 3.8, 25, 4.3, 30, 4.7));
+
+        CarbAdvice advice = service.evaluate(USER, NOW, 7.0, -0.15, vShape(7.0, 1.0, 50)).orElseThrow();
+
+        assertThat(advice.grams()).isEqualTo(30);
+        assertThat(advice.minWith()).isEqualTo(4.7);
+        verify(calculations, times(5)).calculateGlucoseData(any());
+    }
+
+    @Test
+    void capsAt60gWhenNothingIsEnough() {
+        when(settings.getUserSettings(USER)).thenReturn(new UserSettingsDTO());
+        java.util.Map<Integer, Double> allLow = new java.util.HashMap<>();
+        for (int g = 15; g <= 60; g += 5) allLow.put(g, 2.0);
+        gramMinimums(allLow);
+
+        CarbAdvice advice = service.evaluate(USER, NOW, 6.0, -0.15, vShape(6.0, 1.0, 40)).orElseThrow();
+
+        assertThat(advice.grams()).isEqualTo(60);
+        assertThat(advice.minWith()).isEqualTo(2.0);
+        verify(calculations, times(10)).calculateGlucoseData(any());
+    }
+
     // -- no stacking, freshness, hypo flow ---------------------------------------------------
 
     @Test

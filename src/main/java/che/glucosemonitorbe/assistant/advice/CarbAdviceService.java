@@ -53,6 +53,12 @@ public class CarbAdviceService {
     static final int RECHECK_MINUTES = 15;
     /** Window of the "without carbs" minimum shown on the card [min]. */
     static final int TARGET_WINDOW_MINUTES = 120;
+    /** The advised amount must keep the forecast at or above this [mmol/L] (as the pause optimizer's floor). */
+    static final double SAFE_MIN_MMOL = 4.5;
+    /** Increment when the rescue dose is not enough [g]. */
+    static final int STEP_G = 5;
+    /** Never advise more fast carbs than this at once [g]. */
+    static final int MAX_ADVICE_G = 60;
 
     private final GlucoseCalculationsService calculations;
     private final CgmFreshnessService cgmFreshness;
@@ -165,16 +171,25 @@ public class CarbAdviceService {
     }
 
     /**
-     * One forecast with the rescue dose taken now. The dose is not titrated: a rescue is 10-15 g,
-     * not whatever amount would pin the next two hours at 5.0 mmol/L.
+     * The smallest amount, from the user's rescue dose upward in {@link #STEP_G} g steps up to
+     * {@link #MAX_ADVICE_G} g, whose forecast stays at or above {@link #SAFE_MIN_MMOL} over the
+     * window. With heavy IOB a fixed 10-15 g can still forecast a deep low; advising it would be
+     * advice that does not work. If even the cap stays low, the cap is advised with its (low)
+     * minimum shown, and the recheck catches the rest.
      */
     private CarbAdvice withRescueDose(UUID userId, LocalDateTime now, double currentGlucose, double trend,
                                       CarbAdvice without) {
-        int grams = rescueGrams(userId);
         String username = users.getUserById(userId).getUsername();
-        List<PredictionPointDTO> curve = forecastWithFastCarbs(username, now, currentGlucose, trend, grams);
-        Double min = minimum(curve, now, TARGET_WINDOW_MINUTES)
-                .map(PredictionPointDTO::getPredictedGlucose).orElse(null);
+        int grams = rescueGrams(userId);
+        List<PredictionPointDTO> curve;
+        Double min;
+        while (true) {
+            curve = forecastWithFastCarbs(username, now, currentGlucose, trend, grams);
+            min = minimum(curve, now, TARGET_WINDOW_MINUTES)
+                    .map(PredictionPointDTO::getPredictedGlucose).orElse(null);
+            if (min == null || min >= SAFE_MIN_MMOL || grams >= MAX_ADVICE_G) break;
+            grams = Math.min(MAX_ADVICE_G, grams + STEP_G);
+        }
         return new CarbAdvice(CarbAdvice.State.TAKE_NOW, grams, without.minWithout(), without.minWithoutAt(),
                 min, without.curveWithout(), curve, now.plusMinutes(RECHECK_MINUTES), null);
     }
