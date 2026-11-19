@@ -171,27 +171,50 @@ public class CarbAdviceService {
     }
 
     /**
-     * The smallest amount, from the user's rescue dose upward in {@link #STEP_G} g steps up to
-     * {@link #MAX_ADVICE_G} g, whose forecast stays at or above {@link #SAFE_MIN_MMOL} over the
-     * window. With heavy IOB a fixed 10-15 g can still forecast a deep low; advising it would be
+     * The smallest amount on the {@link #STEP_G} g grid from the user's rescue dose up to
+     * {@link #MAX_ADVICE_G} g whose forecast stays at or above {@link #SAFE_MIN_MMOL} over the
+     * window, found by binary search (at most 6 forecasts; 1 when the rescue dose is enough,
+     * 2 when even the cap is not). With heavy IOB a fixed 10-15 g can still forecast a deep low; advising it would be
      * advice that does not work. If even the cap stays low, the cap is advised with its (low)
      * minimum shown, and the recheck catches the rest.
      */
     private CarbAdvice withRescueDose(UUID userId, LocalDateTime now, double currentGlucose, double trend,
                                       CarbAdvice without) {
         String username = users.getUserById(userId).getUsername();
-        int grams = rescueGrams(userId);
-        List<PredictionPointDTO> curve;
-        Double min;
-        while (true) {
-            curve = forecastWithFastCarbs(username, now, currentGlucose, trend, grams);
-            min = minimum(curve, now, TARGET_WINDOW_MINUTES)
-                    .map(PredictionPointDTO::getPredictedGlucose).orElse(null);
-            if (min == null || min >= SAFE_MIN_MMOL || grams >= MAX_ADVICE_G) break;
-            grams = Math.min(MAX_ADVICE_G, grams + STEP_G);
+        int rescue = rescueGrams(userId);
+        // Rescue dose first (the common case: one forecast), then the cap, then bisect the 5 g grid
+        // between them. More carbs never lower the minimum, so at most 2 + log2(grid) forecasts.
+        Trial best = trial(username, now, currentGlucose, trend, rescue);
+        if (!best.safe()) {
+            Trial cap = trial(username, now, currentGlucose, trend, MAX_ADVICE_G);
+            best = cap;
+            if (cap.safe()) {
+                int lo = 0;                                             // steps above rescue known unsafe
+                int hi = (MAX_ADVICE_G - rescue + STEP_G - 1) / STEP_G; // steps known safe (the cap)
+                while (hi - lo > 1) {
+                    int mid = (lo + hi) / 2;
+                    Trial t = trial(username, now, currentGlucose, trend, Math.min(MAX_ADVICE_G, rescue + mid * STEP_G));
+                    if (t.safe()) { hi = mid; best = t; } else { lo = mid; }
+                }
+            }
         }
+        int grams = best.grams();
+        List<PredictionPointDTO> curve = best.curve();
+        Double min = best.min();
         return new CarbAdvice(CarbAdvice.State.TAKE_NOW, grams, without.minWithout(), without.minWithoutAt(),
                 min, without.curveWithout(), curve, now.plusMinutes(RECHECK_MINUTES), null);
+    }
+
+    /** One forecast with {@code grams} taken now; {@code min} null when the forecast is empty. */
+    private record Trial(int grams, List<PredictionPointDTO> curve, Double min) {
+        /** An empty forecast cannot be improved on by more carbs, so it ends the search. */
+        boolean safe() { return min == null || min >= SAFE_MIN_MMOL; }
+    }
+
+    private Trial trial(String username, LocalDateTime now, double currentGlucose, double trend, int grams) {
+        List<PredictionPointDTO> curve = forecastWithFastCarbs(username, now, currentGlucose, trend, grams);
+        Double min = minimum(curve, now, TARGET_WINDOW_MINUTES).map(PredictionPointDTO::getPredictedGlucose).orElse(null);
+        return new Trial(grams, curve, min);
     }
 
     /**

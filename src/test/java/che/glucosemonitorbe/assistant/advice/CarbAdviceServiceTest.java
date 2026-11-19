@@ -181,7 +181,7 @@ class CarbAdviceServiceTest {
     }
 
     @Test
-    void stepsUpUntilForecastStaysAboveSafeMin() {
+    void findsSmallestSafeAmountBySearch() {
         // The reported case: 10 g still forecast 2.2; heavy IOB needs more.
         UserSettingsDTO saved = new UserSettingsDTO();
         saved.setRescueCarbsG(10);
@@ -192,7 +192,7 @@ class CarbAdviceServiceTest {
 
         assertThat(advice.grams()).isEqualTo(30);
         assertThat(advice.minWith()).isEqualTo(4.7);
-        verify(calculations, times(5)).calculateGlucoseData(any());
+        verify(calculations, times(6)).calculateGlucoseData(any()); // 10, 60, 35, 20, 25, 30
     }
 
     @Test
@@ -206,7 +206,7 @@ class CarbAdviceServiceTest {
 
         assertThat(advice.grams()).isEqualTo(60);
         assertThat(advice.minWith()).isEqualTo(2.0);
-        verify(calculations, times(10)).calculateGlucoseData(any());
+        verify(calculations, times(2)).calculateGlucoseData(any()); // rescue, then the cap
     }
 
     // -- no stacking, freshness, hypo flow ---------------------------------------------------
