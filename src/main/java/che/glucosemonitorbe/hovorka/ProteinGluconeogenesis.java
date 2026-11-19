@@ -60,10 +60,10 @@ public final class ProteinGluconeogenesis {
                     .mealType(MEAL_TYPE)
                     .userId(meal.getUserId())
                     .build();
-            // Inherit the meal's absorption kinetics. The Hovorka gut lets the newest carbs set the
-            // GI / gut rate for everything still in it, so a bare entry (default GI 70, no fiber)
-            // would switch a slow low-GI meal's remaining carbs to fast absorption at the onset and
-            // dump them - a 12 g protein equivalent then raised the 4 h forecast by ~3 mmol/L.
+            // Inherit the meal's absorption kinetics: the delayed glucose comes from the same meal,
+            // so it absorbs at that meal's GI and fiber, not at the default GI 70. (With the old
+            // shared gut a bare entry also switched the meal's remaining carbs to fast absorption
+            // - +3 mmol/L at 4 h from 12 g; per-meal chains no longer couple them.)
             delayed.setEstimatedGi(meal.getEstimatedGi());
             delayed.setFiber(meal.getFiber());
             delayed.setAbsorptionSpeedClass(meal.getAbsorptionSpeedClass());

@@ -69,18 +69,6 @@ public class HovorkaGlucosePredictionService {
     private static final int    DEFAULT_GI      = HovorkaOdeSolver.DEFAULT_GI;
 
     /**
-     * Sentinel age [min ago] meaning "no rescue carb is setting the gut rate" in the warm-up replay,
-     * which counts ages down. Never satisfies the {@code age <= spentAtAge} expiry test.
-     */
-    private static final int NO_ACTIVE_RESCUE_AGE = Integer.MIN_VALUE;
-
-    /**
-     * Sentinel minute meaning "no rescue carb is setting the gut rate" in the forward timeline,
-     * which counts minutes up. Never satisfies the {@code min >= spentAtMin} expiry test.
-     */
-    private static final int NO_ACTIVE_RESCUE_MIN = Integer.MAX_VALUE;
-
-    /**
      * A course eaten up to this many minutes before a carb meal counts as its first course: its
      * fiber is added to the meal's own when slowing that meal's absorption ("vegetables first",
      * Shukla et al.). The protocols eat the vegetables 10-15 min before the carbs.
@@ -457,8 +445,7 @@ public class HovorkaGlucosePredictionService {
         // The ODE state is plasma glucose; the anchor is a sensor reading, which trails plasma.
         double plasmaNow = Math.max(G_MIN, Math.min(G_MAX,
                 InterstitialLagModel.plasmaFromSensor(currentGlucose, anchorTrendMmolPerMin)));
-        WarmUp warmUp = buildWarmState(plasmaNow, pastCarbsEntries, currentTime, p, settings);
-        HovorkaState state = warmUp.state();
+        HovorkaState state = HovorkaState.steadyState(plasmaNow, p);
 
         // -- EGP net from long-acting insulin ----------------------------------
         // While sick the reference is the raised basal need, so an unchanged dose covers less of it.
@@ -488,36 +475,14 @@ public class HovorkaGlucosePredictionService {
         List<DoseActivity> doseActivities = buildDoseActivities(pastInsulinDoses, currentTime,
                 pathMinutes, rapidIob, settings, pAdj.isf(), userId, callerIsfScale);
 
-        // -- Future carb timeline (prospective notes already in pastCarbsEntries
-        //    with future timestamps - carbs at t <= now were in the warm-up) ---
-        Map<Integer, Double> futureCarbs = buildFutureCarbTimeline(
-                pastCarbsEntries, currentTime, pAdj, settings);
-
-        // -- Future GI timeline: parallel map of minute -> GI for future meals --
-        Map<Integer, Integer> futureGiMap = buildFutureGiTimeline(pastCarbsEntries, currentTime);
-
-        // -- Future tMaxG timeline: parallel map of minute -> gut time constant. A rescue carb
-        //    absorbs at its own rate here instead of the user's mixed-meal rate. -------------
-        FutureTMaxG futureTMaxG = buildFutureTMaxGTimeline(pastCarbsEntries, currentTime, pAdj);
-        Map<Integer, Double> futureTMaxGMap = futureTMaxG.byMinute();
-        Set<Integer> rescueMinutes          = futureTMaxG.rescueMinutes();
-
-        // -- Future protein+fat timeline: drives protFatGut compartment (GLP-1 ileal brake) --
-        Map<Integer, Double> futureProtFat = buildFutureProtFatTimeline(pastCarbsEntries, currentTime);
+        // -- Gut: one Dalla Man chain per meal (logged and prospective), each at its own GI and
+        //    gut time constant, run ahead of the glucose ODE (the gut does not depend on glucose). --
+        MealGutChains.Appearance appearance = buildAppearance(pastCarbsEntries, currentTime, pAdj, settings, pathMinutes);
 
         // -- Integration loop (1-min steps) -----------------------------------
 
         List<PredictionPointDTO> points = new ArrayList<>();
         int nextEmit = DENSE_STEP_MIN;
-
-        // tMaxG of the meal currently being absorbed, carried across the warm-up boundary and
-        // refreshed on each new meal - the same lifecycle activeGI has inside the solver. pStep is
-        // pAdj until a meal actually changes tMaxG, so a prediction with no rescue carb in it runs
-        // on the identical parameter object it always did.
-        double activeTMaxG = warmUp.activeTMaxG();
-        HovorkaParameters pStep = activeTMaxG == pAdj.tMaxG() ? pAdj : withTMaxG(pAdj, activeTMaxG);
-        // Forward minute at or past which the active rescue is spent and the rate reverts.
-        int rescueSpentAtMin = warmUp.rescueSpentAtMin();
 
         // CGM measurement model: what the sensor would read, not what plasma does. Seeded with
         // the reading itself, so the emitted curve leaves "now" from the measured value and with
@@ -554,41 +519,17 @@ public class HovorkaGlucosePredictionService {
                 insulinEffect += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
             }
 
-            // Future carbs delivered to gut D1 at this minute [mmol]
-            double carbMmol = futureCarbs.getOrDefault(min, 0.0);
-            int    mealGI   = futureGiMap.getOrDefault(min, state.activeGI());
-            double protFatKcalNow = futureProtFat.getOrDefault(min, 0.0);
-
-            // A new meal takes over the gut time constant, mirroring how step() lets a new meal
-            // take over activeGI. Carbs arriving at this minute are the trigger for both.
-            double mealTMaxG = futureTMaxGMap.getOrDefault(min, activeTMaxG);
-            if (carbMmol > 0) {
-                rescueSpentAtMin = rescueMinutes.contains(min)
-                        ? min + RescueCarbProfile.MAX_DURATION_MIN
-                        : NO_ACTIVE_RESCUE_MIN;
-            }
-            // A rescue is done by definition after RescueCarbProfile.MAX_DURATION_MIN, so its rate
-            // must not carry on draining residual gut contents - an earlier dinner, say - for the
-            // rest of the horizon. Erring the other way over-predicts recovery during a hypo.
-            if (min >= rescueSpentAtMin) {
-                mealTMaxG = pAdj.tMaxG();
-                rescueSpentAtMin = NO_ACTIVE_RESCUE_MIN;
-            }
-            if (mealTMaxG != activeTMaxG) {
-                activeTMaxG = mealTMaxG;
-                pStep = withTMaxG(pAdj, activeTMaxG);
-            }
+            double raNow = appearance.stepMean()[min];
 
             if (hasActivity) {
                 double aInst = activityProvider.intensityAt(currentTime.plusMinutes(min));
                 double aSens = activity.stepSensitivity(aInst);
                 double sensFactor = activity.insulinSensitivityFactor(aSens);
                 double insulinEffectMod = insulinEffect * sensFactor;
-                state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow,
+                state = odeSolver.stepWithAppearance(state, pAdj, raNow,
                         insulinEffectMod, activity.uptakeRate(aInst));
             } else {
-                state = odeSolver.step(state, pStep, carbMmol, mealGI, protFatKcalNow,
-                        insulinEffect, 0.0);
+                state = odeSolver.stepWithAppearance(state, pAdj, raNow, insulinEffect, 0.0);
             }
 
             // Advance the sensor model every minute, not only at emission points.
@@ -603,11 +544,7 @@ public class HovorkaGlucosePredictionService {
                 double correction =
                         residualProvider.residualMmol(userId, pointTime) * residualRamp(min);
                 double gAdj = Math.max(G_MIN, Math.min(G_MAX, gPred + correction));
-                double giScaleDisplay = HovorkaOdeSolver.giScale(state.activeGI());
-                // pStep, not pAdj: the reported carb effect must be drawn with the same kAbs the
-                // ODE just integrated with, or a rescue would show a mixed-meal absorption rate.
-                double kAbsDisplay = DallaManGutModel.effectiveKAbs(pStep.tMaxG()) * giScaleDisplay;
-                double carbEffect  = gutModel.ra(state.qgut(), kAbsDisplay) * DENSE_STEP_MIN;
+                double carbEffect  = appearance.atEnd()[min] * DENSE_STEP_MIN;
                 double insulinEff  = -insulinEffect * DENSE_STEP_MIN;
 
                 // Confidence cone from the twin's per-horizon σ: narrow near now, wider further out.
@@ -641,192 +578,38 @@ public class HovorkaGlucosePredictionService {
         return points;
     }
 
-    // -- State warm-up ---------------------------------------------------------
+    // -- Gut appearance -------------------------------------------------------
+
+    /** Oldest meal age replayed into the gut [min]. */
+    private static final int MAX_HISTORY_MIN = 480;
 
     /**
-     * Initialises the extended state reflecting the current physiological state.
-     *
-     * <ul>
-     *   <li>Q1, Q2 - from current CGM glucose (steady-state approximation).</li>
-     *   <li>Qsto1, Qsto2, Qgut - by replaying each past meal through the
-     *       Dalla Man gut ODE up to "now". This gives accurate nonlinear
-     *       absorption state without shortcuts.</li>
-     *   <li>ProtFatGut, Inc, activeGI - carried by the same replay, so an already-logged meal
-     *       enters the forward integration with the same GI scaling and GLP-1 state a meal
-     *       timestamped a minute into the future would have.</li>
-     * </ul>
-     *
-     * <p>The replay mirrors {@link HovorkaOdeSolver#derivatives} term for term. Anything modelled
-     * there and not here is silently dropped for every meal the user has actually logged: the
-     * warm-up used to hard-code {@code activeGI = 70} and leave {@code protFatGut = 0}, so GI,
-     * protein and fat only ever reached the model through the future-event timelines and a meal
-     * one minute old predicted nothing like the same meal one minute ahead.</p>
+     * Glucose appearance [mmol/min] for each forecast minute, from every meal in
+     * {@code carbsEntries} - logged ones replayed from when they were eaten (up to 8 h back),
+     * prospective ones from when they will be. Each meal runs in its own gut chain at its own GI
+     * and tMaxG (see {@link MealGutChains}); protein and fat from any of them drive the shared
+     * ileal brake.
      */
-    private WarmUp buildWarmState(
-            double currentGlucose,
-            List<CarbsEntry> pastCarbs,
-            LocalDateTime now,
-            HovorkaParameters p,
-            UserSettingsDTO settings) {
-
-        HovorkaState ss = HovorkaState.steadyState(currentGlucose, p);
-
-        // Drain rates mirror the forward RK4 integration (HovorkaOdeSolver.derivatives) term for
-        // term, so a meal's Qgut carries over consistently across the warm-up/forward boundary.
-        // Both the caloric correction and kAbs derive from tMaxG there, and both are therefore
-        // computed per tick here - from the tMaxG and GI of the meal being absorbed at that tick.
-
-        // Collect past meals (delivered before "now") as age-in-minutes -> carb mmol, GI and
-        // protein+fat kcal. We replay ALL of them through ONE shared gut chain in chronological
-        // order - not isolated per-meal chains - so the k_empt D reference is refreshed to the
-        // stomach load at each ingestion exactly like HovorkaOdeSolver.step. This makes stacked
-        // history meals (e.g. snack then dinner) carry the same emptying dynamics into the
-        // forward integration as the forward path itself, and keeps a single fresh meal
-        // consistent with a continuous run that started at the meal.
-        Map<Integer, Double> mealsByAge     = new HashMap<>();
-        Map<Integer, Double> giWeightedByAge = new HashMap<>();
-        Map<Integer, Double> giWeightByAge   = new HashMap<>();
-        Map<Integer, Double> tMaxGWeightedByAge = new HashMap<>();
-        Map<Integer, Double> protFatByAge    = new HashMap<>();
-        // Ages at which a rescue carb was ingested - they also expire after the rescue window.
-        Set<Integer> rescueAges = new HashSet<>();
-        // Ages whose tMaxG differs from the user's own (rescue or fiber) - the only ones worth blending.
-        Set<Integer> customTMaxGAges = new HashSet<>();
-        Map<CarbsEntry, Double> fiberByMeal = effectiveFiberByMeal(pastCarbs);
-        int oldestAge = 0;
-        for (CarbsEntry entry : pastCarbs) {
+    private MealGutChains.Appearance buildAppearance(List<CarbsEntry> carbsEntries, LocalDateTime now,
+                                     HovorkaParameters p, UserSettingsDTO settings, int pathMinutes) {
+        MealGutChains chains = new MealGutChains(gutModel);
+        Map<CarbsEntry, Double> fiberByMeal = effectiveFiberByMeal(carbsEntries);
+        for (CarbsEntry entry : carbsEntries) {
             if (entry.getTimestamp() == null) continue;
             long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
-            if (minsAgo <= 0) continue;
-            int ageMin = (int) Math.min(minsAgo, 480);
-
-            // Protein/fat drive the GLP-1 ileal brake even when the meal carries no carbs at all.
-            double kcal = protFatKcal(entry);
-            if (kcal > 0) {
-                protFatByAge.merge(ageMin, kcal, Double::sum);
-                oldestAge = Math.max(oldestAge, ageMin);
-            }
-
+            // A past meal eaten A minutes ago enters before the step ending at 1-A; a meal at or
+            // after "now" before the step ending at its minute (at least 1).
+            int step = minsAgo > 0
+                    ? 1 - (int) Math.min(minsAgo, MAX_HISTORY_MIN)
+                    : Math.max(1, (int) -minsAgo);
+            chains.addProtFat(step, protFatKcal(entry));
             double carbMmol = toCarbMmol(entry, p, settings);
-            if (carbMmol <= 0) continue;
-            mealsByAge.merge(ageMin, carbMmol, Double::sum);
-            // Carb-weighted GI, matching buildFutureGiTimeline: meals landing on the same
-            // minute blend rather than the later one silently winning.
-            double carbs = entry.getCarbs();
-            giWeightedByAge.merge(ageMin, carbs * giOf(entry), Double::sum);
-            giWeightByAge.merge(ageMin, carbs, Double::sum);
-            // Carb-weighted tMaxG over the same weights, so a rescue swallowed alongside a normal
-            // snack blends rather than one of the two silently winning the minute.
-            double entryTMaxG = tMaxGOf(entry, p, fiberByMeal);
-            tMaxGWeightedByAge.merge(ageMin, carbs * entryTMaxG, Double::sum);
-            if (RescueCarbProfile.isRescue(entry.getAbsorptionMode())) {
-                rescueAges.add(ageMin);
+            if (carbMmol > 0) {
+                chains.addMeal(new MealGutChains.Meal(step, carbMmol, giOf(entry), tMaxGOf(entry, p, fiberByMeal)));
             }
-            if (entryTMaxG != p.tMaxG()) {
-                customTMaxGAges.add(ageMin);
-            }
-            oldestAge = Math.max(oldestAge, ageMin);
         }
-
-        if (mealsByAge.isEmpty() && protFatByAge.isEmpty()) {
-            return new WarmUp(ss, p.tMaxG(), NO_ACTIVE_RESCUE_MIN);
-        }
-
-        // Blend only where a rescue or fiber actually changed the rate. Where every entry carries the
-        // user's own tMaxG the blend is p.tMaxG() by definition, but the divide can land a unit in the
-        // last place away from it - and that would perturb every ordinary meal's curve for no reason.
-        Map<Integer, Double> tMaxGByAge = new HashMap<>();
-        customTMaxGAges.forEach(age ->
-                tMaxGByAge.put(age, tMaxGWeightedByAge.get(age) / giWeightByAge.get(age)));
-
-        double qsto1 = 0.0, qsto2 = 0.0, qgut = 0.0, dRef = 0.0;
-        double protFatGut = 0.0, inc = 0.0;
-        int activeGi = DEFAULT_GI;
-        double activeTMaxG = p.tMaxG();
-        // Age [min ago] at or below which the active rescue's window has closed. Ages count DOWN,
-        // so a rescue ingested at age A is spent once the tick reaches A - MAX_DURATION_MIN.
-        int rescueSpentAtAge = NO_ACTIVE_RESCUE_AGE;
-        // Tick down from the oldest meal's age to 1 minute ago. At each tick, ingest any
-        // meal whose age equals the current tick, then advance the gut ODE by one minute.
-        for (int age = oldestAge; age >= 1; age--) {
-            Double carbMmol = mealsByAge.get(age);
-            if (carbMmol != null) {
-                qsto1 += carbMmol;
-                dRef   = qsto1 + qsto2;   // refresh D = stomach load, like step()
-                activeGi = (int) Math.round(giWeightedByAge.get(age) / giWeightByAge.get(age));
-                activeTMaxG = tMaxGByAge.getOrDefault(age, p.tMaxG());
-                rescueSpentAtAge = rescueAges.contains(age)
-                        ? age - RescueCarbProfile.MAX_DURATION_MIN
-                        : NO_ACTIVE_RESCUE_AGE;
-            }
-            Double kcal = protFatByAge.get(age);
-            if (kcal != null) {
-                protFatGut += kcal;
-            }
-
-            // A rescue is done by definition after RescueCarbProfile.MAX_DURATION_MIN. Without this
-            // the rescue rate would keep draining whatever else is left in the gut - an earlier
-            // dinner, say - for the rest of the replay, over-predicting recovery from a hypo.
-            if (age <= rescueSpentAtAge) {
-                activeTMaxG = p.tMaxG();
-                rescueSpentAtAge = NO_ACTIVE_RESCUE_AGE;
-            }
-
-            // Caloric correction and kAbs both from the absorbing meal's own tMaxG, and the GI
-            // scale on top of both - identical to derivatives(), which derives them from p.tMaxG().
-            double cCal    = DallaManGutModel.caloricScale(
-                    activeTMaxG * HovorkaParameterService.HALF_LIFE_TO_TMAX_G);
-            double giScale = HovorkaOdeSolver.giScale(activeGi);
-            double kGriEff = DallaManGutModel.K_GRI * cCal * giScale;
-            double kMaxEff = DallaManGutModel.K_MAX * cCal * giScale;
-            double kMinEff = DallaManGutModel.K_MIN * cCal * giScale;
-            double kAbsEff = DallaManGutModel.effectiveKAbs(activeTMaxG) * giScale;
-
-            double qsto  = qsto1 + qsto2;
-            double kempt = dRef > 0 ? gutModel.kEmpt(qsto, dRef, kMaxEff, kMinEff) : 0.0;
-            // Ileal brake: GLP-1 from protein/fat already in the gut slows emptying.
-            double kemptEff = kempt * HovorkaOdeSolver.ilealBrake(inc);
-
-            double dQsto1 = -kGriEff * qsto1;
-            double dQsto2 = kGriEff * qsto1 - kemptEff * qsto2;
-            double dQgut  = kemptEff * qsto2 - kAbsEff * qgut;
-            double dProtFatGut = -HovorkaOdeSolver.K_PF_DRAIN * protFatGut;
-            double dInc        = HovorkaOdeSolver.dIncDt(protFatGut, inc);
-
-            qsto1 = Math.max(0.0, qsto1 + dQsto1);
-            qsto2 = Math.max(0.0, qsto2 + dQsto2);
-            qgut  = Math.max(0.0, qgut  + dQgut);
-            protFatGut = Math.max(0.0, protFatGut + dProtFatGut);
-            inc        = Math.max(0.0, inc + dInc);
-        }
-
-        HovorkaState warm = new HovorkaState(
-                ss.q1(), ss.q2(), qsto1, qsto2, qgut, inc, protFatGut, dRef, activeGi);
-
-        log.debug("Dalla Man warm state: G={}mmol/L Q1={} Qsto1={} Qsto2={} Qgut={} Inc={} ProtFatGut={} GI={} tMaxG={}min",
-                currentGlucose, warm.q1(), warm.qsto1(), warm.qsto2(), warm.qgut(),
-                warm.inc(), warm.protFatGut(), warm.activeGI(), activeTMaxG);
-        // Ages are minutes BEFORE "now" and forward minutes are minutes AFTER it, so the age at
-        // which the rescue is spent negates into the forward minute at which it is spent: a rescue
-        // swallowed 30 min ago has 15 of its 45 minutes left when the forward integration starts.
-        int rescueSpentAtMin = rescueSpentAtAge == NO_ACTIVE_RESCUE_AGE
-                ? NO_ACTIVE_RESCUE_MIN
-                : -rescueSpentAtAge;
-        return new WarmUp(warm, activeTMaxG, rescueSpentAtMin);
+        return chains.appearance(pathMinutes);
     }
-
-    /**
-     * The state at "now", the gut time constant of the meal still absorbing there, and the forward
-     * minute at which that rate reverts because a rescue's window has closed
-     * ({@link #NO_ACTIVE_RESCUE_MIN} when no rescue is in flight).
-     *
-     * <p>{@code activeTMaxG} rides alongside {@link HovorkaState} rather than inside it because the
-     * solver reads tMaxG from {@link HovorkaParameters}, not from the state vector. It has to cross
-     * the warm-up/forward boundary all the same: a rescue logged a minute ago must keep draining at
-     * its own rate once the forward integration takes over, exactly as {@code activeGI} does - and
-     * must stop doing so at the same elapsed time whichever path it was logged into.</p>
-     */
-    private record WarmUp(HovorkaState state, double activeTMaxG, int rescueSpentAtMin) {}
 
     // -- Per-dose IOB timelines -----------------------------------------------
 
@@ -915,148 +698,6 @@ public class HovorkaGlucosePredictionService {
     private double iobActivityRate(double[] iobTimeline, int m) {
         if (m + 1 >= iobTimeline.length) return 0.0;
         return Math.max(0.0, iobTimeline[m] - iobTimeline[m + 1]);
-    }
-
-    // -- Future carb timeline --------------------------------------------------
-
-    /**
-     * Builds a map of minute -> carb mmol for future events only.
-     * Past events (minsAgo > 0) are already captured in the warm-up.
-     */
-    private Map<Integer, Double> buildFutureCarbTimeline(
-            List<CarbsEntry> carbsEntries,
-            LocalDateTime now,
-            HovorkaParameters p,
-            UserSettingsDTO settings) {
-
-        Map<Integer, Double> timeline = new HashMap<>();
-        for (CarbsEntry entry : carbsEntries) {
-            if (entry.getTimestamp() == null) continue;
-            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
-            if (minsAgo > 0) continue; // past - captured in warm-up
-
-            // Future or current event: minute = |minsAgo|.
-            // Clamp to 1: minsAgo=0 (meal logged at exactly "now") must still enter the ODE loop,
-            // which starts at min=1 - storing at key=0 would cause the meal to be silently dropped.
-            int futureMin = Math.max(1, (int) Math.abs(minsAgo));
-            double carbMmol = toCarbMmol(entry, p, settings);
-            if (carbMmol > 0) {
-                timeline.merge(futureMin, carbMmol, Double::sum);
-            }
-        }
-        return timeline;
-    }
-
-    /**
-     * Builds a map of minute -> GI for future carb events only.
-     * Mirrors the minute-offset logic of {@link #buildFutureCarbTimeline}: past entries
-     * (minsAgo > 0) are captured in the warm-up and excluded here.
-     * Default GI of 70 is used when {@code estimatedGi} is null.
-     *
-     * <p>When multiple meals land at the same minute, computes the carb-weighted average GI
-     * instead of silently dropping the first meal (which would happen with {@code put}).
-     * Accumulates weighted numerator (gi × carbMmol) and carb denominator separately,
-     * then divides to get the final weighted-average GI per minute.</p>
-     */
-    private Map<Integer, Integer> buildFutureGiTimeline(
-            List<CarbsEntry> carbsEntries, LocalDateTime now) {
-        Map<Integer, Double> giWeightedSum = new HashMap<>();
-        Map<Integer, Double> carbWeightMap  = new HashMap<>();
-
-        for (CarbsEntry entry : carbsEntries) {
-            if (entry.getTimestamp() == null) continue;
-            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
-            if (minsAgo > 0) continue; // past - captured in warm-up
-
-            int futureMin = Math.max(1, (int) Math.abs(minsAgo));
-            double carbs = entry.getCarbs() != null ? entry.getCarbs() : 0.0;
-            if (carbs <= 0.0) continue;
-            giWeightedSum.merge(futureMin, carbs * giOf(entry), Double::sum);
-            carbWeightMap.merge(futureMin, carbs, Double::sum);
-        }
-
-        Map<Integer, Integer> timeline = new HashMap<>();
-        giWeightedSum.forEach((min, weightedGi) -> {
-            double totalCarbs = carbWeightMap.getOrDefault(min, 1.0);
-            timeline.put(min, (int) Math.round(weightedGi / totalCarbs));
-        });
-        return timeline;
-    }
-
-    /**
-     * Maps future minute-offset → carb-weighted gut time constant [min]. Mirrors
-     * {@link #buildFutureGiTimeline} exactly - same {@code minsAgo > 0} skip, same carb weights -
-     * so a rescue carb contributes the fast rescue tMaxG and a hypo treatment absorbs at its own
-     * rate rather than the user's mixed-meal rate.
-     *
-     * <p>Fiber (the meal's own and a first course's) slows a meal the same way - see
-     * {@link #tMaxGOf}. A minute with neither a rescue carb nor fiber maps to {@code p.tMaxG()}
-     * verbatim rather than to a carb-weighted average of identical values. The average <em>is</em> {@code p.tMaxG()}
-     * mathematically, but the divide can land a unit in the last place away from it, and that would
-     * perturb every ordinary meal's curve for no reason.</p>
-     */
-    private FutureTMaxG buildFutureTMaxGTimeline(
-            List<CarbsEntry> carbsEntries, LocalDateTime now, HovorkaParameters p) {
-        Map<Integer, Double> tMaxGWeightedSum = new HashMap<>();
-        Map<Integer, Double> carbWeightMap    = new HashMap<>();
-        Set<Integer> rescueMinutes            = new HashSet<>();
-        Set<Integer> customTMaxGMinutes       = new HashSet<>();
-        Map<CarbsEntry, Double> fiberByMeal   = effectiveFiberByMeal(carbsEntries);
-
-        for (CarbsEntry entry : carbsEntries) {
-            if (entry.getTimestamp() == null) continue;
-            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
-            if (minsAgo > 0) continue; // past - captured in warm-up
-
-            int futureMin = Math.max(1, (int) Math.abs(minsAgo));
-            double carbs = entry.getCarbs() != null ? entry.getCarbs() : 0.0;
-            if (carbs <= 0.0) continue;
-            double entryTMaxG = tMaxGOf(entry, p, fiberByMeal);
-            tMaxGWeightedSum.merge(futureMin, carbs * entryTMaxG, Double::sum);
-            carbWeightMap.merge(futureMin, carbs, Double::sum);
-            if (RescueCarbProfile.isRescue(entry.getAbsorptionMode())) {
-                rescueMinutes.add(futureMin);
-            }
-            if (entryTMaxG != p.tMaxG()) {
-                customTMaxGMinutes.add(futureMin);
-            }
-        }
-
-        Map<Integer, Double> timeline = new HashMap<>();
-        carbWeightMap.forEach((min, totalCarbs) -> timeline.put(min,
-                customTMaxGMinutes.contains(min)
-                        ? tMaxGWeightedSum.get(min) / totalCarbs
-                        : p.tMaxG()));
-        return new FutureTMaxG(timeline, rescueMinutes);
-    }
-
-    /**
-     * The future gut-time-constant timeline plus the minutes a rescue actually landed on. The
-     * integration loop needs both: the first to know what rate to absorb at, the second to know
-     * when {@link RescueCarbProfile#MAX_DURATION_MIN} has elapsed and the rate must revert.
-     */
-    private record FutureTMaxG(Map<Integer, Double> byMinute, Set<Integer> rescueMinutes) {}
-
-    /**
-     * Maps future minute-offset → braking load [kcal] entering the gut: each meal's protein+fat
-     * energy beyond the reference meal's share (see {@link HovorkaOdeSolver#brakeKcal}).
-     * Used to drive the protFatGut compartment (GLP-1 ileal brake).
-     *
-     * <p>Mirrors the minute-offset logic of {@link #buildFutureCarbTimeline}: past entries
-     * (minsAgo &gt; 0) are already captured in the warm-up and excluded here.</p>
-     */
-    private Map<Integer, Double> buildFutureProtFatTimeline(
-            List<CarbsEntry> carbsEntries, LocalDateTime now) {
-        Map<Integer, Double> timeline = new HashMap<>();
-        for (CarbsEntry entry : carbsEntries) {
-            if (entry.getTimestamp() == null) continue;
-            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
-            if (minsAgo > 0) continue; // past - captured in warm-up
-            int futureMin = Math.max(1, (int) Math.abs(minsAgo));
-            double kcal = protFatKcal(entry);
-            if (kcal > 0) timeline.merge(futureMin, kcal, Double::sum);
-        }
-        return timeline;
     }
 
     /**
@@ -1153,21 +794,6 @@ public class HovorkaGlucosePredictionService {
 
     private static double fiberOf(CarbsEntry entry) {
         return entry.getFiber() != null ? Math.max(0.0, entry.getFiber()) : 0.0;
-    }
-
-    /**
-     * A copy of {@code p} with {@code tMaxG} replaced - the only lever the ODE offers for "these
-     * carbs absorb at a different speed".
-     *
-     * <p>{@link HovorkaOdeSolver#derivatives} reads {@code p.tMaxG()} twice: once for the caloric
-     * correction on k_gri/k_max/k_min (gastric emptying) and once for {@code effectiveKAbs}
-     * (intestinal drain). Both must move together for a rescue carb, so the per-minute value is
-     * threaded in through the parameter record rather than as a separate argument.</p>
-     */
-    private static HovorkaParameters withTMaxG(HovorkaParameters p, double tMaxG) {
-        return new HovorkaParameters(
-                p.vG(), p.f01(), p.egpNet(), p.egp0(), p.k12(), p.k21(),
-                tMaxG, p.aG(), p.isf(), p.weightKg());
     }
 
     /**
