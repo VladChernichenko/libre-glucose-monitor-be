@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.service;
 
+import che.glucosemonitorbe.sync.SyncOutcome;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.domain.UserGlucoseSyncState;
@@ -52,8 +53,6 @@ class LibreLinkUpSyncServiceCgmTagTest {
         userId = UUID.randomUUID();
         // The @Value-bound numeric fields default to 0 under Mockito, which is fine for the
         // forced/no-backoff path used in this test.
-        ReflectionTestUtils.setField(sut, "fastIntervalMinutes", 5L);
-        ReflectionTestUtils.setField(sut, "slowIntervalMinutes", 15L);
         ReflectionTestUtils.setField(sut, "onDemandWaitSeconds", 25L);
         ReflectionTestUtils.setField(sut, "onDemandMinIntervalSeconds", 8L);
     }
@@ -68,10 +67,10 @@ class LibreLinkUpSyncServiceCgmTagTest {
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
                 .thenReturn(libreData(7.2, 7.5));
 
-        LibreLinkUpSyncService.Outcome outcome = sut.syncUser(userId, true);
+        SyncOutcome outcome = sut.syncUser(userId, true).outcome();
 
-        assertThat(outcome).isIn(LibreLinkUpSyncService.Outcome.NEW_DATA,
-                                 LibreLinkUpSyncService.Outcome.NO_CHANGE);
+        assertThat(outcome).isIn(SyncOutcome.NEW_DATA,
+                                 SyncOutcome.NO_CHANGE);
 
         ArgumentCaptor<List<NightscoutEntryDto>> entriesCaptor = ArgumentCaptor.forClass(List.class);
         verify(cgmReadingService, times(1))
@@ -98,9 +97,9 @@ class LibreLinkUpSyncServiceCgmTagTest {
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
                 .thenReturn(libreDataAt(recorded - 60_000L, recorded, recorded + 60_000L));
 
-        LibreLinkUpSyncService.Outcome outcome = sut.syncUser(userId, true);
+        SyncOutcome outcome = sut.syncUser(userId, true).outcome();
 
-        assertThat(outcome).isEqualTo(LibreLinkUpSyncService.Outcome.NEW_DATA);
+        assertThat(outcome).isEqualTo(SyncOutcome.NEW_DATA);
         ArgumentCaptor<List<NightscoutEntryDto>> entriesCaptor = ArgumentCaptor.forClass(List.class);
         verify(cgmReadingService).storeChartData(
                 eq(userId), entriesCaptor.capture(), eq(CgmReading.DataSource.LIBRE_LINK_UP));
@@ -121,9 +120,9 @@ class LibreLinkUpSyncServiceCgmTagTest {
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))
                 .thenReturn(libreDataAt(recorded - 60_000L, recorded));
 
-        LibreLinkUpSyncService.Outcome outcome = sut.syncUser(userId, true);
+        SyncOutcome outcome = sut.syncUser(userId, true).outcome();
 
-        assertThat(outcome).isEqualTo(LibreLinkUpSyncService.Outcome.NO_CHANGE);
+        assertThat(outcome).isEqualTo(SyncOutcome.NO_CHANGE);
         verify(cgmReadingService, never()).storeChartData(any(), any(), any());
     }
 

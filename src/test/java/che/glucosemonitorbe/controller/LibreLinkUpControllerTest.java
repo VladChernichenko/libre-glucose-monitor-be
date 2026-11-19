@@ -41,6 +41,7 @@ class LibreLinkUpControllerTest {
     @Mock UserDataSourceConfigService dataSourceConfigService;
     @Mock che.glucosemonitorbe.service.LibreLinkUpSyncService libreLinkUpSyncService;
     @Mock che.glucosemonitorbe.assistant.common.CgmFreshnessService cgmFreshness;
+    @Mock che.glucosemonitorbe.sync.LibreSyncLane libreSyncLane;
 
     @InjectMocks LibreLinkUpController controller;
 
@@ -57,6 +58,41 @@ class LibreLinkUpControllerTest {
         when(userService.getUserByUsername("testuser")).thenReturn(userDto);
         auth = new UsernamePasswordAuthenticationToken(
                 "testuser", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+    }
+
+    @Test
+    @DisplayName("POST /sync-now - RATE_LIMITED maps to 429")
+    void syncNow_rateLimited_returns429() throws Exception {
+        when(libreLinkUpSyncService.syncUser(userId, true))
+                .thenReturn(che.glucosemonitorbe.sync.SyncResult.of(che.glucosemonitorbe.sync.SyncOutcome.RATE_LIMITED));
+
+        mockMvc.perform(post("/api/libre/sync-now").principal(auth))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.outcome").value("RATE_LIMITED"));
+    }
+
+    @Test
+    @DisplayName("POST /sync-now - notifies the Libre lane with the result")
+    void syncNow_notifiesLane() throws Exception {
+        che.glucosemonitorbe.sync.SyncResult result = che.glucosemonitorbe.sync.SyncResult.newData(42L);
+        when(libreLinkUpSyncService.syncUser(userId, true)).thenReturn(result);
+
+        mockMvc.perform(post("/api/libre/sync-now").principal(auth))
+                .andExpect(status().isOk());
+
+        verify(libreSyncLane).onForcedSync(userId, result);
+    }
+
+    @Test
+    @DisplayName("POST /sync-now - lane bookkeeping failure still returns the sync outcome")
+    void syncNow_laneBookkeepingFails_stillReturnsOutcomeStatus() throws Exception {
+        che.glucosemonitorbe.sync.SyncResult result = che.glucosemonitorbe.sync.SyncResult.newData(42L);
+        when(libreLinkUpSyncService.syncUser(userId, true)).thenReturn(result);
+        doThrow(new RuntimeException("db down")).when(libreSyncLane).onForcedSync(userId, result);
+
+        mockMvc.perform(post("/api/libre/sync-now").principal(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("NEW_DATA"));
     }
 
     // -- GET /api/libre/status --------------------------------------------------

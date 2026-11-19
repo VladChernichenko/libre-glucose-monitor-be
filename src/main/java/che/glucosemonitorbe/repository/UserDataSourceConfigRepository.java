@@ -48,6 +48,15 @@ public interface UserDataSourceConfigRepository extends JpaRepository<UserDataSo
     List<UUID> findDistinctUserIdsByDataSourceAndIsActiveTrue(@Param("dataSource") UserDataSourceConfig.DataSourceType dataSource);
 
     /**
+     * User IDs with an active LibreLinkUp configuration that has email, password and a non-blank patientId
+     * (the Libre due-queue membership).
+     */
+    @Query("SELECT DISTINCT c.user.id FROM UserDataSourceConfig c WHERE c.dataSource = che.glucosemonitorbe.domain.UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP"
+            + " AND c.isActive = true AND c.libreEmail IS NOT NULL AND c.librePassword IS NOT NULL"
+            + " AND c.librePatientId IS NOT NULL AND TRIM(c.librePatientId) <> ''")
+    List<UUID> findActiveLibreUserIdsWithCredentials();
+
+    /**
      * Find all active Nightscout configurations for a user
      */
     @Query("SELECT c FROM UserDataSourceConfig c WHERE c.user.id = :userId AND c.dataSource = 'NIGHTSCOUT' AND c.isActive = true ORDER BY c.createdAt DESC")
