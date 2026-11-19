@@ -10,6 +10,7 @@ import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
 import che.glucosemonitorbe.service.libre.LibreLinkUpResponseParser;
 import che.glucosemonitorbe.service.libre.LibreLinkUpSessionStore;
+import che.glucosemonitorbe.service.libre.LibreRateLimitedException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -274,7 +275,7 @@ public class LibreLinkUpService {
                     return connections;
                 } catch (Exception e) {
                     logger.error("Failed to fetch LibreLinkUp connections for user {}: {}", userId, e.getMessage());
-                    throw new RuntimeException("Failed to fetch LibreLinkUp connections: " + e.getMessage());
+                    throw wrapFetchFailure("Failed to fetch LibreLinkUp connections: ", e);
                 }
             },
             () -> {
@@ -282,6 +283,21 @@ public class LibreLinkUpService {
                 return new ArrayList<>();
             }
         );
+    }
+
+    /**
+     * Wraps a fetch failure keeping the cause chain; an HTTP 429 (or an already typed rate-limit)
+     * becomes {@link LibreRateLimitedException} so callers can tell it from a generic error.
+     */
+    private static RuntimeException wrapFetchFailure(String prefix, Exception e) {
+        String msg = prefix + e.getMessage();
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof LibreRateLimitedException
+                    || (t instanceof HttpClientErrorException h && h.getStatusCode().value() == 429)) {
+                return new LibreRateLimitedException(msg, e);
+            }
+        }
+        return new RuntimeException(msg, e);
     }
 
     /**
@@ -305,7 +321,7 @@ public class LibreLinkUpService {
                     return glucoseData;
                 } catch (Exception e) {
                     logger.error("Failed to fetch LibreLinkUp glucose data for patient {}: {}", patientId, e.getMessage());
-                    throw new RuntimeException("Failed to fetch LibreLinkUp glucose data: " + e.getMessage());
+                    throw wrapFetchFailure("Failed to fetch LibreLinkUp glucose data: ", e);
                 }
             });
         } catch (CircuitBreakerException e) {

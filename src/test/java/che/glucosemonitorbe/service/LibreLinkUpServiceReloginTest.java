@@ -97,6 +97,20 @@ class LibreLinkUpServiceReloginTest {
     }
 
     @Test
+    @DisplayName("graph HTTP 429 propagates as LibreRateLimitedException")
+    void graphHttp429_propagatesAsRateLimited() throws Exception {
+        storeCredentials();
+        sessionStore.putToken(userId, "live-token");
+        when(client.authenticatedGet(eq(userId), anyString()))
+                .thenThrow(HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS, "Too Many Requests",
+                        HttpHeaders.EMPTY, new byte[0], StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> service.getGlucoseData("p1", 1, userId))
+                .isInstanceOf(che.glucosemonitorbe.service.libre.LibreRateLimitedException.class)
+                .hasCauseInstanceOf(HttpClientErrorException.class);
+    }
+
+    @Test
     @DisplayName("a live session is reused - no extra login")
     void liveSession_noLogin() throws Exception {
         storeCredentials();
