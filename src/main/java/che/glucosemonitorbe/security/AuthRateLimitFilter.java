@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 public class AuthRateLimitFilter extends OncePerRequestFilter {
 
-    private static final Set<String> LIMITED_PATHS = Set.of("/api/auth/login", "/api/auth/register");
+    private static final Set<String> LIMITED_PATHS = Set.of("/api/auth/login", "/api/auth/register", "/api/auth/device-session");
 
     private final boolean enabled;
     private final int maxAttempts;

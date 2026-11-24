@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
@@ -76,6 +77,21 @@ public class AuthController {
             return ResponseEntity.badRequest().body(response);
         }
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Issue a separate session for another device of the signed-in user (Apple Watch)")
+    @ApiResponses({ @ApiResponse(responseCode = "200", description = "New, independent JWT pair returned"),
+                    @ApiResponse(responseCode = "401", description = "Caller is not signed in") })
+    @PostMapping("/device-session")
+    public ResponseEntity<AuthResponse> deviceSession() {
+        // /api/auth/** is permitAll, so an unauthenticated caller arrives here as anonymous: reject it here.
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication instanceof AnonymousAuthenticationToken
+                || !authentication.isAuthenticated()
+                || authentication.getName() == null || authentication.getName().isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        return ResponseEntity.ok(authService.issueDeviceSession(authentication.getName()));
     }
 
     @GetMapping("/test")
