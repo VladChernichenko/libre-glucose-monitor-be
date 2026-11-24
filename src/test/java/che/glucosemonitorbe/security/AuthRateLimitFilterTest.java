@@ -68,6 +68,23 @@ class AuthRateLimitFilterTest {
     }
 
     @Test
+    void deviceSessionFailuresAreLimited() throws Exception {
+        AuthRateLimitFilter filter = new AuthRateLimitFilter(true, 1, 300);
+        MockHttpServletRequest first = new MockHttpServletRequest("POST", "/api/auth/device-session");
+        first.setRemoteAddr("7.7.7.7");
+        filter.doFilter(first, new MockHttpServletResponse(), (rq, rs) -> ((HttpServletResponse) rs).setStatus(401));
+
+        MockHttpServletRequest second = new MockHttpServletRequest("POST", "/api/auth/device-session");
+        second.setRemoteAddr("7.7.7.7");
+        MockHttpServletResponse blocked = new MockHttpServletResponse();
+        AtomicInteger chainCalls = new AtomicInteger();
+        filter.doFilter(second, blocked, (rq, rs) -> chainCalls.incrementAndGet());
+
+        assertEquals(429, blocked.getStatus());
+        assertEquals(0, chainCalls.get());
+    }
+
+    @Test
     void nonAuthPathsAreNotLimited() throws Exception {
         AuthRateLimitFilter filter = new AuthRateLimitFilter(true, 1, 300);
         AtomicInteger chainCalls = new AtomicInteger();
