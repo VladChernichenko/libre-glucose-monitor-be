@@ -13,6 +13,9 @@ import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.LibreLinkUpSyncService;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
+import che.glucosemonitorbe.sync.LibreSyncLane;
+import che.glucosemonitorbe.sync.SyncOutcome;
+import che.glucosemonitorbe.sync.SyncResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,7 +51,8 @@ class WatchGlanceServiceTest {
     private final UserDataSourceConfigService dataSources = mock(UserDataSourceConfigService.class);
     private final GlucoseCalculationsService calculations = mock(GlucoseCalculationsService.class);
     private final FeatureToggleService features = mock(FeatureToggleService.class);
-    private final WatchGlanceService service = new WatchGlanceService(users, readings, libre, dataSources,
+    private final LibreSyncLane lane = mock(LibreSyncLane.class);
+    private final WatchGlanceService service = new WatchGlanceService(users, readings, libre, lane, dataSources,
             calculations, features, Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeEach
@@ -55,6 +60,7 @@ class WatchGlanceServiceTest {
         when(users.getUserByUsername(USERNAME)).thenReturn(UserDto.builder().id(USER_ID).username(USERNAME).build());
         upstreamAvailable(true);
         when(features.shouldUseBackend("glucose-calculations")).thenReturn(true);
+        when(libre.syncUser(USER_ID, true)).thenReturn(SyncResult.of(SyncOutcome.UNAVAILABLE));
     }
 
     @Test
@@ -97,6 +103,47 @@ class WatchGlanceServiceTest {
         when(calculations.calculateDashboard(any())).thenReturn(GlucoseCalculationsResponse.builder().build());
 
         assertEquals(WatchGlance.StaleCause.UPSTREAM_DOWN, service.glance(USERNAME, BERLIN).staleCause());
+        verify(libre, times(1)).syncUser(USER_ID, true);
+    }
+
+    @Test
+    void libreUpstreamGlitch_reconnectsBeforeReporting() {
+        // The phone makes one reconnect attempt (an on-demand sync) before showing "LibreLinkUp isn't responding".
+        libreUser(true);
+        SyncResult synced = SyncResult.of(SyncOutcome.NEW_DATA);
+        when(libre.syncUser(USER_ID, true)).thenReturn(synced);
+        when(libre.upstreamStatus(USER_ID)).thenReturn(
+                new LibreUpstreamStatusDTO(false, "CLOSED", null, null, null),
+                new LibreUpstreamStatusDTO(true, "CLOSED", null, null, null));
+        reading(126, NOW.minusSeconds(120), 3, null);
+        when(calculations.calculateDashboard(any())).thenReturn(GlucoseCalculationsResponse.builder().build());
+
+        assertEquals(WatchGlance.StaleCause.NONE, service.glance(USERNAME, BERLIN).staleCause());
+        verify(lane).onForcedSync(USER_ID, synced);
+    }
+
+    @Test
+    void libreUpstreamAvailable_doesNotSync() {
+        libreUser(true);
+        reading(126, NOW.minusSeconds(120), 3, null);
+        when(calculations.calculateDashboard(any())).thenReturn(GlucoseCalculationsResponse.builder().build());
+
+        service.glance(USERNAME, BERLIN);
+
+        verify(libre, never()).syncUser(any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void libreUser_readsOnlyLibreRows() {
+        // The phone reads Libre users' readings from the LibreLinkUp rows only ("llu-" chart data).
+        libreUser(true);
+        reading(126, NOW.minusSeconds(120), 3, null);
+        CgmReading leftover = CgmReading.builder().userId(USER_ID).dataSource(CgmReading.DataSource.NIGHTSCOUT)
+                .sgv(200).dateTimestamp(NOW.minusSeconds(30).toEpochMilli()).direction("Flat").build();
+        when(readings.findFirstByUserIdOrderByDateTimestampDesc(USER_ID)).thenReturn(Optional.of(leftover));
+        when(calculations.calculateDashboard(any())).thenReturn(GlucoseCalculationsResponse.builder().build());
+
+        assertEquals(126 / 18.018, service.glance(USERNAME, BERLIN).reading().mmol(), 1e-9);
     }
 
     @Test
@@ -122,12 +169,15 @@ class WatchGlanceServiceTest {
         verify(calculations).calculateDashboard(sent.capture());
         assertEquals(-0.067, sent.getValue().getCurrentTrendMmolPerMin(), 0.0);
         assertEquals(false, glance.reading().libre());
+        verify(libre, never()).syncUser(any(), org.mockito.ArgumentMatchers.anyBoolean());
     }
 
     @Test
     void noReading_returnsEmptyGlanceWithoutCalculating() {
         libreUser(true);
         when(readings.findFirstByUserIdOrderByDateTimestampDesc(USER_ID)).thenReturn(Optional.empty());
+        when(readings.findFirstByUserIdAndDataSourceOrderByDateTimestampDesc(USER_ID, CgmReading.DataSource.LIBRE_LINK_UP))
+                .thenReturn(Optional.empty());
 
         WatchGlance glance = service.glance(USERNAME, BERLIN);
 
@@ -182,5 +232,7 @@ class WatchGlanceServiceTest {
         CgmReading r = CgmReading.builder().userId(USER_ID).sgv(sgv).dateTimestamp(at.toEpochMilli())
                 .trend(trend).direction(direction).build();
         when(readings.findFirstByUserIdOrderByDateTimestampDesc(USER_ID)).thenReturn(Optional.of(r));
+        when(readings.findFirstByUserIdAndDataSourceOrderByDateTimestampDesc(USER_ID, CgmReading.DataSource.LIBRE_LINK_UP))
+                .thenReturn(Optional.of(r));
     }
 }

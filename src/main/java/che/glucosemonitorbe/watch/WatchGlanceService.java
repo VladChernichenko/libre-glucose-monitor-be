@@ -12,6 +12,8 @@ import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.LibreLinkUpSyncService;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
 import che.glucosemonitorbe.service.UserService;
+import che.glucosemonitorbe.sync.LibreSyncLane;
+import che.glucosemonitorbe.sync.SyncResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -41,6 +43,7 @@ public class WatchGlanceService {
     private final UserService users;
     private final CgmReadingRepository readings;
     private final LibreLinkUpSyncService libre;
+    private final LibreSyncLane libreLane;
     private final UserDataSourceConfigService dataSources;
     private final GlucoseCalculationsService calculations;
     private final FeatureToggleService features;
@@ -48,17 +51,18 @@ public class WatchGlanceService {
 
     @Autowired
     public WatchGlanceService(UserService users, CgmReadingRepository readings, LibreLinkUpSyncService libre,
-                              UserDataSourceConfigService dataSources, GlucoseCalculationsService calculations,
-                              FeatureToggleService features) {
-        this(users, readings, libre, dataSources, calculations, features, Clock.systemUTC());
+                              LibreSyncLane libreLane, UserDataSourceConfigService dataSources,
+                              GlucoseCalculationsService calculations, FeatureToggleService features) {
+        this(users, readings, libre, libreLane, dataSources, calculations, features, Clock.systemUTC());
     }
 
     WatchGlanceService(UserService users, CgmReadingRepository readings, LibreLinkUpSyncService libre,
-                       UserDataSourceConfigService dataSources, GlucoseCalculationsService calculations,
-                       FeatureToggleService features, Clock clock) {
+                       LibreSyncLane libreLane, UserDataSourceConfigService dataSources,
+                       GlucoseCalculationsService calculations, FeatureToggleService features, Clock clock) {
         this.users = users;
         this.readings = readings;
         this.libre = libre;
+        this.libreLane = libreLane;
         this.dataSources = dataSources;
         this.calculations = calculations;
         this.features = features;
@@ -67,15 +71,21 @@ public class WatchGlanceService {
 
     public WatchGlance glance(String username, ZoneId zone) {
         UUID userId = users.getUserByUsername(username).getId();
-        Optional<CgmReading> newest = readings.findFirstByUserIdOrderByDateTimestampDesc(userId)
+        boolean libreUser = dataSources
+                .getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP).isPresent();
+        if (libreUser) {
+            reconnectIfDown(userId);
+        }
+        // Libre users: the LibreLinkUp rows only, as the phone reads them ("llu-" chart data).
+        Optional<CgmReading> newest = (libreUser
+                ? readings.findFirstByUserIdAndDataSourceOrderByDateTimestampDesc(userId, CgmReading.DataSource.LIBRE_LINK_UP)
+                : readings.findFirstByUserIdOrderByDateTimestampDesc(userId))
                 .filter(r -> r.getSgv() != null && r.getDateTimestamp() != null);
         if (newest.isEmpty()) {
             return WatchGlance.empty();
         }
         CgmReading row = newest.get();
         Instant now = clock.instant();
-        boolean libreUser = dataSources
-                .getActiveConfigEntity(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP).isPresent();
         WatchGlance.Reading reading = new WatchGlance.Reading(row.getSgv() / PHONE_MGDL_PER_MMOL,
                 row.getDateTimestamp(), row.getTrend(), row.getDirection(), libreUser);
         WatchGlance.StaleCause stale = staleCause(userId, libreUser, row.getDateTimestamp(), now);
@@ -91,6 +101,21 @@ public class WatchGlanceService {
             // The reading is still worth showing; never show a strip that was not computed now.
             log.warn("Watch glance calculation failed for user={}: {}", username, e.getMessage(), e);
             return new WatchGlance(reading, stale, null, null);
+        }
+    }
+
+    /**
+     * The phone's {@code refreshLibreUpstreamStatus}: when LibreLinkUp looks down, one reconnect attempt (an
+     * on-demand sync, as {@code POST /api/libre/sync-now} runs it) before the glance reports it, so a single
+     * failed call never taps the wrist with "LibreLinkUp isn't responding".
+     */
+    private void reconnectIfDown(UUID userId) {
+        if (libre.upstreamStatus(userId).available()) return;
+        SyncResult result = libre.syncUser(userId, true);
+        try {
+            libreLane.onForcedSync(userId, result);
+        } catch (RuntimeException e) {
+            log.warn("Lane bookkeeping after the watch's reconnect sync failed for user {}: {}", userId, e.toString());
         }
     }
 
