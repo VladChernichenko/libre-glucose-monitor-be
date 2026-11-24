@@ -255,6 +255,29 @@ public class HovorkaOdeSolver {
     }
 
     /**
+     * Advance glucose by one minute with the gut's glucose appearance supplied from outside
+     * ({@link MealGutChains}, one chain per meal). The state's own gut compartments are expected
+     * empty, so the only carb input is {@code raMmolPerMin}.
+     */
+    public HovorkaState stepWithAppearance(
+            HovorkaState state,
+            HovorkaParameters p,
+            double raMmolPerMin,
+            double insulinEffect,
+            double activityRate) {
+        double[] y  = toArray(state);
+        double[] k1 = derivatives(y, p, 0.0, DEFAULT_GI, insulinEffect, activityRate, raMmolPerMin);
+        double[] k2 = derivatives(add(y, scale(k1, 0.5)), p, 0.0, DEFAULT_GI, insulinEffect, activityRate, raMmolPerMin);
+        double[] k3 = derivatives(add(y, scale(k2, 0.5)), p, 0.0, DEFAULT_GI, insulinEffect, activityRate, raMmolPerMin);
+        double[] k4 = derivatives(add(y, k3),             p, 0.0, DEFAULT_GI, insulinEffect, activityRate, raMmolPerMin);
+        double[] yn = new double[N];
+        for (int i = 0; i < N; i++) {
+            yn[i] = y[i] + (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) / 6.0;
+        }
+        return fromArray(yn, state.mealMmol(), state.activeGI()).clampNonNegative();
+    }
+
+    /**
      * Compute the 7 ODE derivatives (4-arg backward-compat delegate).
      *
      * <p>y[0]=Q1, y[1]=Q2, y[2]=Qsto1, y[3]=Qsto2, y[4]=Qgut, y[5]=Inc,
@@ -283,6 +306,13 @@ public class HovorkaOdeSolver {
     double[] derivatives(double[] y, HovorkaParameters p,
                          double mealMmol, int gi,
                          double insulinEffect, double activityUptakeRate) {
+        return derivatives(y, p, mealMmol, gi, insulinEffect, activityUptakeRate, 0.0);
+    }
+
+    private double[] derivatives(double[] y, HovorkaParameters p,
+                                 double mealMmol, int gi,
+                                 double insulinEffect, double activityUptakeRate,
+                                 double externalRa) {
 
         double q1    = Math.max(0.0, y[0]);
         double q2    = Math.max(0.0, y[1]);
@@ -341,7 +371,7 @@ public class HovorkaOdeSolver {
         // cleared glucose ~3x faster than F01: a 60 g meal with 30 g protein and 30 g fat and no
         // bolus at all was predicted to fall from 6.0 to 2.2 mmol/L.
         double dq1 = -f01c - fr - p.k12() * q1 + p.k21() * q2
-                   + ra + egp - insulinEffect
+                   + ra + externalRa + egp - insulinEffect
                    - activityUptakeRate * q1;
         double dq2 = p.k12() * q1 - p.k21() * q2;
 

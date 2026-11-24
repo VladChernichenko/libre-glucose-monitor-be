@@ -2,8 +2,11 @@ package che.glucosemonitorbe.hovorka;
 
 import che.glucosemonitorbe.domain.CarbsEntry;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -60,15 +63,38 @@ public final class ProteinGluconeogenesis {
                     .mealType(MEAL_TYPE)
                     .userId(meal.getUserId())
                     .build();
-            // Inherit the meal's absorption kinetics. The Hovorka gut lets the newest carbs set the
-            // GI / gut rate for everything still in it, so a bare entry (default GI 70, no fiber)
-            // would switch a slow low-GI meal's remaining carbs to fast absorption at the onset and
-            // dump them - a 12 g protein equivalent then raised the 4 h forecast by ~3 mmol/L.
+            // Inherit the meal's absorption kinetics: the delayed glucose comes from the same meal,
+            // so it absorbs at that meal's GI and fiber, not at the default GI 70. (With the old
+            // shared gut a bare entry also switched the meal's remaining carbs to fast absorption
+            // - +3 mmol/L at 4 h from 12 g; per-meal chains no longer couple them.)
             delayed.setEstimatedGi(meal.getEstimatedGi());
             delayed.setFiber(meal.getFiber());
             delayed.setAbsorptionSpeedClass(meal.getAbsorptionSpeedClass());
             out.add(delayed);
         }
         return out;
+    }
+
+    /** A protein rise that starts within the forecast, or started less than this long ago [min]. */
+    public static final int LATE_RISE_ACTIVE_MIN = 120;
+
+    /** The delayed protein glucose the forecast is about to show (or is showing). */
+    public record LateRise(LocalDateTime onsetAt, double carbEquivalentG) {}
+
+    /**
+     * The earliest delayed-protein entry in {@code modelEntries} (output of
+     * {@link #withDelayedProteinGlucose}) whose onset is in {@code (now - 2 h, now + horizon]},
+     * with the grams of all such entries summed; empty when there is none.
+     */
+    public static Optional<LateRise> lateRise(List<CarbsEntry> modelEntries, LocalDateTime now, int horizonMin) {
+        List<CarbsEntry> active = modelEntries.stream()
+                .filter(e -> MEAL_TYPE.equals(e.getMealType()) && e.getTimestamp() != null)
+                .filter(e -> e.getTimestamp().isAfter(now.minusMinutes(LATE_RISE_ACTIVE_MIN))
+                        && !e.getTimestamp().isAfter(now.plusMinutes(horizonMin)))
+                .sorted(Comparator.comparing(CarbsEntry::getTimestamp))
+                .toList();
+        if (active.isEmpty()) return Optional.empty();
+        double g = active.stream().mapToDouble(e -> e.getCarbs() == null ? 0 : e.getCarbs()).sum();
+        return Optional.of(new LateRise(active.get(0).getTimestamp(), Math.round(g * 10.0) / 10.0));
     }
 }
