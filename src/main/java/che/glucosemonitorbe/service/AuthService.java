@@ -42,6 +42,20 @@ public class AuthService {
                 .build();
     }
 
+    /**
+     * A second session for an already signed-in user (the Apple Watch). Its refresh token starts its
+     * own rotation chain (random jti), so the phone and the watch never spend each other's tokens.
+     * Log-out-everywhere revokes it like any other token issued before the watermark.
+     */
+    public AuthResponse issueDeviceSession(String username) {
+        return AuthResponse.builder()
+                .accessToken(tokenProvider.generateTokenFromUsername(username))
+                .refreshToken(tokenProvider.generateRefreshToken(username))
+                .tokenType("Bearer")
+                .expiresIn(tokenProvider.getAccessTokenExpirySeconds())
+                .build();
+    }
+
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getUsername())) {
             // BE-8 fix: throw typed exception so GlobalExceptionHandler returns HTTP 409

@@ -51,6 +51,8 @@ public interface CgmReadingRepository extends JpaRepository<CgmReading, UUID> {
     /** The user's most recent stored reading, from any data source. */
     Optional<CgmReading> findFirstByUserIdOrderByDateTimestampDesc(UUID userId);
 
+    Optional<CgmReading> findFirstByUserIdAndDataSourceOrderByDateTimestampDesc(UUID userId, CgmReading.DataSource dataSource);
+
     /** Paginated overload to avoid loading the whole CGM history into memory. */
     Page<CgmReading> findByUserIdOrderByDateTimestampAsc(UUID userId, Pageable pageable);
 
