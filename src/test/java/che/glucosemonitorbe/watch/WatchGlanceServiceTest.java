@@ -8,6 +8,7 @@ import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.dto.LibreUpstreamStatusDTO;
 import che.glucosemonitorbe.dto.UserDto;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
+import che.glucosemonitorbe.service.FeatureToggleService;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.LibreLinkUpSyncService;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
@@ -45,13 +46,15 @@ class WatchGlanceServiceTest {
     private final LibreLinkUpSyncService libre = mock(LibreLinkUpSyncService.class);
     private final UserDataSourceConfigService dataSources = mock(UserDataSourceConfigService.class);
     private final GlucoseCalculationsService calculations = mock(GlucoseCalculationsService.class);
+    private final FeatureToggleService features = mock(FeatureToggleService.class);
     private final WatchGlanceService service = new WatchGlanceService(users, readings, libre, dataSources,
-            calculations, Clock.fixed(NOW, ZoneOffset.UTC));
+            calculations, features, Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeEach
     void user() {
         when(users.getUserByUsername(USERNAME)).thenReturn(UserDto.builder().id(USER_ID).username(USERNAME).build());
         upstreamAvailable(true);
+        when(features.shouldUseBackend("glucose-calculations")).thenReturn(true);
     }
 
     @Test
@@ -146,6 +149,21 @@ class WatchGlanceServiceTest {
         assertEquals(WatchGlance.StaleCause.NONE, glance.staleCause());
         assertNull(glance.twoHourPredictionMmol());
         assertNull(glance.watch());
+    }
+
+    @Test
+    void calculationsDisabled_returnsReadingWithoutCalculating() {
+        // The phone's POST answers "feature not enabled" with no data; the watch must show no more than that.
+        when(features.shouldUseBackend("glucose-calculations")).thenReturn(false);
+        libreUser(true);
+        reading(126, NOW.minusSeconds(120), 3, null);
+
+        WatchGlance glance = service.glance(USERNAME, BERLIN);
+
+        assertNotNull(glance.reading());
+        assertNull(glance.twoHourPredictionMmol());
+        assertNull(glance.watch());
+        verify(calculations, never()).calculateDashboard(any());
     }
 
     // -- helpers ---------------------------------------------------------------

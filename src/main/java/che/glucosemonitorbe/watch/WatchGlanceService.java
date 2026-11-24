@@ -7,6 +7,7 @@ import che.glucosemonitorbe.dto.ClientTimeInfo;
 import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.GlucoseCalculationsResponse;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
+import che.glucosemonitorbe.service.FeatureToggleService;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.LibreLinkUpSyncService;
 import che.glucosemonitorbe.service.UserDataSourceConfigService;
@@ -42,22 +43,25 @@ public class WatchGlanceService {
     private final LibreLinkUpSyncService libre;
     private final UserDataSourceConfigService dataSources;
     private final GlucoseCalculationsService calculations;
+    private final FeatureToggleService features;
     private final Clock clock;
 
     @Autowired
     public WatchGlanceService(UserService users, CgmReadingRepository readings, LibreLinkUpSyncService libre,
-                              UserDataSourceConfigService dataSources, GlucoseCalculationsService calculations) {
-        this(users, readings, libre, dataSources, calculations, Clock.systemUTC());
+                              UserDataSourceConfigService dataSources, GlucoseCalculationsService calculations,
+                              FeatureToggleService features) {
+        this(users, readings, libre, dataSources, calculations, features, Clock.systemUTC());
     }
 
     WatchGlanceService(UserService users, CgmReadingRepository readings, LibreLinkUpSyncService libre,
                        UserDataSourceConfigService dataSources, GlucoseCalculationsService calculations,
-                       Clock clock) {
+                       FeatureToggleService features, Clock clock) {
         this.users = users;
         this.readings = readings;
         this.libre = libre;
         this.dataSources = dataSources;
         this.calculations = calculations;
+        this.features = features;
         this.clock = clock;
     }
 
@@ -75,6 +79,10 @@ public class WatchGlanceService {
         WatchGlance.Reading reading = new WatchGlance.Reading(row.getSgv() / PHONE_MGDL_PER_MMOL,
                 row.getDateTimestamp(), row.getTrend(), row.getDirection(), libreUser);
         WatchGlance.StaleCause stale = staleCause(userId, libreUser, row.getDateTimestamp(), now);
+        // Same switch as the phone's POST /api/glucose-calculations/, which then returns no data at all.
+        if (!features.shouldUseBackend("glucose-calculations")) {
+            return new WatchGlance(reading, stale, null, null);
+        }
 
         try {
             GlucoseCalculationsResponse dashboard = calculations.calculateDashboard(request(username, reading, zone, now));
