@@ -105,9 +105,11 @@ only when non-null (as for the ISF windows) and returns them on read.
 ratio. The legacy `carb_ratio` (mmol/L rise per 10 g, read by nothing) was removed with it.
 `scripts/upgrade-existing-db.sql` copies `grams_per_unit` into the unset windows of a deployed
 database before dropping it (an older one derives them from `10 * isf / carb_ratio` before dropping
-`carb_ratio`). An older app's `"gramsPerUnit"` and `"carbRatio"` keys on save are ignored. The
-settings response keeps a read-only `"carbRatio": 2.0` (not stored, not settable) because iPhone
-builds before this change decode it as non-optional; delete it once those builds are gone.
+`carb_ratio`). An older app's `"gramsPerUnit"` and `"carbRatio"` keys on save are ignored. For
+iPhone builds before this change the settings response keeps two read-only compatibility fields
+(not stored, not settable): `"carbRatio": 2.0`, which they decode as non-optional, and
+`"gramsPerUnit"`, the ratio all four windows share (null when they differ), which their only ratio
+row shows. They go together: delete both once those builds are gone.
 
 ### 2. Consumers
 

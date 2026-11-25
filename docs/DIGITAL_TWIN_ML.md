@@ -142,7 +142,7 @@ the system learn aggressively without ever shipping a regression.
 ## 4. How the twin is applied - *predictions only*
 
 **A deliberate, explicit product decision: the twin never touches insulin-dosing settings.** The
-user's `user_settings.isf` / `carb_ratio` (used by the bolus calculator) are never written. The twin
+user's `user_settings.isf` and per-meal-window carb ratios (`grams_per_unit_*`, used by the bolus calculator) are never written. The twin
 affects only the prediction curve.
 
 The overlay happens at three points, all reading from `DigitalTwinService` (which serves an *active*

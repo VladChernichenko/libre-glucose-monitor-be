@@ -1,32 +1,42 @@
 -- =============================================================================
--- One-off upgrade of a database created from main (Flyway at V12) to the
--- feat/assistant-chat schema.
+-- One-off upgrade of an existing database to this build's schema.
 --
--- Why: this branch edited V1/V4/V5/V6 in place (project rule: edit the migration
--- that owns the table). Flyway never re-runs V1, so on an existing database the
--- columns added to V1 are missing, `flyway repair` alone only rewrites checksums,
--- Hibernate `ddl-auto: validate` then refuses to start, and V16 needs pgvector.
+-- Why: migrations are edited in place when they own the table (project rule:
+-- edit the migration that owns the table), and Flyway never re-runs them. So an
+-- existing database lacks what V1/V4/V5/V6 gained and still has what they lost;
+-- `flyway repair` alone only rewrites checksums, Hibernate `ddl-auto: validate`
+-- then refuses to start, and V16 needs pgvector.
 --
--- It also covers feat/carb-ratio-meal-windows, which replaced the single
--- insulin-to-carb ratio user_settings.grams_per_unit with one per meal window
--- (grams_per_unit_breakfast, _lunch, _dinner, _night) in V1. A database already
--- at V22 (upgraded before, or created from the earlier V1) still has
--- grams_per_unit: it needs this script (each unset window takes grams_per_unit,
--- then the column is dropped), then `flyway repair` (V1 checksum), then the app
--- start; Flyway then applies V23. The legacy user_settings.carb_ratio (mmol/L
--- rise per 10 g) was removed from V1 too; the script drops it, after using it
--- for the windows of a database from main.
+-- Applies to a database at:
+--   * V12 - created from old main (before feat/assistant-chat). After this
+--           script, V13 drops experiments, experiment_readings,
+--           verification_events and verification_summary IRREVERSIBLY.
+--   * V22 - main before the per-meal-window carb ratio: has the single
+--           user_settings.grams_per_unit and the legacy carb_ratio.
+--   * V23 - main after PR #40 (feat/carb-ratio-meal-windows, first part): has
+--           the four window columns and still grams_per_unit and carb_ratio.
+-- user_settings: each unset meal-window ratio takes grams_per_unit (from V12,
+-- where there is none, it is derived once as 10 * isf / carb_ratio); then the
+-- script DROPS grams_per_unit and carb_ratio.
 --
--- ORDER (do not skip or reorder):
---   1. BACK UP the database (pg_dump). From V12, V13 drops experiments,
---      experiment_readings, verification_events and verification_summary
---      IRREVERSIBLY.
---   2. Run this script:   psql -v ON_ERROR_STOP=1 -d <db> -f scripts/upgrade-existing-db.sql
+-- Builds before this change read grams_per_unit and carb_ratio. Running this
+-- script under a live older build breaks its settings loads, and after
+-- `flyway repair` an older jar cannot start (V1 checksum). Never run it while an
+-- older build serves traffic.
+--
+-- PRODUCTION ORDER (do not skip or reorder):
+--   1. Pause auto-deploy, or stop the service, so no older build is running.
+--   2. BACK UP the database:  pg_dump.
+--   3. Run this script:       psql -v ON_ERROR_STOP=1 -d <db> -f scripts/upgrade-existing-db.sql
 --      (the server must have the pgvector extension available; the role must be
 --      allowed to CREATE EXTENSION).
---   3. flyway repair      (accepts the new checksums of the edited V1, V4, V5, V6).
---   4. Start the app      (Flyway applies the pending migrations - V13-V23 from V12,
---      V23 from V22 - then Hibernate validates).
+--   4. flyway repair          (accepts the new checksums of the edited V1, V4, V5, V6).
+--   5. Deploy or start this build. Flyway applies any pending migration (V13-V23
+--      from V12, V23 from V22, none from V23), then Hibernate validates.
+--   6. Resume auto-deploy.
+--
+-- ROLLBACK: restore the step-2 backup and redeploy the previous build. The
+-- dropped columns cannot be recovered any other way.
 --
 -- Idempotent: safe to run more than once. Covered by ExistingDbUpgradeIT.
 -- =============================================================================

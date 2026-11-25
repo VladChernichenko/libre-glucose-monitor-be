@@ -98,7 +98,8 @@ class CarbRatioWindowE2ETest {
 
         assertEquals(HttpStatus.OK, saved.getStatusCode(), "saving settings failed: " + saved.getBody());
         JsonNode body = mapper.readTree(saved.getBody());
-        assertFalse(body.has("gramsPerUnit"), "the single ratio is not part of the settings: " + body);
+        assertTrue(body.path("gramsPerUnit").isNull() || body.path("gramsPerUnit").isMissingNode(),
+                "12 is ignored, and windows 6/5/5/5 share no single ratio for older builds: " + body);
         assertEquals(2.0, body.path("carbRatio").asDouble(), "the compatibility carbRatio is a constant: " + body);
         assertEquals(6.0, body.path("gramsPerUnitBreakfast").asDouble());
         assertEquals(5.0, body.path("gramsPerUnitLunch").asDouble(), "an unsent window keeps the new row's 5 g/U");
@@ -114,6 +115,8 @@ class CarbRatioWindowE2ETest {
         assertEquals(HttpStatus.OK, fetched.getStatusCode(), "fetching settings failed: " + fetched.getBody());
         JsonNode body = mapper.readTree(fetched.getBody());
         assertEquals(2.0, body.path("carbRatio").asDouble(), "old builds fail to decode without it: " + body);
+        assertEquals(5.0, body.path("gramsPerUnit").asDouble(),
+                "a new row's windows all share 5 g/U, which old builds show as their one ratio: " + body);
         for (String key : new String[] {"isf", "carbHalfLife", "maxCOBDuration"}) {
             assertTrue(body.hasNonNull(key), key + " is non-optional in old builds too: " + body);
         }
