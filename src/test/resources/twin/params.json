@@ -6,19 +6,33 @@
   "source": "c-good / 3 corrections + refit",
   "notes": "Your stated 1.5 mmol/L per unit (27). The Oct 10 refit across all logs agrees (27 fits best; 30 was slightly too strong)."
  },
- "crAM": {
+ "crBreakfast": {
   "value": 7,
   "unit": "g per U",
-  "label": "Carb ratio, morning (05–11)",
+  "label": "Carb ratio, breakfast (05–11)",
   "source": "c-est / 2 breakfasts",
   "notes": "Oct 9 breakfast was underdosed at 1:9; Oct 10 breakfast at ≈1:7 landed on target."
  },
- "crDay": {
+ "crLunch": {
   "value": 10,
   "unit": "g per U",
-  "label": "Carb ratio, rest of day",
+  "label": "Carb ratio, lunch (11–16)",
   "source": "c-est / fit Oct 10",
   "notes": "Refit on Oct 9–10 lunches and dinners: 1:10 fits best. Sweets alone (Oct 9 cake) behaved stronger, about 1:7."
+ },
+ "crDinner": {
+  "value": 10,
+  "unit": "g per U",
+  "label": "Carb ratio, dinner (16–22)",
+  "source": "c-est / fit Oct 10",
+  "notes": "Same refit as lunch."
+ },
+ "crNight": {
+  "value": 10,
+  "unit": "g per U",
+  "label": "Carb ratio, night (22–05)",
+  "source": "c-est / fit Oct 10",
+  "notes": "Same refit as lunch."
  },
  "csf": {
   "value": 3.1,
