@@ -47,7 +47,6 @@ final class MealEpisode {
     MealEpisode trendMmolPerMin(Double v)         { trendMmolPerMin = v; return this; }
     MealEpisode setting(String field, Object v)   { settings.put(field, v); return this; }
     MealEpisode isf(double v)                     { return setting("isf", v); }
-    MealEpisode carbRatio(double v)               { return setting("carbRatio", v); }
     MealEpisode bodyWeightKg(double v)            { return setting("bodyWeightKg", v); }
     MealEpisode carbHalfLife(int minutes)         { return setting("carbHalfLife", minutes); }
     MealEpisode maxCobDuration(int minutes)       { return setting("maxCOBDuration", minutes); }

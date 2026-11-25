@@ -1,28 +1,42 @@
 -- =============================================================================
--- One-off upgrade of a database created from main (Flyway at V12) to the
--- feat/assistant-chat schema.
+-- One-off upgrade of an existing database to this build's schema.
 --
--- Why: this branch edited V1/V4/V5/V6 in place (project rule: edit the migration
--- that owns the table). Flyway never re-runs V1, so on an existing database the
--- columns added to V1 are missing, `flyway repair` alone only rewrites checksums,
--- Hibernate `ddl-auto: validate` then refuses to start, and V16 needs pgvector.
+-- Why: migrations are edited in place when they own the table (project rule:
+-- edit the migration that owns the table), and Flyway never re-runs them. So an
+-- existing database lacks what V1/V4/V5/V6 gained and still has what they lost;
+-- `flyway repair` alone only rewrites checksums, Hibernate `ddl-auto: validate`
+-- then refuses to start, and V16 needs pgvector.
 --
--- It also covers the per-meal-window carb ratio columns added to V1 on
--- feat/carb-ratio-meal-windows (user_settings.grams_per_unit_breakfast, _lunch,
--- _dinner, _night). A database already at V22 (upgraded before, or created from
--- the earlier V1) needs this script and `flyway repair` again before the app
--- starts; Flyway then applies V23.
+-- Applies to a database at:
+--   * V12 - created from old main (before feat/assistant-chat). After this
+--           script, V13 drops experiments, experiment_readings,
+--           verification_events and verification_summary IRREVERSIBLY.
+--   * V22 - main before the per-meal-window carb ratio: has the single
+--           user_settings.grams_per_unit and the legacy carb_ratio.
+--   * V23 - main after PR #40 (feat/carb-ratio-meal-windows, first part): has
+--           the four window columns and still grams_per_unit and carb_ratio.
+-- user_settings: each unset meal-window ratio takes grams_per_unit (from V12,
+-- where there is none, it is derived once as 10 * isf / carb_ratio); then the
+-- script DROPS grams_per_unit and carb_ratio.
 --
--- ORDER (do not skip or reorder):
---   1. BACK UP the database (pg_dump). From V12, V13 drops experiments,
---      experiment_readings, verification_events and verification_summary
---      IRREVERSIBLY.
---   2. Run this script:   psql -v ON_ERROR_STOP=1 -d <db> -f scripts/upgrade-existing-db.sql
+-- Builds before this change read grams_per_unit and carb_ratio. Running this
+-- script under a live older build breaks its settings loads, and after
+-- `flyway repair` an older jar cannot start (V1 checksum). Never run it while an
+-- older build serves traffic.
+--
+-- PRODUCTION ORDER (do not skip or reorder):
+--   1. Pause auto-deploy, or stop the service, so no older build is running.
+--   2. BACK UP the database:  pg_dump.
+--   3. Run this script:       psql -v ON_ERROR_STOP=1 -d <db> -f scripts/upgrade-existing-db.sql
 --      (the server must have the pgvector extension available; the role must be
 --      allowed to CREATE EXTENSION).
---   3. flyway repair      (accepts the new checksums of the edited V1, V4, V5, V6).
---   4. Start the app      (Flyway applies the pending migrations - V13-V23 from V12,
---      V23 from V22 - then Hibernate validates).
+--   4. flyway repair          (accepts the new checksums of the edited V1, V4, V5, V6).
+--   5. Deploy or start this build. Flyway applies any pending migration (V13-V23
+--      from V12, V23 from V22, none from V23), then Hibernate validates.
+--   6. Resume auto-deploy.
+--
+-- ROLLBACK: restore the step-2 backup and redeploy the previous build. The
+-- dropped columns cannot be recovered any other way.
 --
 -- Idempotent: safe to run more than once. Covered by ExistingDbUpgradeIT.
 -- =============================================================================
@@ -31,28 +45,63 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- user_settings: correction target, rescue carbs, and the insulin-to-carb ratio (V1 on this branch).
--- grams_per_unit is grams of carbohydrate per unit. carb_ratio (mmol/L per 10 g) is left as stored.
+-- user_settings: correction target and rescue carbs (V1 on this branch).
 ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,
-    ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15,
-    ADD COLUMN IF NOT EXISTS grams_per_unit      DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_breakfast DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_lunch DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_dinner DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_night DOUBLE PRECISION;
+    ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15;
 
+-- user_settings: the insulin-to-carb ratio, grams of carbohydrate per unit, one per meal window
+-- (V1 on this branch). The single grams_per_unit they replace is dropped, and so is the legacy
+-- carb_ratio (mmol/L per 10 g), which nothing reads any more.
+--   * Deployed at V22 (has grams_per_unit): each unset window takes grams_per_unit, then the
+--     column goes, and its CHECK with it.
+--   * Older, from main's V12 (neither grams_per_unit nor the windows): each window is derived once
+--     as 10 * isf / carb_ratio, the ICR that produces the same rise as (grams / 10) * carb_ratio,
+--     before carb_ratio is dropped.
+-- A ratio outside 3-30 is neither copied nor derived: that window stays NULL (no ratio, dosing
+-- refused) and has to be typed in. A second run finds the windows and neither old column, and
+-- changes nothing.
 DO $$
+DECLARE
+    has_single     BOOLEAN := EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'user_settings'
+          AND column_name = 'grams_per_unit');
+    has_windows    BOOLEAN := EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'user_settings'
+          AND column_name = 'grams_per_unit_breakfast');
+    has_carb_ratio BOOLEAN := EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'user_settings'
+          AND column_name = 'carb_ratio');
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'chk_user_settings_grams_per_unit'
-          AND conrelid = 'user_settings'::regclass
-    ) THEN
-        ALTER TABLE user_settings
-            ADD CONSTRAINT chk_user_settings_grams_per_unit
-            CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30));
+    ALTER TABLE user_settings
+        ADD COLUMN IF NOT EXISTS grams_per_unit_breakfast DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS grams_per_unit_lunch     DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS grams_per_unit_dinner    DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS grams_per_unit_night     DOUBLE PRECISION;
+
+    IF has_single THEN
+        UPDATE user_settings
+        SET grams_per_unit_breakfast = COALESCE(grams_per_unit_breakfast, grams_per_unit),
+            grams_per_unit_lunch     = COALESCE(grams_per_unit_lunch, grams_per_unit),
+            grams_per_unit_dinner    = COALESCE(grams_per_unit_dinner, grams_per_unit),
+            grams_per_unit_night     = COALESCE(grams_per_unit_night, grams_per_unit)
+        WHERE grams_per_unit BETWEEN 3 AND 30;
+        ALTER TABLE user_settings DROP COLUMN IF EXISTS grams_per_unit;
+    ELSIF NOT has_windows AND has_carb_ratio THEN
+        UPDATE user_settings
+        SET grams_per_unit_breakfast = COALESCE(grams_per_unit_breakfast, 10.0 * isf / carb_ratio),
+            grams_per_unit_lunch     = COALESCE(grams_per_unit_lunch, 10.0 * isf / carb_ratio),
+            grams_per_unit_dinner    = COALESCE(grams_per_unit_dinner, 10.0 * isf / carb_ratio),
+            grams_per_unit_night     = COALESCE(grams_per_unit_night, 10.0 * isf / carb_ratio)
+        WHERE isf > 0 AND carb_ratio > 0
+          AND (10.0 * isf / carb_ratio) BETWEEN 3 AND 30;
     END IF;
+
+    -- Its CHECK (chk_user_settings_carb_ratio_positive) goes with it.
+    ALTER TABLE user_settings DROP COLUMN IF EXISTS carb_ratio;
 END $$;
 
 DO $$
@@ -106,14 +155,6 @@ BEGIN
             CHECK (grams_per_unit_night IS NULL OR (grams_per_unit_night >= 3 AND grams_per_unit_night <= 30));
     END IF;
 END $$;
-
--- One-time: the ICR that produces the same rise as (grams / 10) * carb_ratio is 10 * isf / carb_ratio.
--- Rows outside 3-30 stay NULL and have to be typed in. A second run matches nothing.
-UPDATE user_settings
-SET grams_per_unit = 10.0 * isf / carb_ratio
-WHERE grams_per_unit IS NULL
-  AND isf > 0 AND carb_ratio > 0
-  AND (10.0 * isf / carb_ratio) BETWEEN 3 AND 30;
 
 -- notes: assistant chat carb band, context tags and originating chat message (V1 on this branch)
 ALTER TABLE notes

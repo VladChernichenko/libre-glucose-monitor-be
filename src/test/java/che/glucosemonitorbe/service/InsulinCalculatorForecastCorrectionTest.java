@@ -30,8 +30,8 @@ class InsulinCalculatorForecastCorrectionTest {
     void setUp() {
         UserSettingsService settingsService = mock(UserSettingsService.class);
         settings = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, /*carbRatio*/ 1.0, /*isf*/ 2.0, /*halfLife*/ 45, /*maxCob*/ 240);
-        settings.setGramsPerUnit(10.0);
+                UUID.randomUUID(), USER_ID, /*isf*/ 2.0, /*halfLife*/ 45, /*maxCob*/ 240);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, 10.0);
         settings.setBodyWeightKg(70.0); // max bolus 0.3 U/kg -> 21 U
         when(settingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
         calc = new InsulinCalculatorService(settingsService);
@@ -73,7 +73,7 @@ class InsulinCalculatorForecastCorrectionTest {
 
     @Test
     void refusesInconsistentSettings() {
-        settings.setGramsPerUnit(2.0); // below the 3 g/U floor; carbRatio is not consulted
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, 2.0); // below the 3 g/U floor
         assertRefused(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT,
                 () -> calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 2.0, T));
     }
@@ -86,7 +86,7 @@ class InsulinCalculatorForecastCorrectionTest {
 
     @Test
     void hypoRefusalComesBeforeSettingsCheck() {
-        settings.setGramsPerUnit(2.0);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, 2.0);
         assertRefused(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
                 () -> calc.calculateForecastCorrection(USER, 3.8, 11.0, 5.5, 2.0, T));
     }

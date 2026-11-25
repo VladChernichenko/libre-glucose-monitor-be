@@ -136,7 +136,7 @@ Conventions: UUID PKs via `gen_random_uuid()`; all timestamps `TIMESTAMPTZ` (UTC
 
 ### Key tables
 
-**`user_settings`** — the single source of truth for dosing parameters. `carb_ratio` (mmol/L rise per 10 g), `isf` (mmol/L per U), `carb_half_life` (min), `max_cob_duration`, `body_weight_kg`, four optional per-window ISF overrides (`isf_breakfast|lunch|dinner|night`), plus `timezone` (IANA, authoritative) and `utc_offset_minutes` (fallback). CHECK constraints enforce positivity on every rate.
+**`user_settings`** — the single source of truth for dosing parameters. Four insulin-to-carb ratios, one per meal window (`grams_per_unit_breakfast|lunch|dinner|night`, g/U, 3–30, NULL = no ratio for that window; new rows get 5), `isf` (mmol/L per U), `carb_half_life` (min), `max_cob_duration`, `body_weight_kg`, four optional per-window ISF overrides (`isf_breakfast|lunch|dinner|night`), plus `timezone` (IANA, authoritative) and `utc_offset_minutes` (fallback). CHECK constraints enforce positivity on every rate.
 
 **`notes`** — the intervention log. `carbs`, `insulin`, `meal` label, `glucose_value`, `nutrition_profile` (JSON), `absorption_mode`, `type` (`normal` / `long_acting` / `activity` / `hypo_treatment`), `photo_key`, and activity fields (`activity_type`, `intensity`, `duration_min`). Indexed on `(user_id, timestamp)`.
 
@@ -251,6 +251,8 @@ Readiness ("clean background") requires COB < 5 g **and** IOB < 0.3 U, computed 
 
 ### Real-meal verification
 
+*Removed: V13 dropped its tables, and its scheduler and service are gone. Kept for history; the `carb_ratio` it tuned was later removed from `user_settings` with the per-meal-window ratios.*
+
 `VerificationScheduler` every 15 min → `VerificationService.evaluatePending()`:
 
 - Every created note is enqueued as a `PENDING` verification event (fire-and-forget; a failure never blocks the note save).
@@ -329,15 +331,15 @@ Dosing is the one path that refuses rather than degrades. `InsulinCalculatorServ
 
 | Guard | Rule |
 |---|---|
-| `SETTINGS_INVALID` | Missing/non-finite/non-positive ISF or carb ratio — never substituted with a default |
-| `INSULIN_PARAMS_INCONSISTENT` | Derived `gramsPerUnit = 10·ISF/CR` outside 3–30 g/U (a refusal boundary, not a clamp) |
+| `SETTINGS_INVALID` | Missing/non-finite/non-positive ISF — never substituted with a default |
+| `INSULIN_PARAMS_INCONSISTENT` | The dose time's meal-window ratio (`grams_per_unit_*`) unset or outside 3–30 g/U (a refusal boundary, not a clamp) |
 | `GLUCOSE_BELOW_SAFE_THRESHOLD` | Current glucose < 3.9 mmol/L (ADA/ATTD Level 1) — treat the low, don't bolus |
 | `GLUCOSE_IMPLAUSIBLE_UNIT` | Value outside physiological mmol/L range (likely mg/dL) — defined but not currently enforced |
 | `DOSE_EXCEEDS_MAX_BOLUS` | Final dose > 0.3 U/kg, checked **after** meal + correction − IOB, i.e. on the number a patient would act on |
 
 `DosingRefusedException` carries a patient-facing message and a separate internal `detail` that is logged but never returned. Prediction glucose is clamped to [1, 25] mmol/L everywhere.
 
-Deriving `gramsPerUnit` from ISF and CR (rather than storing it) means it inherits the twin's calibration of both — and it is why a single accepted verification suggestion is bounded to ±25 %.
+The carb ratio is stored per meal window, not derived: the window the dose time falls in prices the meal, and an unset window has no ratio (no other window stands in). Ratios change only when the user sets them or applies the per-window suggestion, which moves a ratio by at most ±20 % per apply.
 
 ---
 
@@ -393,7 +395,7 @@ Deriving `gramsPerUnit` from ISF and CR (rather than storing it) means it inheri
 
 **D · Unlogged scan** — cron → raw Hovorka over 180 min → sustained residual vs robust σ → classify → OPEN flag → user confirm/dismiss.
 
-**E · Verification titration** — note saved → PENDING event → 2 h later CGM fetched, error computed → rolling 7-event summary → gated suggestion → user accepts → carb ratio moves at most ±25 %.
+**E · Verification titration** *(removed in V13; kept for history)* — note saved → PENDING event → 2 h later CGM fetched, error computed → rolling 7-event summary → gated suggestion → user accepts → carb ratio moves at most ±25 %.
 
 **F · CGM sync** — scheduler → per-user config → SSRF-validated fetch / region-probing Libre auth → normalise → dedupe → insert → update sync state (fast/slow backoff) → anomaly detector evaluates on the same cadence.
 

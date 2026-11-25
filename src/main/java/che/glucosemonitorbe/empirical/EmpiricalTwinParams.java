@@ -84,9 +84,9 @@ public record EmpiricalTwinParams(
     }
 
     /** {@link #forUser(Double, Double, Map, double, double)} with one carb ratio for every window. */
-    public static EmpiricalTwinParams forUser(Double isfMmolPerUnit, Double gramsPerUnit,
+    public static EmpiricalTwinParams forUser(Double isfMmolPerUnit, Double gramsPerUnitNow,
                                               double diaHours, double peakMinutes) {
-        return forUser(isfMmolPerUnit, gramsPerUnit, Map.of(), diaHours, peakMinutes);
+        return forUser(isfMmolPerUnit, gramsPerUnitNow, Map.of(), diaHours, peakMinutes);
     }
 
     /**
@@ -96,30 +96,31 @@ public record EmpiricalTwinParams(
      * sensitivities.
      *
      * <p>A missing or implausible input keeps the default for that parameter. Each window takes its
-     * own ratio from {@code windowGramsPerUnit}, else the single {@code gramsPerUnit}, else its
-     * default; the fast-sugar rise follows from the other two as {@code isf / gramsPerUnit}. The
-     * shape parameters (absorption times, GI exponents, walk and alcohol effects) are not personal
-     * settings and stay at their defaults.</p>
+     * own ratio from {@code windowGramsPerUnit}, else the ratio in force now ({@code gramsPerUnitNow}),
+     * else its default; the fast-sugar rise follows from the ISF and the ratio in force now as
+     * {@code isf / gramsPerUnitNow}. The shape parameters (absorption times, GI exponents, walk and
+     * alcohol effects) are not personal settings and stay at their defaults.</p>
      *
      * @param isfMmolPerUnit     ISF [mmol/L per U], or null
-     * @param gramsPerUnit       single carb ratio [g per U], or null
+     * @param gramsPerUnitNow    the carb ratio in force now, i.e. the current meal window's [g per U],
+     *                           or null
      * @param windowGramsPerUnit per-window carb ratios [g per U]; absent or implausible windows fall back
      * @param diaHours           rapid-insulin duration of action [h]
      * @param peakMinutes        rapid-insulin activity peak [min]
      */
-    public static EmpiricalTwinParams forUser(Double isfMmolPerUnit, Double gramsPerUnit,
+    public static EmpiricalTwinParams forUser(Double isfMmolPerUnit, Double gramsPerUnitNow,
                                               Map<MealWindow, Double> windowGramsPerUnit,
                                               double diaHours, double peakMinutes) {
         EmpiricalTwinParams d = defaults();
         Map<MealWindow, Double> byWindow = windowGramsPerUnit == null ? Map.of() : windowGramsPerUnit;
         boolean hasIsf = isfMmolPerUnit != null && Double.isFinite(isfMmolPerUnit) && isfMmolPerUnit > 0;
-        boolean hasCr  = plausibleCr(gramsPerUnit);
+        boolean hasCr  = plausibleCr(gramsPerUnitNow);
         double isf  = hasIsf ? isfMmolPerUnit * EmpiricalTwinEngine.MGDL_PER_MMOL : d.isf();
-        double crBreakfast = windowCr(byWindow.get(MealWindow.BREAKFAST), gramsPerUnit, d.crBreakfast());
-        double crLunch     = windowCr(byWindow.get(MealWindow.LUNCH), gramsPerUnit, d.crLunch());
-        double crDinner    = windowCr(byWindow.get(MealWindow.DINNER), gramsPerUnit, d.crDinner());
-        double crNight     = windowCr(byWindow.get(MealWindow.NIGHT), gramsPerUnit, d.crNight());
-        double csf  = hasIsf || hasCr ? isf / (hasCr ? gramsPerUnit : 10.0) : d.csf();
+        double crBreakfast = windowCr(byWindow.get(MealWindow.BREAKFAST), gramsPerUnitNow, d.crBreakfast());
+        double crLunch     = windowCr(byWindow.get(MealWindow.LUNCH), gramsPerUnitNow, d.crLunch());
+        double crDinner    = windowCr(byWindow.get(MealWindow.DINNER), gramsPerUnitNow, d.crDinner());
+        double crNight     = windowCr(byWindow.get(MealWindow.NIGHT), gramsPerUnitNow, d.crNight());
+        double csf  = hasIsf || hasCr ? isf / (hasCr ? gramsPerUnitNow : 10.0) : d.csf();
         double dia  = Double.isFinite(diaHours) && diaHours > 0 ? diaHours * 60.0 : d.dia();
         double peak = Double.isFinite(peakMinutes) && peakMinutes > 0 ? peakMinutes : d.peak();
         return new EmpiricalTwinParams(
@@ -136,7 +137,7 @@ public record EmpiricalTwinParams(
         return v != null && Double.isFinite(v) && v >= 3.0 && v <= 30.0;
     }
 
-    private static double windowCr(Double windowValue, Double single, double fallback) {
-        return plausibleCr(windowValue) ? windowValue : plausibleCr(single) ? single : fallback;
+    private static double windowCr(Double windowValue, Double now, double fallback) {
+        return plausibleCr(windowValue) ? windowValue : plausibleCr(now) ? now : fallback;
     }
 }

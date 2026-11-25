@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 /**
  * Dosing must price a bolus with the ISF in force at that bolus's own time of day.
  *
- * <p>These are the real stored settings of the 21 Aug incident: carbRatio 2.0, base isf 1.0,
+ * <p>These are the real stored settings of the 21 Aug incident: base isf 1.0,
  * isf_dinner 1.5, isf_night 1.0. An 80 g dinner priced on the base ISF yields 16 u; priced on
  * the dinner ISF it yields 10.7 u. The user took 10 u and still finished the evening at
  * 3.8 mmol/L.
@@ -37,14 +37,14 @@ class InsulinCalculatorServiceIsfWindowTest {
     void setUp() {
         userSettingsService = mock(UserSettingsService.class);
         UserSettingsDTO settings = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, /*carbRatio*/ 2.0, /*isf*/ 1.0,
+                UUID.randomUUID(), USER_ID, /*isf*/ 1.0,
                 /*halfLife*/ 45, /*maxCob*/ 240);
         settings.setIsfBreakfast(1.5);
         settings.setIsfLunch(1.5);
         settings.setIsfDinner(1.5);
         settings.setIsfNight(1.0);
         settings.setBodyWeightKg(84.0);
-        settings.setGramsPerUnit(7.5);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, 7.5);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
         service = new InsulinCalculatorService(userSettingsService);
     }
@@ -88,9 +88,9 @@ class InsulinCalculatorServiceIsfWindowTest {
     @Test
     void refusesWhenNeitherWindowNorBaseIsfIsSet() {
         UserSettingsDTO bare = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, /*carbRatio*/ 2.0, /*isf*/ null,
+                UUID.randomUUID(), USER_ID, /*isf*/ null,
                 /*halfLife*/ 45, /*maxCob*/ 240);
-        bare.setGramsPerUnit(7.5);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(bare, 7.5);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(bare);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(

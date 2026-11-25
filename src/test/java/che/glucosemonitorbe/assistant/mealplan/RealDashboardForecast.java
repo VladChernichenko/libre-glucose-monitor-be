@@ -50,7 +50,6 @@ final class RealDashboardForecast {
         UserSettingsDTO settings = new UserSettingsDTO();
         settings.setUserId(userId);
         settings.setIsf(2.5);
-        settings.setCarbRatio(1.5);
         settings.setCarbHalfLife(45);
         settings.setMaxCOBDuration(240);
         settings.setBodyWeightKg(70.0);

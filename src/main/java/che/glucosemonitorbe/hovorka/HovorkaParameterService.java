@@ -17,7 +17,6 @@ import java.util.UUID;
  * <ul>
  *   <li>ISF from {@code user_settings.isf}</li>
  *   <li>Carb half-life from {@code user_settings.carb_half_life} -> {@code tMaxG}</li>
- *   <li>Insulin-to-carb ratio from {@code user_settings.grams_per_unit} -> {@code A_G}</li>
  *   <li>Body weight from {@code user_settings.body_weight_kg} (or population default 70 kg)</li>
  * </ul>
  *
@@ -27,8 +26,13 @@ import java.util.UUID;
  *   F01          = F01_PER_KG × weight                  [mmol/min]
  *   tMaxG        = carbHalfLife / 1.68                  [min]
  *                  (1.68 = 2-compartment half-time factor)
- *   A_G          = ISF × 2·VG × 0.18 / (F × gramsPerUnit)   (see {@link #mealMagnitude})
+ *   A_G          = 1.0, the neutral meal magnitude      (see {@link #mealMagnitude})
  * </pre>
+ *
+ * <p>The insulin-to-carb ratio is per meal window ({@code user_settings.grams_per_unit_breakfast}
+ * ... {@code _night}), so it cannot shape one {@code A_G} for every meal. The forecast sizes each
+ * meal from its own window's ratio instead ({@code HovorkaGlucosePredictionService.mealWindowFactor}),
+ * on top of the neutral {@code A_G} that carries the twin's meal scale.</p>
  *
  * <h3>Carbohydrate bioavailability (single application)</h3>
  * <p>Physiological carb bioavailability (~0.90) is applied <b>once</b>, downstream, by
@@ -44,7 +48,10 @@ public class HovorkaParameterService {
     /** Default ISF when user has no ISF setting [mmol/L per unit]. */
     private static final double DEFAULT_ISF       = 2.2;
 
-    /** {@code A_G} when the user has no usable insulin-to-carb ratio: meal magnitude from weight alone. */
+    /**
+     * The neutral meal magnitude: {@code A_G} from settings, and what {@link #mealMagnitude} gives
+     * without a usable ratio (meal magnitude from weight alone).
+     */
     private static final double A_G_NEUTRAL = 1.00;
 
     /**
@@ -78,7 +85,7 @@ public class HovorkaParameterService {
      * </pre>
      * {@code 2·VG} is {@link HovorkaParameters#effectiveInsulinVolume()}: absorbed glucose spreads
      * over both compartments exactly as the insulin effect does. {@code isf} is the user's base
-     * ISF; the forecast rescales each meal to the ISF of the window it is eaten in
+     * ISF; the forecast sizes each meal by its window's ratio and rescales it to that window's ISF
      * ({@code HovorkaGlucosePredictionService.mealWindowFactor}), so the ratio holds at meal time.
      *
      * <p>Returns the neutral 1.0 when the ratio is missing or outside 3-30 g/U.</p>
@@ -162,8 +169,8 @@ public class HovorkaParameterService {
                 ? settings.getIsf()
                 : DEFAULT_ISF;
 
-        // -- Meal magnitude A_G from the insulin-to-carb ratio -----------------
-        double aG = mealMagnitude(isf, vG, settings.getGramsPerUnit());
+        // -- Meal magnitude A_G: neutral; each meal is sized by its window's ratio in the forecast --
+        double aG = mealMagnitude(isf, vG, null);
 
         // -- Raw hepatic glucose production before insulin suppression --------
         double egp0 = HovorkaParameters.EGP0_PER_KG * weight;

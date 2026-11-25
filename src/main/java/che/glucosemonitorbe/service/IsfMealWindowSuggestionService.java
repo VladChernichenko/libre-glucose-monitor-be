@@ -114,7 +114,6 @@ public class IsfMealWindowSuggestionService {
 
         UserSettingsDTO settings = userSettingsService.getUserSettings(userId);
         UserSettingsDTO patch = new UserSettingsDTO();
-        patch.setCarbRatio(settings.getCarbRatio());
         patch.setIsf(settings.getIsf());
         patch.setCarbHalfLife(settings.getCarbHalfLife());
         patch.setMaxCOBDuration(settings.getMaxCOBDuration());

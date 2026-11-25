@@ -34,10 +34,10 @@ class InsulinCalculatorServiceTest {
     @BeforeEach
     void setUp() {
         userSettingsService = mock(UserSettingsService.class);
-        // Default: carbRatio=1.0, ISF=2.2; halfLife / maxCOB not used in these tests
+        // Default: ISF=2.2, 22 g/U in every window; halfLife / maxCOB not used in these tests
         UserSettingsDTO defaultSettings = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, /*carbRatio*/ 1.0, /*isf*/ 2.2, /*halfLife*/ 45, /*maxCob*/ 240);
-        defaultSettings.setGramsPerUnit(22.0);
+                UUID.randomUUID(), USER_ID, /*isf*/ 2.2, /*halfLife*/ 45, /*maxCob*/ 240);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(defaultSettings, 22.0);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(defaultSettings);
 
         service = new InsulinCalculatorService(userSettingsService);
@@ -240,7 +240,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void recommendedInsulin_correctionUsesConfiguredIsf() {
-        // C1: carbRatio=1.0, ISF=2.2 -> 10*2.2/1.0 = 22 g/U.
+        // ISF 2.2, 22 g/U.
         // carb bolus = 60/22 ≈ 2.73 u; correction = (12.0 - 6.0) / 2.2 ≈ 2.73 u -> total ≈ 5.45.
         // The old hardcoded 12 g/U gave 7.73 for the same user.
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
@@ -481,8 +481,8 @@ class InsulinCalculatorServiceTest {
     @Test
     void recommendedInsulin_settingsWithNullIsf_refuses() {
         UUID userId = UUID.randomUUID();
-        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), userId, 1.0, null, 45, 240);
-        settings.setGramsPerUnit(22.0);
+        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), userId, null, 45, 240);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, 22.0);
         when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
 
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
@@ -550,14 +550,14 @@ class InsulinCalculatorServiceTest {
     // -- C1: derived insulin:carb ratio ----------------------------------------
 
     /** Settings stub. The 3-arg form uses ICR 11 g/U, the ratio those ceiling cases were written against. */
-    private void givenSettings(Double carbRatio, Double isf, Double bodyWeightKg) {
-        givenSettings(carbRatio, isf, bodyWeightKg, 11.0);
+    private void givenSettings(Double isf, Double bodyWeightKg) {
+        givenSettings(isf, bodyWeightKg, 11.0);
     }
 
-    private void givenSettings(Double carbRatio, Double isf, Double bodyWeightKg, Double gramsPerUnit) {
+    private void givenSettings(Double isf, Double bodyWeightKg, Double gramsPerUnit) {
         UserSettingsDTO settings = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, carbRatio, isf, 45, 240, bodyWeightKg);
-        settings.setGramsPerUnit(gramsPerUnit);
+                UUID.randomUUID(), USER_ID, isf, 45, 240, bodyWeightKg);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, gramsPerUnit);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
     }
 
@@ -576,8 +576,8 @@ class InsulinCalculatorServiceTest {
     private void givenSickSettings(double gramsPerUnit, SickSeverity severity) {
         LocalDateTime now = LocalDateTime.now();
         UserSettingsDTO settings = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, 2.0, 2.2, 45, 240, 70.0);
-        settings.setGramsPerUnit(gramsPerUnit);
+                UUID.randomUUID(), USER_ID, 2.2, 45, 240, 70.0);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, gramsPerUnit);
         settings.setSickProfile(new SickProfile(List.of(new SickProfile.Span(
                 now.minusDays(1), null, now, severity)), null));
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
@@ -585,7 +585,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void mealAndCorrectionDosesBothRiseByOneOverTheMultiplier() {
-        givenSettings(2.0, 2.2, 70.0, 10.0);
+        givenSettings(2.2, 70.0, 10.0);
         double healthyMeal = service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)).getRecommendedInsulin();
         double healthyCorrection = service.calculateRecommendedInsulin(doseRequest(0.0, 11.0, 6.0)).getRecommendedInsulin();
 
@@ -621,15 +621,15 @@ class InsulinCalculatorServiceTest {
     }
 
     @Test
-    void recommendedInsulin_explicitGramsPerUnit_ignoresCarbRatio() {
-        givenSettings(2.0, 2.2, 70.0, 10.0); // carbRatio would derive 11 g/U
+    void recommendedInsulin_pricesWithTheStoredRatio() {
+        givenSettings(2.2, 70.0, 10.0);
         var response = service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0));
         assertThat(response.getRecommendedInsulin()).isEqualTo(6.0); // 60 / 10
     }
 
     @Test
-    void recommendedInsulin_nullGramsPerUnit_refuses_withoutUsingCarbRatio() {
-        givenSettings(2.0, 2.2, 70.0, null); // carbRatio and ISF would have derived 11 g/U
+    void recommendedInsulin_nullGramsPerUnit_refuses() {
+        givenSettings(2.2, 70.0, null); // no ratio is typed in rather than derived
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
                 .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
@@ -638,27 +638,27 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void recommendedInsulin_insideEnvelope_isAccepted() {
-        givenSettings(2.0, 2.2, 70.0, 9.9); // 9.9 is inside 3-30; carbRatio is unused
+        givenSettings(2.2, 70.0, 9.9); // 9.9 is inside 3-30
         assertThat(service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0))
                 .getRecommendedInsulin()).isEqualTo(6.06); // 60 / 9.9
-        givenSettings(2.0, 2.2, 70.0, 30.0);
+        givenSettings(2.2, 70.0, 30.0);
         assertThat(service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0))
                 .getRecommendedInsulin()).isEqualTo(2.0);
     }
 
     @Test
     void recommendedInsulin_gramsPerUnitOutsideEnvelope_refuses() {
-        givenSettings(2.0, 2.2, 70.0, 2.2);
+        givenSettings(2.2, 70.0, 2.2);
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
                 .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
                 .isEqualTo(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT);
-        givenSettings(2.0, 2.2, 70.0, 30.1);
+        givenSettings(2.2, 70.0, 30.1);
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
                 .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
                 .isEqualTo(DosingRefusalReason.INSULIN_PARAMS_INCONSISTENT);
-        givenSettings(2.0, 2.2, 70.0, 40.0);
+        givenSettings(2.2, 70.0, 40.0);
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
                 .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
@@ -666,8 +666,8 @@ class InsulinCalculatorServiceTest {
     }
 
     @Test
-    void mealDose_usesTheStoredIcr_notCarbRatio() {
-        givenSettings(2.0, 2.2, 70.0); // ICR 11 g/U; carbRatio 2.0 is not consulted
+    void mealDose_usesTheStoredIcr() {
+        givenSettings(2.2, 70.0); // ICR 11 g/U
 
         // No correction: current == target. 55 g / 11 g/U = 5.0 U
         var response = service.calculateRecommendedInsulin(doseRequest(55.0, 6.0, 6.0));
@@ -677,7 +677,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void insulinSensitiveUser_getsSmallerMealDoseThanTheOldConstant() {
-        givenSettings(1.0, 2.5, 70.0, 25.0); // 50 g / 25 g/U = 2.0 U; carbRatio is unused
+        givenSettings(2.5, 70.0, 25.0); // 50 g / 25 g/U = 2.0 U
 
         var response = service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0));
 
@@ -685,8 +685,8 @@ class InsulinCalculatorServiceTest {
     }
 
     @Test
-    void derivedRatioBelowEnvelope_refuses_ratherThanClamping() {
-        givenSettings(8.0, 1.0, 70.0, 2.9);
+    void ratioBelowEnvelope_refuses_ratherThanClamping() {
+        givenSettings(1.0, 70.0, 2.9);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
@@ -695,8 +695,8 @@ class InsulinCalculatorServiceTest {
     }
 
     @Test
-    void derivedRatioAboveEnvelope_refuses() {
-        givenSettings(0.5, 4.0, 70.0, 30.1);
+    void ratioAboveEnvelope_refuses() {
+        givenSettings(4.0, 70.0, 30.1);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
@@ -706,13 +706,13 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void nonPositiveOrMissingSettings_refuse() {
-        givenSettings(2.0, 0.0, 70.0);
+        givenSettings(0.0, 70.0);
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
                 .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
                 .isEqualTo(DosingRefusalReason.SETTINGS_INVALID);
 
-        givenSettings(2.0, null, 70.0);
+        givenSettings(null, 70.0);
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(50.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
                 .extracting(InsulinCalculatorServiceTest::refusalReasonOf)
@@ -724,7 +724,7 @@ class InsulinCalculatorServiceTest {
     @Test
     void doseAboveWeightBasedCeiling_refuses_ratherThanClamping() {
         // 60 kg -> ceiling 18.0 U. 11 g/U, 250 g -> 22.7 U meal alone.
-        givenSettings(2.0, 2.2, 60.0);
+        givenSettings(2.2, 60.0);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(250.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
@@ -735,7 +735,7 @@ class InsulinCalculatorServiceTest {
     @Test
     void nullBodyWeight_usesThe70kgFallbackCeiling() {
         // null weight -> 70 kg -> ceiling 21.0 U. 11 g/U, 240 g -> 21.8 U, just over.
-        givenSettings(2.0, 2.2, null);
+        givenSettings(2.2, null);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(240.0, 6.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
@@ -745,7 +745,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void doseUnderCeiling_isReturnedNormally() {
-        givenSettings(2.0, 2.2, 60.0);
+        givenSettings(2.2, 60.0);
         // 110 g / 11 = 10.0 U, under the 18.0 U ceiling.
         assertThat(service.calculateRecommendedInsulin(doseRequest(110.0, 6.0, 6.0))
                 .getRecommendedInsulin()).isEqualTo(10.0);
@@ -753,7 +753,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void ceilingIsCheckedAfterIobSubtraction_notBefore() {
-        givenSettings(2.0, 2.2, 60.0);   // ceiling 18.0 U
+        givenSettings(2.2, 60.0);   // ceiling 18.0 U
         // 220 g / 11 = 20.0 U gross, minus 5 U IOB = 15.0 U net -> allowed.
         InsulinCalculationRequest request = InsulinCalculationRequest.builder()
                 .carbs(220.0).currentGlucose(6.0).targetGlucose(6.0)
@@ -767,7 +767,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void glucoseBelowHypoThreshold_refuses_noDoseReturned() {
-        givenSettings(2.0, 2.2, 70.0);
+        givenSettings(2.2, 70.0);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(doseRequest(60.0, 3.0, 6.0)))
                 .isInstanceOf(DosingRefusedException.class)
@@ -777,7 +777,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void glucoseExactlyAtThreshold_isAllowed() {
-        givenSettings(2.0, 2.2, 70.0);
+        givenSettings(2.2, 70.0);
         // 3.9 is the refusal floor, not itself refused.
         assertThat(service.calculateRecommendedInsulin(doseRequest(0.0, 3.9, 3.9))
                 .getRecommendedInsulin()).isEqualTo(0.0);
@@ -785,7 +785,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void belowTargetButAboveThreshold_reducesTheMealDose() {
-        givenSettings(2.0, 2.2, 70.0);
+        givenSettings(2.2, 70.0);
         // 11 g/U -> 55 g = 5.0 U meal. Correction (5.0 - 6.0) / 2.2 = -0.4545 U.
         // 5.0 - 0.4545 = 4.55 U after rounding.
         var response = service.calculateRecommendedInsulin(doseRequest(55.0, 5.0, 6.0));
@@ -795,7 +795,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void largeNegativeCorrection_floorsAtZero_neverNegative() {
-        givenSettings(2.0, 2.2, 70.0);
+        givenSettings(2.2, 70.0);
         // Tiny meal, well below target: correction dominates and would go negative.
         var response = service.calculateRecommendedInsulin(doseRequest(5.0, 4.0, 9.0));
 
@@ -804,7 +804,7 @@ class InsulinCalculatorServiceTest {
 
     @Test
     void missingCarbsOrGlucose_refusesAsInvalidInput() {
-        givenSettings(2.0, 2.2, 70.0);
+        givenSettings(2.2, 70.0);
         InsulinCalculationRequest noCarbs = InsulinCalculationRequest.builder()
                 .currentGlucose(6.0).targetGlucose(6.0).userId(USER_ID.toString()).build();
 

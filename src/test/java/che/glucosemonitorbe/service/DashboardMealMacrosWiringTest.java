@@ -81,7 +81,6 @@ class DashboardMealMacrosWiringTest {
         when(userService.getUserByUsername("u")).thenReturn(UserDto.builder().id(userId).username("u").build());
         UserSettingsDTO settings = new UserSettingsDTO();
         settings.setUserId(userId);
-        settings.setCarbRatio(1.5);
         settings.setIsf(2.5);
         settings.setCarbHalfLife(45);
         settings.setMaxCOBDuration(240);

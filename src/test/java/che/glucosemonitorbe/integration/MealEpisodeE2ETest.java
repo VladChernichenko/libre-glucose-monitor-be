@@ -91,13 +91,11 @@ class MealEpisodeE2ETest {
                 .trendMmolPerMin(null)
 
                 // User settings (any other UserSettingsDTO field via .setting("name", value)).
-                // NB carbRatio = mmol/L rise per 10 g carbs, NOT grams per unit.
                 .isf(2.5)                 // default ISF (mmol/L per U) when no window override
                 .isfBreakfast(null)       // 05:00-10:59 override
                 .isfLunch(null)           // 11:00-15:59 override
                 .isfDinner(null)          // 16:00-21:59 override
                 .isfNight(null)           // 22:00-04:59 override
-                .carbRatio(1.5)
                 .bodyWeightKg(70)
                 .carbHalfLife(45)
                 .maxCobDuration(240)
@@ -136,7 +134,6 @@ class MealEpisodeE2ETest {
                 .mealTime("19:00")
                 .startGlucose(8.5)
                 .isf(2.5).isfDinner(null)
-                .carbRatio(1.5)
                 .bodyWeightKg(70)
                 .insulin("FIASP", "TRESIBA", "22:00")
                 .historyLongActing(1260, 18)
@@ -246,8 +243,11 @@ class MealEpisodeE2ETest {
                 overridden ? "override" : "no override -> default", num(s.path("isf"))));
         report.append(String.format("          ISF windows: breakfast %s  lunch %s  dinner %s  night %s%n",
                 num(s.path("isfBreakfast")), num(s.path("isfLunch")), num(s.path("isfDinner")), num(s.path("isfNight"))));
-        report.append(String.format("          carbRatio %s mmol/L per 10 g  weight %s kg  carbHalfLife %s min  maxCOB %s min%n",
-                num(s.path("carbRatio")), num(s.path("bodyWeightKg")), num(s.path("carbHalfLife")),
+        report.append(String.format("          carb ratio g/U: breakfast %s  lunch %s  dinner %s  night %s%n",
+                num(s.path("gramsPerUnitBreakfast")), num(s.path("gramsPerUnitLunch")),
+                num(s.path("gramsPerUnitDinner")), num(s.path("gramsPerUnitNight"))));
+        report.append(String.format("          weight %s kg  carbHalfLife %s min  maxCOB %s min%n",
+                num(s.path("bodyWeightKg")), num(s.path("carbHalfLife")),
                 num(s.path("maxCOBDuration"))));
         report.append(String.format("          insulin rapid %s  long-acting %s at %s%n",
                 p.path("rapidInsulinCode").asText("-"), p.path("longActingInsulinCode").asText("-"),

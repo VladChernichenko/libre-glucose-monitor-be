@@ -703,68 +703,65 @@ public class HovorkaGlucosePredictionService {
     /**
      * Converts a {@link CarbsEntry} to gut mmol input using the Hovorka formula:
      * <pre>
-     *   carbMmol = grams × A_G / 0.18
+     *   carbMmol = grams × A_G × mealWindowFactor / 0.18
      * </pre>
      * where 0.18 is the molar mass of glucose (g/mmol, MW = 180 g/mol / 1000).
      *
-     * <p>{@code A_G} is the per-user meal magnitude from the insulin-to-carb ratio
-     * ({@link HovorkaParameterService#mealMagnitude}), <b>not</b> a bioavailability factor.
-     * Physiological carb bioavailability (~0.90) is applied exactly once, downstream, by
-     * {@link DallaManGutModel#ra} ({@code F = 0.90}): the meal dose D = grams × A_G / 0.18 enters
-     * the stomach, and only {@code F} of it ultimately appears in blood.</p>
+     * <p>{@code A_G × mealWindowFactor} is the meal magnitude from the insulin-to-carb ratio of the
+     * meal's window ({@link HovorkaParameterService#mealMagnitude}), <b>not</b> a bioavailability
+     * factor. Physiological carb bioavailability (~0.90) is applied exactly once, downstream, by
+     * {@link DallaManGutModel#ra} ({@code F = 0.90}): the meal dose D enters the stomach, and only
+     * {@code F} of it ultimately appears in blood.</p>
      */
     private double toCarbMmol(CarbsEntry entry, HovorkaParameters p, UserSettingsDTO settings) {
         if (entry.getCarbs() == null || entry.getCarbs() <= 0) return 0.0;
         return entry.getCarbs() * p.aG() * mealWindowFactor(entry.getTimestamp(), p, settings) / 0.18;
     }
 
-    /** Bounds on {@link #mealWindowFactor}: settings this far apart are a mistake, not a physiology. */
+    /**
+     * Bounds on the ISF part of {@link #mealWindowFactor} (window ISF / base ISF): settings this far
+     * apart are a mistake, not a physiology. The ratio sizing is not bounded here.
+     */
     static final double MEAL_WINDOW_FACTOR_MIN = 0.33;
     static final double MEAL_WINDOW_FACTOR_MAX = 3.0;
 
     /**
-     * Sizes a meal by the ISF and carb ratio of its own meal window. {@code A_G} makes the single
-     * {@code gramsPerUnit} grams raise glucose as much as one unit lowers it at the base ISF, but a
-     * dose acts at the ISF of the window it is taken in and is priced by that window's ratio. The
-     * factor is (window ISF / base ISF) x (single ratio / window ratio), so a meal dosed exactly by
-     * its window's ratio forecasts flat (lunch ISF 1.47 vs base 1.0 used to make every ratio-priced
-     * lunch dose look ~47% too big; a breakfast ratio of 6 g/U vs 10 g/U means less carb per unit,
-     * i.e. the meal pushes glucose up 10/6 times as much per gram).
+     * Sizes a meal by the ISF and carb ratio of its own meal window. {@code A_G} is the neutral
+     * magnitude (times the twin's meal scale); the ratio part turns it into the magnitude that makes
+     * the window's ratio of grams raise glucose as much as one unit lowers it at the base ISF,
+     * {@code mealMagnitude(baseIsf, VG, windowRatio) / mealMagnitude(baseIsf, VG, null)}. The ISF
+     * part then moves that to the window's ISF, since a dose acts at the ISF of the window it is
+     * taken in and is priced by that window's ratio: the factor is (window ISF / base ISF) x ratio
+     * part, so a meal dosed exactly by its window's ratio forecasts flat (lunch ISF 1.47 vs base 1.0
+     * used to make every ratio-priced lunch dose look ~47% too big; a breakfast ratio of 6 g/U vs
+     * 10 g/U means less carb per unit, i.e. the meal pushes glucose up 10/6 times as much per gram).
+     * The ratio part is divided by the raw (un-twinned) neutral {@code A_G}, not by {@code p.aG()},
+     * so the twin's meal scale stays a multiplier.
      *
      * <p>Neither the illness multiplier nor the twin's scales enter: illness changes how insulin
-     * acts, not how much glucose a gram of carbs adds. When the single ratio did not shape
-     * {@code A_G} (no usable grams-per-unit) but the window ratio is usable - the calculator then
-     * prices the meal by the window ratio alone - the ratio part sizes the meal from the window
-     * ratio itself: {@code mealMagnitude(baseIsf, VG, windowRatio)} over the raw (un-twinned)
-     * {@code A_G} a missing ratio gives, so a twin meal scale in {@code p.aG()} stays a multiplier.
-     * The whole factor is 1.0 when neither ratio is usable; an unusable window ISF or window ratio
-     * otherwise drops only its own part. The result is clamped to [{@link #MEAL_WINDOW_FACTOR_MIN},
-     * {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
+     * acts, not how much glucose a gram of carbs adds. A window with no usable ratio (unset, or
+     * outside 3-30 g/U - the calculator refuses to dose there) keeps the neutral magnitude, and an
+     * unusable window ISF drops only the ISF part. Only the ISF part is clamped, to
+     * [{@link #MEAL_WINDOW_FACTOR_MIN}, {@link #MEAL_WINDOW_FACTOR_MAX}]; the ratio sizing is bounded
+     * by {@link HovorkaParameterService#mealMagnitude} alone, exactly as it was when one ratio shaped
+     * {@code A_G}, so a user whose window ratios equal that old ratio forecasts as before.</p>
      */
     static double mealWindowFactor(LocalDateTime mealTime, HovorkaParameters p, UserSettingsDTO settings) {
         if (settings == null || mealTime == null) return 1.0;
-        Double single = settings.getGramsPerUnit();
-        boolean singleUsable = HovorkaParameterService.usableGramsPerUnit(single);
-        Double windowRatio = settings.getWindowGramsPerUnit(mealTime);
-        boolean windowUsable = HovorkaParameterService.usableGramsPerUnit(windowRatio);
-        if (!singleUsable && !windowUsable) return 1.0;
         double isfPart = 1.0;
         Double windowIsf = settings.getWindowIsf(mealTime);
         double base = p.isf();
         if (windowIsf != null && Double.isFinite(windowIsf) && windowIsf > 0
                 && Double.isFinite(base) && base > 0) {
-            isfPart = windowIsf / base;
+            isfPart = Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, windowIsf / base));
         }
         double ratioPart = 1.0;
-        if (singleUsable && windowUsable) {
-            ratioPart = single / windowRatio;
-        } else if (windowUsable) {
-            // Against the raw A_G a missing ratio gives, not p.aG(): that carries the twin's meal scale,
-            // which has to stay a multiplier here as it does when the single ratio is usable.
+        Double windowRatio = settings.getWindowGramsPerUnit(mealTime);
+        if (HovorkaParameterService.usableGramsPerUnit(windowRatio)) {
             ratioPart = HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), windowRatio)
                     / HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), null);
         }
-        return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, isfPart * ratioPart));
+        return isfPart * ratioPart;
     }
 
     /**

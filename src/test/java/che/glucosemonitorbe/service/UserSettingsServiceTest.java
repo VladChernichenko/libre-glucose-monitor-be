@@ -102,26 +102,28 @@ class UserSettingsServiceTest {
 
         assertNotNull(result);
         assertEquals(userId, result.getUserId());
-        assertEquals(2.0, result.getCarbRatio());
         assertEquals(45, result.getCarbHalfLife());
+        // every meal window prices at the 5 g/U a new settings row gets
+        assertEquals(5.0, result.getGramsPerUnitBreakfast());
+        assertEquals(5.0, result.getGramsPerUnitLunch());
+        assertEquals(5.0, result.getGramsPerUnitDinner());
+        assertEquals(5.0, result.getGramsPerUnitNight());
     }
 
     @Test
     void saveUserSettingsUpdatesExistingEntity() {
         UUID userId = UUID.randomUUID();
-        UserSettings existing = new UserSettings(userId, 2.0, 1.0, 45, 240);
+        UserSettings existing = new UserSettings(userId, 1.0, 45, 240);
         when(repository.findByUserId(userId)).thenReturn(Optional.of(existing));
         when(repository.save(existing)).thenReturn(existing);
 
         UserSettingsDTO request = new UserSettingsDTO();
-        request.setCarbRatio(1.5);
         request.setIsf(0.9);
         request.setCarbHalfLife(50);
         request.setMaxCOBDuration(300);
 
         UserSettingsDTO result = service.saveUserSettings(userId, request);
 
-        assertEquals(1.5, result.getCarbRatio());
         assertEquals(0.9, result.getIsf());
         assertEquals(50, result.getCarbHalfLife());
         assertEquals(300, result.getMaxCOBDuration());
@@ -216,7 +218,18 @@ class UserSettingsServiceTest {
         assertEquals(9.0, existing.getGramsPerUnitLunch());
         assertEquals(6.0, out.getGramsPerUnitBreakfast());
         assertEquals(9.0, out.getGramsPerUnitLunch());
-        assertNull(out.getGramsPerUnitDinner());
-        assertNull(out.getGramsPerUnitNight());
+        assertEquals(5.0, out.getGramsPerUnitDinner(), "unsent windows keep the row's value");
+        assertEquals(5.0, out.getGramsPerUnitNight());
+    }
+
+    @Test
+    void aNewSettingsRowPricesEveryWindowAtFiveGramsPerUnit() {
+        UserSettings row = new UserSettings(UUID.randomUUID());
+
+        assertEquals(5.0, row.getGramsPerUnitBreakfast());
+        assertEquals(5.0, row.getGramsPerUnitLunch());
+        assertEquals(5.0, row.getGramsPerUnitDinner());
+        assertEquals(5.0, row.getGramsPerUnitNight());
+        assertEquals(5.0, new UserSettings().getGramsPerUnitLunch());
     }
 }

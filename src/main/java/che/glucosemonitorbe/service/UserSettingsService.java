@@ -68,8 +68,11 @@ public class UserSettingsService {
         return userSettingsRepository.findByUserId(userId)
                 .map(this::convertToDTO)
                 .orElseGet(() -> {
-                    UserSettingsDTO d = new UserSettingsDTO(null, userId, 2.0, 1.0, 45, 240);
-                    d.setGramsPerUnit(5.0);
+                    UserSettingsDTO d = new UserSettingsDTO(null, userId, 1.0, 45, 240);
+                    d.setGramsPerUnitBreakfast(UserSettings.DEFAULT_GRAMS_PER_UNIT);
+                    d.setGramsPerUnitLunch(UserSettings.DEFAULT_GRAMS_PER_UNIT);
+                    d.setGramsPerUnitDinner(UserSettings.DEFAULT_GRAMS_PER_UNIT);
+                    d.setGramsPerUnitNight(UserSettings.DEFAULT_GRAMS_PER_UNIT);
                     d.setTargetGlucoseMmol(UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL);
                     d.setRescueCarbsG(15);
                     return d;
@@ -89,10 +92,10 @@ public class UserSettingsService {
      */
     @CacheEvict(value = "userSettings", key = "#userId")
     public UserSettingsDTO saveUserSettings(UUID userId, UserSettingsDTO settingsDTO) {
-        log.info("saveUserSettings request for userId={}: carbRatio={}, isf={}, carbHalfLife={}, " +
+        log.info("saveUserSettings request for userId={}: isf={}, carbHalfLife={}, " +
                         "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}, isfNight={}, " +
                         "gramsPerUnitBreakfast={}, gramsPerUnitLunch={}, gramsPerUnitDinner={}, gramsPerUnitNight={}",
-                userId, settingsDTO.getCarbRatio(), settingsDTO.getIsf(), settingsDTO.getCarbHalfLife(),
+                userId, settingsDTO.getIsf(), settingsDTO.getCarbHalfLife(),
                 settingsDTO.getMaxCOBDuration(), settingsDTO.getBodyWeightKg(),
                 settingsDTO.getIsfBreakfast(), settingsDTO.getIsfLunch(), settingsDTO.getIsfDinner(),
                 settingsDTO.getIsfNight(),
@@ -145,12 +148,6 @@ public class UserSettingsService {
      * @param settingsDTO the DTO with new values
      */
     private void updateSettings(UserSettings settings, UserSettingsDTO settingsDTO) {
-        if (settingsDTO.getCarbRatio() != null) {
-            settings.setCarbRatio(settingsDTO.getCarbRatio());
-        }
-        if (settingsDTO.getGramsPerUnit() != null) {
-            settings.setGramsPerUnit(settingsDTO.getGramsPerUnit());
-        }
         if (settingsDTO.getGramsPerUnitBreakfast() != null) {
             settings.setGramsPerUnitBreakfast(settingsDTO.getGramsPerUnitBreakfast());
         }
@@ -235,7 +232,6 @@ public class UserSettingsService {
         UserSettingsDTO dto = new UserSettingsDTO(
             settings.getId(),
             settings.getUserId(),
-            settings.getCarbRatio(),
             settings.getIsf(),
             settings.getCarbHalfLife(),
             settings.getMaxCOBDuration(),
@@ -250,7 +246,6 @@ public class UserSettingsService {
         dto.setPredictionEngine(settings.getPredictionEngine());
         dto.setTargetGlucoseMmol(settings.getTargetGlucoseMmol());
         dto.setRescueCarbsG(settings.getRescueCarbsG());
-        dto.setGramsPerUnit(settings.getGramsPerUnit());
         dto.setGramsPerUnitBreakfast(settings.getGramsPerUnitBreakfast());
         dto.setGramsPerUnitLunch(settings.getGramsPerUnitLunch());
         dto.setGramsPerUnitDinner(settings.getGramsPerUnitDinner());

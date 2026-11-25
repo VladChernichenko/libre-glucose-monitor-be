@@ -291,8 +291,7 @@ class IsfMealWindowSuggestionServiceTest {
     private UserSettingsDTO settingsWith(Double gramsPerUnit) {
         UserSettingsDTO s = new UserSettingsDTO();
         s.setIsf(2.5);
-        s.setGramsPerUnit(gramsPerUnit);
-        s.setCarbRatio(2.0);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(s, gramsPerUnit);
         s.setCarbHalfLife(45);
         s.setMaxCOBDuration(240);
         return s;
@@ -311,8 +310,7 @@ class IsfMealWindowSuggestionServiceTest {
     private void stubSettings(double isf, Double gramsPerUnit) {
         UserSettingsDTO s = new UserSettingsDTO();
         s.setIsf(isf);
-        s.setGramsPerUnit(gramsPerUnit);
-        s.setCarbRatio(2.0);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(s, gramsPerUnit);
         s.setCarbHalfLife(45);
         s.setMaxCOBDuration(240);
         when(userSettingsService.getUserSettings(userId)).thenReturn(s);

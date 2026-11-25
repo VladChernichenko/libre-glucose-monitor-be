@@ -91,60 +91,50 @@ class HovorkaParameterServiceTest {
 
     // -- A_G meal magnitude -----------------------------------------------------
     //
-    // A_G ties meal magnitude to the insulin-to-carb ratio: one unit lowers glucose by ISF, so
-    // gramsPerUnit grams must raise it by ISF. Bioavailability (DallaManGutModel.F) is divided
-    // out, so it is still applied exactly once. The legacy mmol/L-per-10 g carbRatio has no say.
+    // The ratio is per meal window, so A_G from settings is the neutral magnitude and each meal is
+    // sized by its window's ratio in the forecast (HovorkaGlucosePredictionService.mealWindowFactor).
+    // mealMagnitude ties that size to the ratio: one unit lowers glucose by ISF, so gramsPerUnit
+    // grams must raise it by ISF. Bioavailability (DallaManGutModel.F) is divided out, so it is
+    // still applied exactly once.
 
     @Test
-    void buildForUser_gramsPerUnit_oneUnitsWorthOfCarbsRaisesGlucoseByIsf() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(10.0));
-        HovorkaParameters p = service.buildForUser(USER_ID);
-        // Rise of gramsPerUnit grams once spread over both glucose compartments [mmol/L].
-        double rise = 10.0 * p.aG() / 0.18 * DallaManGutModel.F / p.effectiveInsulinVolume();
-        assertThat(rise).isCloseTo(p.isf(), within(0.001));
-    }
-
-    @Test
-    void buildForUser_doublingGramsPerUnit_halvesMealMagnitude() {
+    void buildForUser_agIsNeutralWhateverTheWindowRatios() {
         when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(6.0));
-        double at6 = service.buildForUser(USER_ID).aG();
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(12.0));
-        double at12 = service.buildForUser(USER_ID).aG();
-        assertThat(at12).isCloseTo(at6 / 2.0, within(0.001));
-    }
-
-    @Test
-    void buildForUser_missingGramsPerUnit_agIsNeutral() {
+        assertThat(service.buildForUser(USER_ID).aG()).isCloseTo(1.00, within(0.001));
         when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(null));
         assertThat(service.buildForUser(USER_ID).aG()).isCloseTo(1.00, within(0.001));
     }
 
     @Test
-    void buildForUser_gramsPerUnitOutsideEnvelope_agIsNeutral() {
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(2.0));
-        assertThat(service.buildForUser(USER_ID).aG()).isCloseTo(1.00, within(0.001));
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(settingsWithGramsPerUnit(31.0));
-        assertThat(service.buildForUser(USER_ID).aG()).isCloseTo(1.00, within(0.001));
+    void mealMagnitude_oneUnitsWorthOfCarbsRaisesGlucoseByIsf() {
+        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(defaultSettings());
+        HovorkaParameters p = service.buildForUser(USER_ID);
+        double aG = HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), 10.0);
+        // Rise of gramsPerUnit grams once spread over both glucose compartments [mmol/L].
+        double rise = 10.0 * aG / 0.18 * DallaManGutModel.F / p.effectiveInsulinVolume();
+        assertThat(rise).isCloseTo(p.isf(), within(0.001));
     }
 
     @Test
-    void buildForUser_inconsistentIsfAndRatio_agIsBounded() {
-        UserSettingsDTO dto = settingsWithGramsPerUnit(3.0);
-        dto.setIsf(9.0);
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(dto);
-        assertThat(service.buildForUser(USER_ID).aG()).isEqualTo(HovorkaParameterService.A_G_MAX);
+    void mealMagnitude_doublingGramsPerUnit_halvesIt() {
+        double vG = HovorkaParameters.VG_PER_KG * HovorkaParameters.DEFAULT_WEIGHT;
+        double at6 = HovorkaParameterService.mealMagnitude(2.2, vG, 6.0);
+        double at12 = HovorkaParameterService.mealMagnitude(2.2, vG, 12.0);
+        assertThat(at12).isCloseTo(at6 / 2.0, within(0.001));
     }
 
     @Test
-    void buildForUser_legacyCarbRatio_doesNotMoveMealMagnitude() {
-        UserSettingsDTO low = settingsWithGramsPerUnit(10.0);
-        low.setCarbRatio(0.1);
-        UserSettingsDTO high = settingsWithGramsPerUnit(10.0);
-        high.setCarbRatio(10.0);
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(low);
-        double atLow = service.buildForUser(USER_ID).aG();
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(high);
-        assertThat(service.buildForUser(USER_ID).aG()).isEqualTo(atLow);
+    void mealMagnitude_missingOrOutsideEnvelope_isNeutral() {
+        double vG = HovorkaParameters.VG_PER_KG * HovorkaParameters.DEFAULT_WEIGHT;
+        assertThat(HovorkaParameterService.mealMagnitude(2.2, vG, null)).isCloseTo(1.00, within(0.001));
+        assertThat(HovorkaParameterService.mealMagnitude(2.2, vG, 2.0)).isCloseTo(1.00, within(0.001));
+        assertThat(HovorkaParameterService.mealMagnitude(2.2, vG, 31.0)).isCloseTo(1.00, within(0.001));
+    }
+
+    @Test
+    void mealMagnitude_inconsistentIsfAndRatio_isBounded() {
+        double vG = HovorkaParameters.VG_PER_KG * HovorkaParameters.DEFAULT_WEIGHT;
+        assertThat(HovorkaParameterService.mealMagnitude(9.0, vG, 3.0)).isEqualTo(HovorkaParameterService.A_G_MAX);
     }
 
     // -- ISF fallback ----------------------------------------------------------
@@ -194,7 +184,6 @@ class HovorkaParameterServiceTest {
         UserSettingsDTO dto = new UserSettingsDTO();
         dto.setBodyWeightKg(70.0);
         dto.setCarbHalfLife(45);
-        dto.setCarbRatio(2.0);
         dto.setIsf(2.2);
         return dto;
     }
@@ -213,8 +202,7 @@ class HovorkaParameterServiceTest {
 
     private static UserSettingsDTO settingsWithGramsPerUnit(Double gramsPerUnit) {
         UserSettingsDTO dto = defaultSettings();
-        dto.setGramsPerUnit(gramsPerUnit);
-        return dto;
+        return che.glucosemonitorbe.dto.TestWindowRatios.setAll(dto, gramsPerUnit);
     }
 
     private static UserSettingsDTO settingsWithIsf(Double isf) {

@@ -29,15 +29,17 @@ class InsulinCalculatorServiceRatioWindowTest {
     void setUp() {
         UserSettingsService userSettingsService = mock(UserSettingsService.class);
         settings = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, /*carbRatio*/ 2.0, /*isf*/ 1.5,
+                UUID.randomUUID(), USER_ID, /*isf*/ 1.5,
                 /*halfLife*/ 45, /*maxCob*/ 240);
         settings.setIsfBreakfast(1.5);
         settings.setIsfLunch(1.5);
         settings.setIsfDinner(1.5);
         settings.setIsfNight(1.5);
         settings.setBodyWeightKg(84.0);
-        settings.setGramsPerUnit(7.5);
         settings.setGramsPerUnitBreakfast(5.0);
+        settings.setGramsPerUnitLunch(7.5);
+        settings.setGramsPerUnitDinner(7.5);
+        settings.setGramsPerUnitNight(7.5);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
         service = new InsulinCalculatorService(userSettingsService);
     }
@@ -48,7 +50,7 @@ class InsulinCalculatorServiceRatioWindowTest {
     }
 
     @Test
-    void lunchFallsBackToTheSingleRatio() {
+    void lunchIsPricedWithTheLunchRatio() {
         assertThat(dose("2026-08-21T12:00:00")).isCloseTo(10.67, within(0.01));
     }
 
@@ -67,8 +69,9 @@ class InsulinCalculatorServiceRatioWindowTest {
     }
 
     @Test
-    void windowRatioWorksWithoutASingleRatio() {
-        settings.setGramsPerUnit(null);
+    void anUnsetWindowIsRefused() {
+        // No window falls back to another ratio: an unset lunch has no ratio, as an unset single had.
+        settings.setGramsPerUnitLunch(null);
         assertThat(dose("2026-08-21T08:00:00")).isCloseTo(16.0, within(0.01));
         assertThatThrownBy(() -> dose("2026-08-21T12:00:00"))
                 .isInstanceOf(DosingRefusedException.class)

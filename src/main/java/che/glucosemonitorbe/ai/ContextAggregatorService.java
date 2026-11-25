@@ -105,7 +105,7 @@ public class ContextAggregatorService {
         PauseStats pauseStats = computePauseStats(notes);
         double preBolusTimingContribution = calculatePreBolusTimingContribution(pauseStats.avgPauseMinutes);
         // #22: the 2 h forecast is the canonical prediction path's, not a second model. Computing
-        // it here from carbRatio/isf reproduced the defect 30b76bd fixed on the dashboard - and on
+        // it here from its own carb ratio and ISF reproduced the defect 30b76bd fixed on the dashboard - and on
         // a more visible path, since SafetyAndScoringService renders it and LlmGatewayService feeds
         // it to the model as ground truth.
         //

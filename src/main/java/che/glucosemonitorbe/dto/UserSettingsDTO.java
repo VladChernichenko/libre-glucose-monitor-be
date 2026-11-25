@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import che.glucosemonitorbe.sick.SickProfile;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -25,17 +26,16 @@ public class UserSettingsDTO {
     // Getters and Setters
     private UUID id;
     private UUID userId;
-    /** Legacy mmol/L rise per 10 g. A save must send the stored value back; dosing does not read it. */
-    private Double carbRatio;
-    /** Insulin-to-carb ratio, grams per unit. Missing or outside 3-30 is refused. */
-    private Double gramsPerUnit;
-    /** g/U override for 05:00-11:00. NULL = use {@link #gramsPerUnit}. */
+    /**
+     * Insulin-to-carb ratio for 05:00-11:00, grams per unit. NULL = no ratio for this window: dosing
+     * there is refused, as is a value outside 3-30. NULL on input = leave unchanged.
+     */
     private Double gramsPerUnitBreakfast;
-    /** g/U override for 11:00-16:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 11:00-16:00 [g/U]. NULL = no ratio for this window. */
     private Double gramsPerUnitLunch;
-    /** g/U override for 16:00-22:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 16:00-22:00 [g/U]. NULL = no ratio for this window. */
     private Double gramsPerUnitDinner;
-    /** g/U override for 22:00-05:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 22:00-05:00 [g/U]. NULL = no ratio for this window. */
     private Double gramsPerUnitNight;
     /** IANA zone id (e.g. "Europe/Berlin"); authoritative over utcOffsetMinutes, DST-aware. */
     private String timezone;
@@ -59,6 +59,35 @@ public class UserSettingsDTO {
     /** Dashboard forecast engine. NULL = {@link PredictionEngine#HOVORKA}. */
     private PredictionEngine predictionEngine;
 
+    /** The constant {@link #getLegacyCarbRatio} reports. */
+    private static final double LEGACY_CARB_RATIO = 2.0;
+
+    /**
+     * Compatibility for iPhone builds before the per-window carb ratio change; delete once those
+     * builds are gone, together with {@link #getLegacyGramsPerUnit}. They decode {@code carbRatio} (the removed mmol/L rise per 10 g) as
+     * non-optional: without it their settings screen falls back to built-in defaults and Save
+     * overwrites the user's ISF and carb half-life. Output only: not stored, not settable, and an
+     * incoming {@code "carbRatio"} is ignored.
+     */
+    @JsonProperty(value = "carbRatio", access = JsonProperty.Access.READ_ONLY)
+    public double getLegacyCarbRatio() {
+        return LEGACY_CARB_RATIO;
+    }
+
+    /**
+     * Compatibility for iPhone builds before the per-window carb ratio change; delete once those
+     * builds are gone, together with {@link #getLegacyCarbRatio}. Their only ratio row shows
+     * {@code gramsPerUnit ?? 5}: this reports the ratio all four windows share (what the removed
+     * single ratio was copied into), and null when they differ or one is unset. Output only: not
+     * stored, not settable, and an incoming {@code "gramsPerUnit"} is ignored.
+     */
+    @JsonProperty(value = "gramsPerUnit", access = JsonProperty.Access.READ_ONLY)
+    public Double getLegacyGramsPerUnit() {
+        if (gramsPerUnitBreakfast == null) return null;
+        return gramsPerUnitBreakfast.equals(gramsPerUnitLunch) && gramsPerUnitBreakfast.equals(gramsPerUnitDinner)
+                && gramsPerUnitBreakfast.equals(gramsPerUnitNight) ? gramsPerUnitBreakfast : null;
+    }
+
     /** Value used when a client or stored row carries no target. */
     public static final double DEFAULT_TARGET_GLUCOSE_MMOL = 5.55;
 
@@ -79,38 +108,35 @@ public class UserSettingsDTO {
     // Constructors
     public UserSettingsDTO() {}
 
-    /** Legacy 6-arg constructor - bodyWeightKg defaults to null (population 70 kg). */
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
+    /** bodyWeightKg defaults to null (population 70 kg). */
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
         this.id = id;
         this.userId = userId;
-        this.carbRatio = carbRatio;
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;
         this.bodyWeightKg = null;
     }
 
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration, Double bodyWeightKg) {
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration, Double bodyWeightKg) {
         this.id = id;
         this.userId = userId;
-        this.carbRatio = carbRatio;
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;
         this.bodyWeightKg = bodyWeightKg;
     }
 
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
                            Double bodyWeightKg, Double isfBreakfast, Double isfLunch, Double isfDinner) {
-        this(id, userId, carbRatio, isf, carbHalfLife, maxCOBDuration, bodyWeightKg,
+        this(id, userId, isf, carbHalfLife, maxCOBDuration, bodyWeightKg,
                 isfBreakfast, isfLunch, isfDinner, null);
     }
 
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
                            Double bodyWeightKg, Double isfBreakfast, Double isfLunch, Double isfDinner, Double isfNight) {
         this.id = id;
         this.userId = userId;
-        this.carbRatio = carbRatio;
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;
@@ -144,22 +170,21 @@ public class UserSettingsDTO {
                 .orElse(isf);
     }
 
-    /** The g/U override for {@code window}, else the single {@link #gramsPerUnit}; may be null. */
+    /** The g/U set for {@code window}; null when that window has no ratio (no other window stands in). */
     public Double getWindowGramsPerUnit(MealWindow window) {
-        Double override = switch (window) {
+        return switch (window) {
             case BREAKFAST -> gramsPerUnitBreakfast;
             case LUNCH -> gramsPerUnitLunch;
             case DINNER -> gramsPerUnitDinner;
             case NIGHT -> gramsPerUnitNight;
         };
-        return override != null ? override : gramsPerUnit;
     }
 
-    /** The g/U for {@code time}'s meal window, without the illness multiplier; the single ratio when {@code time} is null. */
+    /** The g/U for {@code time}'s meal window, without the illness multiplier; null when {@code time} is null. */
     public Double getWindowGramsPerUnit(LocalDateTime time) {
         return MealWindow.fromTimestamp(time)
                 .map(this::getWindowGramsPerUnit)
-                .orElse(gramsPerUnit);
+                .orElse(null);
     }
 
     /** Insulin-to-carb ratio (grams per unit) in effect at {@code time}, scaled like the ISF while sick. */

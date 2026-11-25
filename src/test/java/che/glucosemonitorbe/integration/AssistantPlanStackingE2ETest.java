@@ -93,7 +93,6 @@ class AssistantPlanStackingE2ETest {
 
         UserSettingsDTO s = new UserSettingsDTO();
         s.setIsf(2.5);
-        s.setCarbRatio(1.5);
         s.setTargetGlucoseMmol(5.5);
         userSettingsService.saveUserSettings(userId, s);
 

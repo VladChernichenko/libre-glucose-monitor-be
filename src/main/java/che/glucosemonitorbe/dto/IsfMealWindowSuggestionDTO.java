@@ -43,7 +43,7 @@ public class IsfMealWindowSuggestionDTO {
         private Double currentIsf;
         private boolean hasData;
         private Double weightedSamples;
-        /** Current effective g/U for the window (override, else single ratio); null when none is set. */
+        /** The window's current g/U from settings; null when the window has no ratio. */
         private Double currentGramsPerUnit;
         /** Learned g/U proposal, step-capped against the current value; null when there is no data. */
         private Double proposedGramsPerUnit;
