@@ -83,6 +83,47 @@ class HovorkaMealWindowRatioTest {
                 .isCloseTo(START, within(0.6));
     }
 
+    @ParameterizedTest(name = "{0}: ISF {2}, ratio {3}")
+    @CsvSource(nullValues = "none", value = {
+            "breakfast, 8,  1.50, 6.0",
+            "lunch,     12, 1.47, 12.0",
+            "dinner,    18, none, 8.0",
+            "night,     23, 1.88, none"})
+    void aMealPricedByItsWindowRatioLandsWhereItStarted(String w, int hour, Double isf, Double ratio) {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, hour, 0);
+        UserSettingsDTO settings = settings(isf, ratio);
+        double units = CARBS / (ratio != null ? ratio : GRAMS_PER_UNIT);
+
+        double landing = landing(settings, now, units, 0, 480);
+
+        assertThat(landing).as("%s: a window-ratio-priced meal must not move the landing", w)
+                .isCloseTo(START, within(0.6));
+    }
+
+    @Test
+    void aBreakfastMealIsSizedByIsfOverRatio() {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(1.5, 6.0)))
+                .isCloseTo(1.5 * 10.0 / 6.0, within(1e-9));
+    }
+
+    @Test
+    void theFactorStaysClamped() {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(3.0, 3.0)))
+                .isEqualTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MAX);
+    }
+
+    @Test
+    void anUnusableWindowRatioLeavesOnlyTheIsfPart() {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 12, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(1.47, 2.0)))
+                .isCloseTo(1.47, within(1e-9));
+    }
+
     @Test
     void aLunchMealIsSizedByTheLunchIsf() {
         LocalDateTime now = LocalDateTime.of(2026, 11, 17, 12, 0);
@@ -123,6 +164,15 @@ class HovorkaMealWindowRatioTest {
     }
 
     // ---- helpers ---------------------------------------------------------------------------
+
+    private static UserSettingsDTO settings(Double windowIsf, Double windowRatio) {
+        UserSettingsDTO s = settings(windowIsf);
+        s.setGramsPerUnitBreakfast(windowRatio);
+        s.setGramsPerUnitLunch(windowRatio);
+        s.setGramsPerUnitDinner(windowRatio);
+        s.setGramsPerUnitNight(windowRatio);
+        return s;
+    }
 
     private static UserSettingsDTO settings(Double windowIsf) {
         UserSettingsDTO s = new UserSettingsDTO();

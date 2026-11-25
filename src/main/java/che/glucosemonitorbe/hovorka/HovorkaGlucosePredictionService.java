@@ -723,26 +723,37 @@ public class HovorkaGlucosePredictionService {
     static final double MEAL_WINDOW_FACTOR_MAX = 3.0;
 
     /**
-     * Sizes a meal by the ISF of its own meal window. {@code A_G} makes {@code gramsPerUnit} grams
-     * raise glucose as much as one unit lowers it at the user's base ISF, but a dose acts at the
-     * ISF of the window it is taken in. With a window override that differs from the base, a meal
-     * dosed exactly by the ratio then forecast a large low (lunch ISF 1.47 vs base 1.0: every
-     * ratio-priced lunch dose looked ~47% too big). Scaling each meal by window ISF / base ISF
-     * keeps "gramsPerUnit grams per unit" true at the time the meal is eaten.
+     * Sizes a meal by the ISF and carb ratio of its own meal window. {@code A_G} makes the single
+     * {@code gramsPerUnit} grams raise glucose as much as one unit lowers it at the base ISF, but a
+     * dose acts at the ISF of the window it is taken in and is priced by that window's ratio. The
+     * factor is (window ISF / base ISF) x (single ratio / window ratio), so a meal dosed exactly by
+     * its window's ratio forecasts flat (lunch ISF 1.47 vs base 1.0 used to make every ratio-priced
+     * lunch dose look ~47% too big; a breakfast ratio of 6 g/U vs 10 g/U means less carb per unit,
+     * i.e. the meal pushes glucose up 10/6 times as much per gram).
      *
-     * <p>The window ISF excludes the illness multiplier and the twin's ISF scale: illness changes
-     * how insulin acts, not how much glucose a gram of carbs adds. 1.0 when the ratio did not
-     * shape {@code A_G} (no usable grams-per-unit) or either ISF is unusable.</p>
+     * <p>Neither the illness multiplier nor the twin's scales enter: illness changes how insulin
+     * acts, not how much glucose a gram of carbs adds. 1.0 when the single ratio did not shape
+     * {@code A_G} (no usable grams-per-unit); an unusable window ISF or window ratio drops only
+     * its own part. The result is clamped to [{@link #MEAL_WINDOW_FACTOR_MIN},
+     * {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
      */
     static double mealWindowFactor(LocalDateTime mealTime, HovorkaParameters p, UserSettingsDTO settings) {
         if (settings == null || mealTime == null) return 1.0;
-        if (!HovorkaParameterService.usableGramsPerUnit(settings.getGramsPerUnit())) return 1.0;
-        Double window = settings.getWindowIsf(mealTime);
+        Double single = settings.getGramsPerUnit();
+        if (!HovorkaParameterService.usableGramsPerUnit(single)) return 1.0;
+        double isfPart = 1.0;
+        Double windowIsf = settings.getWindowIsf(mealTime);
         double base = p.isf();
-        if (window == null || !Double.isFinite(window) || window <= 0 || !Double.isFinite(base) || base <= 0) {
-            return 1.0;
+        if (windowIsf != null && Double.isFinite(windowIsf) && windowIsf > 0
+                && Double.isFinite(base) && base > 0) {
+            isfPart = windowIsf / base;
         }
-        return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, window / base));
+        double ratioPart = 1.0;
+        Double windowRatio = settings.getWindowGramsPerUnit(mealTime);
+        if (HovorkaParameterService.usableGramsPerUnit(windowRatio)) {
+            ratioPart = single / windowRatio;
+        }
+        return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, isfPart * ratioPart));
     }
 
     /**
