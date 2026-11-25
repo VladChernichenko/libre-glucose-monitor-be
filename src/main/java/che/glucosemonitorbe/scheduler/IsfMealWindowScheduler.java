@@ -2,6 +2,7 @@ package che.glucosemonitorbe.scheduler;
 
 import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.repository.UserRepository;
+import che.glucosemonitorbe.service.CarbRatioMealWindowProfileService;
 import che.glucosemonitorbe.service.IsfMealWindowProfileService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -9,9 +10,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Recomputes the ISF meal-window profile for every active user once per day at 02:00 UTC,
- * when traffic is lowest. On-bolus refresh is wired through {@link IsfMealWindowProfileService#recomputeForUser}
- * directly from the note-creation path (see {@code NotesService}) - not from here.
+ * Recomputes the meal-window ISF profile and the meal-window carb-ratio profile for every user once
+ * per day at 02:00 UTC, when traffic is lowest. There is no on-bolus refresh: besides this job, only
+ * {@code POST /api/isf/meal-windows/recompute} recomputes them.
  */
 @Slf4j
 @Component
@@ -20,6 +21,7 @@ public class IsfMealWindowScheduler {
 
     private final UserRepository userRepository;
     private final IsfMealWindowProfileService isfProfileService;
+    private final CarbRatioMealWindowProfileService carbRatioProfileService;
 
     @Scheduled(cron = "0 0 2 * * *", zone = "UTC")
     public void recomputeAllUsers() {
@@ -29,6 +31,7 @@ public class IsfMealWindowScheduler {
         for (User user : userRepository.findAll()) {
             try {
                 isfProfileService.recomputeForUser(user.getId());
+                carbRatioProfileService.recomputeForUser(user.getId());
                 success++;
             } catch (Exception e) {
                 failed++;

@@ -2,6 +2,7 @@ package che.glucosemonitorbe.controller;
 
 import che.glucosemonitorbe.dto.IsfMealWindowProfileResponse;
 import che.glucosemonitorbe.dto.IsfMealWindowSuggestionDTO;
+import che.glucosemonitorbe.service.CarbRatioMealWindowProfileService;
 import che.glucosemonitorbe.service.IsfMealWindowProfileService;
 import che.glucosemonitorbe.service.IsfMealWindowSuggestionService;
 import che.glucosemonitorbe.service.UserService;
@@ -29,6 +30,7 @@ import java.util.UUID;
 public class IsfMealWindowController {
 
     private final IsfMealWindowProfileService isfProfileService;
+    private final CarbRatioMealWindowProfileService carbRatioProfileService;
     private final IsfMealWindowSuggestionService suggestionService;
     private final UserService userService;
 
@@ -38,10 +40,13 @@ public class IsfMealWindowController {
         return ResponseEntity.ok(isfProfileService.getProfile(userId(auth)));
     }
 
-    @Operation(summary = "Force a recomputation of the meal-window ISF profile from the last 14 days of data")
+    @Operation(summary = "Force a recomputation of the meal-window ISF and carb-ratio profiles from the last 14 days of data; returns the ISF profile")
     @PostMapping("/recompute")
     public ResponseEntity<IsfMealWindowProfileResponse> recompute(Authentication auth) {
-        return ResponseEntity.ok(isfProfileService.recomputeForUser(userId(auth)));
+        UUID userId = userId(auth);
+        IsfMealWindowProfileResponse isfProfile = isfProfileService.recomputeForUser(userId);
+        carbRatioProfileService.recomputeForUser(userId);
+        return ResponseEntity.ok(isfProfile);
     }
 
     @Operation(summary = "Morning ISF suggestion banner state (show at most every 3 days when calibrated)")
