@@ -40,8 +40,11 @@ import java.util.function.Function;
  *   <li><b>Anchor:</b> a meal is a note with at least {@link #MEAL_CARB_THRESHOLD_GRAMS} of non-rescue
  *       carbs. Its rapid boluses are those within {@link #ANCHOR_TOLERANCE_MINUTES} of it; the earliest
  *       is {@code t0} (a split bolus or a separately logged pre-bolus is one event). No bolus: no event.
- *       The event starts at {@code start}, the earlier of the meal and {@code t0}, so a bolus given
- *       after eating does not move the baseline past the rise it was given for.</li>
+ *       Each {@code t0} anchors at most one event: the first meal to claim it consumes it, whether the
+ *       event is then used or skipped, and a later note sharing it is a duplicate (its carbs still
+ *       count through the carb window). The event starts at {@code start}, the earlier of the meal and
+ *       {@code t0}, so a bolus given after eating does not move the baseline past the rise it was
+ *       given for.</li>
  *   <li><b>Clean:</b> skipped when another meal lands in {@code (start + 30 min, start + DIA]}, when
  *       CGM is missing at {@code start} or {@code start + DIA}, or when {@code t0} is excluded from
  *       learning by an illness span.</li>
@@ -174,7 +177,7 @@ public class CarbRatioMealWindowProfileService {
         };
         long diaMinutes = (long) (rapid.diaHours() * 60);
 
-        Set<LocalDateTime> usedStarts = new HashSet<>();
+        Set<LocalDateTime> claimedBoluses = new HashSet<>();
         for (Note meal : meals) {
             LocalDateTime mealAt = meal.getTimestamp();
             LocalDateTime anchorFrom = mealAt.minusMinutes(ANCHOR_TOLERANCE_MINUTES);
@@ -185,10 +188,13 @@ public class CarbRatioMealWindowProfileService {
                     .min(Comparator.naturalOrder())
                     .orElse(null);
             if (t0 == null) { skip(skips, Skip.UNBOLUSED); continue; }
+            // A bolus anchors at most one event: the first meal (in time order) to claim it consumes it,
+            // whether that event is then used or skipped. A later note sharing it is the same meal; its
+            // carbs count through the first event's carb window.
+            if (!claimedBoluses.add(t0)) { skip(skips, Skip.DUPLICATE); continue; }
             // The event starts at the meal or its earliest bolus, whichever comes first: a bolus given
             // after eating must not move the baseline past the rise it was given for.
             LocalDateTime start = t0.isBefore(mealAt) ? t0 : mealAt;
-            if (usedStarts.contains(start)) { skip(skips, Skip.DUPLICATE); continue; }
             if (settings != null && settings.getSickProfile() != null
                     && settings.getSickProfile().excludedFromLearning(t0)) { skip(skips, Skip.SICK); continue; }
 
@@ -216,7 +222,6 @@ public class CarbRatioMealWindowProfileService {
                 continue;
             }
 
-            usedStarts.add(start);
             // Filed under the dose's window: that is the window the calculator prices the meal at.
             MealWindow.fromTimestamp(t0).ifPresent(w -> ratios.get(w).add(ratio));
         }

@@ -274,6 +274,31 @@ class CarbRatioMealWindowProfileServiceTest {
     }
 
     @Test
+    @DisplayName("One meal logged as two notes before one late bolus is one event")
+    void mealLoggedAsTwoNotesBeforeOneLateBolusCountsOnce() {
+        // 40 g at 08:00 and 20 g at 08:10, both bolused by 6 U at 08:20. The 08:00 note claims the
+        // bolus and starts the event at 08:00; the 08:10 note shares that bolus, so it is a duplicate
+        // and its 20 g count only through the 08:00 event's carb window.
+        List<Note> notes = new ArrayList<>();
+        List<CgmReading> cgm = new ArrayList<>();
+        for (int d = 0; d < DAYS; d++) {
+            LocalDateTime start = day(d, 8, 0);
+            notes.add(meal(start, 40.0));
+            notes.add(meal(day(d, 8, 10), 20.0));
+            notes.add(bolus(day(d, 8, 20), 6.0));
+            cgm.addAll(cgmAround(start, 7.0, 7.0));
+        }
+        stub(notes, cgm);
+
+        service.recomputeForUser(userId);
+
+        double actedBolus = 6.0 - InsulinCalculatorService.iobOpenApsExponential(6.0, DIA_MIN - 20, 4.5, 75);
+        CarbRatioMealWindowSnapshot breakfast = captureSavedSnapshot(MealWindow.BREAKFAST);
+        assertThat(breakfast.getSampleCount()).isEqualTo(3);
+        assertThat(breakfast.getGramsPerUnit()).isCloseTo(60.0 / actedBolus, offset(1e-6));
+    }
+
+    @Test
     @DisplayName("A second meal inside the insulin window skips the first but is still its own event")
     void secondMealInsideTheWindowSkipsTheFirst() {
         List<Note> notes = new ArrayList<>();

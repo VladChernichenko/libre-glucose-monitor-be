@@ -151,8 +151,10 @@ Per meal event:
   bolus), the earliest is the anchor and the others are counted as its insulin, not as new anchors.
 - **Window:** the event starts at `START`, the earlier of the meal note and the anchor bolus `t0`,
   and runs to `tEnd = START + DIA` of the user's current rapid insulin. A bolus given after eating
-  therefore does not move the CGM baseline past the rise it was given for. Events are de-duplicated
-  on `START`.
+  therefore does not move the CGM baseline past the rise it was given for. Each anchor bolus anchors
+  at most one event: the first meal note (in time order) to claim it consumes it, whether that event
+  is then used or skipped by a check below, and a later note sharing it is a duplicate. Its carbs
+  still count through the carbs window, and the first note defines `START`.
 - **Clean meal - skip the event when:** another meal (at least 10 g of non-rescue carbs) is logged in
   `(START + 30 min, tEnd]`, since its carbs and insulin would be mixed into this estimate and filed
   under the wrong window; CGM is missing at `START` or `tEnd` (same 15-min tolerance); or `t0` falls
