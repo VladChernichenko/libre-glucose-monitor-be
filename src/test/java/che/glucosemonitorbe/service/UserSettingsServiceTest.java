@@ -199,4 +199,24 @@ class UserSettingsServiceTest {
         // BUG: repository.save IS called (createDefaultSettings) - this FAILS
         verify(repository, never()).save(any(UserSettings.class));
     }
+
+    @Test
+    void saveStoresWindowRatiosAndNullLeavesThemUnchanged() {
+        UUID userId = UUID.randomUUID();
+        UserSettings existing = new UserSettings(userId);
+        existing.setGramsPerUnitLunch(9.0);
+        when(repository.findByUserId(userId)).thenReturn(Optional.of(existing));
+        when(repository.save(any(UserSettings.class))).thenAnswer(inv -> inv.getArgument(0));
+        UserSettingsDTO in = new UserSettingsDTO();
+        in.setGramsPerUnitBreakfast(6.0);
+
+        UserSettingsDTO out = service.saveUserSettings(userId, in);
+
+        assertEquals(6.0, existing.getGramsPerUnitBreakfast());
+        assertEquals(9.0, existing.getGramsPerUnitLunch());
+        assertEquals(6.0, out.getGramsPerUnitBreakfast());
+        assertEquals(9.0, out.getGramsPerUnitLunch());
+        assertNull(out.getGramsPerUnitDinner());
+        assertNull(out.getGramsPerUnitNight());
+    }
 }

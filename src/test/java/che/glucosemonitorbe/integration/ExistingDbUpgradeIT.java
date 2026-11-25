@@ -107,6 +107,13 @@ class ExistingDbUpgradeIT {
         assertThat(jdbc.queryForObject(
                 "SELECT count(*) FROM pg_constraint WHERE conname = 'chk_user_settings_grams_per_unit'",
                 Integer.class)).isEqualTo(1);
+        for (String w : new String[] {"breakfast", "lunch", "dinner", "night"}) {
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.columns "
+                    + "WHERE table_name = 'user_settings' AND column_name = 'grams_per_unit_" + w + "'",
+                    Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM pg_constraint "
+                    + "WHERE conname = 'chk_user_settings_gpu_" + w + "'", Integer.class)).isEqualTo(1);
+        }
         assertThat(jdbc.queryForList("SELECT title FROM clinical_knowledge_chunk", String.class))
                 .containsExactly("General safety disclaimer");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM pg_indexes WHERE indexname = "

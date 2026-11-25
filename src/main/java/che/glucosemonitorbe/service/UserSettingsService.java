@@ -90,11 +90,14 @@ public class UserSettingsService {
     @CacheEvict(value = "userSettings", key = "#userId")
     public UserSettingsDTO saveUserSettings(UUID userId, UserSettingsDTO settingsDTO) {
         log.info("saveUserSettings request for userId={}: carbRatio={}, isf={}, carbHalfLife={}, " +
-                        "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}, isfNight={}",
+                        "maxCOBDuration={}, bodyWeightKg={}, isfBreakfast={}, isfLunch={}, isfDinner={}, isfNight={}, " +
+                        "gramsPerUnitBreakfast={}, gramsPerUnitLunch={}, gramsPerUnitDinner={}, gramsPerUnitNight={}",
                 userId, settingsDTO.getCarbRatio(), settingsDTO.getIsf(), settingsDTO.getCarbHalfLife(),
                 settingsDTO.getMaxCOBDuration(), settingsDTO.getBodyWeightKg(),
                 settingsDTO.getIsfBreakfast(), settingsDTO.getIsfLunch(), settingsDTO.getIsfDinner(),
-                settingsDTO.getIsfNight());
+                settingsDTO.getIsfNight(),
+                settingsDTO.getGramsPerUnitBreakfast(), settingsDTO.getGramsPerUnitLunch(),
+                settingsDTO.getGramsPerUnitDinner(), settingsDTO.getGramsPerUnitNight());
 
         Optional<UserSettings> existingSettings = userSettingsRepository.findByUserId(userId);
 
@@ -109,9 +112,12 @@ public class UserSettingsService {
         }
 
         UserSettings savedSettings = userSettingsRepository.save(settings);
-        log.info("saveUserSettings persisted for userId={}: isf={}, isfBreakfast={}, isfLunch={}, isfDinner={}, isfNight={}",
+        log.info("saveUserSettings persisted for userId={}: isf={}, isfBreakfast={}, isfLunch={}, isfDinner={}, isfNight={}, " +
+                        "gramsPerUnitBreakfast={}, gramsPerUnitLunch={}, gramsPerUnitDinner={}, gramsPerUnitNight={}",
                 userId, savedSettings.getIsf(), savedSettings.getIsfBreakfast(),
-                savedSettings.getIsfLunch(), savedSettings.getIsfDinner(), savedSettings.getIsfNight());
+                savedSettings.getIsfLunch(), savedSettings.getIsfDinner(), savedSettings.getIsfNight(),
+                savedSettings.getGramsPerUnitBreakfast(), savedSettings.getGramsPerUnitLunch(),
+                savedSettings.getGramsPerUnitDinner(), savedSettings.getGramsPerUnitNight());
         return convertToDTO(savedSettings);
     }
     
@@ -144,6 +150,18 @@ public class UserSettingsService {
         }
         if (settingsDTO.getGramsPerUnit() != null) {
             settings.setGramsPerUnit(settingsDTO.getGramsPerUnit());
+        }
+        if (settingsDTO.getGramsPerUnitBreakfast() != null) {
+            settings.setGramsPerUnitBreakfast(settingsDTO.getGramsPerUnitBreakfast());
+        }
+        if (settingsDTO.getGramsPerUnitLunch() != null) {
+            settings.setGramsPerUnitLunch(settingsDTO.getGramsPerUnitLunch());
+        }
+        if (settingsDTO.getGramsPerUnitDinner() != null) {
+            settings.setGramsPerUnitDinner(settingsDTO.getGramsPerUnitDinner());
+        }
+        if (settingsDTO.getGramsPerUnitNight() != null) {
+            settings.setGramsPerUnitNight(settingsDTO.getGramsPerUnitNight());
         }
         if (settingsDTO.getIsf() != null) {
             settings.setIsf(settingsDTO.getIsf());
@@ -233,6 +251,10 @@ public class UserSettingsService {
         dto.setTargetGlucoseMmol(settings.getTargetGlucoseMmol());
         dto.setRescueCarbsG(settings.getRescueCarbsG());
         dto.setGramsPerUnit(settings.getGramsPerUnit());
+        dto.setGramsPerUnitBreakfast(settings.getGramsPerUnitBreakfast());
+        dto.setGramsPerUnitLunch(settings.getGramsPerUnitLunch());
+        dto.setGramsPerUnitDinner(settings.getGramsPerUnitDinner());
+        dto.setGramsPerUnitNight(settings.getGramsPerUnitNight());
         return dto;
     }
 }

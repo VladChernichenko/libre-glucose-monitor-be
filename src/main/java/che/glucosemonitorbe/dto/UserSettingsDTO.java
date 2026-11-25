@@ -14,6 +14,8 @@ import lombok.Setter;
 import org.springframework.beans.BeanUtils;
 
 import java.time.LocalDateTime;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Setter
@@ -27,6 +29,14 @@ public class UserSettingsDTO {
     private Double carbRatio;
     /** Insulin-to-carb ratio, grams per unit. Missing or outside 3-30 is refused. */
     private Double gramsPerUnit;
+    /** g/U override for 05:00-11:00. NULL = use {@link #gramsPerUnit}. */
+    private Double gramsPerUnitBreakfast;
+    /** g/U override for 11:00-16:00. NULL = use {@link #gramsPerUnit}. */
+    private Double gramsPerUnitLunch;
+    /** g/U override for 16:00-22:00. NULL = use {@link #gramsPerUnit}. */
+    private Double gramsPerUnitDinner;
+    /** g/U override for 22:00-05:00. NULL = use {@link #gramsPerUnit}. */
+    private Double gramsPerUnitNight;
     /** IANA zone id (e.g. "Europe/Berlin"); authoritative over utcOffsetMinutes, DST-aware. */
     private String timezone;
     /** Minutes EAST of UTC (UTC+4 = 240); fallback when timezone is absent or unparseable. */
@@ -134,9 +144,42 @@ public class UserSettingsDTO {
                 .orElse(isf);
     }
 
+    /** The g/U override for {@code window}, else the single {@link #gramsPerUnit}; may be null. */
+    public Double getWindowGramsPerUnit(MealWindow window) {
+        Double override = switch (window) {
+            case BREAKFAST -> gramsPerUnitBreakfast;
+            case LUNCH -> gramsPerUnitLunch;
+            case DINNER -> gramsPerUnitDinner;
+            case NIGHT -> gramsPerUnitNight;
+        };
+        return override != null ? override : gramsPerUnit;
+    }
+
+    /** The g/U for {@code time}'s meal window, without the illness multiplier; the single ratio when {@code time} is null. */
+    public Double getWindowGramsPerUnit(LocalDateTime time) {
+        return MealWindow.fromTimestamp(time)
+                .map(this::getWindowGramsPerUnit)
+                .orElse(gramsPerUnit);
+    }
+
     /** Insulin-to-carb ratio (grams per unit) in effect at {@code time}, scaled like the ISF while sick. */
     public Double getEffectiveGramsPerUnit(LocalDateTime time) {
-        return gramsPerUnit == null ? null : gramsPerUnit * sickMultiplierAt(time);
+        Double base = getWindowGramsPerUnit(time);
+        return base == null ? null : base * sickMultiplierAt(time);
+    }
+
+    /** Every window's effective g/U at {@code time}; windows with no ratio are absent. */
+    @JsonIgnore
+    public Map<MealWindow, Double> getEffectiveGramsPerUnitByWindow(LocalDateTime time) {
+        double multiplier = sickMultiplierAt(time);
+        Map<MealWindow, Double> byWindow = new EnumMap<>(MealWindow.class);
+        for (MealWindow w : MealWindow.values()) {
+            Double base = getWindowGramsPerUnit(w);
+            if (base != null) {
+                byWindow.put(w, base * multiplier);
+            }
+        }
+        return byWindow;
     }
 
     /** Shallow copy carrying {@code profile}; the receiver (possibly a cached instance) is not mutated. */
