@@ -42,8 +42,8 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for {@link CarbRatioMealWindowProfileService}: one ratio estimate per clean meal,
  * median per meal window once {@link CarbRatioMealWindowProfileService#MIN_MEALS} meals exist.
- * Unless a test says otherwise each scenario runs on 3 consecutive days, with CGM at the meal's
- * earliest bolus ({@code t0}) and at {@code t0 + DIA}.
+ * Unless a test says otherwise each scenario runs on 3 consecutive days, with CGM at the event's
+ * START (the earlier of the meal and its earliest bolus) and at START + DIA.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)

@@ -735,9 +735,11 @@ public class HovorkaGlucosePredictionService {
      * acts, not how much glucose a gram of carbs adds. When the single ratio did not shape
      * {@code A_G} (no usable grams-per-unit) but the window ratio is usable - the calculator then
      * prices the meal by the window ratio alone - the ratio part sizes the meal from the window
-     * ratio itself: {@code mealMagnitude(baseIsf, VG, windowRatio) / A_G}. 1.0 when neither ratio is
-     * usable; an unusable window ISF or window ratio otherwise drops only its own part. The result is
-     * clamped to [{@link #MEAL_WINDOW_FACTOR_MIN}, {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
+     * ratio itself: {@code mealMagnitude(baseIsf, VG, windowRatio)} over the raw (un-twinned)
+     * {@code A_G} a missing ratio gives, so a twin meal scale in {@code p.aG()} stays a multiplier.
+     * The whole factor is 1.0 when neither ratio is usable; an unusable window ISF or window ratio
+     * otherwise drops only its own part. The result is clamped to [{@link #MEAL_WINDOW_FACTOR_MIN},
+     * {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
      */
     static double mealWindowFactor(LocalDateTime mealTime, HovorkaParameters p, UserSettingsDTO settings) {
         if (settings == null || mealTime == null) return 1.0;
@@ -756,8 +758,11 @@ public class HovorkaGlucosePredictionService {
         double ratioPart = 1.0;
         if (singleUsable && windowUsable) {
             ratioPart = single / windowRatio;
-        } else if (windowUsable && p.aG() > 0) {
-            ratioPart = HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), windowRatio) / p.aG();
+        } else if (windowUsable) {
+            // Against the raw A_G a missing ratio gives, not p.aG(): that carries the twin's meal scale,
+            // which has to stay a multiplier here as it does when the single ratio is usable.
+            ratioPart = HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), windowRatio)
+                    / HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), null);
         }
         return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, isfPart * ratioPart));
     }

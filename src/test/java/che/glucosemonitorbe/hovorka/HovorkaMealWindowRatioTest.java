@@ -126,6 +126,23 @@ class HovorkaMealWindowRatioTest {
     }
 
     @Test
+    void aWindowOnlyRatioKeepsTheTwinMealScale() {
+        // A twin meal scale of 1.5 on the neutral A_G (no single ratio): the forecast's meal magnitude
+        // must be the window ratio's magnitude times that scale, not the scale cancelled out.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+        UserSettingsDTO settings = settings(null);
+        settings.setGramsPerUnit(null);
+        settings.setGramsPerUnitBreakfast(6.0);
+        HovorkaParameters twinned = withMealMagnitude(
+                1.5 * HovorkaParameterService.mealMagnitude(BASE_ISF, params.vG(), null));
+
+        double magnitude = twinned.aG() * HovorkaGlucosePredictionService.mealWindowFactor(now, twinned, settings);
+
+        assertThat(magnitude).isCloseTo(
+                1.5 * HovorkaParameterService.mealMagnitude(twinned.isf(), twinned.vG(), 6.0), within(1e-9));
+    }
+
+    @Test
     void theFactorStaysClamped() {
         // ISF part 1.5 alone is inside the bounds; only the ratio part (10 / 3) pushes it to 5.0.
         LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);

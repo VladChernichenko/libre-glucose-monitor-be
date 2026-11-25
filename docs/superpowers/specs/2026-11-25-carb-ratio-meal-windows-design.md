@@ -113,9 +113,10 @@ only when non-null (as for the ISF windows) and returns them on read.
   `factor = (windowIsf / baseIsf) × (baseGramsPerUnit / windowGramsPerUnit)`, clamped to the existing
   0.33-3.0. No sick multiplier and no twin scale, as today. When the single ratio is unusable (it
   did not shape `A_G`) but the window ratio is usable, the ratio part sizes the meal from the window
-  ratio itself, `mealMagnitude(baseIsf, VG, windowGramsPerUnit) / A_G`; 1.0 when neither is usable.
-  The ratio part is 1.0 when only the window ratio is unusable. This keeps "a meal dosed by its
-  window's ratio forecasts flat".
+  ratio itself: `mealMagnitude(baseIsf, VG, windowGramsPerUnit)` divided by the raw (un-twinned)
+  `A_G` a missing ratio gives, so the twin's meal scale stays a multiplier. When neither ratio is
+  usable the whole factor is 1.0 (no ISF part either). When only the window ratio is unusable, the
+  ratio part is 1.0. This keeps "a meal dosed by its window's ratio forecasts flat".
 - **Classic COB forecast** (`GlucoseCalculationsService`): already reads
   `getEffectiveGramsPerUnit(t)`, so it becomes window-aware with no further change. It resolves by
   step time, as its ISF already does; left as is.
@@ -160,7 +161,8 @@ Per meal event:
   under the wrong window; CGM is missing at `START` or `tEnd` (same 15-min tolerance); or `t0` falls
   in a sick period excluded from learning. Smaller snacks, rescue carbs and correction doses inside
   the window do not disqualify a meal; they are counted as below. A meal skipped because of a later
-  meal does not stop that later meal from being its own event.
+  meal does not stop that later meal from being its own event, except that a later note within
+  30 min of an already-claimed bolus is a duplicate (see "Window").
 - **Carbs:** every carb entry logged in `[START − 30 min, tEnd]`, **including rescue carbs**, plus COB
   at `START` from meals in `[START − 8 h, START − 30 min)`, minus COB at `tEnd` (same COB service as
   the ISF learner). Rescue carbs count because dropping meals that needed them would hide a ratio
@@ -186,8 +188,7 @@ Storage: new table `carb_ratio_meal_window_snapshots` (new migration `V23`): `us
 (`user_id`, `meal_window`).
 
 Recompute: the existing nightly `IsfMealWindowScheduler` (02:00 UTC) and the existing
-`POST /api/isf/meal-windows/recompute` recompute both learners. (The scheduler's Javadoc mentions an
-on-bolus refresh from `NotesService`; no such call exists today, and none is added.)
+`POST /api/isf/meal-windows/recompute` recompute both learners.
 
 ### 5. Suggestion card
 
