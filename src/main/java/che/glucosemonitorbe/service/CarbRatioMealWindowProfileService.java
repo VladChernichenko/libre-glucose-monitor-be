@@ -39,23 +39,26 @@ import java.util.function.Function;
  * <ol>
  *   <li><b>Anchor:</b> a meal is a note with at least {@link #MEAL_CARB_THRESHOLD_GRAMS} of non-rescue
  *       carbs. Its rapid boluses are those within {@link #ANCHOR_TOLERANCE_MINUTES} of it; the earliest
- *       is {@code t0} (a split bolus or a separately logged pre-bolus is one event). No bolus: no event.</li>
- *   <li><b>Clean:</b> skipped when another meal lands in {@code (t0 + 30 min, t0 + DIA]}, when CGM is
- *       missing at {@code t0} or {@code t0 + DIA}, or when {@code t0} is excluded from learning by an
- *       illness span.</li>
- *   <li><b>Carbs:</b> every carb entry in {@code [t0 − 30 min, t0 + DIA]}, rescue carbs included, plus
- *       carbs still on board at {@code t0} from the previous {@link #PRIOR_CARB_LOOKBACK_HOURS} h, minus
- *       carbs still on board at {@code t0 + DIA}.</li>
- *   <li><b>Insulin:</b> insulin on board at {@code t0} from earlier doses, the doses at {@code t0}, and
- *       the share of every later dose in the window that acted by {@code t0 + DIA} - each on its own
- *       insulin's curve.</li>
- *   <li><b>Estimate:</b> {@code unitsNeeded = insulin + Δglucose / windowIsf};
- *       {@code ratio = carbs / unitsNeeded}, kept when {@code unitsNeeded ≥ 0.5} and the ratio is 3-30.</li>
+ *       is {@code t0} (a split bolus or a separately logged pre-bolus is one event). No bolus: no event.
+ *       The event starts at {@code start}, the earlier of the meal and {@code t0}, so a bolus given
+ *       after eating does not move the baseline past the rise it was given for.</li>
+ *   <li><b>Clean:</b> skipped when another meal lands in {@code (start + 30 min, start + DIA]}, when
+ *       CGM is missing at {@code start} or {@code start + DIA}, or when {@code t0} is excluded from
+ *       learning by an illness span.</li>
+ *   <li><b>Carbs:</b> every carb entry in {@code [start − 30 min, start + DIA]}, rescue carbs included,
+ *       plus carbs still on board at {@code start} from the previous {@link #PRIOR_CARB_LOOKBACK_HOURS} h,
+ *       minus carbs still on board at {@code start + DIA}.</li>
+ *   <li><b>Insulin:</b> insulin on board at {@code start} from earlier doses, the doses at
+ *       {@code start}, and the share of every later dose in the window (a bolus after the meal
+ *       included) that acted by {@code start + DIA} - each on its own insulin's curve.</li>
+ *   <li><b>Estimate:</b> {@code unitsNeeded = insulin + Δglucose / windowIsf} (ISF of {@code t0}'s
+ *       window); {@code ratio = carbs / unitsNeeded}, kept when {@code unitsNeeded ≥ 0.5} and the ratio
+ *       is 3-30.</li>
  * </ol>
  *
  * <p>Per window: the median of the estimates once there are {@link #MIN_MEALS}, otherwise no value.
- * Meal windows follow the note's own hour, and note↔CGM matching uses the JVM zone, exactly as
- * {@link IsfMealWindowProfileService}.</p>
+ * An estimate is filed under the window of {@code t0}, the dose time the calculator prices the meal
+ * at; note↔CGM matching uses the JVM zone, exactly as {@link IsfMealWindowProfileService}.</p>
  */
 @Service
 @Slf4j
@@ -171,35 +174,39 @@ public class CarbRatioMealWindowProfileService {
         };
         long diaMinutes = (long) (rapid.diaHours() * 60);
 
-        Set<LocalDateTime> usedT0 = new HashSet<>();
+        Set<LocalDateTime> usedStarts = new HashSet<>();
         for (Note meal : meals) {
-            LocalDateTime anchorFrom = meal.getTimestamp().minusMinutes(ANCHOR_TOLERANCE_MINUTES);
-            LocalDateTime anchorTo = meal.getTimestamp().plusMinutes(ANCHOR_TOLERANCE_MINUTES);
+            LocalDateTime mealAt = meal.getTimestamp();
+            LocalDateTime anchorFrom = mealAt.minusMinutes(ANCHOR_TOLERANCE_MINUTES);
+            LocalDateTime anchorTo = mealAt.plusMinutes(ANCHOR_TOLERANCE_MINUTES);
             LocalDateTime t0 = rapidDoses.stream()
                     .map(Note::getTimestamp)
                     .filter(t -> !t.isBefore(anchorFrom) && !t.isAfter(anchorTo))
                     .min(Comparator.naturalOrder())
                     .orElse(null);
             if (t0 == null) { skip(skips, Skip.UNBOLUSED); continue; }
-            if (usedT0.contains(t0)) { skip(skips, Skip.DUPLICATE); continue; }
+            // The event starts at the meal or its earliest bolus, whichever comes first: a bolus given
+            // after eating must not move the baseline past the rise it was given for.
+            LocalDateTime start = t0.isBefore(mealAt) ? t0 : mealAt;
+            if (usedStarts.contains(start)) { skip(skips, Skip.DUPLICATE); continue; }
             if (settings != null && settings.getSickProfile() != null
                     && settings.getSickProfile().excludedFromLearning(t0)) { skip(skips, Skip.SICK); continue; }
 
-            LocalDateTime tEnd = t0.plusMinutes(diaMinutes);
-            LocalDateTime cleanFrom = t0.plusMinutes(ANCHOR_TOLERANCE_MINUTES);
+            LocalDateTime tEnd = start.plusMinutes(diaMinutes);
+            LocalDateTime cleanFrom = start.plusMinutes(ANCHOR_TOLERANCE_MINUTES);
             boolean laterMeal = meals.stream().map(Note::getTimestamp)
                     .anyMatch(t -> t.isAfter(cleanFrom) && !t.isAfter(tEnd));
             if (laterMeal) { skip(skips, Skip.LATER_MEAL); continue; }
 
-            Double g0 = IsfMealWindowProfileService.nearestCgmMmol(cgm, t0);
+            Double g0 = IsfMealWindowProfileService.nearestCgmMmol(cgm, start);
             Double g1 = IsfMealWindowProfileService.nearestCgmMmol(cgm, tEnd);
             if (g0 == null || g1 == null) { skip(skips, Skip.NO_CGM); continue; }
 
             Double isfW = settings == null ? null : settings.getWindowIsf(t0);
             if (isfW == null || !Double.isFinite(isfW) || isfW <= 0) { skip(skips, Skip.NO_ISF); continue; }
 
-            double carbs = carbsAbsorbed(carbNotes, t0, tEnd, settings);
-            double insulin = insulinActed(rapidDoses, t0, tEnd, curveOf);
+            double carbs = carbsAbsorbed(carbNotes, start, tEnd, settings);
+            double insulin = insulinActed(rapidDoses, start, tEnd, curveOf);
             double needed = insulin + (g1 - g0) / isfW;
             if (needed < MIN_UNITS_NEEDED) { skip(skips, Skip.TOO_FEW_UNITS); continue; }
 
@@ -209,20 +216,21 @@ public class CarbRatioMealWindowProfileService {
                 continue;
             }
 
-            usedT0.add(t0);
+            usedStarts.add(start);
+            // Filed under the dose's window: that is the window the calculator prices the meal at.
             MealWindow.fromTimestamp(t0).ifPresent(w -> ratios.get(w).add(ratio));
         }
         return meals.size();
     }
 
     /**
-     * Carbs absorbed between {@code t0} and {@code tEnd}: every entry in {@code [t0 − 30 min, tEnd]}
-     * (rescue carbs too), plus what earlier entries still had on board at {@code t0}, minus what all
-     * of them still have on board at {@code tEnd}.
+     * Carbs absorbed between {@code start} and {@code tEnd}: every entry in
+     * {@code [start − 30 min, tEnd]} (rescue carbs too), plus what earlier entries still had on board
+     * at {@code start}, minus what all of them still have on board at {@code tEnd}.
      */
-    private double carbsAbsorbed(List<Note> carbNotes, LocalDateTime t0, LocalDateTime tEnd, UserSettingsDTO settings) {
-        LocalDateTime windowStart = t0.minusMinutes(ANCHOR_TOLERANCE_MINUTES);
-        LocalDateTime priorStart = t0.minusHours(PRIOR_CARB_LOOKBACK_HOURS);
+    private double carbsAbsorbed(List<Note> carbNotes, LocalDateTime start, LocalDateTime tEnd, UserSettingsDTO settings) {
+        LocalDateTime windowStart = start.minusMinutes(ANCHOR_TOLERANCE_MINUTES);
+        LocalDateTime priorStart = start.minusHours(PRIOR_CARB_LOOKBACK_HOURS);
         double windowGrams = 0.0;
         List<CarbsEntry> windowEntries = new ArrayList<>();
         List<CarbsEntry> priorEntries = new ArrayList<>();
@@ -236,7 +244,7 @@ public class CarbRatioMealWindowProfileService {
             }
         }
         double priorCobAtStart = priorEntries.isEmpty() ? 0.0
-                : carbsOnBoardService.calculateTotalCarbsOnBoard(priorEntries, t0, settings);
+                : carbsOnBoardService.calculateTotalCarbsOnBoard(priorEntries, start, settings);
         List<CarbsEntry> all = new ArrayList<>(windowEntries);
         all.addAll(priorEntries);
         double cobAtEnd = carbsOnBoardService.calculateTotalCarbsOnBoard(all, tEnd, settings);
@@ -244,18 +252,18 @@ public class CarbRatioMealWindowProfileService {
     }
 
     /**
-     * Insulin that acted between {@code t0} and {@code tEnd}: on board at {@code t0} from earlier
-     * doses, the doses at {@code t0} in full, and each later dose up to {@code tEnd} minus what it
-     * still has on board at {@code tEnd}.
+     * Insulin that acted between {@code start} and {@code tEnd}: on board at {@code start} from
+     * earlier doses, the doses at {@code start} in full, and each later dose up to {@code tEnd}
+     * (a bolus given after the meal included) minus what it still has on board at {@code tEnd}.
      */
-    private static double insulinActed(List<Note> rapidDoses, LocalDateTime t0, LocalDateTime tEnd,
+    private static double insulinActed(List<Note> rapidDoses, LocalDateTime start, LocalDateTime tEnd,
                                        Function<Note, RapidInsulinIobParameters> curveOf) {
         double units = 0.0;
         for (Note d : rapidDoses) {
             LocalDateTime t = d.getTimestamp();
-            if (t.isBefore(t0)) {
-                units += iob(d, Duration.between(t, t0).toMinutes(), curveOf.apply(d));
-            } else if (t.isEqual(t0)) {
+            if (t.isBefore(start)) {
+                units += iob(d, Duration.between(t, start).toMinutes(), curveOf.apply(d));
+            } else if (t.isEqual(start)) {
                 units += d.getInsulin();
             } else if (!t.isAfter(tEnd)) {
                 units += d.getInsulin() - iob(d, Duration.between(t, tEnd).toMinutes(), curveOf.apply(d));

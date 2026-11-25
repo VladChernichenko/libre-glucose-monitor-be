@@ -210,6 +210,37 @@ class CarbRatioMealWindowProfileServiceTest {
     }
 
     @Test
+    @DisplayName("A bolus given after eating: the meal, not the bolus, is the CGM baseline")
+    void bolusAfterTheMealUsesTheMealAsBaseline() {
+        // 60 g at 08:00, 6 U at 08:20, glucose 7.0 -> 8.2 by 08:20 -> back to 7.0. The event starts at
+        // the meal: baseline 7.0 at 08:00, end 08:00 + DIA, the 08:20 bolus counted by the share that
+        // acted by then (250 of 270 min). Starting at the bolus instead would take 8.2 as the baseline
+        // and learn 60 / (6 - 1.2 / 2.5) ≈ 10.9 (the 7.0 at 08:20 + DIA lets that wrong path finish).
+        List<Note> notes = new ArrayList<>();
+        List<CgmReading> cgm = new ArrayList<>();
+        for (int d = 0; d < DAYS; d++) {
+            LocalDateTime mealAt = day(d, 8, 0);
+            LocalDateTime bolusAt = day(d, 8, 20);
+            notes.add(meal(mealAt, 60.0));
+            notes.add(bolus(bolusAt, 6.0));
+            cgm.add(cgmReading(mealAt, 7.0));
+            cgm.add(cgmReading(bolusAt, 8.2));
+            cgm.add(cgmReading(mealAt.plusMinutes(DIA_MIN), 7.0));
+            cgm.add(cgmReading(bolusAt.plusMinutes(DIA_MIN), 7.0));
+        }
+        stub(notes, cgm);
+
+        service.recomputeForUser(userId);
+
+        double actedBolus = 6.0 - InsulinCalculatorService.iobOpenApsExponential(6.0, DIA_MIN - 20, 4.5, 75);
+        CarbRatioMealWindowSnapshot breakfast = captureSavedSnapshot(MealWindow.BREAKFAST);
+        assertThat(breakfast.getSampleCount()).isEqualTo(3);
+        assertThat(breakfast.getGramsPerUnit())
+                .isCloseTo(60.0 / actedBolus, offset(0.05))
+                .isNotCloseTo(10.9, offset(0.3));
+    }
+
+    @Test
     @DisplayName("A second meal inside the insulin window skips the first but is still its own event")
     void secondMealInsideTheWindowSkipsTheFirst() {
         List<Note> notes = new ArrayList<>();

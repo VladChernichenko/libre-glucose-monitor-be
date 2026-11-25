@@ -147,22 +147,26 @@ Per meal event:
 - **Anchor:** a rapid (not long-acting) bolus with at least 10 g of non-rescue carbs logged within
   30 min either side of it. When several boluses fall within 30 min of the same meal (a split
   bolus), the earliest is the anchor and the others are counted as its insulin, not as new anchors.
-- **Window:** `t0` (anchor bolus time) to `tEnd = t0 + DIA` of the user's current rapid insulin.
+- **Window:** the event starts at `START`, the earlier of the meal note and the anchor bolus `t0`,
+  and runs to `tEnd = START + DIA` of the user's current rapid insulin. A bolus given after eating
+  therefore does not move the CGM baseline past the rise it was given for. Events are de-duplicated
+  on `START`.
 - **Clean meal - skip the event when:** another meal (at least 10 g of non-rescue carbs) is logged in
-  `(t0 + 30 min, tEnd]`, since its carbs and insulin would be mixed into this estimate and filed
-  under the wrong window; CGM is missing at `t0` or `tEnd` (same 15-min tolerance); or `t0` falls in a
-  sick period excluded from learning. Smaller snacks, rescue carbs and correction doses inside the
-  window do not disqualify a meal; they are counted as below. A meal skipped because of a later meal
-  does not stop that later meal from being its own event.
-- **Carbs:** every carb entry logged in `[t0 − 30 min, tEnd]`, **including rescue carbs**, plus COB
-  at `t0` from meals in the previous 8 h, minus COB at `tEnd` (same COB service as the ISF learner).
-  Rescue carbs count because dropping meals that needed them would hide a ratio that is too
-  aggressive.
-- **Insulin:** the anchor bolus, plus all insulin on board at `t0` from earlier rapid doses, plus
-  every other rapid dose in `(t0, tEnd]` counted by the share of it that acted by `tEnd`
-  (units − its IOB at `tEnd`, on its own insulin curve). Follow-up corrections count because
-  dropping those meals would hide a ratio that is too weak.
-- **Estimate:** `Δ = CGM(tEnd) − CGM(t0)`; `ISF_w` = the window ISF from settings at `t0`
+  `(START + 30 min, tEnd]`, since its carbs and insulin would be mixed into this estimate and filed
+  under the wrong window; CGM is missing at `START` or `tEnd` (same 15-min tolerance); or `t0` falls
+  in a sick period excluded from learning. Smaller snacks, rescue carbs and correction doses inside
+  the window do not disqualify a meal; they are counted as below. A meal skipped because of a later
+  meal does not stop that later meal from being its own event.
+- **Carbs:** every carb entry logged in `[START − 30 min, tEnd]`, **including rescue carbs**, plus COB
+  at `START` from meals in `[START − 8 h, START − 30 min)`, minus COB at `tEnd` (same COB service as
+  the ISF learner). Rescue carbs count because dropping meals that needed them would hide a ratio
+  that is too aggressive.
+- **Insulin:** all insulin on board at `START` from earlier rapid doses, plus any dose at `START` in
+  full, plus every rapid dose in `(START, tEnd]` counted by the share of it that acted by `tEnd`
+  (units − its IOB at `tEnd`, on its own insulin curve). A bolus given after the meal is counted
+  this way; the anchor bolus counts in full only when it is at `START`. Follow-up corrections count
+  because dropping those meals would hide a ratio that is too weak.
+- **Estimate:** `Δ = CGM(tEnd) − CGM(START)`; `ISF_w` = the window ISF from settings at `t0`
   (`getWindowIsf`, no sick multiplier, no twin scale);
   `unitsNeeded = insulin + Δ / ISF_w`; skip if `unitsNeeded < 0.5 U`;
   `ratio = carbs / unitsNeeded`; skip if outside 3-30 g/U.
@@ -170,7 +174,8 @@ Per meal event:
   2.0 instead: 6.75 U → 8.9 g/U.
 
 Per window: the **median** of the estimates when there are **at least 3** in the last 14 days,
-otherwise no data.
+otherwise no data. Each estimate is filed under the window of the anchor bolus `t0` (the dose time
+the calculator prices the meal at), not of `START`.
 
 Storage: new table `carb_ratio_meal_window_snapshots` (new migration `V23`): `user_id`,
 `meal_window`, `grams_per_unit` (nullable = no data), `sample_count`, `computed_at`; unique on
