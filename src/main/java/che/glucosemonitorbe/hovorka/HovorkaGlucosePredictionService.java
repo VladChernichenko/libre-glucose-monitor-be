@@ -732,15 +732,20 @@ public class HovorkaGlucosePredictionService {
      * i.e. the meal pushes glucose up 10/6 times as much per gram).
      *
      * <p>Neither the illness multiplier nor the twin's scales enter: illness changes how insulin
-     * acts, not how much glucose a gram of carbs adds. 1.0 when the single ratio did not shape
-     * {@code A_G} (no usable grams-per-unit); an unusable window ISF or window ratio drops only
-     * its own part. The result is clamped to [{@link #MEAL_WINDOW_FACTOR_MIN},
-     * {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
+     * acts, not how much glucose a gram of carbs adds. When the single ratio did not shape
+     * {@code A_G} (no usable grams-per-unit) but the window ratio is usable - the calculator then
+     * prices the meal by the window ratio alone - the ratio part sizes the meal from the window
+     * ratio itself: {@code mealMagnitude(baseIsf, VG, windowRatio) / A_G}. 1.0 when neither ratio is
+     * usable; an unusable window ISF or window ratio otherwise drops only its own part. The result is
+     * clamped to [{@link #MEAL_WINDOW_FACTOR_MIN}, {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
      */
     static double mealWindowFactor(LocalDateTime mealTime, HovorkaParameters p, UserSettingsDTO settings) {
         if (settings == null || mealTime == null) return 1.0;
         Double single = settings.getGramsPerUnit();
-        if (!HovorkaParameterService.usableGramsPerUnit(single)) return 1.0;
+        boolean singleUsable = HovorkaParameterService.usableGramsPerUnit(single);
+        Double windowRatio = settings.getWindowGramsPerUnit(mealTime);
+        boolean windowUsable = HovorkaParameterService.usableGramsPerUnit(windowRatio);
+        if (!singleUsable && !windowUsable) return 1.0;
         double isfPart = 1.0;
         Double windowIsf = settings.getWindowIsf(mealTime);
         double base = p.isf();
@@ -749,9 +754,10 @@ public class HovorkaGlucosePredictionService {
             isfPart = windowIsf / base;
         }
         double ratioPart = 1.0;
-        Double windowRatio = settings.getWindowGramsPerUnit(mealTime);
-        if (HovorkaParameterService.usableGramsPerUnit(windowRatio)) {
+        if (singleUsable && windowUsable) {
             ratioPart = single / windowRatio;
+        } else if (windowUsable && p.aG() > 0) {
+            ratioPart = HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), windowRatio) / p.aG();
         }
         return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, isfPart * ratioPart));
     }

@@ -109,11 +109,38 @@ class HovorkaMealWindowRatioTest {
     }
 
     @Test
+    void aWindowOnlyRatioStillLandsWhereItStarted() {
+        // No single ratio, so A_G is the neutral magnitude; the calculator still prices breakfast at
+        // the breakfast ratio, and the forecast has to agree with that dose.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+        UserSettingsDTO settings = settings(null);
+        settings.setGramsPerUnit(null);
+        settings.setGramsPerUnitBreakfast(6.0);
+        params = withMealMagnitude(HovorkaParameterService.mealMagnitude(BASE_ISF, params.vG(), null));
+        double units = CARBS / 6.0;
+
+        double landing = landing(settings, now, units, 0, 480);
+
+        assertThat(landing).as("a meal priced by a window-only ratio must not move the landing")
+                .isCloseTo(START, within(0.6));
+    }
+
+    @Test
     void theFactorStaysClamped() {
+        // ISF part 1.5 alone is inside the bounds; only the ratio part (10 / 3) pushes it to 5.0.
         LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
 
-        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(3.0, 3.0)))
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(1.5, 3.0)))
                 .isEqualTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MAX);
+    }
+
+    @Test
+    void theFactorStaysClampedBelow() {
+        // 0.5 x 10 / 30 ≈ 0.167 -> 0.33.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(0.5, 30.0)))
+                .isEqualTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MIN);
     }
 
     @Test
@@ -164,6 +191,11 @@ class HovorkaMealWindowRatioTest {
     }
 
     // ---- helpers ---------------------------------------------------------------------------
+
+    private HovorkaParameters withMealMagnitude(double aG) {
+        return new HovorkaParameters(params.vG(), params.f01(), params.egpNet(), params.egp0(), params.k12(),
+                params.k21(), params.tMaxG(), aG, params.isf(), params.weightKg());
+    }
 
     private static UserSettingsDTO settings(Double windowIsf, Double windowRatio) {
         UserSettingsDTO s = settings(windowIsf);

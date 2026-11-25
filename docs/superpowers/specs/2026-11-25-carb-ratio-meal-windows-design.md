@@ -111,9 +111,11 @@ only when non-null (as for the ISF windows) and returns them on read.
   the single ISF and single ratio. Each meal is rescaled so that its carb effect per gram is
   window ISF ÷ window ratio:
   `factor = (windowIsf / baseIsf) × (baseGramsPerUnit / windowGramsPerUnit)`, clamped to the existing
-  0.33-3.0. No sick multiplier and no twin scale, as today. 1.0 when the single ratio is unusable
-  (it did not shape `A_G`); the ratio part is 1.0 when the window ratio is unusable. This keeps "a
-  meal dosed by its window's ratio forecasts flat".
+  0.33-3.0. No sick multiplier and no twin scale, as today. When the single ratio is unusable (it
+  did not shape `A_G`) but the window ratio is usable, the ratio part sizes the meal from the window
+  ratio itself, `mealMagnitude(baseIsf, VG, windowGramsPerUnit) / A_G`; 1.0 when neither is usable.
+  The ratio part is 1.0 when only the window ratio is unusable. This keeps "a meal dosed by its
+  window's ratio forecasts flat".
 - **Classic COB forecast** (`GlucoseCalculationsService`): already reads
   `getEffectiveGramsPerUnit(t)`, so it becomes window-aware with no further change. It resolves by
   step time, as its ISF already does; left as is.
