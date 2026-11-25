@@ -105,7 +105,9 @@ only when non-null (as for the ISF windows) and returns them on read.
 ratio. The legacy `carb_ratio` (mmol/L rise per 10 g, read by nothing) was removed with it.
 `scripts/upgrade-existing-db.sql` copies `grams_per_unit` into the unset windows of a deployed
 database before dropping it (an older one derives them from `10 * isf / carb_ratio` before dropping
-`carb_ratio`). An older app's `"gramsPerUnit"` and `"carbRatio"` keys on save are ignored.
+`carb_ratio`). An older app's `"gramsPerUnit"` and `"carbRatio"` keys on save are ignored. The
+settings response keeps a read-only `"carbRatio": 2.0` (not stored, not settable) because iPhone
+builds before this change decode it as non-optional; delete it once those builds are gone.
 
 ### 2. Consumers
 
@@ -124,8 +126,10 @@ database before dropping it (an older one derives them from `10 * isf / carb_rat
   usable the whole factor is 1.0 (no ISF part either). When only the window ratio is unusable, the
   ratio part is 1.0. This keeps "a meal dosed by its window's ratio forecasts flat".
   *Follow-up, single ratio removed:* `A_G` is always the neutral magnitude and the factor is
-  `(windowIsf / baseIsf) × mealMagnitude(baseIsf, VG, windowGramsPerUnit) / mealMagnitude(baseIsf, VG, null)`
-  (ratio part 1.0 for an unusable window), i.e. the window-only branch above for everyone.
+  `clamp(windowIsf / baseIsf, 0.33, 3.0) × mealMagnitude(baseIsf, VG, windowGramsPerUnit) / mealMagnitude(baseIsf, VG, null)`
+  (ratio part 1.0 for an unusable window). Only the ISF part is clamped; the ratio sizing is bounded
+  by `mealMagnitude`'s own 0.3-3.0 alone, as when one ratio shaped `A_G`, so a user whose windows
+  equal the old single ratio forecasts exactly as before.
 - **Classic COB forecast** (`GlucoseCalculationsService`): already reads
   `getEffectiveGramsPerUnit(t)`, so it becomes window-aware with no further change. It resolves by
   step time, as its ISF already does; left as is.

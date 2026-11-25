@@ -718,7 +718,10 @@ public class HovorkaGlucosePredictionService {
         return entry.getCarbs() * p.aG() * mealWindowFactor(entry.getTimestamp(), p, settings) / 0.18;
     }
 
-    /** Bounds on {@link #mealWindowFactor}: settings this far apart are a mistake, not a physiology. */
+    /**
+     * Bounds on the ISF part of {@link #mealWindowFactor} (window ISF / base ISF): settings this far
+     * apart are a mistake, not a physiology. The ratio sizing is not bounded here.
+     */
     static final double MEAL_WINDOW_FACTOR_MIN = 0.33;
     static final double MEAL_WINDOW_FACTOR_MAX = 3.0;
 
@@ -738,8 +741,10 @@ public class HovorkaGlucosePredictionService {
      * <p>Neither the illness multiplier nor the twin's scales enter: illness changes how insulin
      * acts, not how much glucose a gram of carbs adds. A window with no usable ratio (unset, or
      * outside 3-30 g/U - the calculator refuses to dose there) keeps the neutral magnitude, and an
-     * unusable window ISF drops only the ISF part. The result is clamped to
-     * [{@link #MEAL_WINDOW_FACTOR_MIN}, {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
+     * unusable window ISF drops only the ISF part. Only the ISF part is clamped, to
+     * [{@link #MEAL_WINDOW_FACTOR_MIN}, {@link #MEAL_WINDOW_FACTOR_MAX}]; the ratio sizing is bounded
+     * by {@link HovorkaParameterService#mealMagnitude} alone, exactly as it was when one ratio shaped
+     * {@code A_G}, so a user whose window ratios equal that old ratio forecasts as before.</p>
      */
     static double mealWindowFactor(LocalDateTime mealTime, HovorkaParameters p, UserSettingsDTO settings) {
         if (settings == null || mealTime == null) return 1.0;
@@ -748,7 +753,7 @@ public class HovorkaGlucosePredictionService {
         double base = p.isf();
         if (windowIsf != null && Double.isFinite(windowIsf) && windowIsf > 0
                 && Double.isFinite(base) && base > 0) {
-            isfPart = windowIsf / base;
+            isfPart = Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, windowIsf / base));
         }
         double ratioPart = 1.0;
         Double windowRatio = settings.getWindowGramsPerUnit(mealTime);
@@ -756,7 +761,7 @@ public class HovorkaGlucosePredictionService {
             ratioPart = HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), windowRatio)
                     / HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), null);
         }
-        return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, isfPart * ratioPart));
+        return isfPart * ratioPart;
     }
 
     /**

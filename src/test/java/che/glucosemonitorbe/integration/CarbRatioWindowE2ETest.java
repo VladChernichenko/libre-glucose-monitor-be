@@ -6,7 +6,6 @@ import che.glucosemonitorbe.dto.RegisterRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -31,11 +30,11 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * A breakfast dosed by the user's own breakfast ratio forecasts the same whatever that ratio is: two
- * users who differ only in it (6 vs 10 g/U), each given what their ratio charges for 60 g, land
- * together at 4 h. It compares the two users instead of asserting an absolute 4 h landing because the
- * 4 h horizon includes a carb/insulin timing gap (a ratio-priced meal reads about 1.4 mmol/L low at
- * 4 h); absolute flatness at 8 h is covered by HovorkaMealWindowRatioTest.
+ * Each meal is forecast with the ratio of its own meal window, through the real HTTP stack. Every
+ * comparison gives both users the same meal and the same dose, so the 4 h carb/insulin timing gap
+ * (about 0.14 mmol/L per unit still to act at 4 h) is the same on both sides and cancels; absolute
+ * flatness at 8 h is covered by HovorkaMealWindowRatioTest. Also pins what an older iPhone build
+ * sends and expects from the settings endpoint.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -59,32 +58,30 @@ class CarbRatioWindowE2ETest {
 
     private static final double START_GLUCOSE = 7.0;
     private static final double MEAL_CARBS = 60.0;
+    private static final double MEAL_UNITS = 10.0;
 
     @Autowired private TestRestTemplate rest;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    @Disabled("Prescribed 0.2 tolerance does not hold, before or after dropping the single ratio: "
-            + "measured 5.60 (6 g/U, 10 U) vs 6.20 (10 g/U, 6 U). The 4 h shortfall is the insulin still "
-            + "to act, about 0.14 mmol/L per unit, so it scales with the dose. Tolerance left to the reviewer.")
-    @DisplayName("A breakfast dosed by the user's own breakfast ratio lands the same at 6 and at 10 g/U")
-    void breakfastDosedByItsOwnRatioLandsTheSameForEitherRatio() throws Exception {
-        double at6 = landingAfterBreakfast(settings(6.0), MEAL_CARBS / 6.0);
-        double at10 = landingAfterBreakfast(settings(10.0), MEAL_CARBS / 10.0);
-        System.out.printf("CarbRatioWindowE2E own-ratio doses: 6 g/U user (10 U) %.2f, 10 g/U user (6 U) %.2f%n",
-                at6, at10);
-        assertTrue(Math.abs(at6 - at10) <= 0.2,
-                "6 g/U user dosed 10 U landed at " + at6 + " vs 10 g/U user dosed 6 U at " + at10);
+    @DisplayName("A meal is forecast with its own window's ratio: breakfast at 6 g/U lands where lunch at 6 g/U does")
+    void theMealsWindowRatioIsTheOneUsed() throws Exception {
+        double a = landingAfterMeal(ratios(6.0, 10.0, 10.0, 10.0), LocalTime.of(8, 0), "Breakfast", MEAL_UNITS);
+        double b = landingAfterMeal(ratios(10.0, 6.0, 10.0, 10.0), LocalTime.of(12, 0), "Lunch", MEAL_UNITS);
+        System.out.printf("CarbRatioWindowE2E same dose, 6 g/U window: A breakfast 08:00 %.2f, B lunch 12:00 %.2f%n",
+                a, b);
+        assertTrue(Math.abs(a - b) <= 0.2,
+                "A (breakfast 6 g/U, 10 U at 08:00) landed at " + a + " vs B (lunch 6 g/U, 10 U at 12:00) at " + b);
     }
 
     @Test
-    @DisplayName("The 6 g/U user given only what 10 g/U charges forecasts high")
-    void breakfastUnderDosedForTheRatioForecastsHigh() throws Exception {
-        double underDosed = landingAfterBreakfast(settings(6.0), MEAL_CARBS / 10.0);
-        double dosed = landingAfterBreakfast(settings(6.0), MEAL_CARBS / 6.0);
-        System.out.printf("CarbRatioWindowE2E 6 g/U user: 6 U %.2f, 10 U %.2f%n", underDosed, dosed);
-        assertTrue(underDosed >= dosed + 2.0,
-                "6 U landed at " + underDosed + ", expected at least 2.0 above the 10 U landing " + dosed);
+    @DisplayName("For the same breakfast and dose, a weaker breakfast ratio (10 g/U) forecasts lower than 6 g/U")
+    void aWeakerWindowRatioForecastsLowerForTheSameDose() throws Exception {
+        double a = landingAfterMeal(ratios(6.0, 10.0, 10.0, 10.0), LocalTime.of(8, 0), "Breakfast", MEAL_UNITS);
+        double c = landingAfterMeal(ratios(10.0, 6.0, 6.0, 6.0), LocalTime.of(8, 0), "Breakfast", MEAL_UNITS);
+        System.out.printf("CarbRatioWindowE2E same dose at 08:00: A breakfast 6 g/U %.2f, C breakfast 10 g/U %.2f%n",
+                a, c);
+        assertTrue(c <= a - 2.0, "C (breakfast 10 g/U) landed at " + c + ", expected at least 2.0 below A at " + a);
     }
 
     @Test
@@ -92,18 +89,34 @@ class CarbRatioWindowE2ETest {
     void anOlderAppsRemovedKeysAreAcceptedAndIgnored() throws Exception {
         Map<String, Object> settings = commonSettings();
         settings.put("gramsPerUnit", 12.0);
-        settings.put("carbRatio", 1.5);
+        settings.put("carbRatio", 7.0);
         settings.put("gramsPerUnitBreakfast", 6.0);
+        HttpHeaders auth = registerAndLogin();
 
         ResponseEntity<String> saved = rest.exchange("/api/user-settings", HttpMethod.POST,
-                entity(settings, registerAndLogin()), String.class);
+                entity(settings, auth), String.class);
 
         assertEquals(HttpStatus.OK, saved.getStatusCode(), "saving settings failed: " + saved.getBody());
         JsonNode body = mapper.readTree(saved.getBody());
         assertFalse(body.has("gramsPerUnit"), "the single ratio is not part of the settings: " + body);
-        assertFalse(body.has("carbRatio"), "the legacy mmol/L per 10 g is not part of the settings: " + body);
+        assertEquals(2.0, body.path("carbRatio").asDouble(), "the compatibility carbRatio is a constant: " + body);
         assertEquals(6.0, body.path("gramsPerUnitBreakfast").asDouble());
         assertEquals(5.0, body.path("gramsPerUnitLunch").asDouble(), "an unsent window keeps the new row's 5 g/U");
+    }
+
+    @Test
+    @DisplayName("The settings an older iPhone build fetches still carry the carbRatio it decodes")
+    void theFetchedSettingsKeepTheCompatibilityCarbRatio() throws Exception {
+        // BackendAPI.fetchCOBSettings: GET /api/user-settings/, COBSettings.carbRatio non-optional in old builds.
+        ResponseEntity<String> fetched = rest.exchange("/api/user-settings/", HttpMethod.GET,
+                entity(null, registerAndLogin()), String.class);
+
+        assertEquals(HttpStatus.OK, fetched.getStatusCode(), "fetching settings failed: " + fetched.getBody());
+        JsonNode body = mapper.readTree(fetched.getBody());
+        assertEquals(2.0, body.path("carbRatio").asDouble(), "old builds fail to decode without it: " + body);
+        for (String key : new String[] {"isf", "carbHalfLife", "maxCOBDuration"}) {
+            assertTrue(body.hasNonNull(key), key + " is non-optional in old builds too: " + body);
+        }
     }
 
     private static Map<String, Object> commonSettings() {
@@ -112,21 +125,25 @@ class CarbRatioWindowE2ETest {
         settings.put("bodyWeightKg", 70);
         settings.put("carbHalfLife", 45);
         settings.put("maxCOBDuration", 240);
-        settings.put("isf", 1.0);
-        settings.put("isfBreakfast", 1.5);
+        settings.put("isf", 1.5);   // the same ISF in every window: no window overrides
         return settings;
     }
 
-    /** The common settings with this breakfast ratio; the other windows keep the new row's default. */
-    private static Map<String, Object> settings(double breakfastGramsPerUnit) {
+    /** The common settings with these four window ratios [g/U]. */
+    private static Map<String, Object> ratios(double breakfast, double lunch, double dinner, double night) {
         Map<String, Object> settings = commonSettings();
-        settings.put("gramsPerUnitBreakfast", breakfastGramsPerUnit);
+        settings.put("gramsPerUnitBreakfast", breakfast);
+        settings.put("gramsPerUnitLunch", lunch);
+        settings.put("gramsPerUnitDinner", dinner);
+        settings.put("gramsPerUnitNight", night);
         return settings;
     }
 
-    private double landingAfterBreakfast(Map<String, Object> settings, double units) throws Exception {
+    /** A new user with {@code settings} eats {@link #MEAL_CARBS} with {@code units} at {@code mealTime}; the 4 h landing. */
+    private double landingAfterMeal(Map<String, Object> settings, LocalTime mealTime, String meal, double units)
+            throws Exception {
         LocalDateTime now = LocalDateTime.now().withSecond(0).withNano(0);
-        LocalDateTime t0 = now.toLocalDate().atTime(LocalTime.of(8, 0));
+        LocalDateTime t0 = now.toLocalDate().atTime(mealTime);
         if (!t0.isBefore(now.minusMinutes(1))) t0 = t0.minusDays(1);
 
         HttpHeaders auth = registerAndLogin();
@@ -138,7 +155,7 @@ class CarbRatioWindowE2ETest {
         note.put("timestamp", t0.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         note.put("carbs", MEAL_CARBS);
         note.put("insulin", units);
-        note.put("meal", "Breakfast");
+        note.put("meal", meal);
         ResponseEntity<String> noteResp = rest.exchange("/api/notes", HttpMethod.POST,
                 entity(note, auth), String.class);
         assertTrue(noteResp.getStatusCode().is2xxSuccessful(), "saving note failed: " + noteResp.getBody());

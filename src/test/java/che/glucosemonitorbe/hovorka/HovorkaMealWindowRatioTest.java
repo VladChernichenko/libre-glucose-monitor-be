@@ -148,20 +148,40 @@ class HovorkaMealWindowRatioTest {
 
     @Test
     void theFactorStaysClamped() {
-        // ISF part 2.0 alone is inside the bounds; only the ratio part (3 g/U at 84 kg: 1.79) pushes it to 3.58.
+        // A window ISF 4x the base ISF is a settings mistake: the ISF part stops at 3.0. The ratio
+        // sizing (10 g/U) is applied on top, unclamped.
         LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
 
-        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(2.0, 3.0)))
-                .isEqualTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MAX);
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(4.0)))
+                .isCloseTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MAX * defaultRatioMagnitude(), within(1e-9));
     }
 
     @Test
     void theFactorStaysClampedBelow() {
-        // 0.5 x the 30 g/U magnitude (0.18, floored at A_G_MIN 0.3) = 0.15 -> 0.33.
+        // A window ISF of 0.2 against base 1.0: the ISF part stops at 0.33.
         LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
 
-        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(0.5, 30.0)))
-                .isEqualTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MIN);
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(0.2)))
+                .isCloseTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MIN * defaultRatioMagnitude(), within(1e-9));
+    }
+
+    @Test
+    void aLowIsfToRatioIsNotClamped() {
+        // ISF 1.0 with 15 g/U at 70 kg sizes the meal at the A_G floor 0.3 (4.48 x 1.0 / 15 = 0.299), below
+        // the factor bounds' 0.33: only the ISF part is bounded, so the meal keeps the size the old single
+        // ratio gave it.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+        double vG = HovorkaParameters.VG_PER_KG * 70.0;
+        HovorkaParameters neutral = new HovorkaParameters(vG, params.f01(), params.egpNet(), params.egp0(),
+                params.k12(), params.k21(), params.tMaxG(), HovorkaParameterService.mealMagnitude(1.0, vG, null),
+                1.0, 70.0);
+        UserSettingsDTO s = new UserSettingsDTO();
+        s.setIsf(1.0);
+        TestWindowRatios.setAll(s, 10.0);
+        s.setGramsPerUnitBreakfast(15.0);
+
+        assertThat(neutral.aG() * HovorkaGlucosePredictionService.mealWindowFactor(now, neutral, s))
+                .isCloseTo(HovorkaParameterService.mealMagnitude(1.0, vG, 15.0), within(1e-9));
     }
 
     @Test
@@ -177,7 +197,7 @@ class HovorkaMealWindowRatioTest {
         LocalDateTime now = LocalDateTime.of(2026, 11, 17, 12, 0);
 
         assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(1.47)))
-                .isCloseTo(1.47 * lunchRatioMagnitude(), within(1e-9));
+                .isCloseTo(1.47 * defaultRatioMagnitude(), within(1e-9));
     }
 
     @Test
@@ -187,7 +207,7 @@ class HovorkaMealWindowRatioTest {
                 List.of(new SickProfile.Span(now.minusDays(1), null, now, SickSeverity.SEVERE)), null));
 
         assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, sick))
-                .isCloseTo(1.47 * lunchRatioMagnitude(), within(1e-9));
+                .isCloseTo(1.47 * defaultRatioMagnitude(), within(1e-9));
     }
 
     @Test
@@ -214,7 +234,7 @@ class HovorkaMealWindowRatioTest {
     // ---- helpers ---------------------------------------------------------------------------
 
     /** The 10 g/U magnitude every window carries in {@link #settings(Double)}, over the neutral one. */
-    private double lunchRatioMagnitude() {
+    private double defaultRatioMagnitude() {
         return HovorkaParameterService.mealMagnitude(BASE_ISF, params.vG(), GRAMS_PER_UNIT) / params.aG();
     }
 

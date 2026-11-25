@@ -76,6 +76,16 @@ class UserSettingsDTOWindowRatioTest {
     }
 
     @Test
+    void olderIphoneBuildsStillGetTheCarbRatioTheyDecode() throws Exception {
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+
+        assertThat(mapper.writeValueAsString(settings())).contains("\"carbRatio\":2.0");
+        UserSettingsDTO read = mapper.readValue("{\"carbRatio\":7.0,\"isf\":1.0}", UserSettingsDTO.class);
+        assertThat(mapper.writeValueAsString(read)).as("not settable: the input 7.0 is ignored")
+                .contains("\"carbRatio\":2.0").doesNotContain("7.0");
+    }
+
+    @Test
     void windowRatiosAreSerialisedButTheMapIsNot() throws Exception {
         String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(settings());
 
