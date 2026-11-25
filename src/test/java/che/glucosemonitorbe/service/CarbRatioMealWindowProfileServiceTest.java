@@ -313,8 +313,9 @@ class CarbRatioMealWindowProfileServiceTest {
     @Test
     @DisplayName("Fewer than 0.5 U needed: the meal is dropped")
     void unitsNeededBelowHalfUnitDropped() {
-        // 30 g + 1 U, 9.0 -> 7.5 at ISF 2.5: 1 - 0.6 = 0.4 U needed
-        stubDailyMeal(DAYS, 8, 0, 1.0, 30.0, 9.0, 7.5);
+        // 10 g + 1 U, 9.0 -> 7.5 at ISF 2.5: 1 - 0.6 = 0.4 U needed. 10 / 0.4 = 25 g/U is in range,
+        // so only the 0.5 U gate can drop it.
+        stubDailyMeal(DAYS, 8, 0, 1.0, 10.0, 9.0, 7.5);
 
         service.recomputeForUser(userId);
 
