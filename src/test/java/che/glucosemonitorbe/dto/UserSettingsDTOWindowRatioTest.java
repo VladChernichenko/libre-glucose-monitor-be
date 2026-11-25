@@ -20,14 +20,15 @@ class UserSettingsDTOWindowRatioTest {
 
     private static UserSettingsDTO settings() {
         UserSettingsDTO s = new UserSettingsDTO();
-        s.setGramsPerUnit(10.0);
         s.setGramsPerUnitBreakfast(8.0);
+        s.setGramsPerUnitLunch(10.0);
         s.setGramsPerUnitDinner(12.0);
+        s.setGramsPerUnitNight(10.0);
         return s;
     }
 
     @Test
-    void windowRatioOverridesTheSingleRatio() {
+    void eachWindowHasItsOwnRatio() {
         UserSettingsDTO s = settings();
 
         assertThat(s.getWindowGramsPerUnit(LocalDateTime.of(2026, 11, 25, 8, 0))).isEqualTo(8.0);
@@ -50,6 +51,19 @@ class UserSettingsDTOWindowRatioTest {
         assertThat(settings().getEffectiveGramsPerUnitByWindow(LocalDateTime.of(2026, 11, 25, 8, 0)))
                 .containsEntry(MealWindow.BREAKFAST, 8.0).containsEntry(MealWindow.LUNCH, 10.0)
                 .containsEntry(MealWindow.DINNER, 12.0).containsEntry(MealWindow.NIGHT, 10.0);
+    }
+
+    @Test
+    void anUnsetWindowHasNoRatioAndNoOtherWindowStandsIn() {
+        UserSettingsDTO s = settings();
+        s.setGramsPerUnitLunch(null);
+        LocalDateTime noon = LocalDateTime.of(2026, 11, 25, 12, 0);
+
+        assertThat(s.getWindowGramsPerUnit(MealWindow.LUNCH)).isNull();
+        assertThat(s.getWindowGramsPerUnit(noon)).isNull();
+        assertThat(s.getEffectiveGramsPerUnit(noon)).isNull();
+        assertThat(s.getEffectiveGramsPerUnitByWindow(noon)).doesNotContainKey(MealWindow.LUNCH).hasSize(3);
+        assertThat(s.getWindowGramsPerUnit((LocalDateTime) null)).as("no time, no window").isNull();
     }
 
     @Test

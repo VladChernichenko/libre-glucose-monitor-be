@@ -558,7 +558,7 @@ class CarbRatioMealWindowProfileServiceTest {
     private static UserSettingsDTO userSettings() {
         UserSettingsDTO s = new UserSettingsDTO();
         s.setCarbRatio(2.0);
-        s.setGramsPerUnit(10.0);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(s, 10.0);
         s.setIsf(2.5);
         s.setCarbHalfLife(45);
         s.setMaxCOBDuration(240);

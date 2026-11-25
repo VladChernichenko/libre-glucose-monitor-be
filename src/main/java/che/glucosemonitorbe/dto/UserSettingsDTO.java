@@ -27,15 +27,16 @@ public class UserSettingsDTO {
     private UUID userId;
     /** Legacy mmol/L rise per 10 g. A save must send the stored value back; dosing does not read it. */
     private Double carbRatio;
-    /** Insulin-to-carb ratio, grams per unit. Missing or outside 3-30 is refused. */
-    private Double gramsPerUnit;
-    /** g/U override for 05:00-11:00. NULL = use {@link #gramsPerUnit}. */
+    /**
+     * Insulin-to-carb ratio for 05:00-11:00, grams per unit. NULL = no ratio for this window: dosing
+     * there is refused, as is a value outside 3-30. NULL on input = leave unchanged.
+     */
     private Double gramsPerUnitBreakfast;
-    /** g/U override for 11:00-16:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 11:00-16:00 [g/U]. NULL = no ratio for this window. */
     private Double gramsPerUnitLunch;
-    /** g/U override for 16:00-22:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 16:00-22:00 [g/U]. NULL = no ratio for this window. */
     private Double gramsPerUnitDinner;
-    /** g/U override for 22:00-05:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 22:00-05:00 [g/U]. NULL = no ratio for this window. */
     private Double gramsPerUnitNight;
     /** IANA zone id (e.g. "Europe/Berlin"); authoritative over utcOffsetMinutes, DST-aware. */
     private String timezone;
@@ -144,22 +145,21 @@ public class UserSettingsDTO {
                 .orElse(isf);
     }
 
-    /** The g/U override for {@code window}, else the single {@link #gramsPerUnit}; may be null. */
+    /** The g/U set for {@code window}; null when that window has no ratio (no other window stands in). */
     public Double getWindowGramsPerUnit(MealWindow window) {
-        Double override = switch (window) {
+        return switch (window) {
             case BREAKFAST -> gramsPerUnitBreakfast;
             case LUNCH -> gramsPerUnitLunch;
             case DINNER -> gramsPerUnitDinner;
             case NIGHT -> gramsPerUnitNight;
         };
-        return override != null ? override : gramsPerUnit;
     }
 
-    /** The g/U for {@code time}'s meal window, without the illness multiplier; the single ratio when {@code time} is null. */
+    /** The g/U for {@code time}'s meal window, without the illness multiplier; null when {@code time} is null. */
     public Double getWindowGramsPerUnit(LocalDateTime time) {
         return MealWindow.fromTimestamp(time)
                 .map(this::getWindowGramsPerUnit)
-                .orElse(gramsPerUnit);
+                .orElse(null);
     }
 
     /** Insulin-to-carb ratio (grams per unit) in effect at {@code time}, scaled like the ISF while sick. */

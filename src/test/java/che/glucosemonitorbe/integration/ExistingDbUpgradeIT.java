@@ -103,16 +103,15 @@ class ExistingDbUpgradeIT {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notes", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT target_glucose_mmol FROM user_settings", Double.class)).isEqualTo(5.55);
         assertThat(jdbc.queryForObject("SELECT rescue_carbs_g FROM user_settings", Integer.class)).isEqualTo(15);
-        assertThat(jdbc.queryForObject("SELECT grams_per_unit FROM user_settings", Double.class)).isEqualTo(5.0);
-        assertThat(jdbc.queryForObject(
-                "SELECT count(*) FROM pg_constraint WHERE conname = 'chk_user_settings_grams_per_unit'",
-                Integer.class)).isEqualTo(1);
+        // main has no ratio in grams per unit: each window is derived once, 10 * isf 1.0 / carb_ratio 2.0
+        assertThat(jdbc.queryForMap("SELECT grams_per_unit_breakfast b, grams_per_unit_lunch l, "
+                + "grams_per_unit_dinner d, grams_per_unit_night n FROM user_settings"))
+                .containsEntry("b", 5.0).containsEntry("l", 5.0).containsEntry("d", 5.0).containsEntry("n", 5.0);
+        assertThat(column(jdbc, "grams_per_unit")).as("the single ratio is gone").isZero();
+        assertThat(constraint(jdbc, "chk_user_settings_grams_per_unit")).isZero();
         for (String w : new String[] {"breakfast", "lunch", "dinner", "night"}) {
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.columns "
-                    + "WHERE table_name = 'user_settings' AND column_name = 'grams_per_unit_" + w + "'",
-                    Integer.class)).isEqualTo(1);
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM pg_constraint "
-                    + "WHERE conname = 'chk_user_settings_gpu_" + w + "'", Integer.class)).isEqualTo(1);
+            assertThat(column(jdbc, "grams_per_unit_" + w)).isEqualTo(1);
+            assertThat(constraint(jdbc, "chk_user_settings_gpu_" + w)).isEqualTo(1);
         }
         assertThat(jdbc.queryForList("SELECT title FROM clinical_knowledge_chunk", String.class))
                 .containsExactly("General safety disclaimer");
@@ -124,5 +123,104 @@ class ExistingDbUpgradeIT {
         assertThat(jdbc.queryForObject("SELECT to_regclass('sick_segment') IS NOT NULL", Boolean.class)).isTrue();
         assertThat(jdbc.queryForObject("SELECT to_regclass('carb_ratio_meal_window_snapshots') IS NOT NULL",
                 Boolean.class)).isTrue();
+    }
+
+    @Test
+    @DisplayName("deployed at V22 from main (single grams_per_unit, no windows): the windows take the single ratio, then it is dropped")
+    void mainV22DatabaseMovesTheSingleRatioIntoTheWindows() throws Exception {
+        JdbcTemplate db = upgradedV22Database("deployedmain", false);
+
+        assertThat(windows(db, USER_A)).as("every window takes the single ratio").containsExactly(12.0, 12.0, 12.0, 12.0);
+        assertThat(windows(db, USER_C)).as("no single ratio stays no ratio, also on the second run")
+                .containsExactly(null, null, null, null);
+        assertThat(column(db, "grams_per_unit")).isZero();
+        assertThat(constraint(db, "chk_user_settings_grams_per_unit")).isZero();
+    }
+
+    @Test
+    @DisplayName("deployed at V22 with this branch's window columns: set windows are kept, unset ones take the single ratio")
+    void devV22DatabaseKeepsSetWindowsAndFillsTheRest() throws Exception {
+        JdbcTemplate db = upgradedV22Database("deployeddev", true);
+
+        assertThat(windows(db, USER_A)).containsExactly(12.0, 12.0, 12.0, 12.0);
+        assertThat(windows(db, USER_B)).as("the breakfast override is kept").containsExactly(6.0, 8.0, 8.0, 8.0);
+        assertThat(windows(db, USER_C)).containsExactly(null, null, null, null);
+        assertThat(column(db, "grams_per_unit")).isZero();
+        assertThat(constraint(db, "chk_user_settings_grams_per_unit")).isZero();
+    }
+
+    // ---- a database deployed at V22 ------------------------------------------------------------
+
+    private static final String USER_A = "aaaaaaaa-0000-0000-0000-000000000001";
+    private static final String USER_B = "aaaaaaaa-0000-0000-0000-000000000002";
+    private static final String USER_C = "aaaaaaaa-0000-0000-0000-000000000003";
+
+    /**
+     * A database at V22 as it was deployed: today's migrations up to V22, with user_settings put back
+     * to the V1 it was created from (the single {@code grams_per_unit} with its CHECK; the window
+     * columns only when {@code withWindowColumns}, as on a database already upgraded for this branch).
+     * Then the script twice, flyway repair, and Flyway applies V23 as the app start would.
+     */
+    private static JdbcTemplate upgradedV22Database(String name, boolean withWindowColumns) throws Exception {
+        try (Connection c = connection(); Statement st = c.createStatement()) {
+            st.execute("CREATE DATABASE " + name);
+        }
+        String url = postgres.getJdbcUrl().replace("/legacydb", "/" + name);
+        Flyway.configure().dataSource(url, postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").target("22").load().migrate();
+        try (Connection c = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
+             Statement st = c.createStatement()) {
+            st.execute("ALTER TABLE user_settings DROP COLUMN IF EXISTS grams_per_unit");
+            st.execute("ALTER TABLE user_settings ADD COLUMN grams_per_unit DOUBLE PRECISION "
+                    + "CONSTRAINT chk_user_settings_grams_per_unit "
+                    + "CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30))");
+            if (!withWindowColumns) {
+                st.execute("ALTER TABLE user_settings DROP COLUMN grams_per_unit_breakfast, "
+                        + "DROP COLUMN grams_per_unit_lunch, DROP COLUMN grams_per_unit_dinner, "
+                        + "DROP COLUMN grams_per_unit_night");
+            }
+            for (String id : new String[] {USER_A, USER_B, USER_C}) {
+                st.execute("INSERT INTO users (id, username, email, password) VALUES ('" + id + "', '" + id
+                        + "', '" + id + "@example.com', 'x')");
+            }
+            st.execute("INSERT INTO user_settings (user_id, isf, grams_per_unit) VALUES ('" + USER_A + "', 2.0, 12)");
+            if (withWindowColumns) {
+                st.execute("INSERT INTO user_settings (user_id, isf, grams_per_unit, grams_per_unit_breakfast) "
+                        + "VALUES ('" + USER_B + "', 2.0, 8, 6)");
+            }
+            // No single ratio, though 10 * isf 3.0 / carb_ratio 2.0 = 15 g/U would be derivable: it stays unset.
+            st.execute("INSERT INTO user_settings (user_id, isf, grams_per_unit) VALUES ('" + USER_C + "', 3.0, NULL)");
+
+            String script = Files.readString(Path.of("scripts/upgrade-existing-db.sql"));
+            st.execute(script);
+            st.execute(script);
+        }
+        Flyway current = Flyway.configure().dataSource(url, postgres.getUsername(), postgres.getPassword())
+                .locations("classpath:db/migration").load();
+        current.repair();
+        current.migrate();
+        current.validate();
+        JdbcTemplate db = new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                url, postgres.getUsername(), postgres.getPassword()));
+        assertThat(db.queryForObject("SELECT max(version::int) FROM flyway_schema_history WHERE success",
+                Integer.class)).isEqualTo(23);
+        return db;
+    }
+
+    private static java.util.List<Double> windows(JdbcTemplate db, String userId) {
+        return db.queryForObject("SELECT grams_per_unit_breakfast, grams_per_unit_lunch, grams_per_unit_dinner, "
+                        + "grams_per_unit_night FROM user_settings WHERE user_id = '" + userId + "'",
+                (rs, i) -> java.util.Arrays.asList(
+                        (Double) rs.getObject(1), (Double) rs.getObject(2),
+                        (Double) rs.getObject(3), (Double) rs.getObject(4)));
+    }
+
+    private static int column(JdbcTemplate db, String name) {
+        return db.queryForObject("SELECT count(*) FROM information_schema.columns "
+                + "WHERE table_name = 'user_settings' AND column_name = ?", Integer.class, name);
+    }
+
+    private static int constraint(JdbcTemplate db, String name) {
+        return db.queryForObject("SELECT count(*) FROM pg_constraint WHERE conname = ?", Integer.class, name);
     }
 }

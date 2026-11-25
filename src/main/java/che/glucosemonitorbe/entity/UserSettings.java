@@ -16,6 +16,9 @@ import java.util.UUID;
 @Table(name = "user_settings")
 public class UserSettings {
 
+    /** The insulin-to-carb ratio a new settings row gets in every meal window [g/U]. */
+    public static final double DEFAULT_GRAMS_PER_UNIT = 5.0;
+
     // Getters and Setters
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -28,25 +31,24 @@ public class UserSettings {
     @Column(name = "carb_ratio", nullable = false)
     private Double carbRatio = 2.0;
 
-    /** Insulin-to-carb ratio: grams of carbohydrate covered by 1 unit. New rows default to 5. */
-    @Column(name = "grams_per_unit")
-    private Double gramsPerUnit = 5.0;
-
-    /** g/U override for 05:00-11:00. NULL = use {@link #gramsPerUnit}. */
+    /**
+     * Insulin-to-carb ratio for 05:00-11:00: grams of carbohydrate covered by 1 unit. New rows default
+     * every window to 5. NULL = no ratio for this window (dosing is refused there).
+     */
     @Column(name = "grams_per_unit_breakfast")
-    private Double gramsPerUnitBreakfast;
+    private Double gramsPerUnitBreakfast = DEFAULT_GRAMS_PER_UNIT;
 
-    /** g/U override for 11:00-16:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 11:00-16:00 [g/U]. NULL = no ratio for this window. */
     @Column(name = "grams_per_unit_lunch")
-    private Double gramsPerUnitLunch;
+    private Double gramsPerUnitLunch = DEFAULT_GRAMS_PER_UNIT;
 
-    /** g/U override for 16:00-22:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 16:00-22:00 [g/U]. NULL = no ratio for this window. */
     @Column(name = "grams_per_unit_dinner")
-    private Double gramsPerUnitDinner;
+    private Double gramsPerUnitDinner = DEFAULT_GRAMS_PER_UNIT;
 
-    /** g/U override for 22:00-05:00. NULL = use {@link #gramsPerUnit}. */
+    /** Insulin-to-carb ratio for 22:00-05:00 [g/U]. NULL = no ratio for this window. */
     @Column(name = "grams_per_unit_night")
-    private Double gramsPerUnitNight;
+    private Double gramsPerUnitNight = DEFAULT_GRAMS_PER_UNIT;
     
     @Column(name = "isf", nullable = false)
     private Double isf = 1.0;
@@ -118,16 +120,14 @@ public class UserSettings {
     // Constructors
     public UserSettings() {
         this.carbRatio = 2.0;
-        this.gramsPerUnit = 5.0;
         this.isf = 1.0;
         this.carbHalfLife = 45;
         this.maxCOBDuration = 240;
     }
-    
+
     public UserSettings(UUID userId) {
         this.userId = userId;
         this.carbRatio = 2.0;
-        this.gramsPerUnit = 5.0;
         this.isf = 1.0;
         this.carbHalfLife = 45;
         this.maxCOBDuration = 240;

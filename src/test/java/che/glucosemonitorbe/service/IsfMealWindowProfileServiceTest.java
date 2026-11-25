@@ -250,9 +250,8 @@ class IsfMealWindowProfileServiceTest {
     @DisplayName("Small carbs in a correction are deconvolved with the window's ratio, not the single one")
     void correctionCarbsAreDeconvolvedWithTheWindowRatio() {
         // 2 U + 5 g at 07:30, glucose 9.0 -> 4.0. Breakfast ratio 5 g/U: 5/5 - 2 = -1 U net -> ISF 5.0.
-        // With the single ratio 12.5 it would be 5 / (0.4 - 2) = 3.1.
+        // With the other windows' ratio 12.5 it would be 5 / (0.4 - 2) = 3.1.
         UserSettingsDTO settings = userSettings(2.0, 2.5, 45, 240);
-        settings.setGramsPerUnit(12.5);
         settings.setGramsPerUnitBreakfast(5.0);
         when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
         LocalDateTime t = today(7, 30);
@@ -633,7 +632,7 @@ class IsfMealWindowProfileServiceTest {
     private static UserSettingsDTO userSettings(double cr, double isf, int halfLife, int maxDuration) {
         UserSettingsDTO s = new UserSettingsDTO();
         s.setCarbRatio(cr);
-        s.setGramsPerUnit(12.5);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(s, 12.5);
         s.setIsf(isf);
         s.setCarbHalfLife(halfLife);
         s.setMaxCOBDuration(maxDuration);

@@ -257,8 +257,8 @@ public class InsulinCalculatorService {
      * 2.0 mmol/L per 10 g must not be read as 2 g/U.
      *
      * <p>The envelope is a refusal boundary, not a clamp. A missing ratio, or one outside
-     * 3-30, is typed in rather than invented. The ratio is the one for the meal window that
-     * {@code at} falls in (window override, else the single ratio). The check is on that stored
+     * 3-30, is typed in rather than invented. The ratio is the one set for the meal window that
+     * {@code at} falls in; an unset window has no ratio, and no other window stands in. The check is on that stored
      * window value; the value returned is scaled by the illness multiplier at {@code at}, so it
      * may fall below 3.
      */

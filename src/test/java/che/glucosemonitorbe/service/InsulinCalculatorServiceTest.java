@@ -37,7 +37,7 @@ class InsulinCalculatorServiceTest {
         // Default: carbRatio=1.0, ISF=2.2; halfLife / maxCOB not used in these tests
         UserSettingsDTO defaultSettings = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, /*carbRatio*/ 1.0, /*isf*/ 2.2, /*halfLife*/ 45, /*maxCob*/ 240);
-        defaultSettings.setGramsPerUnit(22.0);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(defaultSettings, 22.0);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(defaultSettings);
 
         service = new InsulinCalculatorService(userSettingsService);
@@ -482,7 +482,7 @@ class InsulinCalculatorServiceTest {
     void recommendedInsulin_settingsWithNullIsf_refuses() {
         UUID userId = UUID.randomUUID();
         UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), userId, 1.0, null, 45, 240);
-        settings.setGramsPerUnit(22.0);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, 22.0);
         when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
 
         var request = new che.glucosemonitorbe.dto.InsulinCalculationRequest();
@@ -557,7 +557,7 @@ class InsulinCalculatorServiceTest {
     private void givenSettings(Double carbRatio, Double isf, Double bodyWeightKg, Double gramsPerUnit) {
         UserSettingsDTO settings = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, carbRatio, isf, 45, 240, bodyWeightKg);
-        settings.setGramsPerUnit(gramsPerUnit);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, gramsPerUnit);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
     }
 
@@ -577,7 +577,7 @@ class InsulinCalculatorServiceTest {
         LocalDateTime now = LocalDateTime.now();
         UserSettingsDTO settings = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, 2.0, 2.2, 45, 240, 70.0);
-        settings.setGramsPerUnit(gramsPerUnit);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, gramsPerUnit);
         settings.setSickProfile(new SickProfile(List.of(new SickProfile.Span(
                 now.minusDays(1), null, now, severity)), null));
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);

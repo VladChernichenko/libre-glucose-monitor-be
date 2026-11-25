@@ -16,8 +16,9 @@ error.
 ## Goals
 
 - Four optional ratios, one per meal window, using the ISF windows: Breakfast 05:00-11:00,
-  Lunch 11:00-16:00, Dinner 16:00-22:00, Night 22:00-05:00. An unset window falls back to the
-  single `grams_per_unit`.
+  Lunch 11:00-16:00, Dinner 16:00-22:00, Night 22:00-05:00. *Follow-up:* the single
+  `grams_per_unit` was removed; an unset window has no ratio (dosing there is refused) and no
+  window stands in for another. New rows get 5 g/U in every window.
 - Every consumer of the ratio uses the ratio of the relevant window: the bolus calculator, the
   Hovorka forecast, the classic COB forecast, the empirical twin forecast, sick-mode scaling.
 - The app learns a ratio per window from clean meals in the last 14 days and proposes it on the
@@ -96,15 +97,19 @@ After a meal, how high glucose ends up depends on both ISF and the ratio, so the
 only when non-null (as for the ISF windows) and returns them on read.
 
 `UserSettingsDTO`:
-- New `getWindowGramsPerUnit(LocalDateTime time)`: the override for `time`'s meal window, else the
-  single `gramsPerUnit`. Mirrors `getWindowIsf`.
+- New `getWindowGramsPerUnit(LocalDateTime time)`: the ratio set for `time`'s meal window.
 - `getEffectiveGramsPerUnit(time)` becomes `getWindowGramsPerUnit(time) × sick multiplier` (today
   it is the single value × sick multiplier).
+
+*Follow-up:* the single `grams_per_unit` was removed (column, CHECK, field); an unset window = no
+ratio. `scripts/upgrade-existing-db.sql` copies `grams_per_unit` into the unset windows of a
+deployed database before dropping it (an older one derives them from `10 * isf / carb_ratio`). An
+older app's `"gramsPerUnit"` key on save is ignored.
 
 ### 2. Consumers
 
 - **Bolus calculator** (`InsulinCalculatorService.resolveGramsPerUnit`): validates the window value
-  in effect at the dose time (override, else single) against 3-30 and refuses exactly as today;
+  in effect at the dose time (*follow-up:* the window's own; unset = no ratio) against 3-30 and refuses exactly as today;
   returns the effective (sick-scaled) window value. `calculateForecastCorrection` keeps calling it as
   its plausibility check.
 - **Hovorka forecast** (`HovorkaGlucosePredictionService.mealWindowFactor`): `A_G` stays built from
@@ -117,15 +122,19 @@ only when non-null (as for the ISF windows) and returns them on read.
   `A_G` a missing ratio gives, so the twin's meal scale stays a multiplier. When neither ratio is
   usable the whole factor is 1.0 (no ISF part either). When only the window ratio is unusable, the
   ratio part is 1.0. This keeps "a meal dosed by its window's ratio forecasts flat".
+  *Follow-up, single ratio removed:* `A_G` is always the neutral magnitude and the factor is
+  `(windowIsf / baseIsf) × mealMagnitude(baseIsf, VG, windowGramsPerUnit) / mealMagnitude(baseIsf, VG, null)`
+  (ratio part 1.0 for an unusable window), i.e. the window-only branch above for everyone.
 - **Classic COB forecast** (`GlucoseCalculationsService`): already reads
   `getEffectiveGramsPerUnit(t)`, so it becomes window-aware with no further change. It resolves by
   step time, as its ISF already does; left as is.
 - **Empirical twin forecast** (`EmpiricalTwinParams` / `EmpiricalTwinEngine`): replace the two
   ratios `crAM` / `crDay` with four window ratios, looked up per meal from the meal's local hour
   (the engine already uses `e.localHour()`). `forUser` takes the four window values (each falling
-  back to the single ratio); with no usable ratio at all, the defaults keep 7 g/U for breakfast and
-  10 g/U for the other three. The twin's ISF stays the "now" ISF, as today: insulin and carbs both
-  use it, so ratio-dosed meals still net flat. `csf` keeps following from ISF and the single ratio.
+  back to the ratio in force now, *follow-up:* formerly the single ratio); with no usable ratio at
+  all, the defaults keep 7 g/U for breakfast and 10 g/U for the other three. The twin's ISF stays the
+  "now" ISF, as today: insulin and carbs both use it, so ratio-dosed meals still net flat. `csf`
+  follows from ISF and the ratio in force now.
 - **Sick mode:** unchanged rule (the ratio is scaled by the same multiplier as ISF), now applied to
   the window value.
 
@@ -196,7 +205,8 @@ Backend: extend `IsfMealWindowSuggestionService` and its DTO; the endpoints stay
 `/api/isf/meal-windows/suggestion`, `/suggestion/accept`, `/suggestion/dismiss`.
 
 - Each `WindowProposal` gains `currentGramsPerUnit`, `proposedGramsPerUnit`, `ratioHasData`,
-  `ratioSamples`. Current = the window override, else the single ratio.
+  `ratioSamples`. Current = the window's ratio (*follow-up:* an unset window has no current, so its
+  proposal is not step-capped).
 - Proposed ratio = the learned median, **limited to within ±20% of the current value**, rounded to
   0.1 g/U.
 - A ratio line is a material change when it differs from current by **at least 10%**.
@@ -236,15 +246,14 @@ Night        —
 - `BackendAPI.COBSettings` gains four optional fields matching the DTO (omitted on encode when nil,
   so a save cannot clear a stored window).
 - `SettingsView` is grouped by meal (user's decision): one section per meal window holding that
-  window's ISF and carb ratio together. The "Insulin-to-carb ratio" row stays in "User Settings" as
-  the default for windows not set. Each ratio row shows `window ?? gramsPerUnit ?? 5` and pins the
-  window on edit, like the ISF rows. Save, Insulin Preferences and Sign Out move below the meal
+  window's ISF and carb ratio together. *Follow-up:* the "Insulin-to-carb ratio" default row was
+  removed with the single ratio; each ratio row shows `window ?? 5` and pins the window on edit,
+  like the ISF rows. Save, Insulin Preferences and Sign Out move below the meal
   sections so Save still comes after everything it saves.
 
 ```
 USER SETTINGS
   Glucose Units            mmol/L
-  Insulin-to-carb ratio    5      grams per unit * default
   Body Weight / Target Glucose / Rescue Carbs
 
 BREAKFAST · 05:00 – 11:00
@@ -288,7 +297,7 @@ NIGHT · 22:00 – 05:00
 - Applying ratios needs an opt-in flag from the app, so an older build can't change them unseen.
 - Proposals capped at ±20% of the current value per apply; a line counts as a change at 10%.
 - Ratio lines do not wait for the digital twin.
-- The single ratio row stays in Settings as the default.
+- The single ratio row stays in Settings as the default (*follow-up:* removed with `grams_per_unit`).
 - Separate snapshot table instead of new columns on `isf_meal_window_snapshots`.
 
 ## Left to the builder

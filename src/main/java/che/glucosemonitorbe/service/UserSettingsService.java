@@ -69,7 +69,10 @@ public class UserSettingsService {
                 .map(this::convertToDTO)
                 .orElseGet(() -> {
                     UserSettingsDTO d = new UserSettingsDTO(null, userId, 2.0, 1.0, 45, 240);
-                    d.setGramsPerUnit(5.0);
+                    d.setGramsPerUnitBreakfast(UserSettings.DEFAULT_GRAMS_PER_UNIT);
+                    d.setGramsPerUnitLunch(UserSettings.DEFAULT_GRAMS_PER_UNIT);
+                    d.setGramsPerUnitDinner(UserSettings.DEFAULT_GRAMS_PER_UNIT);
+                    d.setGramsPerUnitNight(UserSettings.DEFAULT_GRAMS_PER_UNIT);
                     d.setTargetGlucoseMmol(UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL);
                     d.setRescueCarbsG(15);
                     return d;
@@ -147,9 +150,6 @@ public class UserSettingsService {
     private void updateSettings(UserSettings settings, UserSettingsDTO settingsDTO) {
         if (settingsDTO.getCarbRatio() != null) {
             settings.setCarbRatio(settingsDTO.getCarbRatio());
-        }
-        if (settingsDTO.getGramsPerUnit() != null) {
-            settings.setGramsPerUnit(settingsDTO.getGramsPerUnit());
         }
         if (settingsDTO.getGramsPerUnitBreakfast() != null) {
             settings.setGramsPerUnitBreakfast(settingsDTO.getGramsPerUnitBreakfast());
@@ -250,7 +250,6 @@ public class UserSettingsService {
         dto.setPredictionEngine(settings.getPredictionEngine());
         dto.setTargetGlucoseMmol(settings.getTargetGlucoseMmol());
         dto.setRescueCarbsG(settings.getRescueCarbsG());
-        dto.setGramsPerUnit(settings.getGramsPerUnit());
         dto.setGramsPerUnitBreakfast(settings.getGramsPerUnitBreakfast());
         dto.setGramsPerUnitLunch(settings.getGramsPerUnitLunch());
         dto.setGramsPerUnitDinner(settings.getGramsPerUnitDinner());

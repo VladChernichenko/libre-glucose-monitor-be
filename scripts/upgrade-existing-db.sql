@@ -7,11 +7,13 @@
 -- columns added to V1 are missing, `flyway repair` alone only rewrites checksums,
 -- Hibernate `ddl-auto: validate` then refuses to start, and V16 needs pgvector.
 --
--- It also covers the per-meal-window carb ratio columns added to V1 on
--- feat/carb-ratio-meal-windows (user_settings.grams_per_unit_breakfast, _lunch,
--- _dinner, _night). A database already at V22 (upgraded before, or created from
--- the earlier V1) needs this script and `flyway repair` again before the app
--- starts; Flyway then applies V23.
+-- It also covers feat/carb-ratio-meal-windows, which replaced the single
+-- insulin-to-carb ratio user_settings.grams_per_unit with one per meal window
+-- (grams_per_unit_breakfast, _lunch, _dinner, _night) in V1. A database already
+-- at V22 (upgraded before, or created from the earlier V1) still has
+-- grams_per_unit: it needs this script (each unset window takes grams_per_unit,
+-- then the column is dropped), then `flyway repair` (V1 checksum), then the app
+-- start; Flyway then applies V23.
 --
 -- ORDER (do not skip or reorder):
 --   1. BACK UP the database (pg_dump). From V12, V13 drops experiments,
@@ -31,27 +33,53 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- user_settings: correction target, rescue carbs, and the insulin-to-carb ratio (V1 on this branch).
--- grams_per_unit is grams of carbohydrate per unit. carb_ratio (mmol/L per 10 g) is left as stored.
+-- user_settings: correction target and rescue carbs (V1 on this branch).
 ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,
-    ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15,
-    ADD COLUMN IF NOT EXISTS grams_per_unit      DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_breakfast DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_lunch DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_dinner DOUBLE PRECISION,
-    ADD COLUMN IF NOT EXISTS grams_per_unit_night DOUBLE PRECISION;
+    ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15;
 
+-- user_settings: the insulin-to-carb ratio, grams of carbohydrate per unit, one per meal window
+-- (V1 on this branch). The single grams_per_unit they replace is dropped.
+--   * Deployed at V22 (has grams_per_unit): each unset window takes grams_per_unit, then the
+--     column goes, and its CHECK with it.
+--   * Older, from main's V12 (neither grams_per_unit nor the windows): each window is derived once
+--     as 10 * isf / carb_ratio, the ICR that produces the same rise as (grams / 10) * carb_ratio.
+-- A ratio outside 3-30 is neither copied nor derived: that window stays NULL (no ratio, dosing
+-- refused) and has to be typed in. carb_ratio (mmol/L per 10 g) is left as stored. A second run
+-- finds the windows and no grams_per_unit, and changes nothing.
 DO $$
+DECLARE
+    has_single  BOOLEAN := EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'user_settings'
+          AND column_name = 'grams_per_unit');
+    has_windows BOOLEAN := EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'user_settings'
+          AND column_name = 'grams_per_unit_breakfast');
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'chk_user_settings_grams_per_unit'
-          AND conrelid = 'user_settings'::regclass
-    ) THEN
-        ALTER TABLE user_settings
-            ADD CONSTRAINT chk_user_settings_grams_per_unit
-            CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30));
+    ALTER TABLE user_settings
+        ADD COLUMN IF NOT EXISTS grams_per_unit_breakfast DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS grams_per_unit_lunch     DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS grams_per_unit_dinner    DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS grams_per_unit_night     DOUBLE PRECISION;
+
+    IF has_single THEN
+        UPDATE user_settings
+        SET grams_per_unit_breakfast = COALESCE(grams_per_unit_breakfast, grams_per_unit),
+            grams_per_unit_lunch     = COALESCE(grams_per_unit_lunch, grams_per_unit),
+            grams_per_unit_dinner    = COALESCE(grams_per_unit_dinner, grams_per_unit),
+            grams_per_unit_night     = COALESCE(grams_per_unit_night, grams_per_unit)
+        WHERE grams_per_unit BETWEEN 3 AND 30;
+        ALTER TABLE user_settings DROP COLUMN IF EXISTS grams_per_unit;
+    ELSIF NOT has_windows THEN
+        UPDATE user_settings
+        SET grams_per_unit_breakfast = COALESCE(grams_per_unit_breakfast, 10.0 * isf / carb_ratio),
+            grams_per_unit_lunch     = COALESCE(grams_per_unit_lunch, 10.0 * isf / carb_ratio),
+            grams_per_unit_dinner    = COALESCE(grams_per_unit_dinner, 10.0 * isf / carb_ratio),
+            grams_per_unit_night     = COALESCE(grams_per_unit_night, 10.0 * isf / carb_ratio)
+        WHERE isf > 0 AND carb_ratio > 0
+          AND (10.0 * isf / carb_ratio) BETWEEN 3 AND 30;
     END IF;
 END $$;
 
@@ -106,14 +134,6 @@ BEGIN
             CHECK (grams_per_unit_night IS NULL OR (grams_per_unit_night >= 3 AND grams_per_unit_night <= 30));
     END IF;
 END $$;
-
--- One-time: the ICR that produces the same rise as (grams / 10) * carb_ratio is 10 * isf / carb_ratio.
--- Rows outside 3-30 stay NULL and have to be typed in. A second run matches nothing.
-UPDATE user_settings
-SET grams_per_unit = 10.0 * isf / carb_ratio
-WHERE grams_per_unit IS NULL
-  AND isf > 0 AND carb_ratio > 0
-  AND (10.0 * isf / carb_ratio) BETWEEN 3 AND 30;
 
 -- notes: assistant chat carb band, context tags and originating chat message (V1 on this branch)
 ALTER TABLE notes

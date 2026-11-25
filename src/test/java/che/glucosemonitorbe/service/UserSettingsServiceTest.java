@@ -104,6 +104,11 @@ class UserSettingsServiceTest {
         assertEquals(userId, result.getUserId());
         assertEquals(2.0, result.getCarbRatio());
         assertEquals(45, result.getCarbHalfLife());
+        // every meal window prices at the 5 g/U a new settings row gets
+        assertEquals(5.0, result.getGramsPerUnitBreakfast());
+        assertEquals(5.0, result.getGramsPerUnitLunch());
+        assertEquals(5.0, result.getGramsPerUnitDinner());
+        assertEquals(5.0, result.getGramsPerUnitNight());
     }
 
     @Test
@@ -216,7 +221,18 @@ class UserSettingsServiceTest {
         assertEquals(9.0, existing.getGramsPerUnitLunch());
         assertEquals(6.0, out.getGramsPerUnitBreakfast());
         assertEquals(9.0, out.getGramsPerUnitLunch());
-        assertNull(out.getGramsPerUnitDinner());
-        assertNull(out.getGramsPerUnitNight());
+        assertEquals(5.0, out.getGramsPerUnitDinner(), "unsent windows keep the row's value");
+        assertEquals(5.0, out.getGramsPerUnitNight());
+    }
+
+    @Test
+    void aNewSettingsRowPricesEveryWindowAtFiveGramsPerUnit() {
+        UserSettings row = new UserSettings(UUID.randomUUID());
+
+        assertEquals(5.0, row.getGramsPerUnitBreakfast());
+        assertEquals(5.0, row.getGramsPerUnitLunch());
+        assertEquals(5.0, row.getGramsPerUnitDinner());
+        assertEquals(5.0, row.getGramsPerUnitNight());
+        assertEquals(5.0, new UserSettings().getGramsPerUnitLunch());
     }
 }

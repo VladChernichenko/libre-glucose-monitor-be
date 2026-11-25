@@ -44,7 +44,7 @@ class InsulinCalculatorServiceIsfWindowTest {
         settings.setIsfDinner(1.5);
         settings.setIsfNight(1.0);
         settings.setBodyWeightKg(84.0);
-        settings.setGramsPerUnit(7.5);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(settings, 7.5);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(settings);
         service = new InsulinCalculatorService(userSettingsService);
     }
@@ -90,7 +90,7 @@ class InsulinCalculatorServiceIsfWindowTest {
         UserSettingsDTO bare = new UserSettingsDTO(
                 UUID.randomUUID(), USER_ID, /*carbRatio*/ 2.0, /*isf*/ null,
                 /*halfLife*/ 45, /*maxCob*/ 240);
-        bare.setGramsPerUnit(7.5);
+        che.glucosemonitorbe.dto.TestWindowRatios.setAll(bare, 7.5);
         when(userSettingsService.getUserSettings(any(UUID.class))).thenReturn(bare);
 
         assertThatThrownBy(() -> service.calculateRecommendedInsulin(
