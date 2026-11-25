@@ -229,10 +229,8 @@ class IsfMealWindowProfileServiceTest {
     // -- Meal-attached bolus ---------------------------------------------------
 
     @Test
-    @DisplayName("Meal-attached bolus uses 0.4 weight and deconvolves carbs via CR")
-    void mealBolus_weightedLower_andCarbsDeconvolved() {
-        // Bolus 4u + 40g carbs at 13:00 (LUNCH). Weight is 0.4 because carbs are present.
-        // ICR 12.5 keeps the denominator (40/12.5 - 4) away from zero.
+    @DisplayName("Meal-attached bolus gives no ISF estimate: ISF learns from corrections only")
+    void mealBolus_givesNoIsfEstimate() {
         LocalDateTime t = today(13, 0);
         Note bolus = bolusWithCarbs(t, 4.0, 40.0);
         List<Note> notes = List.of(bolus);
@@ -244,8 +242,31 @@ class IsfMealWindowProfileServiceTest {
         service.recomputeForUser(userId);
 
         IsfMealWindowSnapshot saved = captureSavedSnapshot(MealWindow.LUNCH);
+        assertThat(saved.getRawSampleCount()).isZero();
+        assertThat(saved.getIsfMmolPerU()).isNull();
+    }
+
+    @Test
+    @DisplayName("Small carbs in a correction are deconvolved with the window's ratio, not the single one")
+    void correctionCarbsAreDeconvolvedWithTheWindowRatio() {
+        // 2 U + 5 g at 07:30, glucose 9.0 -> 4.0. Breakfast ratio 5 g/U: 5/5 - 2 = -1 U net -> ISF 5.0.
+        // With the single ratio 12.5 it would be 5 / (0.4 - 2) = 3.1.
+        UserSettingsDTO settings = userSettings(2.0, 2.5, 45, 240);
+        settings.setGramsPerUnit(12.5);
+        settings.setGramsPerUnitBreakfast(5.0);
+        when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
+        LocalDateTime t = today(7, 30);
+        Note bolus = bolusWithCarbs(t, 2.0, 5.0);
+        List<CgmReading> cgm = List.of(
+                cgmReading(t, 9.0),
+                cgmReading(t.plusMinutes((long)(RAPID.diaHours() * 60)), 4.0));
+        stub(List.of(bolus), cgm);
+
+        service.recomputeForUser(userId);
+
+        IsfMealWindowSnapshot saved = captureSavedSnapshot(MealWindow.BREAKFAST);
         assertThat(saved.getRawSampleCount()).isEqualTo(1);
-        assertThat(saved.getWeightedSamples()).isEqualTo(0.4); // meal-bolus weight
+        assertThat(saved.getIsfMmolPerU()).isCloseTo(5.0, offset(0.05));
     }
 
     // -- Night exclusion -------------------------------------------------------
@@ -324,7 +345,7 @@ class IsfMealWindowProfileServiceTest {
         List<CgmReading> cgm = List.of(cgmReading(t.plusMinutes(30), 9.0), cgmReading(end, 3.0));
 
         IsfMealWindowProfileService.EventEstimate est = service.estimateForBolus(
-                correction, List.of(first, correction), cgm, RAPID, USER_SETTINGS, 12.5, ZoneOffset.UTC);
+                correction, List.of(first, correction), cgm, RAPID, USER_SETTINGS, ZoneOffset.UTC);
 
         assertThat(est).isNotNull();
         assertThat(est.isf).isBetween(1.2, 1.5);   // 6 mmol/L over ~1 U + ~3.6 U still on board
@@ -342,7 +363,7 @@ class IsfMealWindowProfileServiceTest {
                 cgmReading(t.plusMinutes((long) (RAPID.diaHours() * 60)), 6.5));
 
         assertThat(service.estimateForBolus(
-                meal, List.of(meal), cgm, RAPID, USER_SETTINGS, 12.5, ZoneOffset.UTC)).isNull();
+                meal, List.of(meal), cgm, RAPID, USER_SETTINGS, ZoneOffset.UTC)).isNull();
     }
 
     // -- Missing CGM -----------------------------------------------------------

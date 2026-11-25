@@ -42,7 +42,7 @@ public class IsfMealWindowSnapshot {
     @Column(name = "isf_mmol_per_u")
     private Double isfMmolPerU;
 
-    /** Sum of per-event weights. Correction events contribute 1.0; meal-attached events 0.4. */
+    /** Sum of per-event weights. Only correction boluses contribute; every contributing event weighs 1.0. */
     @Column(name = "weighted_samples", nullable = false)
     private Double weightedSamples;
 
