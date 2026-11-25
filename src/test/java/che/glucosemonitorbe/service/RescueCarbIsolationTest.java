@@ -90,7 +90,6 @@ class RescueCarbIsolationTest {
 
         RapidInsulinIobParameters rapid = new RapidInsulinIobParameters(4.5, 75.0);
         UserSettingsDTO userSettings = new UserSettingsDTO();
-        userSettings.setCarbRatio(2.0);
         che.glucosemonitorbe.dto.TestWindowRatios.setAll(userSettings, 12.5); // the estimator skips every event without a ratio
         userSettings.setIsf(2.5);
         userSettings.setCarbHalfLife(45);

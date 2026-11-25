@@ -29,7 +29,7 @@ class InsulinCalculatorServiceRatioWindowTest {
     void setUp() {
         UserSettingsService userSettingsService = mock(UserSettingsService.class);
         settings = new UserSettingsDTO(
-                UUID.randomUUID(), USER_ID, /*carbRatio*/ 2.0, /*isf*/ 1.5,
+                UUID.randomUUID(), USER_ID, /*isf*/ 1.5,
                 /*halfLife*/ 45, /*maxCob*/ 240);
         settings.setIsfBreakfast(1.5);
         settings.setIsfLunch(1.5);

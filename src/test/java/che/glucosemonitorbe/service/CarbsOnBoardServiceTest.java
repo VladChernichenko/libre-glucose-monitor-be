@@ -588,7 +588,7 @@ class CarbsOnBoardServiceTest {
     @Test
     void nullMaxCobDuration_fallsBackToSpeedClassDefault() {
         when(settingsService.getUserSettings(USER_ID))
-                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, null));
+                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 1.0, 45, null));
         // maxCOBDuration null -> SLOW speed-class default = 240 -> still active at 200 min
         CarbsEntry e = carbEntry(now.minusMinutes(200), 60.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isGreaterThan(0.0);
@@ -597,7 +597,7 @@ class CarbsOnBoardServiceTest {
     @Test
     void nullCarbHalfLife_fallsBackToDefault45Minutes() {
         when(settingsService.getUserSettings(USER_ID))
-                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, null, 240));
+                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 1.0, null, 240));
         // carbHalfLife null -> default 45 min -> at t=45 min remaining ≈ 50%
         CarbsEntry e = carbEntry(now.minusMinutes(45), 50.0, "SLOW", null);
         assertThat(service.calculateRemainingCarbs(e, now, USER_ID)).isCloseTo(25.0, within(3.0));
@@ -622,19 +622,19 @@ class CarbsOnBoardServiceTest {
 
     @Test
     void totalCob_preloadedSettings_nullList_returnsZeroWithoutLookup() {
-        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 1.0, 45, 240);
         assertThat(service.calculateTotalCarbsOnBoard((List<CarbsEntry>) null, now, settings)).isEqualTo(0.0);
     }
 
     @Test
     void totalCob_preloadedSettings_emptyList_returnsZeroWithoutLookup() {
-        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 1.0, 45, 240);
         assertThat(service.calculateTotalCarbsOnBoard(List.of(), now, settings)).isEqualTo(0.0);
     }
 
     @Test
     void totalCob_preloadedSettings_filtersNullAndZeroCarbEntries() {
-        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, 45, 240);
+        UserSettingsDTO settings = new UserSettingsDTO(UUID.randomUUID(), USER_ID, 1.0, 45, 240);
         // Real-life: 30g Snack entry, plus a zero-carb and a null-carbs entry that must be skipped
         CarbsEntry valid = carbEntry(now.minusMinutes(30), 30.0, "MEDIUM", null);
         CarbsEntry zeroCarbs = carbEntry(now.minusMinutes(30), 0.0, "MEDIUM", null);
@@ -728,7 +728,7 @@ class CarbsOnBoardServiceTest {
 
     private void stubSettings(int maxCobMinutes, int halfLife) {
         when(settingsService.getUserSettings(USER_ID))
-                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 2.0, 1.0, halfLife, maxCobMinutes));
+                .thenReturn(new UserSettingsDTO(UUID.randomUUID(), USER_ID, 1.0, halfLife, maxCobMinutes));
     }
 
     private CarbsEntry carbEntry(LocalDateTime timestamp, double carbs, String speedClass, Double patternDuration) {

@@ -68,7 +68,6 @@ class ContextAggregatorServiceTest {
     void setUp() {
         userId = UUID.randomUUID();
         defaultUserSettings = new UserSettingsDTO();
-        defaultUserSettings.setCarbRatio(2.0);
         defaultUserSettings.setIsf(2.5);
         defaultInsulinPrefs = new UserInsulinPreferencesDTO();
         defaultRapidIob = new RapidInsulinIobParameters(4.0, 75);

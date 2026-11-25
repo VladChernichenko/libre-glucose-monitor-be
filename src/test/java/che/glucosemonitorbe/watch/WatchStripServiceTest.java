@@ -520,7 +520,6 @@ class WatchStripServiceTest {
     void high_missingEffectiveIsf_refusedSettingsInvalid() {
         // Real ISF and calculator: settings without an ISF must surface as a refusal, never throw.
         UserSettingsDTO noIsf = new UserSettingsDTO();
-        noIsf.setCarbRatio(1.0);
         che.glucosemonitorbe.dto.TestWindowRatios.setAll(noIsf, 10.0); // a valid ratio, so the missing ISF is the only defect
         when(settings.getUserSettings(any(UUID.class))).thenReturn(noIsf);
         when(digitalTwin.activeScales(USER)).thenReturn(Optional.empty());

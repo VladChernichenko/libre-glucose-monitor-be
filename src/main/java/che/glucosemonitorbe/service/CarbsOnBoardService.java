@@ -68,7 +68,7 @@ public class CarbsOnBoardService {
 
         // Linear taper over the last 30 min of the window so COB reaches zero smoothly
         // instead of snapping from ~1g to 0 at maxDuration, which causes a step in the
-        // prediction path (carbsDeliveredEffect = (cobNow - cobAtT) / 10 * carbRatio).
+        // prediction path (carb rise = (cobNow - cobAtT) / gramsPerUnit * isf).
         int taperStartMinutes = maxDuration - 30;
         if (minutesSinceEntry >= taperStartMinutes) {
             double taperProgress = (double)(minutesSinceEntry - taperStartMinutes) / 30.0;

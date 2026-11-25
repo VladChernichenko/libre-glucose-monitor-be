@@ -13,7 +13,9 @@
 -- at V22 (upgraded before, or created from the earlier V1) still has
 -- grams_per_unit: it needs this script (each unset window takes grams_per_unit,
 -- then the column is dropped), then `flyway repair` (V1 checksum), then the app
--- start; Flyway then applies V23.
+-- start; Flyway then applies V23. The legacy user_settings.carb_ratio (mmol/L
+-- rise per 10 g) was removed from V1 too; the script drops it, after using it
+-- for the windows of a database from main.
 --
 -- ORDER (do not skip or reorder):
 --   1. BACK UP the database (pg_dump). From V12, V13 drops experiments,
@@ -39,24 +41,30 @@ ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15;
 
 -- user_settings: the insulin-to-carb ratio, grams of carbohydrate per unit, one per meal window
--- (V1 on this branch). The single grams_per_unit they replace is dropped.
+-- (V1 on this branch). The single grams_per_unit they replace is dropped, and so is the legacy
+-- carb_ratio (mmol/L per 10 g), which nothing reads any more.
 --   * Deployed at V22 (has grams_per_unit): each unset window takes grams_per_unit, then the
 --     column goes, and its CHECK with it.
 --   * Older, from main's V12 (neither grams_per_unit nor the windows): each window is derived once
---     as 10 * isf / carb_ratio, the ICR that produces the same rise as (grams / 10) * carb_ratio.
+--     as 10 * isf / carb_ratio, the ICR that produces the same rise as (grams / 10) * carb_ratio,
+--     before carb_ratio is dropped.
 -- A ratio outside 3-30 is neither copied nor derived: that window stays NULL (no ratio, dosing
--- refused) and has to be typed in. carb_ratio (mmol/L per 10 g) is left as stored. A second run
--- finds the windows and no grams_per_unit, and changes nothing.
+-- refused) and has to be typed in. A second run finds the windows and neither old column, and
+-- changes nothing.
 DO $$
 DECLARE
-    has_single  BOOLEAN := EXISTS (
+    has_single     BOOLEAN := EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema = current_schema() AND table_name = 'user_settings'
           AND column_name = 'grams_per_unit');
-    has_windows BOOLEAN := EXISTS (
+    has_windows    BOOLEAN := EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema = current_schema() AND table_name = 'user_settings'
           AND column_name = 'grams_per_unit_breakfast');
+    has_carb_ratio BOOLEAN := EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'user_settings'
+          AND column_name = 'carb_ratio');
 BEGIN
     ALTER TABLE user_settings
         ADD COLUMN IF NOT EXISTS grams_per_unit_breakfast DOUBLE PRECISION,
@@ -72,7 +80,7 @@ BEGIN
             grams_per_unit_night     = COALESCE(grams_per_unit_night, grams_per_unit)
         WHERE grams_per_unit BETWEEN 3 AND 30;
         ALTER TABLE user_settings DROP COLUMN IF EXISTS grams_per_unit;
-    ELSIF NOT has_windows THEN
+    ELSIF NOT has_windows AND has_carb_ratio THEN
         UPDATE user_settings
         SET grams_per_unit_breakfast = COALESCE(grams_per_unit_breakfast, 10.0 * isf / carb_ratio),
             grams_per_unit_lunch     = COALESCE(grams_per_unit_lunch, 10.0 * isf / carb_ratio),
@@ -81,6 +89,9 @@ BEGIN
         WHERE isf > 0 AND carb_ratio > 0
           AND (10.0 * isf / carb_ratio) BETWEEN 3 AND 30;
     END IF;
+
+    -- Its CHECK (chk_user_settings_carb_ratio_positive) goes with it.
+    ALTER TABLE user_settings DROP COLUMN IF EXISTS carb_ratio;
 END $$;
 
 DO $$

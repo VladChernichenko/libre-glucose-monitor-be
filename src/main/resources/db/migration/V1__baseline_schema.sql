@@ -42,7 +42,6 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE TABLE IF NOT EXISTS user_settings (
     id                  UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id             UUID             NOT NULL UNIQUE,
-    carb_ratio          DOUBLE PRECISION NOT NULL DEFAULT 2.0,
     grams_per_unit_breakfast DOUBLE PRECISION,                        -- g/U meal ratio for 05:00-11:00; NULL = no ratio, dosing refused
     grams_per_unit_lunch     DOUBLE PRECISION,                        -- g/U meal ratio for 11:00-16:00; NULL = no ratio, dosing refused
     grams_per_unit_dinner    DOUBLE PRECISION,                        -- g/U meal ratio for 16:00-22:00; NULL = no ratio, dosing refused
@@ -63,7 +62,6 @@ CREATE TABLE IF NOT EXISTS user_settings (
     created_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT chk_user_settings_carb_ratio_positive CHECK (carb_ratio > 0),
     CONSTRAINT chk_user_settings_gpu_breakfast CHECK (grams_per_unit_breakfast IS NULL OR (grams_per_unit_breakfast >= 3 AND grams_per_unit_breakfast <= 30)),
     CONSTRAINT chk_user_settings_gpu_lunch CHECK (grams_per_unit_lunch IS NULL OR (grams_per_unit_lunch >= 3 AND grams_per_unit_lunch <= 30)),
     CONSTRAINT chk_user_settings_gpu_dinner CHECK (grams_per_unit_dinner IS NULL OR (grams_per_unit_dinner >= 3 AND grams_per_unit_dinner <= 30)),

@@ -88,10 +88,11 @@ class CarbRatioWindowE2ETest {
     }
 
     @Test
-    @DisplayName("A save from an older app that still sends the single gramsPerUnit is accepted and the key ignored")
-    void anOlderAppsSingleRatioKeyIsAcceptedAndIgnored() throws Exception {
+    @DisplayName("A save from an older app that still sends gramsPerUnit and carbRatio is accepted and both keys ignored")
+    void anOlderAppsRemovedKeysAreAcceptedAndIgnored() throws Exception {
         Map<String, Object> settings = commonSettings();
         settings.put("gramsPerUnit", 12.0);
+        settings.put("carbRatio", 1.5);
         settings.put("gramsPerUnitBreakfast", 6.0);
 
         ResponseEntity<String> saved = rest.exchange("/api/user-settings", HttpMethod.POST,
@@ -100,6 +101,7 @@ class CarbRatioWindowE2ETest {
         assertEquals(HttpStatus.OK, saved.getStatusCode(), "saving settings failed: " + saved.getBody());
         JsonNode body = mapper.readTree(saved.getBody());
         assertFalse(body.has("gramsPerUnit"), "the single ratio is not part of the settings: " + body);
+        assertFalse(body.has("carbRatio"), "the legacy mmol/L per 10 g is not part of the settings: " + body);
         assertEquals(6.0, body.path("gramsPerUnitBreakfast").asDouble());
         assertEquals(5.0, body.path("gramsPerUnitLunch").asDouble(), "an unsent window keeps the new row's 5 g/U");
     }
@@ -107,7 +109,6 @@ class CarbRatioWindowE2ETest {
     private static Map<String, Object> commonSettings() {
         Map<String, Object> settings = new LinkedHashMap<>();
         settings.put("timezone", "UTC");
-        settings.put("carbRatio", 1.5);
         settings.put("bodyWeightKg", 70);
         settings.put("carbHalfLife", 45);
         settings.put("maxCOBDuration", 240);

@@ -25,8 +25,6 @@ public class UserSettingsDTO {
     // Getters and Setters
     private UUID id;
     private UUID userId;
-    /** Legacy mmol/L rise per 10 g. A save must send the stored value back; dosing does not read it. */
-    private Double carbRatio;
     /**
      * Insulin-to-carb ratio for 05:00-11:00, grams per unit. NULL = no ratio for this window: dosing
      * there is refused, as is a value outside 3-30. NULL on input = leave unchanged.
@@ -80,38 +78,35 @@ public class UserSettingsDTO {
     // Constructors
     public UserSettingsDTO() {}
 
-    /** Legacy 6-arg constructor - bodyWeightKg defaults to null (population 70 kg). */
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
+    /** bodyWeightKg defaults to null (population 70 kg). */
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
         this.id = id;
         this.userId = userId;
-        this.carbRatio = carbRatio;
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;
         this.bodyWeightKg = null;
     }
 
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration, Double bodyWeightKg) {
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration, Double bodyWeightKg) {
         this.id = id;
         this.userId = userId;
-        this.carbRatio = carbRatio;
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;
         this.bodyWeightKg = bodyWeightKg;
     }
 
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
                            Double bodyWeightKg, Double isfBreakfast, Double isfLunch, Double isfDinner) {
-        this(id, userId, carbRatio, isf, carbHalfLife, maxCOBDuration, bodyWeightKg,
+        this(id, userId, isf, carbHalfLife, maxCOBDuration, bodyWeightKg,
                 isfBreakfast, isfLunch, isfDinner, null);
     }
 
-    public UserSettingsDTO(UUID id, UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
+    public UserSettingsDTO(UUID id, UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration,
                            Double bodyWeightKg, Double isfBreakfast, Double isfLunch, Double isfDinner, Double isfNight) {
         this.id = id;
         this.userId = userId;
-        this.carbRatio = carbRatio;
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;

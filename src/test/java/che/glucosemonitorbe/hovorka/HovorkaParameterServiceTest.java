@@ -95,7 +95,7 @@ class HovorkaParameterServiceTest {
     // sized by its window's ratio in the forecast (HovorkaGlucosePredictionService.mealWindowFactor).
     // mealMagnitude ties that size to the ratio: one unit lowers glucose by ISF, so gramsPerUnit
     // grams must raise it by ISF. Bioavailability (DallaManGutModel.F) is divided out, so it is
-    // still applied exactly once. The legacy mmol/L-per-10 g carbRatio has no say.
+    // still applied exactly once.
 
     @Test
     void buildForUser_agIsNeutralWhateverTheWindowRatios() {
@@ -135,18 +135,6 @@ class HovorkaParameterServiceTest {
     void mealMagnitude_inconsistentIsfAndRatio_isBounded() {
         double vG = HovorkaParameters.VG_PER_KG * HovorkaParameters.DEFAULT_WEIGHT;
         assertThat(HovorkaParameterService.mealMagnitude(9.0, vG, 3.0)).isEqualTo(HovorkaParameterService.A_G_MAX);
-    }
-
-    @Test
-    void buildForUser_legacyCarbRatio_doesNotMoveMealMagnitude() {
-        UserSettingsDTO low = settingsWithGramsPerUnit(10.0);
-        low.setCarbRatio(0.1);
-        UserSettingsDTO high = settingsWithGramsPerUnit(10.0);
-        high.setCarbRatio(10.0);
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(low);
-        double atLow = service.buildForUser(USER_ID).aG();
-        when(userSettingsService.getUserSettings(USER_ID)).thenReturn(high);
-        assertThat(service.buildForUser(USER_ID).aG()).isEqualTo(atLow);
     }
 
     // -- ISF fallback ----------------------------------------------------------
@@ -196,7 +184,6 @@ class HovorkaParameterServiceTest {
         UserSettingsDTO dto = new UserSettingsDTO();
         dto.setBodyWeightKg(70.0);
         dto.setCarbHalfLife(45);
-        dto.setCarbRatio(2.0);
         dto.setIsf(2.2);
         return dto;
     }

@@ -27,10 +27,6 @@ public class UserSettings {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
     
-    /** Legacy mmol/L rise per 10 g. Kept so a stored 2.0 is never read as 2 g/U. Dosing does not use it. */
-    @Column(name = "carb_ratio", nullable = false)
-    private Double carbRatio = 2.0;
-
     /**
      * Insulin-to-carb ratio for 05:00-11:00: grams of carbohydrate covered by 1 unit. New rows default
      * every window to 5. NULL = no ratio for this window (dosing is refused there).
@@ -119,7 +115,6 @@ public class UserSettings {
     
     // Constructors
     public UserSettings() {
-        this.carbRatio = 2.0;
         this.isf = 1.0;
         this.carbHalfLife = 45;
         this.maxCOBDuration = 240;
@@ -127,15 +122,13 @@ public class UserSettings {
 
     public UserSettings(UUID userId) {
         this.userId = userId;
-        this.carbRatio = 2.0;
         this.isf = 1.0;
         this.carbHalfLife = 45;
         this.maxCOBDuration = 240;
     }
     
-    public UserSettings(UUID userId, Double carbRatio, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
+    public UserSettings(UUID userId, Double isf, Integer carbHalfLife, Integer maxCOBDuration) {
         this.userId = userId;
-        this.carbRatio = carbRatio;
         this.isf = isf;
         this.carbHalfLife = carbHalfLife;
         this.maxCOBDuration = maxCOBDuration;

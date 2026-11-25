@@ -50,7 +50,6 @@ class TwinForecastSnapshotE2ETest extends AbstractGlycemicEventE2ETest {
         UUID userId = userId();
         UserSettingsDTO settings = new UserSettingsDTO();
         settings.setIsf(2.0);
-        settings.setCarbRatio(10.0);
         userSettingsService.saveUserSettings(userId, settings);
 
         long nowMs = nowMs();

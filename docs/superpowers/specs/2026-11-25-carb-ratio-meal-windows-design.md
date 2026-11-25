@@ -102,9 +102,10 @@ only when non-null (as for the ISF windows) and returns them on read.
   it is the single value × sick multiplier).
 
 *Follow-up:* the single `grams_per_unit` was removed (column, CHECK, field); an unset window = no
-ratio. `scripts/upgrade-existing-db.sql` copies `grams_per_unit` into the unset windows of a
-deployed database before dropping it (an older one derives them from `10 * isf / carb_ratio`). An
-older app's `"gramsPerUnit"` key on save is ignored.
+ratio. The legacy `carb_ratio` (mmol/L rise per 10 g, read by nothing) was removed with it.
+`scripts/upgrade-existing-db.sql` copies `grams_per_unit` into the unset windows of a deployed
+database before dropping it (an older one derives them from `10 * isf / carb_ratio` before dropping
+`carb_ratio`). An older app's `"gramsPerUnit"` and `"carbRatio"` keys on save are ignored.
 
 ### 2. Consumers
 

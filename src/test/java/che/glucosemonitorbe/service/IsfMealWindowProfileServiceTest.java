@@ -64,9 +64,9 @@ class IsfMealWindowProfileServiceTest {
 
     private final UUID userId = UUID.randomUUID();
 
-    // ICR 12.5 g/U. ISF target = 2.5 mmol/L per unit, DIA = 4.5h, peak = 75min. carbRatio is unused.
+    // ICR 12.5 g/U. ISF target = 2.5 mmol/L per unit, DIA = 4.5h, peak = 75min.
     private static final RapidInsulinIobParameters RAPID = new RapidInsulinIobParameters(4.5, 75.0);
-    private static final UserSettingsDTO USER_SETTINGS = userSettings(2.0, 2.5, 45, 240);
+    private static final UserSettingsDTO USER_SETTINGS = userSettings(2.5, 45, 240);
 
     @BeforeEach
     void setUp() {
@@ -159,7 +159,7 @@ class IsfMealWindowProfileServiceTest {
     void isfProfileIgnoresBolusesTakenWhileSick() {
         LocalDateTime healthy = today(7, 30);
         LocalDateTime sick = today(7, 30).minusDays(2);
-        UserSettingsDTO settings = userSettings(2.0, 2.5, 45, 240).withSickProfile(new SickProfile(List.of(
+        UserSettingsDTO settings = userSettings(2.5, 45, 240).withSickProfile(new SickProfile(List.of(
                 new SickProfile.Span(sick.minusHours(1), sick.plusHours(3), sick.plusHours(3), SickSeverity.MODERATE)),
                 null));
         when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
@@ -251,7 +251,7 @@ class IsfMealWindowProfileServiceTest {
     void correctionCarbsAreDeconvolvedWithTheWindowRatio() {
         // 2 U + 5 g at 07:30, glucose 9.0 -> 4.0. Breakfast ratio 5 g/U: 5/5 - 2 = -1 U net -> ISF 5.0.
         // With the other windows' ratio 12.5 it would be 5 / (0.4 - 2) = 3.1.
-        UserSettingsDTO settings = userSettings(2.0, 2.5, 45, 240);
+        UserSettingsDTO settings = userSettings(2.5, 45, 240);
         settings.setGramsPerUnitBreakfast(5.0);
         when(userSettingsService.getUserSettings(userId)).thenReturn(settings);
         LocalDateTime t = today(7, 30);
@@ -430,7 +430,7 @@ class IsfMealWindowProfileServiceTest {
         private final TimeZone tokyo = TimeZone.getTimeZone("Asia/Tokyo");
 
         private UserSettingsDTO berlinSettings() {
-            UserSettingsDTO s = userSettings(2.0, 2.5, 45, 240);
+            UserSettingsDTO s = userSettings(2.5, 45, 240);
             s.setTimezone("Europe/Berlin");
             return s;
         }
@@ -629,9 +629,8 @@ class IsfMealWindowProfileServiceTest {
                 .orElseThrow(() -> new AssertionError("No snapshot saved for " + window));
     }
 
-    private static UserSettingsDTO userSettings(double cr, double isf, int halfLife, int maxDuration) {
+    private static UserSettingsDTO userSettings(double isf, int halfLife, int maxDuration) {
         UserSettingsDTO s = new UserSettingsDTO();
-        s.setCarbRatio(cr);
         che.glucosemonitorbe.dto.TestWindowRatios.setAll(s, 12.5);
         s.setIsf(isf);
         s.setCarbHalfLife(halfLife);

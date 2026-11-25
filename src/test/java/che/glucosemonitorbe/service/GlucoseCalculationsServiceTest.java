@@ -108,7 +108,6 @@ class GlucoseCalculationsServiceTest {
                 .thenReturn(UserDto.builder().id(userId).username(username).build());
         UserSettingsDTO settings = new UserSettingsDTO();
         settings.setUserId(userId);
-        settings.setCarbRatio(2.0);
         settings.setIsf(1.0);
         settings.setCarbHalfLife(45);
         settings.setMaxCOBDuration(240);
@@ -239,7 +238,6 @@ class GlucoseCalculationsServiceTest {
         // Stub COB settings to avoid NPE
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setUserId(userId);
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setCarbHalfLife(45);
         userSettings.setMaxCOBDuration(240);
@@ -298,7 +296,6 @@ class GlucoseCalculationsServiceTest {
 
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setUserId(userId);
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setCarbHalfLife(45);
         userSettings.setMaxCOBDuration(480); // 8 hours max for HFHP
@@ -361,7 +358,6 @@ class GlucoseCalculationsServiceTest {
 
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setUserId(userId);
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setCarbHalfLife(45);
         userSettings.setMaxCOBDuration(240);
@@ -424,7 +420,6 @@ class GlucoseCalculationsServiceTest {
 
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setUserId(userId);
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setCarbHalfLife(45);
         userSettings.setMaxCOBDuration(240);
@@ -671,7 +666,6 @@ class GlucoseCalculationsServiceTest {
 
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setUserId(userId);
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setIsfBreakfast(1.0);
         userSettings.setIsfLunch(3.0);
@@ -724,7 +718,6 @@ class GlucoseCalculationsServiceTest {
     @Test
     void calculatePredictionFactors_resolvesIsfAtPredictionTime_notCurrentTime() throws Exception {
         UserSettingsDTO userSettings = new UserSettingsDTO();
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setIsfBreakfast(1.0);
         userSettings.setIsfLunch(3.0);
@@ -832,7 +825,6 @@ class GlucoseCalculationsServiceTest {
 
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setUserId(userId);
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setCarbHalfLife(45);
         userSettings.setMaxCOBDuration(240);
@@ -879,7 +871,6 @@ class GlucoseCalculationsServiceTest {
 
         UserSettingsDTO userSettings = new UserSettingsDTO();
         userSettings.setUserId(userId);
-        userSettings.setCarbRatio(2.0);
         userSettings.setIsf(1.0);
         userSettings.setCarbHalfLife(45);
         userSettings.setMaxCOBDuration(240);

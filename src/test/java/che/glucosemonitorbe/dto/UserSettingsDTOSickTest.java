@@ -24,7 +24,7 @@ class UserSettingsDTOSickTest {
     }
 
     private static UserSettingsDTO settings() {
-        UserSettingsDTO s = new UserSettingsDTO(UUID.randomUUID(), UUID.randomUUID(), 2.0, 1.0, 45, 240);
+        UserSettingsDTO s = new UserSettingsDTO(UUID.randomUUID(), UUID.randomUUID(), 1.0, 45, 240);
         s.setIsfDinner(0.85);
         TestWindowRatios.setAll(s, 10.0);
         return s;

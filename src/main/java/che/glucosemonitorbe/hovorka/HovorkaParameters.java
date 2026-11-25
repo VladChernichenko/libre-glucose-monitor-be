@@ -6,7 +6,7 @@ package che.glucosemonitorbe.hovorka;
  * <p>Population constants are from Hovorka et al., "Nonlinear model predictive control of
  * glucose concentration in subjects with type 1 diabetes", Physiol Meas 2004.
  * User-specific values (isf, weight, carb half-life, meal magnitude) are derived from settings.
- * The legacy {@code carbRatio} (mmol/L per 10 g) is not among them. The insulin-to-carb ratio is per
+ * The insulin-to-carb ratio is per
  * meal window, so it sizes each meal in the forecast ({@code HovorkaGlucosePredictionService
  * .mealWindowFactor}) rather than through {@code aG}.</p>
  *

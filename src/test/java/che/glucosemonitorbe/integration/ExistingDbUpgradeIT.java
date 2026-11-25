@@ -109,6 +109,8 @@ class ExistingDbUpgradeIT {
                 .containsEntry("b", 5.0).containsEntry("l", 5.0).containsEntry("d", 5.0).containsEntry("n", 5.0);
         assertThat(column(jdbc, "grams_per_unit")).as("the single ratio is gone").isZero();
         assertThat(constraint(jdbc, "chk_user_settings_grams_per_unit")).isZero();
+        assertThat(column(jdbc, "carb_ratio")).as("the legacy mmol/L per 10 g is gone").isZero();
+        assertThat(constraint(jdbc, "chk_user_settings_carb_ratio_positive")).isZero();
         for (String w : new String[] {"breakfast", "lunch", "dinner", "night"}) {
             assertThat(column(jdbc, "grams_per_unit_" + w)).isEqualTo(1);
             assertThat(constraint(jdbc, "chk_user_settings_gpu_" + w)).isEqualTo(1);
@@ -135,6 +137,8 @@ class ExistingDbUpgradeIT {
                 .containsExactly(null, null, null, null);
         assertThat(column(db, "grams_per_unit")).isZero();
         assertThat(constraint(db, "chk_user_settings_grams_per_unit")).isZero();
+        assertThat(column(db, "carb_ratio")).isZero();
+        assertThat(constraint(db, "chk_user_settings_carb_ratio_positive")).isZero();
     }
 
     @Test
@@ -147,6 +151,8 @@ class ExistingDbUpgradeIT {
         assertThat(windows(db, USER_C)).containsExactly(null, null, null, null);
         assertThat(column(db, "grams_per_unit")).isZero();
         assertThat(constraint(db, "chk_user_settings_grams_per_unit")).isZero();
+        assertThat(column(db, "carb_ratio")).isZero();
+        assertThat(constraint(db, "chk_user_settings_carb_ratio_positive")).isZero();
     }
 
     // ---- a database deployed at V22 ------------------------------------------------------------
@@ -157,7 +163,8 @@ class ExistingDbUpgradeIT {
 
     /**
      * A database at V22 as it was deployed: today's migrations up to V22, with user_settings put back
-     * to the V1 it was created from (the single {@code grams_per_unit} with its CHECK; the window
+     * to the V1 it was created from ({@code carb_ratio} and the single {@code grams_per_unit}, each
+     * with its CHECK; the window
      * columns only when {@code withWindowColumns}, as on a database already upgraded for this branch).
      * Then the script twice, flyway repair, and Flyway applies V23 as the app start would.
      */
@@ -170,7 +177,9 @@ class ExistingDbUpgradeIT {
                 .locations("classpath:db/migration").target("22").load().migrate();
         try (Connection c = DriverManager.getConnection(url, postgres.getUsername(), postgres.getPassword());
              Statement st = c.createStatement()) {
-            st.execute("ALTER TABLE user_settings DROP COLUMN IF EXISTS grams_per_unit");
+            st.execute("ALTER TABLE user_settings DROP COLUMN IF EXISTS grams_per_unit, DROP COLUMN IF EXISTS carb_ratio");
+            st.execute("ALTER TABLE user_settings ADD COLUMN carb_ratio DOUBLE PRECISION NOT NULL DEFAULT 2.0 "
+                    + "CONSTRAINT chk_user_settings_carb_ratio_positive CHECK (carb_ratio > 0)");
             st.execute("ALTER TABLE user_settings ADD COLUMN grams_per_unit DOUBLE PRECISION "
                     + "CONSTRAINT chk_user_settings_grams_per_unit "
                     + "CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30))");
