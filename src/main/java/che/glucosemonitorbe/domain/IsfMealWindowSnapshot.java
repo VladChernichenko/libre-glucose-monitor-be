@@ -12,9 +12,9 @@ import java.util.UUID;
 /**
  * Cached observational ISF estimate for one user × meal window.
  *
- * <p>Maintained by {@code IsfMealWindowProfileService}: a nightly batch (and on-bolus-event
- * trigger) re-runs the deconvolution algorithm over the last 14 days of notes + CGM history
- * and upserts one row per meal window per user.</p>
+ * <p>Maintained by {@code IsfMealWindowProfileService}: the nightly batch (02:00 UTC) and the
+ * manual recompute endpoint re-run the deconvolution algorithm over the last 14 days of notes +
+ * CGM history and upsert one row per meal window per user.</p>
  */
 @Entity
 @Table(name = "isf_meal_window_snapshots")

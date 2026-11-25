@@ -26,7 +26,8 @@ import java.util.*;
 /**
  * Computes observational per-meal-window ISF estimates from each user's historical bolus
  * events + CGM trace. Snapshots are cached in {@code isf_meal_window_snapshots} and refreshed
- * by a daily scheduler and on every new bolus.
+ * by the nightly scheduler (02:00 UTC) and the manual {@code POST /api/isf/meal-windows/recompute};
+ * there is no on-bolus refresh.
  *
  * <h3>Algorithm (per bolus B at time t_B)</h3>
  * <ol>
@@ -134,7 +135,7 @@ public class IsfMealWindowProfileService {
 
     /**
      * Recomputes all meal-window snapshots from scratch for the user and persists them.
-     * Idempotent - safe to call from both the daily scheduler and an on-bolus hook.
+     * Idempotent - safe to call from both the nightly scheduler and the manual recompute endpoint.
      */
     @Transactional
     public IsfMealWindowProfileResponse recomputeForUser(UUID userId) {
