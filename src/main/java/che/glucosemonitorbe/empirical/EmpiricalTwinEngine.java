@@ -114,7 +114,7 @@ public final class EmpiricalTwinEngine {
                         double slow = Boolean.TRUE.equals(e.fat()) ? p.fatSlow() : 0;
                         double gr = giRatio(GI_REF_MEAL, e.gi());
                         double k = (Boolean.TRUE.equals(e.fruit()) ? p.kFruit() : p.kMeal()) * Math.pow(gr, p.giPow());
-                        double cr = e.localHour() >= 5 && e.localHour() < 11 ? p.crAM() : p.crDay();
+                        double cr = p.crAt(e.localHour());
                         g += (p.isf() / cr) * e.amount() * Math.pow(1 / gr, p.giMag())
                                 * ((1 - slow) * (carbAbs(xB, k) - carbAbs(xA, k))
                                 + slow * (carbAbs(xB, p.kSlow()) - carbAbs(xA, p.kSlow())));

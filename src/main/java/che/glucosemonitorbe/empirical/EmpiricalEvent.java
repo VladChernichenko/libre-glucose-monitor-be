@@ -13,7 +13,7 @@ package che.glucosemonitorbe.empirical;
  * @param amount     insulin units ({@code INSULIN}, {@code BASAL}), grams of carbs ({@code MEAL},
  *                   {@code FAST}), drinks ({@code ALCOHOL}), minutes ({@code HEAT}); unused for walks
  * @param localHour  clock hour of the event on the user's own wall clock, fractional (10:30 = 10.5);
- *                   selects the morning or daytime carb ratio of a meal
+ *                   selects the meal window, and so the carb ratio, of a meal
  * @param fat        fatty meal: a share of its carbs absorbs on the slow curve
  * @param fruit      fruit: absorbs on the faster fruit curve
  * @param gi         glycemic index of the food or drink

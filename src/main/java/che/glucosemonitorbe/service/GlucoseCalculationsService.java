@@ -441,6 +441,7 @@ public class GlucoseCalculationsService {
         // The user's own ISF (for the meal window "now" falls in), carb ratio and insulin profile.
         EmpiricalTwinParams params = EmpiricalTwinParams.forUser(
                 userSettings.getEffectiveIsf(currentTime), userSettings.getEffectiveGramsPerUnit(currentTime),
+                userSettings.getEffectiveGramsPerUnitByWindow(currentTime),
                 rapidIob.diaHours(), rapidIob.peakMinutes());
         List<EmpiricalEvent> events = new ArrayList<>();
         carbsEntries.forEach(c -> events.add(EmpiricalEventMapper.carbs(c)));

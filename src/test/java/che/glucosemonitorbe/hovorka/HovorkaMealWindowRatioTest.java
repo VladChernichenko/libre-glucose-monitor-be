@@ -83,6 +83,91 @@ class HovorkaMealWindowRatioTest {
                 .isCloseTo(START, within(0.6));
     }
 
+    @ParameterizedTest(name = "{0}: ISF {2}, ratio {3}")
+    @CsvSource(nullValues = "none", value = {
+            "breakfast, 8,  1.50, 6.0",
+            "lunch,     12, 1.47, 12.0",
+            "dinner,    18, none, 8.0",
+            "night,     23, 1.88, none"})
+    void aMealPricedByItsWindowRatioLandsWhereItStarted(String w, int hour, Double isf, Double ratio) {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, hour, 0);
+        UserSettingsDTO settings = settings(isf, ratio);
+        double units = CARBS / (ratio != null ? ratio : GRAMS_PER_UNIT);
+
+        double landing = landing(settings, now, units, 0, 480);
+
+        assertThat(landing).as("%s: a window-ratio-priced meal must not move the landing", w)
+                .isCloseTo(START, within(0.6));
+    }
+
+    @Test
+    void aBreakfastMealIsSizedByIsfOverRatio() {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(1.5, 6.0)))
+                .isCloseTo(1.5 * 10.0 / 6.0, within(1e-9));
+    }
+
+    @Test
+    void aWindowOnlyRatioStillLandsWhereItStarted() {
+        // No single ratio, so A_G is the neutral magnitude; the calculator still prices breakfast at
+        // the breakfast ratio, and the forecast has to agree with that dose.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+        UserSettingsDTO settings = settings(null);
+        settings.setGramsPerUnit(null);
+        settings.setGramsPerUnitBreakfast(6.0);
+        params = withMealMagnitude(HovorkaParameterService.mealMagnitude(BASE_ISF, params.vG(), null));
+        double units = CARBS / 6.0;
+
+        double landing = landing(settings, now, units, 0, 480);
+
+        assertThat(landing).as("a meal priced by a window-only ratio must not move the landing")
+                .isCloseTo(START, within(0.6));
+    }
+
+    @Test
+    void aWindowOnlyRatioKeepsTheTwinMealScale() {
+        // A twin meal scale of 1.5 on the neutral A_G (no single ratio): the forecast's meal magnitude
+        // must be the window ratio's magnitude times that scale, not the scale cancelled out.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+        UserSettingsDTO settings = settings(null);
+        settings.setGramsPerUnit(null);
+        settings.setGramsPerUnitBreakfast(6.0);
+        HovorkaParameters twinned = withMealMagnitude(
+                1.5 * HovorkaParameterService.mealMagnitude(BASE_ISF, params.vG(), null));
+
+        double magnitude = twinned.aG() * HovorkaGlucosePredictionService.mealWindowFactor(now, twinned, settings);
+
+        assertThat(magnitude).isCloseTo(
+                1.5 * HovorkaParameterService.mealMagnitude(twinned.isf(), twinned.vG(), 6.0), within(1e-9));
+    }
+
+    @Test
+    void theFactorStaysClamped() {
+        // ISF part 1.5 alone is inside the bounds; only the ratio part (10 / 3) pushes it to 5.0.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(1.5, 3.0)))
+                .isEqualTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MAX);
+    }
+
+    @Test
+    void theFactorStaysClampedBelow() {
+        // 0.5 x 10 / 30 ≈ 0.167 -> 0.33.
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 8, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(0.5, 30.0)))
+                .isEqualTo(HovorkaGlucosePredictionService.MEAL_WINDOW_FACTOR_MIN);
+    }
+
+    @Test
+    void anUnusableWindowRatioLeavesOnlyTheIsfPart() {
+        LocalDateTime now = LocalDateTime.of(2026, 11, 17, 12, 0);
+
+        assertThat(HovorkaGlucosePredictionService.mealWindowFactor(now, params, settings(1.47, 2.0)))
+                .isCloseTo(1.47, within(1e-9));
+    }
+
     @Test
     void aLunchMealIsSizedByTheLunchIsf() {
         LocalDateTime now = LocalDateTime.of(2026, 11, 17, 12, 0);
@@ -123,6 +208,20 @@ class HovorkaMealWindowRatioTest {
     }
 
     // ---- helpers ---------------------------------------------------------------------------
+
+    private HovorkaParameters withMealMagnitude(double aG) {
+        return new HovorkaParameters(params.vG(), params.f01(), params.egpNet(), params.egp0(), params.k12(),
+                params.k21(), params.tMaxG(), aG, params.isf(), params.weightKg());
+    }
+
+    private static UserSettingsDTO settings(Double windowIsf, Double windowRatio) {
+        UserSettingsDTO s = settings(windowIsf);
+        s.setGramsPerUnitBreakfast(windowRatio);
+        s.setGramsPerUnitLunch(windowRatio);
+        s.setGramsPerUnitDinner(windowRatio);
+        s.setGramsPerUnitNight(windowRatio);
+        return s;
+    }
 
     private static UserSettingsDTO settings(Double windowIsf) {
         UserSettingsDTO s = new UserSettingsDTO();

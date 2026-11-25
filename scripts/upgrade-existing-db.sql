@@ -7,14 +7,22 @@
 -- columns added to V1 are missing, `flyway repair` alone only rewrites checksums,
 -- Hibernate `ddl-auto: validate` then refuses to start, and V16 needs pgvector.
 --
+-- It also covers the per-meal-window carb ratio columns added to V1 on
+-- feat/carb-ratio-meal-windows (user_settings.grams_per_unit_breakfast, _lunch,
+-- _dinner, _night). A database already at V22 (upgraded before, or created from
+-- the earlier V1) needs this script and `flyway repair` again before the app
+-- starts; Flyway then applies V23.
+--
 -- ORDER (do not skip or reorder):
---   1. BACK UP the database (pg_dump). V13 drops experiments, experiment_readings,
---      verification_events and verification_summary IRREVERSIBLY.
+--   1. BACK UP the database (pg_dump). From V12, V13 drops experiments,
+--      experiment_readings, verification_events and verification_summary
+--      IRREVERSIBLY.
 --   2. Run this script:   psql -v ON_ERROR_STOP=1 -d <db> -f scripts/upgrade-existing-db.sql
 --      (the server must have the pgvector extension available; the role must be
 --      allowed to CREATE EXTENSION).
 --   3. flyway repair      (accepts the new checksums of the edited V1, V4, V5, V6).
---   4. Start the app      (Flyway applies V13-V17, then Hibernate validates).
+--   4. Start the app      (Flyway applies the pending migrations - V13-V23 from V12,
+--      V23 from V22 - then Hibernate validates).
 --
 -- Idempotent: safe to run more than once. Covered by ExistingDbUpgradeIT.
 -- =============================================================================
@@ -28,7 +36,11 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,
     ADD COLUMN IF NOT EXISTS rescue_carbs_g      INTEGER          NOT NULL DEFAULT 15,
-    ADD COLUMN IF NOT EXISTS grams_per_unit      DOUBLE PRECISION;
+    ADD COLUMN IF NOT EXISTS grams_per_unit      DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS grams_per_unit_breakfast DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS grams_per_unit_lunch DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS grams_per_unit_dinner DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS grams_per_unit_night DOUBLE PRECISION;
 
 DO $$
 BEGIN
@@ -40,6 +52,58 @@ BEGIN
         ALTER TABLE user_settings
             ADD CONSTRAINT chk_user_settings_grams_per_unit
             CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_user_settings_gpu_breakfast'
+          AND conrelid = 'user_settings'::regclass
+    ) THEN
+        ALTER TABLE user_settings
+            ADD CONSTRAINT chk_user_settings_gpu_breakfast
+            CHECK (grams_per_unit_breakfast IS NULL OR (grams_per_unit_breakfast >= 3 AND grams_per_unit_breakfast <= 30));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_user_settings_gpu_lunch'
+          AND conrelid = 'user_settings'::regclass
+    ) THEN
+        ALTER TABLE user_settings
+            ADD CONSTRAINT chk_user_settings_gpu_lunch
+            CHECK (grams_per_unit_lunch IS NULL OR (grams_per_unit_lunch >= 3 AND grams_per_unit_lunch <= 30));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_user_settings_gpu_dinner'
+          AND conrelid = 'user_settings'::regclass
+    ) THEN
+        ALTER TABLE user_settings
+            ADD CONSTRAINT chk_user_settings_gpu_dinner
+            CHECK (grams_per_unit_dinner IS NULL OR (grams_per_unit_dinner >= 3 AND grams_per_unit_dinner <= 30));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_user_settings_gpu_night'
+          AND conrelid = 'user_settings'::regclass
+    ) THEN
+        ALTER TABLE user_settings
+            ADD CONSTRAINT chk_user_settings_gpu_night
+            CHECK (grams_per_unit_night IS NULL OR (grams_per_unit_night >= 3 AND grams_per_unit_night <= 30));
     END IF;
 END $$;
 

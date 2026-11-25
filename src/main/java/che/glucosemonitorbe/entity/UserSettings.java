@@ -31,6 +31,22 @@ public class UserSettings {
     /** Insulin-to-carb ratio: grams of carbohydrate covered by 1 unit. New rows default to 5. */
     @Column(name = "grams_per_unit")
     private Double gramsPerUnit = 5.0;
+
+    /** g/U override for 05:00-11:00. NULL = use {@link #gramsPerUnit}. */
+    @Column(name = "grams_per_unit_breakfast")
+    private Double gramsPerUnitBreakfast;
+
+    /** g/U override for 11:00-16:00. NULL = use {@link #gramsPerUnit}. */
+    @Column(name = "grams_per_unit_lunch")
+    private Double gramsPerUnitLunch;
+
+    /** g/U override for 16:00-22:00. NULL = use {@link #gramsPerUnit}. */
+    @Column(name = "grams_per_unit_dinner")
+    private Double gramsPerUnitDinner;
+
+    /** g/U override for 22:00-05:00. NULL = use {@link #gramsPerUnit}. */
+    @Column(name = "grams_per_unit_night")
+    private Double gramsPerUnitNight;
     
     @Column(name = "isf", nullable = false)
     private Double isf = 1.0;

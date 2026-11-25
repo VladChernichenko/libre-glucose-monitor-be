@@ -26,18 +26,22 @@ import java.util.*;
 /**
  * Computes observational per-meal-window ISF estimates from each user's historical bolus
  * events + CGM trace. Snapshots are cached in {@code isf_meal_window_snapshots} and refreshed
- * by a daily scheduler and on every new bolus.
+ * by the nightly scheduler (02:00 UTC) and the manual {@code POST /api/isf/meal-windows/recompute};
+ * there is no on-bolus refresh.
  *
  * <h3>Algorithm (per bolus B at time t_B)</h3>
  * <ol>
  *   <li>Define the analysis window {@code [t_B, t_B + DIA]} (user's rapid-acting DIA, typ. 4.5 h).</li>
  *   <li>Read CGM at t_B (baseline) and at t_B + DIA (post). Skip if either is missing.</li>
- *   <li>Estimate ISF from the observed change and the insulin-to-carb ratio (grams per unit):
+ *   <li>Estimate ISF from the observed change and the insulin-to-carb ratio (grams per unit) of the
+ *       bolus's meal window ({@link UserSettingsDTO#getWindowGramsPerUnit}):
  *       {@code ISF = observedDelta / (absorbedGrams / ICR - units)}, where {@code units} includes the
  *       insulin still on board from earlier boluses and {@code absorbedGrams} the carbs still on
  *       board from earlier meals. No estimate when the denominator is under
  *       {@link #MIN_NET_UNITS} or the ICR is missing.</li>
- *   <li>Weight: 1.0 if no carbs nearby (correction bolus), else 0.4 (deconvolved meal bolus).</li>
+ *   <li>Learn from corrections only: a bolus whose carbs in the envelope plus carbs still on board
+ *       reach {@link #CARB_THRESHOLD_GRAMS} gives no estimate (the ratio is learned from meals
+ *       separately); every surviving estimate weighs {@link #WEIGHT_CORRECTION}.</li>
  *   <li>Bucket by {@link MealWindow#fromTimestamp(LocalDateTime)} (full 24h: B/L/D/NIGHT).</li>
  * </ol>
  *
@@ -62,9 +66,6 @@ public class IsfMealWindowProfileService {
 
     /** Weight applied to a correction bolus (no significant carbs nearby). */
     public static final double WEIGHT_CORRECTION = 1.0;
-
-    /** Weight applied to a meal-attached bolus (lower trust - depends on user's CR). */
-    public static final double WEIGHT_MEAL = 0.4;
 
     /** A bolus is treated as "correction" when nearby carbs (±2 h around t_B) sum below this. */
     public static final double CARB_THRESHOLD_GRAMS = 10.0;
@@ -134,7 +135,7 @@ public class IsfMealWindowProfileService {
 
     /**
      * Recomputes all meal-window snapshots from scratch for the user and persists them.
-     * Idempotent - safe to call from both the daily scheduler and an on-bolus hook.
+     * Idempotent - safe to call from both the nightly scheduler and the manual recompute endpoint.
      */
     @Transactional
     public IsfMealWindowProfileResponse recomputeForUser(UUID userId) {
@@ -157,8 +158,6 @@ public class IsfMealWindowProfileService {
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, since, now);
         List<CgmReading> cgmReadings = loadCgmReadings(userId, since);
 
-        Double gramsPerUnit = userSettings == null ? null : userSettings.getGramsPerUnit();
-
         List<EventEstimate> estimates = new ArrayList<>();
         int candidates = 0;
         int rejectedNoCgm = 0;
@@ -172,7 +171,7 @@ public class IsfMealWindowProfileService {
                     && userSettings.getSickProfile().excludedFromLearning(bolus.getTimestamp())) continue;
             candidates++;
 
-            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings, gramsPerUnit,
+            EventEstimate est = estimateForBolus(bolus, notes, cgmReadings, rapid, userSettings,
                     userZone, curveByCode);
             if (est != null) {
                 estimates.add(est);
@@ -274,9 +273,8 @@ public class IsfMealWindowProfileService {
             List<CgmReading> cgmReadings,
             RapidInsulinIobParameters rapid,
             UserSettingsDTO userSettings,
-            Double gramsPerUnit,
             ZoneId userZone) {
-        return estimateForBolus(bolus, allNotes, cgmReadings, rapid, userSettings, gramsPerUnit,
+        return estimateForBolus(bolus, allNotes, cgmReadings, rapid, userSettings,
                 userZone, code -> rapid);
     }
 
@@ -290,7 +288,6 @@ public class IsfMealWindowProfileService {
             List<CgmReading> cgmReadings,
             RapidInsulinIobParameters rapid,
             UserSettingsDTO userSettings,
-            Double gramsPerUnit,
             ZoneId userZone,
             java.util.function.Function<String, RapidInsulinIobParameters> curveByCode) {
 
@@ -362,6 +359,14 @@ public class IsfMealWindowProfileService {
         // Carbs that remained un-absorbed at tEnd don't contribute to the observed Δglucose.
         double cobAtEnd = carbsOnBoardService.calculateTotalCarbsOnBoard(carbEntries, tEnd, userSettings);
         double absorbedGrams = Math.max(0.0, carbsGrams + priorCobAtStart - cobAtEnd);
+        // Learn from corrections only: a meal bolus mixes ISF with the ratio, which is learned separately.
+        if (carbsGrams + priorCobAtStart >= CARB_THRESHOLD_GRAMS) {
+            return null;
+        }
+        if (userSettings == null) {
+            return null;
+        }
+        Double gramsPerUnit = userSettings.getWindowGramsPerUnit(t0);
         if (gramsPerUnit == null || !Double.isFinite(gramsPerUnit)
                 || gramsPerUnit < MIN_GRAMS_PER_UNIT || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
             return null;
@@ -378,7 +383,7 @@ public class IsfMealWindowProfileService {
         if (Double.isNaN(isf) || Double.isInfinite(isf)) return null;
         if (isf < MIN_PLAUSIBLE_ISF || isf > MAX_PLAUSIBLE_ISF) return null;
 
-        double weight = (carbsGrams + priorCobAtStart < CARB_THRESHOLD_GRAMS) ? WEIGHT_CORRECTION : WEIGHT_MEAL;
+        double weight = WEIGHT_CORRECTION;
         // Bucket on the note LocalDateTime hour (device/JVM wall of the timestamptz Instant).
         // Remapping through user_settings.timezone when it disagrees with the device zone (e.g.
         // settings Europe/Moscow vs notes written in Asia/Tbilisi) shifts boundary hours into the
@@ -398,7 +403,7 @@ public class IsfMealWindowProfileService {
      * @param target a bolus time (or bolus + DIA) from {@code notes.timestamp} — see
      *               {@link #noteTimestampToEpochMs}
      */
-    Double nearestCgmMmol(List<CgmReading> readings, LocalDateTime target) {
+    static Double nearestCgmMmol(List<CgmReading> readings, LocalDateTime target) {
         if (readings == null || readings.isEmpty() || target == null) return null;
         long targetEpochMs = noteTimestampToEpochMs(target);
         long bestDelta = Long.MAX_VALUE;
@@ -421,7 +426,7 @@ public class IsfMealWindowProfileService {
         return sgv / 18.0182;
     }
 
-    private che.glucosemonitorbe.domain.CarbsEntry buildCarbsEntry(Note n) {
+    static che.glucosemonitorbe.domain.CarbsEntry buildCarbsEntry(Note n) {
         che.glucosemonitorbe.domain.CarbsEntry e = che.glucosemonitorbe.domain.CarbsEntry.builder()
                 .id(n.getId())
                 .timestamp(n.getTimestamp())

@@ -1,5 +1,9 @@
 package che.glucosemonitorbe.empirical;
 
+import che.glucosemonitorbe.domain.MealWindow;
+
+import java.util.Map;
+
 /**
  * Parameters of the empirical twin (model v2.4). Units are the model's own: mg/dL, grams,
  * insulin units, minutes. {@link #defaults()} mirrors {@code specs/twin-port/params.json}, which
@@ -10,8 +14,10 @@ package che.glucosemonitorbe.empirical;
  * user's settings.</p>
  *
  * @param isf          insulin sensitivity [mg/dL per U]
- * @param crAM         carb ratio for meals logged 05:00-11:00 local [g per U]
- * @param crDay        carb ratio for the rest of the day [g per U]
+ * @param crBreakfast  carb ratio for meals logged 05:00-11:00 local [g per U]
+ * @param crLunch      carb ratio for meals logged 11:00-16:00 local [g per U]
+ * @param crDinner     carb ratio for meals logged 16:00-22:00 local [g per U]
+ * @param crNight      carb ratio for meals logged 22:00-05:00 local [g per U]
  * @param csf          fast-sugar rise [mg/dL per g]
  * @param dia          rapid-insulin duration of action [min]
  * @param peak         rapid-insulin activity peak [min]
@@ -32,8 +38,10 @@ package che.glucosemonitorbe.empirical;
  */
 public record EmpiricalTwinParams(
         double isf,
-        double crAM,
-        double crDay,
+        double crBreakfast,
+        double crLunch,
+        double crDinner,
+        double crNight,
         double csf,
         double dia,
         double peak,
@@ -55,7 +63,7 @@ public record EmpiricalTwinParams(
     /** The v2.4 values of {@code params.json}. */
     public static EmpiricalTwinParams defaults() {
         return new EmpiricalTwinParams(
-                27, 7, 10, 3.1,
+                27, 7, 10, 10, 10, 3.1,
                 240, 55,
                 35, 12, 18,
                 0.5, 0, 1,
@@ -64,40 +72,71 @@ public record EmpiricalTwinParams(
                 40, 0);
     }
 
-    /**
-     * {@link #defaults()} with the dosing parameters replaced by the user's own: ISF, carb ratio and
-     * the action profile of their rapid insulin. The defaults for those were one person's values,
-     * and a forecast drawn with them for anyone else is off by the ratio of the two sensitivities.
-     *
-     * <p>A missing or implausible input keeps the default for that parameter. One carb ratio is
-     * used for the whole day - settings carry no morning ratio - and the fast-sugar rise follows
-     * from the other two as {@code isf / carbRatio}. The shape parameters (absorption times, GI
-     * exponents, walk and alcohol effects) are not personal settings and stay at their defaults.</p>
-     *
-     * @param isfMmolPerUnit ISF [mmol/L per U], or null
-     * @param gramsPerUnit   carb ratio [g per U], or null
-     * @param diaHours       rapid-insulin duration of action [h]
-     * @param peakMinutes    rapid-insulin activity peak [min]
-     */
+    /** The carb ratio for a meal at {@code localHour}: that clock hour's meal window, lunch's if none. */
+    public double crAt(double localHour) {
+        MealWindow w = MealWindow.fromHour((int) Math.floor(localHour)).orElse(MealWindow.LUNCH);
+        return switch (w) {
+            case BREAKFAST -> crBreakfast;
+            case LUNCH -> crLunch;
+            case DINNER -> crDinner;
+            case NIGHT -> crNight;
+        };
+    }
+
+    /** {@link #forUser(Double, Double, Map, double, double)} with one carb ratio for every window. */
     public static EmpiricalTwinParams forUser(Double isfMmolPerUnit, Double gramsPerUnit,
                                               double diaHours, double peakMinutes) {
+        return forUser(isfMmolPerUnit, gramsPerUnit, Map.of(), diaHours, peakMinutes);
+    }
+
+    /**
+     * {@link #defaults()} with the dosing parameters replaced by the user's own: ISF, carb ratio per
+     * meal window and the action profile of their rapid insulin. The defaults for those were one
+     * person's values, and a forecast drawn with them for anyone else is off by the ratio of the two
+     * sensitivities.
+     *
+     * <p>A missing or implausible input keeps the default for that parameter. Each window takes its
+     * own ratio from {@code windowGramsPerUnit}, else the single {@code gramsPerUnit}, else its
+     * default; the fast-sugar rise follows from the other two as {@code isf / gramsPerUnit}. The
+     * shape parameters (absorption times, GI exponents, walk and alcohol effects) are not personal
+     * settings and stay at their defaults.</p>
+     *
+     * @param isfMmolPerUnit     ISF [mmol/L per U], or null
+     * @param gramsPerUnit       single carb ratio [g per U], or null
+     * @param windowGramsPerUnit per-window carb ratios [g per U]; absent or implausible windows fall back
+     * @param diaHours           rapid-insulin duration of action [h]
+     * @param peakMinutes        rapid-insulin activity peak [min]
+     */
+    public static EmpiricalTwinParams forUser(Double isfMmolPerUnit, Double gramsPerUnit,
+                                              Map<MealWindow, Double> windowGramsPerUnit,
+                                              double diaHours, double peakMinutes) {
         EmpiricalTwinParams d = defaults();
+        Map<MealWindow, Double> byWindow = windowGramsPerUnit == null ? Map.of() : windowGramsPerUnit;
         boolean hasIsf = isfMmolPerUnit != null && Double.isFinite(isfMmolPerUnit) && isfMmolPerUnit > 0;
-        boolean hasCr  = gramsPerUnit != null && Double.isFinite(gramsPerUnit)
-                && gramsPerUnit >= 3.0 && gramsPerUnit <= 30.0;
+        boolean hasCr  = plausibleCr(gramsPerUnit);
         double isf  = hasIsf ? isfMmolPerUnit * EmpiricalTwinEngine.MGDL_PER_MMOL : d.isf();
-        double crAM = hasCr ? gramsPerUnit : d.crAM();
-        double crDay = hasCr ? gramsPerUnit : d.crDay();
-        double csf  = hasIsf || hasCr ? isf / crDay : d.csf();
+        double crBreakfast = windowCr(byWindow.get(MealWindow.BREAKFAST), gramsPerUnit, d.crBreakfast());
+        double crLunch     = windowCr(byWindow.get(MealWindow.LUNCH), gramsPerUnit, d.crLunch());
+        double crDinner    = windowCr(byWindow.get(MealWindow.DINNER), gramsPerUnit, d.crDinner());
+        double crNight     = windowCr(byWindow.get(MealWindow.NIGHT), gramsPerUnit, d.crNight());
+        double csf  = hasIsf || hasCr ? isf / (hasCr ? gramsPerUnit : 10.0) : d.csf();
         double dia  = Double.isFinite(diaHours) && diaHours > 0 ? diaHours * 60.0 : d.dia();
         double peak = Double.isFinite(peakMinutes) && peakMinutes > 0 ? peakMinutes : d.peak();
         return new EmpiricalTwinParams(
-                isf, crAM, crDay, csf,
+                isf, crBreakfast, crLunch, crDinner, crNight, csf,
                 dia, peak,
                 d.kMeal(), d.kFast(), d.kFruit(),
                 d.giPow(), d.giMag(), d.oneU(),
                 d.kSlow(), d.fatSlow(),
                 d.walkBoost(), d.walkDrop(), d.walkDropTail(), d.walkTail(),
                 d.alcDrop(), d.drift());
+    }
+
+    private static boolean plausibleCr(Double v) {
+        return v != null && Double.isFinite(v) && v >= 3.0 && v <= 30.0;
+    }
+
+    private static double windowCr(Double windowValue, Double single, double fallback) {
+        return plausibleCr(windowValue) ? windowValue : plausibleCr(single) ? single : fallback;
     }
 }

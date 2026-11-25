@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
     user_id             UUID             NOT NULL UNIQUE,
     carb_ratio          DOUBLE PRECISION NOT NULL DEFAULT 2.0,
     grams_per_unit      DOUBLE PRECISION,                        -- explicit g/U meal ratio; NULL = derive 10 * isf / carb_ratio
+    grams_per_unit_breakfast DOUBLE PRECISION,                        -- g/U override for 05:00-11:00; NULL = use grams_per_unit
+    grams_per_unit_lunch     DOUBLE PRECISION,                        -- g/U override for 11:00-16:00; NULL = use grams_per_unit
+    grams_per_unit_dinner    DOUBLE PRECISION,                        -- g/U override for 16:00-22:00; NULL = use grams_per_unit
+    grams_per_unit_night     DOUBLE PRECISION,                        -- g/U override for 22:00-05:00; NULL = use grams_per_unit
     isf                 DOUBLE PRECISION NOT NULL DEFAULT 1.0,
     carb_half_life      INTEGER          NOT NULL DEFAULT 45,
     max_cob_duration    INTEGER          NOT NULL DEFAULT 240,
@@ -62,6 +66,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
     CONSTRAINT fk_user_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT chk_user_settings_carb_ratio_positive CHECK (carb_ratio > 0),
     CONSTRAINT chk_user_settings_grams_per_unit CHECK (grams_per_unit IS NULL OR (grams_per_unit >= 3 AND grams_per_unit <= 30)),
+    CONSTRAINT chk_user_settings_gpu_breakfast CHECK (grams_per_unit_breakfast IS NULL OR (grams_per_unit_breakfast >= 3 AND grams_per_unit_breakfast <= 30)),
+    CONSTRAINT chk_user_settings_gpu_lunch CHECK (grams_per_unit_lunch IS NULL OR (grams_per_unit_lunch >= 3 AND grams_per_unit_lunch <= 30)),
+    CONSTRAINT chk_user_settings_gpu_dinner CHECK (grams_per_unit_dinner IS NULL OR (grams_per_unit_dinner >= 3 AND grams_per_unit_dinner <= 30)),
+    CONSTRAINT chk_user_settings_gpu_night CHECK (grams_per_unit_night IS NULL OR (grams_per_unit_night >= 3 AND grams_per_unit_night <= 30)),
     CONSTRAINT chk_user_settings_weight_positive CHECK (body_weight_kg IS NULL OR body_weight_kg > 0),
     CONSTRAINT chk_user_settings_isf_breakfast_positive CHECK (isf_breakfast IS NULL OR isf_breakfast > 0),
     CONSTRAINT chk_user_settings_isf_lunch_positive CHECK (isf_lunch IS NULL OR isf_lunch > 0),

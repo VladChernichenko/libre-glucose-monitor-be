@@ -723,26 +723,48 @@ public class HovorkaGlucosePredictionService {
     static final double MEAL_WINDOW_FACTOR_MAX = 3.0;
 
     /**
-     * Sizes a meal by the ISF of its own meal window. {@code A_G} makes {@code gramsPerUnit} grams
-     * raise glucose as much as one unit lowers it at the user's base ISF, but a dose acts at the
-     * ISF of the window it is taken in. With a window override that differs from the base, a meal
-     * dosed exactly by the ratio then forecast a large low (lunch ISF 1.47 vs base 1.0: every
-     * ratio-priced lunch dose looked ~47% too big). Scaling each meal by window ISF / base ISF
-     * keeps "gramsPerUnit grams per unit" true at the time the meal is eaten.
+     * Sizes a meal by the ISF and carb ratio of its own meal window. {@code A_G} makes the single
+     * {@code gramsPerUnit} grams raise glucose as much as one unit lowers it at the base ISF, but a
+     * dose acts at the ISF of the window it is taken in and is priced by that window's ratio. The
+     * factor is (window ISF / base ISF) x (single ratio / window ratio), so a meal dosed exactly by
+     * its window's ratio forecasts flat (lunch ISF 1.47 vs base 1.0 used to make every ratio-priced
+     * lunch dose look ~47% too big; a breakfast ratio of 6 g/U vs 10 g/U means less carb per unit,
+     * i.e. the meal pushes glucose up 10/6 times as much per gram).
      *
-     * <p>The window ISF excludes the illness multiplier and the twin's ISF scale: illness changes
-     * how insulin acts, not how much glucose a gram of carbs adds. 1.0 when the ratio did not
-     * shape {@code A_G} (no usable grams-per-unit) or either ISF is unusable.</p>
+     * <p>Neither the illness multiplier nor the twin's scales enter: illness changes how insulin
+     * acts, not how much glucose a gram of carbs adds. When the single ratio did not shape
+     * {@code A_G} (no usable grams-per-unit) but the window ratio is usable - the calculator then
+     * prices the meal by the window ratio alone - the ratio part sizes the meal from the window
+     * ratio itself: {@code mealMagnitude(baseIsf, VG, windowRatio)} over the raw (un-twinned)
+     * {@code A_G} a missing ratio gives, so a twin meal scale in {@code p.aG()} stays a multiplier.
+     * The whole factor is 1.0 when neither ratio is usable; an unusable window ISF or window ratio
+     * otherwise drops only its own part. The result is clamped to [{@link #MEAL_WINDOW_FACTOR_MIN},
+     * {@link #MEAL_WINDOW_FACTOR_MAX}].</p>
      */
     static double mealWindowFactor(LocalDateTime mealTime, HovorkaParameters p, UserSettingsDTO settings) {
         if (settings == null || mealTime == null) return 1.0;
-        if (!HovorkaParameterService.usableGramsPerUnit(settings.getGramsPerUnit())) return 1.0;
-        Double window = settings.getWindowIsf(mealTime);
+        Double single = settings.getGramsPerUnit();
+        boolean singleUsable = HovorkaParameterService.usableGramsPerUnit(single);
+        Double windowRatio = settings.getWindowGramsPerUnit(mealTime);
+        boolean windowUsable = HovorkaParameterService.usableGramsPerUnit(windowRatio);
+        if (!singleUsable && !windowUsable) return 1.0;
+        double isfPart = 1.0;
+        Double windowIsf = settings.getWindowIsf(mealTime);
         double base = p.isf();
-        if (window == null || !Double.isFinite(window) || window <= 0 || !Double.isFinite(base) || base <= 0) {
-            return 1.0;
+        if (windowIsf != null && Double.isFinite(windowIsf) && windowIsf > 0
+                && Double.isFinite(base) && base > 0) {
+            isfPart = windowIsf / base;
         }
-        return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, window / base));
+        double ratioPart = 1.0;
+        if (singleUsable && windowUsable) {
+            ratioPart = single / windowRatio;
+        } else if (windowUsable) {
+            // Against the raw A_G a missing ratio gives, not p.aG(): that carries the twin's meal scale,
+            // which has to stay a multiplier here as it does when the single ratio is usable.
+            ratioPart = HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), windowRatio)
+                    / HovorkaParameterService.mealMagnitude(p.isf(), p.vG(), null);
+        }
+        return Math.max(MEAL_WINDOW_FACTOR_MIN, Math.min(MEAL_WINDOW_FACTOR_MAX, isfPart * ratioPart));
     }
 
     /**
