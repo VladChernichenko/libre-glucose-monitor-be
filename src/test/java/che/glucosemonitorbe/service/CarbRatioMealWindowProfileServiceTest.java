@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.domain.CarbRatioMealWindowSnapshot;
+import che.glucosemonitorbe.domain.CarbsEntry;
 import che.glucosemonitorbe.domain.CgmReading;
 import che.glucosemonitorbe.domain.MealWindow;
 import che.glucosemonitorbe.dto.CarbRatioWindowEstimate;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -33,6 +35,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.offset;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -166,6 +169,36 @@ class CarbRatioMealWindowProfileServiceTest {
         CarbRatioMealWindowSnapshot breakfast = captureSavedSnapshot(MealWindow.BREAKFAST);
         assertThat(breakfast.getSampleCount()).isEqualTo(3);
         assertThat(breakfast.getGramsPerUnit()).isCloseTo(9.375, offset(1e-9));
+    }
+
+    @Test
+    @DisplayName("Carbs still on board from an earlier meal count in; carbs left at the end count out")
+    void priorAndRemainingCobAreCounted() {
+        // 30 g + 3 U at 05:00 (START - 3 h: before the carb window, and skipped as its own event because
+        // the 08:00 meal lands inside its insulin window), then 60 g + 6 U at 08:00, flat CGM.
+        // COB of the 05:00 meal at 08:00 = 20 g; COB of both meals at 08:00 + DIA = 5 g.
+        List<Note> notes = new ArrayList<>();
+        List<CgmReading> cgm = new ArrayList<>();
+        for (int d = 0; d < DAYS; d++) {
+            LocalDateTime start = day(d, 8, 0);
+            LocalDateTime tEnd = start.plusMinutes(DIA_MIN);
+            notes.add(bolusWithCarbs(start.minusHours(3), 3.0, 30.0));
+            notes.add(bolusWithCarbs(start, 6.0, 60.0));
+            cgm.addAll(cgmAround(start, 7.0, 7.0));
+            when(carbsOnBoardService.calculateTotalCarbsOnBoard(
+                    argThat(carbsOf(30.0)), eq(start), any(UserSettingsDTO.class))).thenReturn(20.0);
+            when(carbsOnBoardService.calculateTotalCarbsOnBoard(
+                    argThat(carbsOf(60.0, 30.0)), eq(tEnd), any(UserSettingsDTO.class))).thenReturn(5.0);
+        }
+        stub(notes, cgm);
+
+        service.recomputeForUser(userId);
+
+        double priorIob = InsulinCalculatorService.iobOpenApsExponential(3.0, 180, 4.5, 75);
+        double expected = (60.0 + 20.0 - 5.0) / (6.0 + priorIob);
+        CarbRatioMealWindowSnapshot breakfast = captureSavedSnapshot(MealWindow.BREAKFAST);
+        assertThat(breakfast.getSampleCount()).isEqualTo(3);
+        assertThat(breakfast.getGramsPerUnit()).isCloseTo(expected, offset(1e-6));
     }
 
     @Test
@@ -480,6 +513,12 @@ class CarbRatioMealWindowProfileServiceTest {
                 .thenReturn(notes);
         when(cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(eq(userId), any()))
                 .thenReturn(cgm);
+    }
+
+    /** Matches a COB call over exactly these carb entries, in this order. */
+    private static ArgumentMatcher<List<CarbsEntry>> carbsOf(Double... grams) {
+        return entries -> entries != null
+                && entries.stream().map(CarbsEntry::getCarbs).toList().equals(List.of(grams));
     }
 
     private CarbRatioMealWindowSnapshot captureSavedSnapshot(MealWindow window) {
