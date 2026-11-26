@@ -2,6 +2,7 @@ package che.glucosemonitorbe.service;
 
 import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.entity.UserDigitalTwin;
+import che.glucosemonitorbe.hovorka.AbsorptionModel;
 import che.glucosemonitorbe.hovorka.ActivityGains;
 import che.glucosemonitorbe.hovorka.learning.PredictionUncertaintyModel;
 import che.glucosemonitorbe.hovorka.learning.ResidualBiasModel;
@@ -22,6 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Only twins whose {@code applied} flag is set (i.e. they beat the un-calibrated model
  * out-of-sample) are returned; everything else resolves to neutral so predictions are unchanged.
+ * A twin fitted under a different meal-absorption model than the forecast runs
+ * ({@link AbsorptionModel}) resolves to neutral too, activity gains included.
  * The whole thing is gated by the {@code digital-twin-enabled} feature flag.</p>
  */
 @Slf4j
@@ -96,7 +99,11 @@ public class DigitalTwinService {
     private Cached load(UUID userId) {
         UserDigitalTwin twin = repository.findByUserId(userId).orElse(null);
         long expiry = System.currentTimeMillis() + CACHE_TTL_MS;
-        if (twin == null) {
+        // A twin fitted under the other meal-absorption model corrects errors this forecast does not
+        // have (its meal scale, residual grid and activity gains were all fitted through replays of
+        // that model): treat it as no twin until the nightly refit under the current model.
+        if (twin == null || AbsorptionModel.parse(twin.getAbsorptionModel())
+                != AbsorptionModel.of(featureToggleConfig.isGammaAbsorptionEnabled())) {
             return new Cached(TwinScales.neutral(), ResidualBiasModel.neutral(),
                     PredictionUncertaintyModel.populationDefault(), false, null, expiry);
         }
