@@ -231,16 +231,84 @@ class CarbAdviceServiceTest {
 
     @Test
     void fastCarbsMoreThan15MinAgoDoNotBlockGrams() {
-        // A normal meal note inside the window is not fast carbs, and the repository window is [now-15, now].
+        // A normal meal note is not fast carbs, and fast carbs 16 min ago are past the landing window.
+        // The meal puts the user in meal context, so the low needs a CGM-confirmed fall (trend -0.15).
         when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any()))
-                .thenReturn(List.of(new Note(USER, NOW.minusMinutes(5), 40.0, 4.0, "Dinner")));
+                .thenReturn(List.of(new Note(USER, NOW.minusMinutes(5), 40.0, 4.0, "Dinner"),
+                        fastCarbsAt(NOW.minusMinutes(16), 15.0)));
 
-        CarbAdvice advice = service.evaluate(USER, NOW, 6.0, 0.0, vShape(6.0, 3.4, 45)).orElseThrow();
+        CarbAdvice advice = service.evaluate(USER, NOW, 6.0, -0.15, vShape(6.0, 3.4, 45)).orElseThrow();
 
         assertThat(advice.state()).isEqualTo(CarbAdvice.State.TAKE_NOW);
         ArgumentCaptor<LocalDateTime> from = ArgumentCaptor.forClass(LocalDateTime.class);
         verify(notes).findByUserIdAndTimestampBetween(eq(USER), from.capture(), eq(NOW));
-        assertThat(from.getValue()).isEqualTo(NOW.minusMinutes(15));
+        assertThat(from.getValue()).as("one query covering the 4 h meal window").isEqualTo(NOW.minusHours(4));
+    }
+
+    // -- meal-context guard ------------------------------------------------------------------
+
+    /** 5-minute grid from {@code at} + 5 to + 240 min, glucose = f(minute). */
+    private static List<PredictionPointDTO> pathAt(LocalDateTime at, IntToDoubleFunction f) {
+        List<PredictionPointDTO> out = new ArrayList<>();
+        for (int m = 5; m <= 240; m += 5) {
+            out.add(PredictionPointDTO.builder().timestamp(at.plusMinutes(m)).predictedGlucose(f.applyAsDouble(m)).build());
+        }
+        return out;
+    }
+
+    /** A forecast that falls from {@code start} to 1.0 by +55 min (the 2026-11-19 dinner forecasts). */
+    private static List<PredictionPointDTO> toOneAt(LocalDateTime at, double start) {
+        return pathAt(at, m -> m <= 55 ? start - (start - 1.0) * m / 55 : 1.0);
+    }
+
+    /** The 2026-11-19 dinner: 8 U pre-bolus, then a potato 14 min later. */
+    private void dinnerOf2026_11_19() {
+        LocalDateTime bolus = LocalDateTime.of(2026, 11, 19, 19, 30);
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(
+                new Note(USER, bolus, 0.0, 8.0, "Pre-bolus"),
+                new Note(USER, bolus.plusMinutes(14), 26.0, 0.0, "fried potato")));
+    }
+
+    @Test
+    void dinnerOf2026_11_19GetsNoAdviceWhileTheCgmHoldsUp() {
+        LocalDateTime at = LocalDateTime.of(2026, 11, 19, 20, 5);
+        dinnerOf2026_11_19();
+        freshReadingAt(READING_0, 6.2);
+
+        assertThat(service.evaluate(USER, at, 6.2, 0.0, toOneAt(at, 6.2))).isEmpty();
+        verify(calculations, never()).calculateGlucoseData(any());
+    }
+
+    @Test
+    void aMealContextLowAtOrUnder5_5IsStillAdvised() {
+        // The confirmation reading is 5.5 (tuned for safety), so the 19:53 forecast at 5.4 still fires.
+        LocalDateTime at = LocalDateTime.of(2026, 11, 19, 19, 53);
+        dinnerOf2026_11_19();
+        freshReadingAt(READING_0, 5.4);
+
+        assertThat(service.evaluate(USER, at, 5.4, 0.0, toOneAt(at, 5.4))).isPresent();
+    }
+
+    @Test
+    void guardHoldsAcrossAMealLoggedInParts() {
+        LocalDateTime at = LocalDateTime.of(2026, 11, 19, 20, 15);
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(
+                new Note(USER, LocalDateTime.of(2026, 11, 19, 19, 44), 26.0, 0.0, "fried potato"),
+                new Note(USER, LocalDateTime.of(2026, 11, 19, 20, 3), 11.0, 0.0, "salad")));
+        freshReadingAt(READING_0, 6.6);
+
+        assertThat(service.evaluate(USER, at, 6.6, 0.0, toOneAt(at, 6.6))).isEmpty();
+    }
+
+    @Test
+    void heldAdviceIsNotWithdrawnByTheGuard() {
+        // Outside meal context the forecast-only low triggers and the card is held.
+        assertThat(service.evaluate(USER, NOW, 6.0, 0.0, vShape(6.0, 3.4, 45))).isPresent();
+
+        // A meal is logged; the same reading (no new CGM data) must not withdraw the held card.
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any()))
+                .thenReturn(List.of(new Note(USER, NOW.minusMinutes(1), 40.0, 0.0, "Dinner")));
+        assertThat(service.evaluate(USER, NOW.plusMinutes(1), 6.0, 0.0, vShape(6.0, 3.4, 45))).isPresent();
     }
 
     @Test
