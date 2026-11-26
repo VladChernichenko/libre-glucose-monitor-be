@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS user_digital_twin (
     activity_applied             BOOLEAN          NOT NULL DEFAULT FALSE,
     activity_samples             INTEGER          NOT NULL DEFAULT 0,
 
+    -- Meal-absorption model the twin was fitted under: DALLA_MAN or GAMMA (NULL = DALLA_MAN).
+    absorption_model  VARCHAR(16),
+
     fitted_at         TIMESTAMPTZ,
     created_at        TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
@@ -66,5 +69,7 @@ COMMENT ON COLUMN user_digital_twin.activity_tail_half_life_min IS
     'Half-life [min] of the post-exercise sensitivity tail (120 = population default). Only used when activity_applied is TRUE.';
 COMMENT ON COLUMN user_digital_twin.activity_applied IS
     'TRUE when the fitted activity gains beat the population defaults on the held-out validation window. Independent of `applied`.';
+COMMENT ON COLUMN user_digital_twin.absorption_model IS
+    'Meal-absorption model the twin was fitted under (DALLA_MAN or GAMMA; NULL = DALLA_MAN). The twin is not applied while the forecast runs a different model.';
 COMMENT ON COLUMN user_digital_twin.activity_samples IS
     'Number of logged activity notes in the training window the activity gains were fitted on.';

@@ -368,6 +368,8 @@ public class DigitalTwinCalibrationService {
         twin.setActivityTailHalfLifeMin(gains.tailHalfLifeMin());
         twin.setActivityApplied(activityFit != null && activityFit.applied());
         twin.setActivitySamples(activityFit != null ? activityFit.activityCount() : 0);
+        twin.setAbsorptionModel(
+                che.glucosemonitorbe.hovorka.AbsorptionModel.of(featureToggleConfig.isGammaAbsorptionEnabled()).name());
         twin.setFittedAt(now);
 
         twinRepository.save(twin);

@@ -184,6 +184,10 @@ ALTER TABLE user_digital_twin
     ADD COLUMN IF NOT EXISTS activity_applied            BOOLEAN          NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS activity_samples            INTEGER          NOT NULL DEFAULT 0;
 
+-- user_digital_twin: meal-absorption model the twin was fitted under (V8)
+ALTER TABLE user_digital_twin
+    ADD COLUMN IF NOT EXISTS absorption_model VARCHAR(16);
+
 -- clinical_knowledge_chunk: clinical library columns, upsert key and vector index (V1 on this branch)
 ALTER TABLE clinical_knowledge_chunk
     ADD COLUMN IF NOT EXISTS embedding     vector(1536),

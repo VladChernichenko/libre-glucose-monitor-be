@@ -63,6 +63,13 @@ public class UserDigitalTwin {
     @Builder.Default @Column(name = "activity_samples", nullable = false)
     private Integer activitySamples = 0;
 
+    /**
+     * Meal-absorption model the twin was fitted under ({@code DALLA_MAN} or {@code GAMMA}); null =
+     * fitted before it was recorded, i.e. Dalla Man. A twin is not applied under another model.
+     */
+    @Column(name = "absorption_model", length = 16)
+    private String absorptionModel;
+
     // -- Fit diagnostics (out-of-sample) ---------------------------------------
     @Column(name = "mae_baseline")    private Double maeBaseline;
     @Column(name = "mae_calibrated")  private Double maeCalibrated;
