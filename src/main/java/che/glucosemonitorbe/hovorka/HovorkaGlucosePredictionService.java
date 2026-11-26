@@ -191,7 +191,8 @@ public class HovorkaGlucosePredictionService {
 
     /**
      * The dashboard forecast: as the activity-aware overload above, anchored on the CGM reading
-     * <b>and its current trend</b> (mmol/L per minute, 0 when unknown). The trend is what lets the
+     * <b>and its current trend</b> (mmol/L per minute, NaN when unknown - not 0, which would read as
+     * "flat" to the CGM deviation term). The trend is what lets the
      * forecast start from where plasma glucose is rather than from where the sensor still reads -
      * see {@link InterstitialLagModel}.
      */
@@ -214,7 +215,7 @@ public class HovorkaGlucosePredictionService {
                 activityProvider,
                 insulinPrefsService.getLongActingDurationHours(userId),
                 Objects.requireNonNullElse(residualProvider.activityGains(userId), ActivityGains.NEUTRAL),
-                1.0, currentTrendMmolPerMin);
+                1.0, currentTrendMmolPerMin, CgmDeviationModel.decayMinutes);
     }
 
     /**
@@ -396,7 +397,36 @@ public class HovorkaGlucosePredictionService {
 
         return integrate(customParams, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider, basalDurationHours, gains, isfScale, anchorTrendMmolPerMin);
+                activityProvider, basalDurationHours, gains, isfScale, anchorTrendMmolPerMin, 0);
+    }
+
+    /**
+     * As the overload above, also carrying the {@link CgmDeviationModel CGM deviation} forward over
+     * {@code deviationDecayMin} minutes (0 = off, the overload above). For backtests of the live
+     * forecast, which runs with {@link CgmDeviationModel#decayMinutes}.
+     */
+    public List<PredictionPointDTO> buildPredictionPath(
+            HovorkaParameters customParams,
+            RapidInsulinIobParameters rapidIob,
+            UserSettingsDTO settings,
+            double currentGlucose,
+            LocalDateTime currentTime,
+            List<CarbsEntry> pastCarbsEntries,
+            List<InsulinDose> pastInsulinDoses,
+            List<Note> longActingNotes,
+            UUID userId,
+            int pathMinutes,
+            ActivityProvider activityProvider,
+            double basalDurationHours,
+            ActivityGains gains,
+            double isfScale,
+            double anchorTrendMmolPerMin,
+            int deviationDecayMin) {
+
+        return integrate(customParams, rapidIob, settings, currentGlucose, currentTime,
+                pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
+                activityProvider, basalDurationHours, gains, isfScale, anchorTrendMmolPerMin,
+                deviationDecayMin);
     }
 
     /** Core ODE integration with population-default activity gains. */
@@ -439,7 +469,7 @@ public class HovorkaGlucosePredictionService {
             ActivityGains gains) {
         return integrate(p, rapidIob, settings, currentGlucose, currentTime,
                 pastCarbsEntries, pastInsulinDoses, longActingNotes, userId, pathMinutes,
-                activityProvider, basalDurationHours, gains, 1.0, 0.0);
+                activityProvider, basalDurationHours, gains, 1.0, 0.0, 0);
     }
 
     /** Core ODE integration - shared by every overload. */
@@ -458,7 +488,8 @@ public class HovorkaGlucosePredictionService {
             double basalDurationHours,
             ActivityGains gains,
             double callerIsfScale,
-            double anchorTrendMmolPerMin) {
+            double anchorTrendMmolPerMin,
+            int deviationDecayMin) {
 
         // -- State warm-up -----------------------------------------------------
         // The ODE state is plasma glucose; the anchor is a sensor reading, which trails plasma.
@@ -497,6 +528,16 @@ public class HovorkaGlucosePredictionService {
         // -- Gut: one Dalla Man chain per meal (logged and prospective), each at its own GI and
         //    gut time constant, run ahead of the glucose ODE (the gut does not depend on glucose). --
         MealGutChains.Appearance appearance = buildAppearance(pastCarbsEntries, currentTime, pAdj, settings, pathMinutes);
+
+        // -- CGM deviation: the part of the measured trend the logged events do not explain,
+        //    carried forward as an extra appearance [mmol/min] that fades out. Spread over VG, not
+        //    2·VG: an input to Q1 first raises G by rate/VG, so the forecast leaves "now" at the
+        //    measured trend (2·VG left it at twice the trend and overshot the first hour). --
+        double deviationRate = deviationDecayMin > 0 && Double.isFinite(anchorTrendMmolPerMin)
+                ? CgmDeviationModel.deviation(anchorTrendMmolPerMin,
+                        modelSlopeAtNow(doseActivities, appearance, pAdj, pathMinutes))
+                  * pAdj.vG()
+                : 0.0;
 
         // -- Integration loop (1-min steps) -----------------------------------
 
@@ -538,7 +579,8 @@ public class HovorkaGlucosePredictionService {
                 insulinEffect += dose.isf() * pAdj.effectiveInsulinVolume() * iobActivityRate;
             }
 
-            double raNow = appearance.stepMean()[min];
+            double raNow = appearance.stepMean()[min]
+                    + deviationRate * CgmDeviationModel.weight(min, deviationDecayMin);
 
             if (hasActivity) {
                 double aInst = activityProvider.intensityAt(currentTime.plusMinutes(min));
@@ -595,6 +637,27 @@ public class HovorkaGlucosePredictionService {
         }
 
         return points;
+    }
+
+    /**
+     * The glucose slope [mmol/L per min] the logged events alone give at "now": meal appearance
+     * minus insulin action over the first {@link CgmDeviationModel#SLOPE_WINDOW_MIN} minutes, both
+     * spread over {@link HovorkaParameters#effectiveInsulinVolume()} as the model's ISF convention
+     * does.
+     */
+    private double modelSlopeAtNow(List<DoseActivity> doses, MealGutChains.Appearance appearance,
+                                          HovorkaParameters p, int pathMinutes) {
+        int window = Math.max(1, Math.min(CgmDeviationModel.SLOPE_WINDOW_MIN, pathMinutes));
+        double volume = p.effectiveInsulinVolume();
+        double sum = 0.0;
+        for (int min = 1; min <= window; min++) {
+            double insulin = 0.0;
+            for (DoseActivity dose : doses) {
+                insulin += dose.isf() * volume * iobActivityRate(dose.iobTimeline(), min - 1);
+            }
+            sum += (appearance.stepMean()[min] - insulin) / volume;
+        }
+        return sum / window;
     }
 
     // -- Gut appearance -------------------------------------------------------
