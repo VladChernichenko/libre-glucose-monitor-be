@@ -8,6 +8,7 @@ import che.glucosemonitorbe.dto.InsulinCalculationRequest;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
 import che.glucosemonitorbe.exception.DosingRefusalReason;
 import che.glucosemonitorbe.exception.DosingRefusedException;
+import che.glucosemonitorbe.hovorka.ProteinGluconeogenesis;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
 import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserSettingsService;
@@ -115,7 +116,7 @@ public class MealPlanService {
         double dose;
         try {
             double raw = calculator.calculateRecommendedInsulin(InsulinCalculationRequest.builder()
-                    .carbs(carbs)
+                    .carbs(carbs + proteinCarbEquivalent(carbs, protein))
                     .currentGlucose(glucose)
                     .targetGlucose(target)
                     .activeInsulin(iob)
@@ -136,6 +137,19 @@ public class MealPlanService {
         }
         HistoryDose banner = historyDose(userId, n, macros, now, glucose, target, iob, dose, s);
         return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, dose, null, pause, false, banner);
+    }
+
+    /**
+     * The slow-carb equivalent of the meal's protein that the dashboard forecast adds at meal + 2 h
+     * ({@link ProteinGluconeogenesis}), so the dose covers the same glucose the card's curve shows.
+     * 0 for a meal without carbs (the forecast drops a carb-less prospective meal, protein and all)
+     * and below {@link ProteinGluconeogenesis#MIN_EQUIV_G}, exactly where the forecast adds nothing.
+     * Fat is not converted: the forecast models it as gastric delay only.
+     */
+    public static double proteinCarbEquivalent(double carbs, double protein) {
+        if (!(carbs > 0)) return 0.0;
+        double equiv = ProteinGluconeogenesis.equivalentCarbs(protein, ProteinGluconeogenesis.GLUCOGENIC_FRACTION);
+        return equiv < ProteinGluconeogenesis.MIN_EQUIV_G ? 0.0 : equiv;
     }
 
     /** Only for a real dose; correction and IOB are exactly the terms the calculator just applied. */

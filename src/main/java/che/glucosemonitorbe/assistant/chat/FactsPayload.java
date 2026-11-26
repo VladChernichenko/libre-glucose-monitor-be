@@ -29,7 +29,7 @@ public record FactsPayload(String language, String now, State state, PlanFacts p
                             Double fiber, Double massG, Double gi, String pattern, Boolean noFreshCgmReading,
                             String calculatorRefused, Double doseUnits, Integer pauseMinutes, Double forecastPeak,
                             Double forecastLowest, String pauseReason, Integer forecastHours,
-                            Double lowThreshold) {}
+                            Double lowThreshold, Double proteinCarbsDosed) {}
 
     /**
      * A past episode with its outcome; also the wire shape of one card in the {@code episodes} event.
