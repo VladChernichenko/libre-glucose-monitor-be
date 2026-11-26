@@ -155,7 +155,8 @@ class DashboardMealMacrosWiringTest {
     @DisplayName("a request without a CGM trend starts from the stored one; a request trend wins")
     void storedTrendFillsAMissingRequestTrend() throws Exception {
         when(noteRepository.findByUserIdAndTimestampBetween(any(UUID.class), any(), any())).thenReturn(List.of());
-        assertThat(trendPassedFor(null)).as("no stored-trend source wired").isEqualTo(0.0);
+        // Unknown is NaN, not 0: a 0 would tell the CGM deviation term that glucose is flat.
+        assertThat(trendPassedFor(null)).as("no stored-trend source wired").isNaN();
 
         inject("cgmFreshnessService", cgmFreshnessService);
         when(cgmFreshnessService.freshTrendMmolPerMin(eq(userId), any(Instant.class)))
@@ -166,11 +167,11 @@ class DashboardMealMacrosWiringTest {
 
         when(cgmFreshnessService.freshTrendMmolPerMin(eq(userId), any(Instant.class)))
                 .thenReturn(OptionalDouble.empty());
-        assertThat(trendPassedFor(null)).as("no fresh reading").isEqualTo(0.0);
+        assertThat(trendPassedFor(null)).as("no fresh reading").isNaN();
 
         when(cgmFreshnessService.freshTrendMmolPerMin(eq(userId), any(Instant.class)))
                 .thenThrow(new IllegalStateException("db down"));
-        assertThat(trendPassedFor(null)).as("a failed lookup never fails the forecast").isEqualTo(0.0);
+        assertThat(trendPassedFor(null)).as("a failed lookup never fails the forecast").isNaN();
     }
 
     private double trendPassedFor(Double requestTrend) {

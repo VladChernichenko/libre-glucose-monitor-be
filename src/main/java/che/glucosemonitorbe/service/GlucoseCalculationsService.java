@@ -488,23 +488,26 @@ public class GlucoseCalculationsService {
             return request;
         }
         UUID userId = userService.getUserByUsername(request.getUserId()).getId();
-        return request.toBuilder().currentTrendMmolPerMin(storedTrend(userId)).build();
+        double trend = storedTrend(userId);
+        // Unknown stays unset: a 0 would read as "glucose is flat" to the CGM deviation term.
+        return Double.isFinite(trend) ? request.toBuilder().currentTrendMmolPerMin(trend).build() : request;
     }
 
     /**
      * The CGM trend [mmol/L per minute] from stored readings, for a request that carries none.
-     * 0 when no source is wired, there is no fresh pair of readings, or the lookup fails.
+     * NaN (unknown) when no source is wired, there is no fresh pair of readings, or the lookup
+     * fails: the forecast then neither compensates the sensor lag nor carries a CGM deviation.
      */
     private double storedTrend(UUID userId) {
         if (cgmFreshnessService == null) {
-            return 0.0;
+            return Double.NaN;
         }
         try {
-            return cgmFreshnessService.freshTrendMmolPerMin(userId, Instant.now()).orElse(0.0);
+            return cgmFreshnessService.freshTrendMmolPerMin(userId, Instant.now()).orElse(Double.NaN);
         } catch (RuntimeException e) {
             // The forecast is still valid without the lag correction; never fail it over the trend.
             log.warn("Stored CGM trend unavailable for user={}: {}", userId, e.getMessage(), e);
-            return 0.0;
+            return Double.NaN;
         }
     }
 
