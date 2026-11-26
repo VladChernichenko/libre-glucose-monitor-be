@@ -123,6 +123,18 @@ class LibreLinkUpControllerTest {
                 .andExpect(jsonPath("$.readingsStale").value(false));
     }
 
+    @Test
+    @DisplayName("GET /status - rejected Libre credentials are reported to the app")
+    void status_reportsRejectedCredentials() throws Exception {
+        when(libreLinkUpSyncService.upstreamStatus(userId)).thenReturn(
+                new LibreUpstreamStatusDTO(true, "CLOSED", null).withCredentialsRejected(true));
+        when(cgmFreshness.newestReadingAt(userId)).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(get("/api/libre/status").principal(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.credentialsRejected").value(true));
+    }
+
     // -- POST /api/libre/auth/login --------------------------------------------
 
     @Test
