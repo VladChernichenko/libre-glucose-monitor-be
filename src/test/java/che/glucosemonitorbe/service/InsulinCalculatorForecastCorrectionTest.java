@@ -38,6 +38,18 @@ class InsulinCalculatorForecastCorrectionTest {
     }
 
     @Test
+    void recentDose_returnsOnlyTheMissingUnits() {
+        assertEquals(2.75, calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 2.0, 18.0, T), 1e-9);
+    }
+
+    @Test
+    void recentDose_maxBolusAppliesToTheTotal() {
+        // 2.75 new + 19.0 taken = 21.75 > 21 U (0.3 U/kg x 70 kg)
+        assertRefused(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS,
+                () -> calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 2.0, 19.0, T));
+    }
+
+    @Test
     void aimsFromLandingNotCurrent() {
         assertEquals(2.75, calc.calculateForecastCorrection(USER, 9.0, 11.0, 5.5, 2.0, T), 1e-9);
     }

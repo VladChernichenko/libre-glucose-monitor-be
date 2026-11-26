@@ -341,6 +341,17 @@ public class InsulinCalculatorService {
     public double calculateForecastCorrection(String username, double currentReadingMmol,
                                               double landingMmol, double targetMmol, double isf,
                                               LocalDateTime time) {
+        return calculateForecastCorrection(username, currentReadingMmol, landingMmol, targetMmol, isf, 0.0, time);
+    }
+
+    /**
+     * Units still missing to bring the forecast landing to target. The landing already counts
+     * {@code recentUnits} (rapid insulin taken recently), so they are not subtracted again; they only
+     * count toward the max-bolus ceiling, which applies to the total.
+     */
+    public double calculateForecastCorrection(String username, double currentReadingMmol,
+                                              double landingMmol, double targetMmol, double isf,
+                                              double recentUnits, LocalDateTime time) {
         if (currentReadingMmol < HYPO_REFUSAL_THRESHOLD_MMOL) {
             throw new DosingRefusedException(DosingRefusalReason.GLUCOSE_BELOW_SAFE_THRESHOLD,
                     "currentReading=" + currentReadingMmol + " < " + HYPO_REFUSAL_THRESHOLD_MMOL);
@@ -351,10 +362,11 @@ public class InsulinCalculatorService {
             throw new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID, "isf=" + isf);
         }
         double units = Math.max(0.0, (landingMmol - targetMmol) / isf);
+        double taken = Math.max(0.0, recentUnits);
         double maxBolus = maxBolusUnits(settings);
-        if (units > maxBolus) {
+        if (units + taken > maxBolus) {
             throw new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS,
-                    "correction=" + units + " exceeds max=" + maxBolus);
+                    "correction=" + units + " + recent=" + taken + " exceeds max=" + maxBolus);
         }
         return units;
     }

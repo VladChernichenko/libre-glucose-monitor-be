@@ -24,8 +24,13 @@ public record WatchStrip(State state, Reason reason, Suggestion suggestion,
 
     public enum ActivityEstimate { LEARNED, DEFAULT }
 
+    /**
+     * {@code takenUnits}: rapid insulin logged in the last 2 h, already counted by the forecast. A
+     * correction's {@code units} come on top of it; the banner shows the sum. Null when none.
+     * {@code INSULIN_LANDING} is no longer produced (kept so older apps still decode).
+     */
     public record Suggestion(Kind kind, Integer grams, Double units, String refusalCode,
-                             Double targetMmol, Double isf, Double minWithCarbs) {}
+                             Double targetMmol, Double isf, Double minWithCarbs, Double takenUnits) {}
 
     public record GlucosePoint(LocalDateTime at, double mmol) {}
 }

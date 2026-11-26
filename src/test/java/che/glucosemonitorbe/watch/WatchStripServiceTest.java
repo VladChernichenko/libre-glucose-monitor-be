@@ -432,7 +432,7 @@ class WatchStripServiceTest {
 
     @Test
     void high_correctionFromLanding_roundedDown() {
-        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 11.0, 5.55, 2.0, NOW)).thenReturn(2.75);
+        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 11.0, 5.55, 2.0, 0.0, NOW)).thenReturn(2.75);
         WatchStrip strip = service.evaluate(USER, high(10.5, 11.0)).orElseThrow();
         assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
         assertThat(strip.reason()).isEqualTo(Reason.HIGH_FORECAST);
@@ -445,19 +445,55 @@ class WatchStripServiceTest {
     }
 
     @Test
-    void high_doseWithin2h_insulinLanding() {
+    void high_doseWithin2h_suggestsMissingUnitsAndReportsTaken() {
+        // The forecast already counts the 3.0 U, so the dose is only what is still missing.
         notesAre(note(0, 3.0, Note.TYPE_NORMAL, 100));
+        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 11.0, 5.55, 2.0, 3.0, NOW)).thenReturn(2.75);
         WatchStrip strip = service.evaluate(USER, high(10.5, 11.0)).orElseThrow();
         assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
-        assertThat(strip.reason()).isEqualTo(Reason.INSULIN_LANDING);
-        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+        assertThat(strip.reason()).isEqualTo(Reason.HIGH_FORECAST);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.INSULIN);
+        assertThat(strip.suggestion().units()).isEqualTo(2.5);
+        assertThat(strip.suggestion().takenUnits()).isEqualTo(3.0);
         assertThat(strip.landing().mmol()).isEqualTo(11.0);
         assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(60));
     }
 
     @Test
+    void high_recentRapidDosesAreSummed_longActingAndCarbOnlyIgnored() {
+        notesAre(note(0, 1.0, Note.TYPE_NORMAL, 67),
+                note(0, 0.5, Note.TYPE_NORMAL, 20),
+                note(0, 10.0, Note.TYPE_LONG_ACTING, 60),
+                note(30, 0.0, Note.TYPE_NORMAL, 40));
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenReturn(3.1);
+        WatchStrip strip = service.evaluate(USER, high(10.5, 13.3)).orElseThrow();
+        verify(calculator).calculateForecastCorrection(eq(USER.toString()), anyDouble(), eq(13.3), anyDouble(),
+                anyDouble(), eq(1.5), eq(NOW));
+        assertThat(strip.suggestion().units()).isEqualTo(3.0);
+        assertThat(strip.suggestion().takenUnits()).isEqualTo(1.5);
+    }
+
+    @Test
+    void high_noRecentDose_takenUnitsAbsent() {
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenReturn(2.75);
+        assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().suggestion().takenUnits()).isNull();
+    }
+
+    @Test
+    void high_doseWithin2h_totalOverMaxBolus_refused() {
+        notesAre(note(0, 3.0, Note.TYPE_NORMAL, 30));
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenThrow(new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS, "total"));
+        WatchStrip strip = service.evaluate(USER, high(10.5, 11.0)).orElseThrow();
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.REFUSED);
+        assertThat(strip.suggestion().refusalCode()).isEqualTo("DOSE_EXCEEDS_MAX_BOLUS");
+    }
+
+    @Test
     void high_under05_smallRise() {
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(0.49);
         WatchStrip strip = service.evaluate(USER, high(10.5, 10.6)).orElseThrow();
         assertThat(strip.reason()).isEqualTo(Reason.SMALL_RISE);
@@ -466,7 +502,7 @@ class WatchStripServiceTest {
 
     @Test
     void high_refusal_surfacesCode() {
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenThrow(new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS, "too big"));
         WatchStrip strip = service.evaluate(USER, high(12.0, 16.0)).orElseThrow();
         assertThat(strip.state()).isEqualTo(State.URGENT_HIGH);
@@ -502,14 +538,14 @@ class WatchStripServiceTest {
         assertThat(strip.suggestion().refusalCode()).isEqualTo("READING_MISMATCH");
         assertThat(strip.suggestion().units()).isNull();
         verify(calculator, never()).calculateForecastCorrection(anyString(), anyDouble(), anyDouble(),
-                anyDouble(), anyDouble(), any());
+                anyDouble(), anyDouble(), anyDouble(), any());
     }
 
     @Test
     void high_smallMismatch_normalCorrection() {
         GlucoseCalculationsResponse r = high(10.5, 11.0);
         r.setCurrentGlucose(6.2);
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(2.75);
         WatchStrip strip = service.evaluate(USER, r).orElseThrow();
         assertThat(strip.suggestion().kind()).isEqualTo(Kind.INSULIN);
@@ -536,16 +572,18 @@ class WatchStripServiceTest {
         reading(7.2);
         GlucoseCalculationsResponse r = high(10.5, 11.0);
         r.setCurrentGlucose(7.0); // within the 0.3 mismatch tolerance, but not the stored value
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(1.0);
         service.evaluate(USER, r);
-        verify(calculator).calculateForecastCorrection(eq(USER.toString()), eq(7.2), eq(11.0), anyDouble(), eq(2.0), eq(NOW));
+        verify(calculator).calculateForecastCorrection(eq(USER.toString()), eq(7.2), eq(11.0), anyDouble(), eq(2.0), eq(0.0), eq(NOW));
     }
 
     @Test
-    void high_doseLoggedAheadOfClock_stillBlocksCorrection() {
+    void high_doseLoggedAheadOfClock_stillCountedAsTaken() {
         notesAre(note(0, 3.0, Note.TYPE_NORMAL, -5));
-        assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().reason()).isEqualTo(Reason.INSULIN_LANDING);
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenReturn(2.75);
+        assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().suggestion().takenUnits()).isEqualTo(3.0);
         verify(notes).findByUserIdAndTimestampBetween(USER, NOW.minusHours(2), NOW.plusMinutes(15));
     }
 
@@ -578,7 +616,7 @@ class WatchStripServiceTest {
 
     @Test
     void hold_doseStripNotKeptAfterForecastDrops() {
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(2.75);
         assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().suggestion().kind()).isEqualTo(Kind.INSULIN);
         readingStoredAt(6.0, -3);
@@ -586,13 +624,14 @@ class WatchStripServiceTest {
     }
 
     @Test
-    void hold_insulinLanding_clearsWhenLiveForecastNoLongerHigh() {
-        // NO_ACTION high strips are held for anti-flicker; without reconcile they keep a stale
+    void hold_highWithoutDose_clearsWhenLiveForecastNoLongerHigh() {
+        // Non-dose high strips are held for anti-flicker; without reconcile they keep a stale
         // landing (e.g. 12.2) while the chart already shows ~8.8 after a note change.
         notesAre(note(0, 4.0, Note.TYPE_NORMAL, 30));
         readingStoredAt(9.7, 2);
         WatchStrip first = service.evaluate(USER, high(11.0, 12.2)).orElseThrow();
-        assertThat(first.reason()).isEqualTo(Reason.INSULIN_LANDING);
+        assertThat(first.state()).isEqualTo(State.URGENT_HIGH);
+        assertThat(first.suggestion().kind()).isNotEqualTo(Kind.INSULIN);
         assertThat(first.landing().mmol()).isEqualTo(12.2);
 
         readingStoredAt(9.7, -3);

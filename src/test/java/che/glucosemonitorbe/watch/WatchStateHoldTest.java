@@ -28,7 +28,7 @@ class WatchStateHoldTest {
             case URGENT_HIGH -> Reason.HIGH_FORECAST;
             case CALM -> Reason.WATCHING;
         };
-        return new WatchStrip(state, reason, new WatchStrip.Suggestion(kind, null, null, null, null, null, null),
+        return new WatchStrip(state, reason, new WatchStrip.Suggestion(kind, null, null, null, null, null, null, null),
                 null, null, null, null, nextCheckAt, ActivityEstimate.DEFAULT);
     }
 

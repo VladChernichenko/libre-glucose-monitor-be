@@ -163,7 +163,7 @@ public class WatchStripService {
             }
             UserSettingsDTO s = settings.getUserSettings(userId);
             int rescue = s != null && s.getRescueCarbsG() != null ? s.getRescueCarbsG() : DEFAULT_RESCUE_CARBS_G;
-            return Optional.of(low(Reason.LOW_NOW, new Suggestion(Kind.CARBS, rescue, null, null, null, null, null),
+            return Optional.of(low(Reason.LOW_NOW, new Suggestion(Kind.CARBS, rescue, null, null, null, null, null, null),
                     null, now.plusMinutes(CHECK_MINUTES), iob, cob));
         }
 
@@ -181,11 +181,11 @@ public class WatchStripService {
             GlucosePoint lowPoint = new GlucosePoint(advice.minWithoutAt(), advice.minWithout());
             if (advice.state() == CarbAdvice.State.TAKE_NOW) {
                 return Optional.of(low(Reason.FORECAST_LOW,
-                        new Suggestion(Kind.CARBS, advice.grams(), null, null, null, null, advice.minWith()),
+                        new Suggestion(Kind.CARBS, advice.grams(), null, null, null, null, advice.minWith(), null),
                         lowPoint, advice.recheckAt(), iob, cob));
             }
             return Optional.of(low(Reason.CARBS_LANDING,
-                    new Suggestion(Kind.NO_ACTION, advice.landingGrams(), null, null, null, null, null),
+                    new Suggestion(Kind.NO_ACTION, advice.landingGrams(), null, null, null, null, null, null),
                     lowPoint, advice.recheckAt(), iob, cob));
         }
 
@@ -211,13 +211,15 @@ public class WatchStripService {
                             double landing, Double iob, Double cob) {
         GlucosePoint landingPoint = new GlucosePoint(now.plusMinutes(HORIZON_MINUTES), landing);
         LocalDateTime next = now.plusMinutes(HIGH_CHECK_MINUTES);
-        boolean recentDose = notes.findByUserIdAndTimestampBetween(userId,
+        // Rapid insulin from the last 2 h is already in the forecast: the correction is what is still
+        // missing on top of it, and the banner shows the sum (taken + new).
+        double taken = notes.findByUserIdAndTimestampBetween(userId,
                         now.minusHours(RAPID_INSULIN_LOOKBACK_HOURS), now.plusMinutes(RAPID_INSULIN_LOOKAHEAD_MINUTES)).stream()
-                .anyMatch(n -> n.getInsulin() != null && n.getInsulin() > 0
-                        && !Note.TYPE_LONG_ACTING.equals(n.getType()));
-        if (recentDose) {
-            return highStrip(Reason.INSULIN_LANDING, noAction(), landingPoint, next, iob, cob);
-        }
+                .filter(n -> n.getInsulin() != null && n.getInsulin() > 0
+                        && !Note.TYPE_LONG_ACTING.equals(n.getType()))
+                .mapToDouble(Note::getInsulin)
+                .sum();
+        Double takenUnits = taken > 0 ? taken : null;
         // The forecast was run from the client's reading, the dose would be priced from the stored
         // one: when they disagree the landing is not trustworthy enough to dose from.
         if (clientReading != null && Math.abs(clientReading - reading) > READING_MISMATCH_MMOL) {
@@ -232,13 +234,13 @@ public class WatchStripService {
             double target = s.getTargetGlucoseMmol() != null
                     ? s.getTargetGlucoseMmol() : UserSettingsDTO.DEFAULT_TARGET_GLUCOSE_MMOL;
             double isf = twinIsf.effectiveIsf(userId, s, now);
-            double raw = calculator.calculateForecastCorrection(userId.toString(), reading, landing, target, isf, now);
+            double raw = calculator.calculateForecastCorrection(userId.toString(), reading, landing, target, isf, taken, now);
             double units = Math.floor(raw * 2) / 2;
             if (units < MIN_DOSE_UNITS) {
                 return highStrip(Reason.SMALL_RISE, noAction(), landingPoint, next, iob, cob);
             }
             return highStrip(Reason.HIGH_FORECAST,
-                    new Suggestion(Kind.INSULIN, null, units, null, target, isf, null),
+                    new Suggestion(Kind.INSULIN, null, units, null, target, isf, null, takenUnits),
                     landingPoint, next, iob, cob);
         } catch (DosingRefusedException e) {
             return highStrip(Reason.HIGH_FORECAST, refused(e.getReason().name()), landingPoint, next, iob, cob);
@@ -258,11 +260,11 @@ public class WatchStripService {
     }
 
     private static Suggestion noAction() {
-        return new Suggestion(Kind.NO_ACTION, null, null, null, null, null, null);
+        return new Suggestion(Kind.NO_ACTION, null, null, null, null, null, null, null);
     }
 
     private static Suggestion refused(String code) {
-        return new Suggestion(Kind.REFUSED, null, null, code, null, null, null);
+        return new Suggestion(Kind.REFUSED, null, null, code, null, null, null, null);
     }
 
     /**

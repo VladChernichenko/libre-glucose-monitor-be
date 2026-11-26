@@ -27,7 +27,7 @@ class WatchStripJsonTest {
     @Test
     void serializesTheShapeIosDecodes() throws Exception {
         WatchStrip strip = new WatchStrip(State.URGENT_HIGH, Reason.HIGH_FORECAST,
-                new Suggestion(Kind.INSULIN, 15, 2.5, "SETTINGS_INVALID", 5.55, 2.2, 5.2),
+                new Suggestion(Kind.INSULIN, 15, 2.5, "SETTINGS_INVALID", 5.55, 2.2, 5.2, 1.0),
                 new GlucosePoint(LocalDateTime.of(2026, 10, 31, 19, 50), 3.8),
                 new GlucosePoint(LocalDateTime.of(2026, 10, 31, 23, 0), 11.0),
                 1.5, 12.0, LocalDateTime.of(2026, 10, 31, 20, 0), ActivityEstimate.LEARNED);
@@ -45,7 +45,8 @@ class WatchStripJsonTest {
 
         JsonNode s = json.get("suggestion");
         assertThat(s.fieldNames()).toIterable().containsExactlyInAnyOrder(
-                "kind", "grams", "units", "refusalCode", "targetMmol", "isf", "minWithCarbs");
+                "kind", "grams", "units", "refusalCode", "targetMmol", "isf", "minWithCarbs", "takenUnits");
+        assertThat(s.get("takenUnits").asDouble()).isEqualTo(1.0);
         assertThat(s.get("kind").asText()).isEqualTo("INSULIN");
         assertThat(s.get("grams").asInt()).isEqualTo(15);
         assertThat(s.get("units").asDouble()).isEqualTo(2.5);
