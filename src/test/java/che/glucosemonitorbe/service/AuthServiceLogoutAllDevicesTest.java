@@ -30,7 +30,7 @@ class AuthServiceLogoutAllDevicesTest {
     void setUp() {
         authService = new AuthService(
                 authenticationManager, userRepository, passwordEncoder,
-                tokenProvider, tokenBlacklistService);
+                tokenProvider, tokenBlacklistService, org.mockito.Mockito.mock(UserActivityService.class));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package che.glucosemonitorbe.scheduler;
 
+import che.glucosemonitorbe.service.UserReactivatedEvent;
 import che.glucosemonitorbe.sync.NightscoutSyncLane;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -46,6 +48,16 @@ public class NightscoutGlucoseSyncScheduler {
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
         lane.reconcile();
+    }
+
+    /** A returning user rejoins the lane and syncs now; off the request thread. */
+    @EventListener
+    public void onUserReactivated(UserReactivatedEvent event) {
+        try {
+            syncExecutor.execute(() -> lane.wake(event.userId()));
+        } catch (RejectedExecutionException e) {
+            // Shutting down; the next reconcile (if any) picks the user up.
+        }
     }
 
     @Scheduled(

@@ -32,7 +32,11 @@ CREATE TABLE IF NOT EXISTS users (
     credentials_non_expired  BOOLEAN      NOT NULL DEFAULT TRUE,
     account_non_locked       BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    updated_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    -- FALSE once the user has not used the app for 10 daytime hours (night excluded); inactive
+    -- users are left out of the CGM sync lanes. Any authenticated request sets it back to TRUE.
+    is_active                BOOLEAN      NOT NULL DEFAULT TRUE,
+    last_activity_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 

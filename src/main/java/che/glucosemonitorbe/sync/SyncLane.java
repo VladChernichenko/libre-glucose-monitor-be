@@ -126,6 +126,24 @@ public abstract class SyncLane {
         }
     }
 
+    /**
+     * A user came back after being inactive: reconcile so they rejoin the lane, then make them due
+     * now (they have been without fresh readings since they went inactive). No-op for a user who is
+     * not a member (no source in this lane) or is already in flight. If a concurrent reconcile made
+     * this one return early, the next periodic reconcile adds the user on their next slot.
+     */
+    public void wake(UUID id) {
+        reconcile();
+        synchronized (lock) {
+            if (!members.contains(id) || inFlight.contains(id)) {
+                return;
+            }
+        }
+        Instant now = clock.instant();
+        state.schedule(id, toLocal(now));
+        rekeyIfIdle(id, now);
+    }
+
     /** Starts due users up to the in-flight cap. A concurrent call returns immediately. */
     public void pump(Executor executor) {
         if (!deciding.compareAndSet(false, true)) {

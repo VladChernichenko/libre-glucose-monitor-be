@@ -514,4 +514,29 @@ class LibreSyncLaneTest {
         assertThat(startup.keyOf(added).get()).isAfter(T0);
         assertThat(startup.keyOf(first)).contains(T0);
     }
+
+    @Test
+    void wake_reactivatedUser_rejoinsAndIsDueNow() {
+        UUID back = UUID.randomUUID();
+        stored.put(back, T0.minusSeconds(36_000)); // stale next_poll_at from before going inactive
+        when(repo.findActiveLibreUserIdsWithCredentials()).thenReturn(List.of(back));
+
+        lane.wake(back);
+
+        assertThat(lane.keyOf(back)).contains(T0);
+        verify(state).schedule(back, ldt(T0));
+        lane.pump(executor);
+        assertThat(executor.size()).isEqualTo(1);
+    }
+
+    @Test
+    void wake_nonMember_isNoOp() {
+        UUID other = UUID.randomUUID();
+        when(repo.findActiveLibreUserIdsWithCredentials()).thenReturn(List.of());
+
+        lane.wake(other);
+
+        assertThat(lane.keyOf(other)).isEmpty();
+        verify(state, never()).schedule(eq(other), any());
+    }
 }

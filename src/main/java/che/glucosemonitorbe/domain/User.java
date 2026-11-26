@@ -6,6 +6,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -64,10 +65,25 @@ public class User implements UserDetails {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    /**
+     * False once the user has been idle for the inactivity threshold (night hours excluded); the CGM
+     * sync lanes skip inactive users. Written only by {@code UserActivityService}, by bulk update.
+     */
+    @Column(name = "is_active", nullable = false)
+    @Builder.Default
+    private boolean active = true;
+
+    /** Last authenticated request / login / token refresh (throttled to about once a minute). */
+    @Column(name = "last_activity_at", nullable = false)
+    private Instant lastActivityAt;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (lastActivityAt == null) {
+            lastActivityAt = Instant.now();
+        }
     }
 
     @PreUpdate
