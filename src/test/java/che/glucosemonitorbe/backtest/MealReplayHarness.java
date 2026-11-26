@@ -92,11 +92,21 @@ public final class MealReplayHarness {
         boolean at(LocalDateTime now, List<Note> visible);
     }
 
-    public record Options(Mode mode, LocalDate fromInclusive, LocalDate toExclusive, MealContextFn mealContext) {}
+    /** The carb-advice rule the harness scores; {@link #LIVE} is production's. */
+    @FunctionalInterface
+    public interface Trigger {
+        Trigger LIVE = CarbAdviceTrigger::fires;
+        boolean fires(LocalDateTime now, double g0, double trend, List<PredictionPointDTO> forecast, boolean mealContext);
+    }
+
+    public record Options(Mode mode, LocalDate fromInclusive, LocalDate toExclusive, MealContextFn mealContext,
+                          Trigger trigger) {
+        public Options(Mode mode, LocalDate fromInclusive, LocalDate toExclusive, MealContextFn mealContext) {
+            this(mode, fromInclusive, toExclusive, mealContext, Trigger.LIVE);
+        }
+    }
 
     public record LowOutcome(LocalDateTime lowAt, LocalDateTime firstFireAt, Integer leadMin) {}
-
-    // -- Loading -------------------------------------------------------------------------------
 
     /** An export directory: {@code cgm.csv}, {@code notes.csv}, {@code settings.properties}. */
     public static Data load(Path dir) throws IOException {
@@ -180,8 +190,6 @@ public final class MealReplayHarness {
         return v.isEmpty() ? null : v;
     }
 
-    // -- The real model ----------------------------------------------------------------------
-
     /**
      * The live dashboard forecast, raw (no twin): {@link GlucoseCalculationsService} on mocked
      * repositories that hold only the {@code visible} notes, so inputs are built exactly as in
@@ -243,8 +251,6 @@ public final class MealReplayHarness {
         };
     }
 
-    // -- Replay --------------------------------------------------------------------------------
-
     public static Report run(Data d, Forecaster f, Options o) {
         Report report = new Report();
         for (LocalDateTime t : anchors(d, o)) {
@@ -262,13 +268,19 @@ public final class MealReplayHarness {
                 report.add(bucket, h, actual - pred);
                 if (rescueAnchor) report.addRescue(h, actual - pred);
             }
-            if (o.mode() == Mode.AS_LOGGED && CarbAdviceTrigger.fires(t, trend, path)) {
+            if (o.mode() == Mode.AS_LOGGED
+                    && o.trigger().fires(t, g0, trend, path, o.mealContext().at(t, visible))) {
                 report.adviceAnchors++;
-                if (staysUp(d, t)) report.falseAdvice++;
+                report.adviceByBucket.merge(bucket, 1, Integer::sum);
+                if (staysUp(d, t)) {
+                    report.falseAdvice++;
+                    report.falseByBucket.merge(bucket, 1, Integer::sum);
+                    report.falseAdviceAt.add(t);
+                }
             }
         }
         if (o.mode() == Mode.AS_LOGGED) {
-            for (LocalDateTime lowAt : lows(d, o)) report.lows.add(lowOutcome(d, f, lowAt));
+            for (LocalDateTime lowAt : lows(d, o)) report.lows.add(lowOutcome(d, f, lowAt, o));
         }
         return report;
     }
@@ -336,20 +348,19 @@ public final class MealReplayHarness {
         return out;
     }
 
-    private static LowOutcome lowOutcome(Data d, Forecaster f, LocalDateTime lowAt) {
+    private static LowOutcome lowOutcome(Data d, Forecaster f, LocalDateTime lowAt, Options o) {
         for (int back = 60; back >= 5; back -= 5) {
             LocalDateTime g = lowAt.minusMinutes(back);
             Double g0 = cgmAt(d, g);
             if (g0 == null) continue;
             double trend = trendAt(d, g, g0);
-            if (CarbAdviceTrigger.fires(g, trend, f.forecast(g, g0, trend, visible(d, g, Mode.AS_LOGGED)))) {
+            List<Note> seen = visible(d, g, Mode.AS_LOGGED);
+            if (o.trigger().fires(g, g0, trend, f.forecast(g, g0, trend, seen), o.mealContext().at(g, seen))) {
                 return new LowOutcome(lowAt, g, back);
             }
         }
         return new LowOutcome(lowAt, null, null);
     }
-
-    // -- Helpers -------------------------------------------------------------------------------
 
     private static boolean rapid(Note n) {
         return n.getInsulin() != null && n.getInsulin() > 0 && !n.isLongActing();
@@ -398,12 +409,13 @@ public final class MealReplayHarness {
         return null;
     }
 
-    // -- Report --------------------------------------------------------------------------------
-
     public static final class Report {
         private final Map<Bucket, TreeMap<Integer, double[]>> byBucket = new EnumMap<>(Bucket.class);
         private final TreeMap<Integer, double[]> rescue = new TreeMap<>();
         private int adviceAnchors, falseAdvice;
+        private final Map<Bucket, Integer> adviceByBucket = new EnumMap<>(Bucket.class);
+        private final Map<Bucket, Integer> falseByBucket = new EnumMap<>(Bucket.class);
+        private final List<LocalDateTime> falseAdviceAt = new ArrayList<>();
         private final List<LowOutcome> lows = new ArrayList<>();
 
         private void add(Bucket b, int h, double err) {
@@ -421,6 +433,9 @@ public final class MealReplayHarness {
             other.rescue.forEach((h, a) -> add3(rescue, h, a));
             adviceAnchors += other.adviceAnchors;
             falseAdvice += other.falseAdvice;
+            other.adviceByBucket.forEach((b, n) -> adviceByBucket.merge(b, n, Integer::sum));
+            other.falseByBucket.forEach((b, n) -> falseByBucket.merge(b, n, Integer::sum));
+            falseAdviceAt.addAll(other.falseAdviceAt);
             lows.addAll(other.lows);
         }
 
@@ -446,6 +461,11 @@ public final class MealReplayHarness {
         public Metrics rescueMetrics(int horizonMin) { return metricsOf(rescue, horizonMin); }
         public int adviceAnchors() { return adviceAnchors; }
         public int falseAdvice() { return falseAdvice; }
+        /** Advice that fired at anchors of bucket {@code b}, and how many of those were false. */
+        public int adviceAnchors(Bucket b) { return adviceByBucket.getOrDefault(b, 0); }
+        public int falseAdvice(Bucket b) { return falseByBucket.getOrDefault(b, 0); }
+        /** Anchor times of false advice. */
+        public List<LocalDateTime> falseAdviceAt() { return List.copyOf(falseAdviceAt); }
         public List<LowOutcome> lows() { return List.copyOf(lows); }
 
         public String render() {
@@ -457,8 +477,9 @@ public final class MealReplayHarness {
             row(sb, "RESCUE", rescue);
             long missed = lows.stream().filter(l -> l.leadMin() == null).count();
             long late = lows.stream().filter(l -> l.leadMin() != null && l.leadMin() < 15).count();
-            sb.append(String.format("advice anchors %d, false advice %d; lows %d, missed %d, late (<15 min) %d%n",
-                    adviceAnchors, falseAdvice, lows.size(), missed, late));
+            sb.append(String.format("advice anchors %d, false advice %d (MEAL %d of %d); lows %d, missed %d, late (<15 min) %d%n",
+                    adviceAnchors, falseAdvice, falseAdvice(Bucket.MEAL), adviceAnchors(Bucket.MEAL),
+                    lows.size(), missed, late));
             return sb.toString();
         }
 
