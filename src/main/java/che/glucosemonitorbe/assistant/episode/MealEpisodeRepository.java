@@ -35,6 +35,9 @@ public interface MealEpisodeRepository extends JpaRepository<MealEpisode, UUID> 
 
     List<MealEpisode> findByUserIdAndMealAtGreaterThanEqual(UUID userId, java.time.LocalDateTime from);
 
+    /** Episodes built from these meal notes, whatever their stored meal_at (the unique key is note_id). */
+    List<MealEpisode> findByNoteIdIn(Collection<UUID> noteIds);
+
     /** Ids of episodes waiting for an embedding (not failed since {@code retryBefore}), oldest first. */
     @Query(value = "SELECT id FROM meal_episode WHERE embedding IS NULL "
             + "AND (embedding_failed_at IS NULL OR embedding_failed_at < :retryBefore) "

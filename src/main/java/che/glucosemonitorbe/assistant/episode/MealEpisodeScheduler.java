@@ -25,13 +25,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -157,19 +158,49 @@ public class MealEpisodeScheduler {
     private int syncWindow(UUID userId, UserSettingsDTO settings, ZoneId zone, LocalDateTime from,
                            LocalDateTime nowWall, LocalDateTime cutoff, boolean force) {
         List<Note> window = notes.findByUserIdAndTimestampBetween(userId, from.minus(NOTES_BEFORE), nowWall);
-        Map<UUID, MealEpisode> existing = episodes.findByUserIdAndMealAtGreaterThanEqual(userId, from).stream()
-                .collect(Collectors.toMap(MealEpisode::getNoteId, Function.identity(), (a, b) -> a));
-        int changed = 0;
+        Map<UUID, Note> meals = new LinkedHashMap<>();
         for (Note meal : window) {
-            if (meal.getTimestamp() == null || meal.getTimestamp().isBefore(from) || meal.getTimestamp().isAfter(cutoff)
+            if (meal.getId() == null || meal.getTimestamp() == null || meal.getTimestamp().isBefore(from)
+                    || meal.getTimestamp().isAfter(cutoff)
                     || meal.getCarbs() == null || meal.getCarbs() < MealEpisodeBuilder.MIN_CARBS) continue;
-            changed += syncMeal(userId, meal, window, existing.get(meal.getId()), settings, zone, force);
+            meals.putIfAbsent(meal.getId(), meal);
+        }
+        Map<UUID, MealEpisode> existing = existingByNote(userId, from, meals.keySet());
+        int changed = 0;
+        for (Note meal : meals.values()) {
+            try {
+                changed += syncMeal(userId, meal, window, existing, settings, zone, force);
+            } catch (RuntimeException e) {
+                log.warn("Meal episode for note {} (user {}) not built: {}", meal.getId(), userId, e.getMessage());
+            }
         }
         return changed;
     }
 
-    private int syncMeal(UUID userId, Note meal, List<Note> window, MealEpisode old, UserSettingsDTO settings,
-                         ZoneId zone, boolean force) {
+    /**
+     * Stored episodes for these meals, keyed like the unique constraint (note_id). The meal_at range
+     * alone misses rows whose stored meal_at drifted from the note's timestamp (an edited note time,
+     * a zone change), and those must be updated rather than inserted again.
+     */
+    private Map<UUID, MealEpisode> existingByNote(UUID userId, LocalDateTime from, Set<UUID> mealNoteIds) {
+        Map<UUID, MealEpisode> existing = new HashMap<>();
+        for (MealEpisode e : episodes.findByUserIdAndMealAtGreaterThanEqual(userId, from)) {
+            if (e.getNoteId() != null) existing.putIfAbsent(e.getNoteId(), e);
+        }
+        Set<UUID> missing = new HashSet<>(mealNoteIds);
+        missing.removeAll(existing.keySet());
+        if (!missing.isEmpty()) {
+            for (MealEpisode e : episodes.findByNoteIdIn(missing)) {
+                if (e.getNoteId() != null) existing.putIfAbsent(e.getNoteId(), e);
+            }
+        }
+        return existing;
+    }
+
+    /** Builds or rebuilds one meal's episode; {@code existing} is updated so a later pass updates the same row. */
+    private int syncMeal(UUID userId, Note meal, List<Note> window, Map<UUID, MealEpisode> existing,
+                         UserSettingsDTO settings, ZoneId zone, boolean force) {
+        MealEpisode old = existing.get(meal.getId());
         LocalDateTime at = meal.getTimestamp();
         List<Note> around = window.stream()
                 .filter(n -> n.getTimestamp() != null
@@ -185,14 +216,18 @@ public class MealEpisodeScheduler {
         MealLoad load = loadAt(userId, meal, others);
         Optional<MealEpisode> built = builder.build(meal, around, readings, settings, load);
         if (built.isEmpty()) {
-            if (old != null) episodes.delete(old);
+            if (old != null) {
+                episodes.delete(old);
+                existing.remove(meal.getId());
+            }
             return old == null ? 0 : 1;
         }
         MealEpisode e = built.get();
         e.setUpdatedAt(clock.instant());
         snapshots.findByNoteId(meal.getId()).filter(s -> !s.isExcluded()).ifPresent(s -> copyHits(e, s));
         if (old != null) e.setId(old.getId());
-        episodes.save(e);
+        MealEpisode saved = episodes.save(e);
+        existing.put(meal.getId(), saved != null ? saved : e);
         if (old != null && !MealEpisodeBuilder.foodText(e).equals(MealEpisodeBuilder.foodText(old))) {
             episodes.clearEmbedding(old.getId());
         }

@@ -311,6 +311,86 @@ class MealEpisodeSchedulerTest {
         verify(episodes, never()).save(any());
     }
 
+    private MealEpisode stored(Note meal, LocalDateTime mealAt) {
+        MealEpisode old = new MealEpisode();
+        old.setId(UUID.randomUUID());
+        old.setNoteId(meal.getId());
+        old.setUserId(USER);
+        old.setMealAt(mealAt);
+        old.setFoodText("lunch");
+        old.setCarbs(40);
+        old.setLocalMinuteOfDay(720);
+        old.setUpdatedAt(Instant.parse("2000-01-01T00:00:00Z"));   // older than every note: stale
+        return old;
+    }
+
+    @Test
+    @DisplayName("an episode stored with a meal_at outside the lookback is updated, not inserted again")
+    void episodeOutsideMealAtWindowIsUpdatedByNoteId() {
+        Note meal = note(MEAL_AT, 40, 4, "lunch");
+        // stored meal_at drifted (zone shift, edited note time) to before the lookback start
+        MealEpisode old = stored(meal, MEAL_AT.minusDays(MealEpisodeScheduler.LOOKBACK_DAYS + 1));
+        when(episodes.existsByUserId(USER)).thenReturn(true);
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(meal));
+        when(episodes.findByUserIdAndMealAtGreaterThanEqual(eq(USER), any())).thenReturn(List.of());
+        when(episodes.findByNoteIdIn(any())).thenReturn(List.of(old));
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER), anyLong(), anyLong()))
+                .thenReturn(flatCgm());
+
+        assertThat(scheduler.buildForUser(USER)).isEqualTo(1);
+
+        ArgumentCaptor<MealEpisode> saved = ArgumentCaptor.forClass(MealEpisode.class);
+        verify(episodes).save(saved.capture());
+        assertThat(saved.getValue().getId()).isEqualTo(old.getId());
+    }
+
+    @Test
+    @DisplayName("one note seen twice in a run yields a single episode row")
+    void sameNoteTwiceInOneRunUpdatesTheFirstRow() {
+        Note meal = note(MEAL_AT, 40, 4, "lunch");
+        UUID firstId = UUID.randomUUID();
+        when(episodes.existsByUserId(USER)).thenReturn(true);
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(meal, meal));
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER), anyLong(), anyLong()))
+                .thenReturn(flatCgm());
+        List<UUID> savedIds = new ArrayList<>();
+        when(episodes.save(any())).thenAnswer(inv -> {
+            MealEpisode e = inv.getArgument(0);
+            savedIds.add(e.getId());
+            if (e.getId() == null) e.setId(firstId);
+            return e;
+        });
+
+        scheduler.buildForUser(USER);
+
+        assertThat(savedIds).hasSizeLessThanOrEqualTo(2);
+        assertThat(savedIds.subList(1, savedIds.size())).allMatch(firstId::equals);
+    }
+
+    @Test
+    @DisplayName("one meal failing to save does not stop the user's other meals")
+    void oneMealFailureDoesNotAbortTheUser() {
+        Note bad = note(MEAL_AT.minusDays(1), 40, 4, "bread");
+        Note good = note(MEAL_AT, 40, 4, "lunch");
+        when(episodes.existsByUserId(USER)).thenReturn(true);
+        when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(bad, good));
+        long dayMs = 24L * 60 * 60 * 1000;
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(eq(USER), anyLong(), anyLong()))
+                .thenAnswer(inv -> {
+                    long shift = (long) inv.getArgument(1) < flatCgm().get(0).getDateTimestamp() - dayMs / 2
+                            ? -dayMs : 0;
+                    List<CgmReading> out = flatCgm();
+                    out.forEach(r -> r.setDateTimestamp(r.getDateTimestamp() + shift));
+                    return out;
+                });
+        when(episodes.save(argThat(e -> e != null && bad.getId().equals(e.getNoteId()))))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("uq_meal_episode_note"));
+
+        scheduler.buildForUser(USER);
+
+        verify(episodes).save(argThat(e -> e != null && good.getId().equals(e.getNoteId())));
+    }
+
     private MealEpisode pending(String text) {
         MealEpisode e = new MealEpisode();
         e.setId(UUID.randomUUID());
