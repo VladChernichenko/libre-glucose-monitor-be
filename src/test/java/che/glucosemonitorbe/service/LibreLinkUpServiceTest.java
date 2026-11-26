@@ -241,8 +241,10 @@ class LibreLinkUpServiceTest {
         LibreLinkUpService svc = new LibreLinkUpService(
                 new CircuitBreakerManager(), mockClient, sessionStore,
                 new LibreLinkUpRegionResolver(), responseParser, configRepository);
-
+        // Past the graph cache window, so the second call has to reach LibreLinkUp.
+        svc.sensorClock = at(0);
         svc.getSensorInfo("p1", userId);
+        svc.sensorClock = at(121);
         svc.getSensorInfo("p1", userId);
 
         verify(mockClient, times(2)).authenticatedGet(eq(userId), anyString());
@@ -323,5 +325,141 @@ class LibreLinkUpServiceTest {
         assertThat(LibreLinkUpService.ticketExpiry(om.readTree("{\"token\":\"t\"}"))).isNull();
         assertThat(LibreLinkUpService.ticketExpiry(om.readTree("{\"expires\":0}"))).isNull();
         assertThat(LibreLinkUpService.ticketExpiry(null)).isNull();
+    }
+
+    // -- /graph response cache --------------------------------------------------
+
+    private static final String GOOD_GRAPH = "{\"data\":{\"graphData\":[],\"activeSensors\":[]}}";
+    private static final Instant T0 = Instant.parse("2026-11-26T10:00:00Z");
+
+    private static Clock at(long secondsAfterT0) {
+        return Clock.fixed(T0.plusSeconds(secondsAfterT0), ZoneOffset.UTC);
+    }
+
+    private LibreLinkUpService svcWith(LibreLinkUpClient c) {
+        LibreLinkUpService svc = new LibreLinkUpService(
+                new CircuitBreakerManager(), c, sessionStore,
+                new LibreLinkUpRegionResolver(), responseParser, configRepository);
+        svc.sensorClock = at(0);
+        return svc;
+    }
+
+    private UUID loggedInUser() {
+        UUID userId = UUID.randomUUID();
+        sessionStore.saveLogin(userId, "tok", null, null, null, null);
+        return userId;
+    }
+
+    @Test
+    @DisplayName("graph cache: a second call within the window does not reach LibreLinkUp")
+    void graphCache_secondCallWithinTtlIsServedFromCache() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        when(c.authenticatedGet(eq(u), anyString())).thenReturn(new ObjectMapper().readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        svc.getGlucoseData("p1", 1, u);
+        svc.sensorClock = at(119);
+        svc.getGlucoseData("p1", 1, u);
+
+        verify(c, times(1)).authenticatedGet(eq(u), anyString());
+    }
+
+    @Test
+    @DisplayName("graph cache: expires after the window")
+    void graphCache_expiresAfterTtl() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        when(c.authenticatedGet(eq(u), anyString())).thenReturn(new ObjectMapper().readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        svc.getGlucoseData("p1", 1, u);
+        svc.sensorClock = at(121);
+        svc.getGlucoseData("p1", 1, u);
+
+        verify(c, times(2)).authenticatedGet(eq(u), anyString());
+    }
+
+    @Test
+    @DisplayName("graph cache: sensor info reuses the cached graph")
+    void graphCache_sharedBySensorInfo() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        when(c.authenticatedGet(eq(u), anyString())).thenReturn(new ObjectMapper().readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        svc.getGlucoseData("p1", 1, u);
+        svc.sensorClock = at(30);
+        svc.getSensorInfo("p1", u);
+
+        verify(c, times(1)).authenticatedGet(eq(u), anyString());
+    }
+
+    @Test
+    @DisplayName("graph cache: a LibreLinkUp error body is not cached")
+    void graphCache_errorBodyIsNotCached() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        ObjectMapper om = new ObjectMapper();
+        when(c.authenticatedGet(eq(u), anyString()))
+                .thenReturn(om.readTree("{\"error\":{\"message\":\"boom\"}}"))
+                .thenReturn(om.readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        assertThatThrownBy(() -> svc.getGlucoseData("p1", 1, u)).isInstanceOf(RuntimeException.class);
+        assertThat(svc.getGlucoseData("p1", 1, u).getData()).isEmpty();
+
+        verify(c, times(2)).authenticatedGet(eq(u), anyString());
+    }
+
+    @Test
+    @DisplayName("graph cache: a failed call is not cached")
+    void graphCache_failureIsNotCached() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        when(c.authenticatedGet(eq(u), anyString()))
+                .thenThrow(new RuntimeException("timeout"))
+                .thenReturn(new ObjectMapper().readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        assertThatThrownBy(() -> svc.getGlucoseData("p1", 1, u)).isInstanceOf(RuntimeException.class);
+        assertThat(svc.getGlucoseData("p1", 1, u).getData()).isEmpty();
+
+        verify(c, times(2)).authenticatedGet(eq(u), anyString());
+    }
+
+    @Test
+    @DisplayName("graph cache: one user's graph is never served to another")
+    void graphCache_isPerUser() throws Exception {
+        UUID u1 = loggedInUser();
+        UUID u2 = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        when(c.authenticatedGet(org.mockito.ArgumentMatchers.any(UUID.class), anyString()))
+                .thenReturn(new ObjectMapper().readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        svc.getGlucoseData("p1", 1, u1);
+        svc.getGlucoseData("p1", 1, u2);
+        svc.getGlucoseData("p1", 1, u1);
+        svc.getGlucoseData("p1", 1, u2);
+
+        verify(c, times(1)).authenticatedGet(eq(u1), anyString());
+        verify(c, times(1)).authenticatedGet(eq(u2), anyString());
+    }
+
+    @Test
+    @DisplayName("graph cache: logout drops the user's cached graph")
+    void graphCache_clearedOnLogout() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        when(c.authenticatedGet(eq(u), anyString())).thenReturn(new ObjectMapper().readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        svc.getGlucoseData("p1", 1, u);
+        svc.logout(u);
+        sessionStore.saveLogin(u, "tok2", null, null, null, null);
+        svc.getGlucoseData("p1", 1, u);
+
+        verify(c, times(2)).authenticatedGet(eq(u), anyString());
     }
 }

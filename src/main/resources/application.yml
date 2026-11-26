@@ -209,6 +209,8 @@ management:
 libre:
   api:
     base-url: ${LIBRE_API_BASE_URL:https://api-eu.libreview.io}
+    # One /graph call per user per window, shared by every caller.
+    graph-cache-ttl-seconds: ${LIBRE_GRAPH_CACHE_TTL_SECONDS:120}
 
 springdoc:
   api-docs:

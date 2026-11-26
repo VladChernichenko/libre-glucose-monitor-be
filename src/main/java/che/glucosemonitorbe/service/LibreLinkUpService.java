@@ -64,9 +64,18 @@ public class LibreLinkUpService {
     private final ConcurrentHashMap<String, CachedSensor> sensorInfoCache = new ConcurrentHashMap<>();
     /** One /graph download at a time per user and patient, shared by glucose sync and sensor info. */
     private final ConcurrentHashMap<String, CompletableFuture<JsonNode>> graphInflight = new ConcurrentHashMap<>();
+    /**
+     * Last successful /graph body per user and patient. Every caller (sync queue, on-demand sync, watch,
+     * history, sensor) reuses it inside the window, so LibreLinkUp sees at most one /graph call per window.
+     */
+    private final ConcurrentHashMap<String, CachedGraph> graphCache = new ConcurrentHashMap<>();
+    @Value("${libre.api.graph-cache-ttl-seconds:120}")
+    long graphCacheTtlSeconds = 120;
+    /** Clock for the sensor and graph caches; replaced in tests. */
     Clock sensorClock = Clock.systemUTC();
 
     private record CachedSensor(LibreSensorInfo info, long fetchedAtMs) {}
+    private record CachedGraph(JsonNode body, long fetchedAtMs) {}
 
     public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager,
                               LibreLinkUpClient client,
@@ -426,6 +435,15 @@ public class LibreLinkUpService {
      */
     private JsonNode fetchGraph(UUID userId, String patientId) throws Exception {
         String key = cacheKey(userId, patientId);
+        CachedGraph cached = graphCache.get(key);
+        if (cached != null) {
+            long ageMs = sensorClock.millis() - cached.fetchedAtMs();
+            if (ageMs < graphCacheTtlSeconds * 1000) {
+                logger.debug("LibreLinkUp graph for patient {} served from cache ({} s old)", patientId, ageMs / 1000);
+                return cached.body();
+            }
+            graphCache.remove(key, cached);
+        }
         CompletableFuture<JsonNode> created = new CompletableFuture<>();
         CompletableFuture<JsonNode> existing = graphInflight.putIfAbsent(key, created);
         if (existing != null) {
@@ -437,6 +455,9 @@ public class LibreLinkUpService {
             logger.info("Fetching LibreLinkUp graph for patient {} from {}", patientId, url);
             JsonNode json = authenticatedGet(userId, url);
             rememberSensor(userId, patientId, json);
+            if (json != null && !json.has("error")) {
+                graphCache.put(key, new CachedGraph(json, sensorClock.millis()));
+            }
             created.complete(json);
             return json;
         } catch (Exception e) {
@@ -494,9 +515,14 @@ public class LibreLinkUpService {
         sessionStore.clear(userId);
         if (userId == null) return;
         String prefix = userId + "\0";
-        Iterator<Map.Entry<String, CachedSensor>> it = sensorInfoCache.entrySet().iterator();
+        removeUserEntries(sensorInfoCache, prefix);
+        removeUserEntries(graphCache, prefix);
+    }
+
+    private static void removeUserEntries(Map<String, ?> cache, String prefix) {
+        Iterator<String> it = cache.keySet().iterator();
         while (it.hasNext()) {
-            if (it.next().getKey().startsWith(prefix)) it.remove();
+            if (it.next().startsWith(prefix)) it.remove();
         }
     }
 
