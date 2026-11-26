@@ -112,7 +112,7 @@ public class HovorkaGlucosePredictionService {
      * Meal absorption model: Gamma kernels per meal ({@link GammaMealAppearance}) when true, the
      * Dalla Man gut chains ({@link MealGutChains}) when false.
      */
-    @Value("${app.features.gamma-absorption-enabled:false}")
+    @Value("${app.features.gamma-absorption-enabled:true}")
     private boolean gammaAbsorptionEnabled;
 
     private GammaKernelParams gammaKernelParams = GammaKernelParams.POPULATION;
