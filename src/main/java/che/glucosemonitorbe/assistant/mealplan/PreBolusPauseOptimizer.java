@@ -45,7 +45,9 @@ import java.util.UUID;
 @Service
 public class PreBolusPauseOptimizer {
 
-    static final int[] CANDIDATES = {0, 5, 10, 15, 20, 25, 30};
+    /** Longest pre-bolus pause ever suggested [min]: 30 min was too long to wait in practice. */
+    static final int MAX_PAUSE_MINUTES = 15;
+    static final int[] CANDIDATES = {0, 5, 10, MAX_PAUSE_MINUTES};
     /** No candidate may forecast below this [mmol/L]. */
     static final double MIN_FLOOR = 4.5;
 
@@ -58,7 +60,10 @@ public class PreBolusPauseOptimizer {
     static final double LOW_SIDE_WEIGHT = 2.0;
     /** Every candidate is judged over this many minutes after its own meal (as the old engine did). */
     static final int POST_MEAL_MINUTES = 240;
-    /** Path asked of the dashboard forecast: long enough for the longest pause plus its window. */
+    /**
+     * Path asked of the dashboard forecast: past the longest pause plus its window. Beyond 4 h the
+     * forecast grid is 10 min, so an exact 255 would end at 250 and reject the 15-min pause as short.
+     */
     static final int PATH_MINUTES = POST_MEAL_MINUTES + 30;
     /** Notes searched for a pre-bolus in flight; the resolver itself caps its age at 2 h. */
     private static final int LOOKBACK_HOURS = 8;
@@ -153,8 +158,8 @@ public class PreBolusPauseOptimizer {
             String reason = dose == null
                     ? String.format(Locale.ROOT, "Eating now forecasts a low under %.1f mmol/L%s.", MIN_FLOOR, lowest)
                     : String.format(Locale.ROOT,
-                            "Every pause from 0 to 30 min forecasts a low under %.1f mmol/L%s, so no pre-bolus pause: eat now.",
-                            MIN_FLOOR, lowest);
+                            "Every pause from 0 to %d min forecasts a low under %.1f mmol/L%s, so no pre-bolus pause: eat now.",
+                            MAX_PAUSE_MINUTES, MIN_FLOOR, lowest);
             return choice(null, eatNow, reason);
         }
         PauseChoice chosen = choice(bestPause, bestCurve, null);

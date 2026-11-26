@@ -97,11 +97,11 @@ class PreBolusPauseOptimizerTest {
         @Test
         @DisplayName("never picks a pause whose forecast minimum is under 4.5, even when its cost is lowest")
         void neverPicksPauseWithMinUnder4_5() {
-            forecastByPause(p -> levelWithDip(p, p >= 30 ? 4.4 : 5.6));
+            forecastByPause(p -> levelWithDip(p, p >= 15 ? 4.4 : 5.6));
 
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
-            assertThat(choice.pauseMinutes()).isEqualTo(25);
+            assertThat(choice.pauseMinutes()).isEqualTo(10);
             assertThat(choice.min()).isGreaterThanOrEqualTo(4.5);
         }
 
@@ -112,9 +112,9 @@ class PreBolusPauseOptimizerTest {
 
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
-            assertThat(choice.pauseMinutes()).isEqualTo(30);
+            assertThat(choice.pauseMinutes()).isEqualTo(15); // the cap: never longer than 15 min
             assertThat(choice.inFlight()).isFalse();
-            assertThat(choice.peak()).isCloseTo(8.0 - 30 * 0.08, within(1e-9));
+            assertThat(choice.peak()).isCloseTo(8.0 - 15 * 0.08, within(1e-9));
             assertThat(choice.min()).isCloseTo(5.6, within(1e-9));
         }
 
@@ -165,13 +165,13 @@ class PreBolusPauseOptimizerTest {
         @Test
         @DisplayName("a low after now+240 but within pause+240 rejects that pause; each curve is cropped to pause+240")
         void lowAfterNowPlus240_rejectsLongPause() {
-            // Cost prefers longer pauses; a dip at +265 lies inside the 25- and 30-min windows only.
-            forecastByPause(p -> path(270, m -> m == 265 ? 4.0 : 8.0 - p * 0.08));
+            // Cost prefers longer pauses; a dip at +250 lies inside the 10- and 15-min windows only.
+            forecastByPause(p -> path(270, m -> m == 250 ? 4.0 : 8.0 - p * 0.08));
 
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
-            assertThat(choice.pauseMinutes()).isEqualTo(20);
-            assertThat(choice.curve().get(choice.curve().size() - 1).getTimestamp()).isEqualTo(NOW.plusMinutes(260));
+            assertThat(choice.pauseMinutes()).isEqualTo(5);
+            assertThat(choice.curve().get(choice.curve().size() - 1).getTimestamp()).isEqualTo(NOW.plusMinutes(245));
             assertThat(choice.min()).isGreaterThanOrEqualTo(4.5);
         }
 
@@ -315,14 +315,14 @@ class PreBolusPauseOptimizerTest {
             optimizer.choose(USER, NOW, 7.0, 4.5, meal);
 
             ArgumentCaptor<GlucoseCalculationsRequest> req = ArgumentCaptor.forClass(GlucoseCalculationsRequest.class);
-            verify(calculations, times(7)).calculateGlucoseData(req.capture());
+            verify(calculations, times(4)).calculateGlucoseData(req.capture());
             List<Integer> pauses = new ArrayList<>();
             for (GlucoseCalculationsRequest r : req.getAllValues()) {
                 assertThat(r.getUserId()).isEqualTo("vlad");
                 assertThat(r.getCurrentGlucose()).isEqualTo(7.0);
                 assertThat(r.getClientTimeInfo().toLocalDateTime()).isEqualTo(NOW);
                 assertThat(r.getClientTimeInfo().getTimezone()).isNull();
-                assertThat(r.getPredictionPathMinutes()).as("240 after the longest pause").isEqualTo(270);
+                assertThat(r.getPredictionPathMinutes()).as("240 after the longest pause, on the 10-min grid").isEqualTo(270);
                 ProspectiveNoteDTO dose = r.getProspectiveNotes().stream().filter(n -> n.getInsulin() != null).findFirst().orElseThrow();
                 ProspectiveNoteDTO food = r.getProspectiveNotes().stream().filter(n -> n.getCarbs() != null).findFirst().orElseThrow();
                 assertThat(dose.getInsulin()).isEqualTo(4.5);
@@ -335,7 +335,7 @@ class PreBolusPauseOptimizerTest {
                 assertThat(s.getEstimatedGi()).isEqualTo(40.0);
                 pauses.add(-food.getMinutesAgo());
             }
-            assertThat(pauses).containsExactly(0, 5, 10, 15, 20, 25, 30);
+            assertThat(pauses).containsExactly(0, 5, 10, 15);
         }
     }
 
@@ -355,7 +355,7 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
-        @DisplayName("60 g GI 75 at 7.0 mmol/L: the forecast asks for at least 15 min")
+        @DisplayName("60 g GI 75 at 7.0 mmol/L: the forecast asks for the longest pause, capped at 15 min")
         void prefersLongerPauseForFastCarbs() {
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, RealDashboardForecast.DOSE_FOR_60G, FAST_CARBS);
 
