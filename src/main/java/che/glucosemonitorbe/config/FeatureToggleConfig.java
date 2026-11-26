@@ -17,6 +17,10 @@ public class FeatureToggleConfig {
     // Off by default - toggle on per-environment after validation
     private boolean hovorkaModelEnabled = false;
 
+    // Meal absorption in the Hovorka forecast: per-meal Gamma kernels instead of the Dalla Man gut.
+    // On: Gamma beat Dalla Man on replayed meal forecasts; false falls back to Dalla Man.
+    private boolean gammaAbsorptionEnabled = true;
+
     // Per-user "digital twin": nightly ML calibration of the prediction model from
     // predicted-vs-actual CGM error. Applied to PREDICTIONS ONLY (never to dosing settings).
     // Each user's twin only takes effect once it beats the un-calibrated model out-of-sample.

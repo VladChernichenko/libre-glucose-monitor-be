@@ -15,6 +15,7 @@ import che.glucosemonitorbe.service.UserSettingsService;
 import che.glucosemonitorbe.sick.SickProfile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -106,6 +107,24 @@ public class HovorkaGlucosePredictionService {
     /** Auto-applies the learned digital-twin residual correction to emitted points (predictions only).
      *  Use {@link PredictionResidualProvider#NONE} to run the raw model (e.g. during calibration). */
     private final PredictionResidualProvider    residualProvider;
+
+    /**
+     * Meal absorption model: Gamma kernels per meal ({@link GammaMealAppearance}) when true, the
+     * Dalla Man gut chains ({@link MealGutChains}) when false.
+     */
+    @Value("${app.features.gamma-absorption-enabled:true}")
+    private boolean gammaAbsorptionEnabled;
+
+    private GammaKernelParams gammaKernelParams = GammaKernelParams.POPULATION;
+
+    public void setGammaAbsorptionEnabled(boolean enabled) {
+        this.gammaAbsorptionEnabled = enabled;
+    }
+
+    /** Kernel coefficients for the Gamma path; a population fit swaps candidates in. */
+    public void setGammaKernelParams(GammaKernelParams params) {
+        this.gammaKernelParams = Objects.requireNonNull(params);
+    }
 
     /** Coverage of the prediction band (matches the empirical twin's likely-range cone). */
     private static final double BAND_CONFIDENCE = 0.9;
@@ -592,6 +611,9 @@ public class HovorkaGlucosePredictionService {
      */
     private MealGutChains.Appearance buildAppearance(List<CarbsEntry> carbsEntries, LocalDateTime now,
                                      HovorkaParameters p, UserSettingsDTO settings, int pathMinutes) {
+        if (gammaAbsorptionEnabled) {
+            return buildGammaAppearance(carbsEntries, now, p, settings, pathMinutes);
+        }
         MealGutChains chains = new MealGutChains(gutModel);
         Map<CarbsEntry, Double> fiberByMeal = effectiveFiberByMeal(carbsEntries);
         for (CarbsEntry entry : carbsEntries) {
@@ -609,6 +631,44 @@ public class HovorkaGlucosePredictionService {
             }
         }
         return chains.appearance(pathMinutes);
+    }
+
+    /** Entries within this many minutes of a carb entry count as the same stomach load [min]. */
+    static final int MEAL_CLUSTER_MIN = 30;
+
+    /**
+     * Gamma-kernel appearance ({@link GammaMealAppearance}): each carb entry's glucose
+     * ({@code toCarbMmol × F}) appears over its own kernel, set by its GI, its fiber (with any first
+     * course), the fat and protein of every entry within {@link #MEAL_CLUSTER_MIN} minutes, and the
+     * rescue flag. Entries without carbs add no kernel; their fat and protein shape their
+     * neighbours'. No ileal brake: the kernel's static fat/protein delay replaces it.
+     */
+    private MealGutChains.Appearance buildGammaAppearance(List<CarbsEntry> carbsEntries, LocalDateTime now,
+                                                          HovorkaParameters p, UserSettingsDTO settings,
+                                                          int pathMinutes) {
+        GammaMealAppearance appearance = new GammaMealAppearance();
+        Map<CarbsEntry, Double> fiberByMeal = effectiveFiberByMeal(carbsEntries);
+        for (CarbsEntry entry : carbsEntries) {
+            if (entry.getTimestamp() == null) continue;
+            double carbMmol = toCarbMmol(entry, p, settings);
+            if (carbMmol <= 0) continue;
+            long minsAgo = minsAgoFromNow(entry.getTimestamp(), now);
+            if (minsAgo > MAX_HISTORY_MIN) continue;
+            int step = minsAgo > 0 ? 1 - (int) minsAgo : Math.max(1, (int) -minsAgo);
+            double fat = 0, protein = 0;
+            for (CarbsEntry other : carbsEntries) {
+                if (other.getTimestamp() == null) continue;
+                long apart = Math.abs(Duration.between(other.getTimestamp(), entry.getTimestamp()).toMinutes());
+                if (apart > MEAL_CLUSTER_MIN) continue;
+                // The delayed-protein entry carries no macros of its own; it never adds to a meal.
+                fat     += other.getFat()     != null ? Math.max(0.0, other.getFat())     : 0.0;
+                protein += other.getProtein() != null ? Math.max(0.0, other.getProtein()) : 0.0;
+            }
+            MealInputs inputs = new MealInputs(giOf(entry), fiberByMeal.getOrDefault(entry, 0.0), fat, protein,
+                    RescueCarbProfile.isRescue(entry.getAbsorptionMode()));
+            appearance.addMeal(step, carbMmol * DallaManGutModel.F, gammaKernelParams.kernelFor(inputs, 1.0, 1.0));
+        }
+        return appearance.appearance(pathMinutes);
     }
 
     // -- Per-dose IOB timelines -----------------------------------------------
