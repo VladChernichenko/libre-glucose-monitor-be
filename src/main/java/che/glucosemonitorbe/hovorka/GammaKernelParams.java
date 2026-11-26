@@ -22,7 +22,15 @@ public record GammaKernelParams(
     public static final GammaKernelParams PRIOR =
             new GammaKernelParams(35, 43, 20, 7, 4, 45, 26, 16, 7, 5, 15, 10);
 
-    public static final GammaKernelParams POPULATION = PRIOR;
+    /**
+     * Fitted on one user's 25 frozen meal forecasts (Oct 26 - Nov 26 2026, grid over t0, w0 and a
+     * common factor on the fat/protein terms; {@code GammaSnapshotBacktestTest}): the appearance
+     * peaks earlier and narrower than the prior (GI 70: mode ≈ 23 min, SD ≈ 33 min) and fat and
+     * protein delay it at a quarter of the prior's strength - at full strength every fat-containing
+     * meal was forecast far too flat. One subject, in-sample: a starting point, not a final fit.
+     */
+    public static final GammaKernelParams POPULATION =
+            new GammaKernelParams(10, 43, 5, 1.75, 4, 25, 26, 4, 1.75, 5, 15, 10);
 
     /**
      * The kernel for one entry. {@code timeScale} and {@code widthScale} are the per-user
