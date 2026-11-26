@@ -8,7 +8,6 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import che.glucosemonitorbe.sick.SickProfile;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -58,35 +57,6 @@ public class UserSettingsDTO {
 
     /** Dashboard forecast engine. NULL = {@link PredictionEngine#HOVORKA}. */
     private PredictionEngine predictionEngine;
-
-    /** The constant {@link #getLegacyCarbRatio} reports. */
-    private static final double LEGACY_CARB_RATIO = 2.0;
-
-    /**
-     * Compatibility for iPhone builds before the per-window carb ratio change; delete once those
-     * builds are gone, together with {@link #getLegacyGramsPerUnit}. They decode {@code carbRatio} (the removed mmol/L rise per 10 g) as
-     * non-optional: without it their settings screen falls back to built-in defaults and Save
-     * overwrites the user's ISF and carb half-life. Output only: not stored, not settable, and an
-     * incoming {@code "carbRatio"} is ignored.
-     */
-    @JsonProperty(value = "carbRatio", access = JsonProperty.Access.READ_ONLY)
-    public double getLegacyCarbRatio() {
-        return LEGACY_CARB_RATIO;
-    }
-
-    /**
-     * Compatibility for iPhone builds before the per-window carb ratio change; delete once those
-     * builds are gone, together with {@link #getLegacyCarbRatio}. Their only ratio row shows
-     * {@code gramsPerUnit ?? 5}: this reports the ratio all four windows share (what the removed
-     * single ratio was copied into), and null when they differ or one is unset. Output only: not
-     * stored, not settable, and an incoming {@code "gramsPerUnit"} is ignored.
-     */
-    @JsonProperty(value = "gramsPerUnit", access = JsonProperty.Access.READ_ONLY)
-    public Double getLegacyGramsPerUnit() {
-        if (gramsPerUnitBreakfast == null) return null;
-        return gramsPerUnitBreakfast.equals(gramsPerUnitLunch) && gramsPerUnitBreakfast.equals(gramsPerUnitDinner)
-                && gramsPerUnitBreakfast.equals(gramsPerUnitNight) ? gramsPerUnitBreakfast : null;
-    }
 
     /** Value used when a client or stored row carries no target. */
     public static final double DEFAULT_TARGET_GLUCOSE_MMOL = 5.55;

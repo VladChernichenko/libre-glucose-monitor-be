@@ -33,8 +33,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * Each meal is forecast with the ratio of its own meal window, through the real HTTP stack. Every
  * comparison gives both users the same meal and the same dose, so the 4 h carb/insulin timing gap
  * (about 0.14 mmol/L per unit still to act at 4 h) is the same on both sides and cancels; absolute
- * flatness at 8 h is covered by HovorkaMealWindowRatioTest. Also pins what an older iPhone build
- * sends and expects from the settings endpoint.
+ * flatness at 8 h is covered by HovorkaMealWindowRatioTest. Also pins that the removed ratio keys an
+ * older client may still send are accepted and ignored.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -98,28 +98,10 @@ class CarbRatioWindowE2ETest {
 
         assertEquals(HttpStatus.OK, saved.getStatusCode(), "saving settings failed: " + saved.getBody());
         JsonNode body = mapper.readTree(saved.getBody());
-        assertTrue(body.path("gramsPerUnit").isNull() || body.path("gramsPerUnit").isMissingNode(),
-                "12 is ignored, and windows 6/5/5/5 share no single ratio for older builds: " + body);
-        assertEquals(2.0, body.path("carbRatio").asDouble(), "the compatibility carbRatio is a constant: " + body);
+        assertTrue(body.path("gramsPerUnit").isMissingNode(), "the removed single ratio is not reported: " + body);
+        assertTrue(body.path("carbRatio").isMissingNode(), "the removed carbRatio is not reported: " + body);
         assertEquals(6.0, body.path("gramsPerUnitBreakfast").asDouble());
         assertEquals(5.0, body.path("gramsPerUnitLunch").asDouble(), "an unsent window keeps the new row's 5 g/U");
-    }
-
-    @Test
-    @DisplayName("The settings an older iPhone build fetches still carry the carbRatio it decodes")
-    void theFetchedSettingsKeepTheCompatibilityCarbRatio() throws Exception {
-        // BackendAPI.fetchCOBSettings: GET /api/user-settings/, COBSettings.carbRatio non-optional in old builds.
-        ResponseEntity<String> fetched = rest.exchange("/api/user-settings/", HttpMethod.GET,
-                entity(null, registerAndLogin()), String.class);
-
-        assertEquals(HttpStatus.OK, fetched.getStatusCode(), "fetching settings failed: " + fetched.getBody());
-        JsonNode body = mapper.readTree(fetched.getBody());
-        assertEquals(2.0, body.path("carbRatio").asDouble(), "old builds fail to decode without it: " + body);
-        assertEquals(5.0, body.path("gramsPerUnit").asDouble(),
-                "a new row's windows all share 5 g/U, which old builds show as their one ratio: " + body);
-        for (String key : new String[] {"isf", "carbHalfLife", "maxCOBDuration"}) {
-            assertTrue(body.hasNonNull(key), key + " is non-optional in old builds too: " + body);
-        }
     }
 
     private static Map<String, Object> commonSettings() {
