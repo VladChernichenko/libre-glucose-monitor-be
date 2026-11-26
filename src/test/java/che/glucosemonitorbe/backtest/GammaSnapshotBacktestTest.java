@@ -122,14 +122,17 @@ class GammaSnapshotBacktestTest {
 
             // Diagnostic: is the remaining error timing or amount? Shrink every insulin effect
             // (all ISFs) while keeping the grams' effect (grams-per-unit shrunk by the same factor).
-            for (double insulinScale : new double[]{1.0, 0.75, 0.5}) {
-                UserSettingsDTO scaled = scaledInsulin(settings, insulinScale);
+            // {ISF factor, grams-per-unit factor}: CGM-measured ISF ≈ 1.5× the settings and carb
+            // ratio ≈ 0.65× for this user (clean corrections and isolated meals).
+            for (double[] k : new double[][]{{1, 1}, {1.5, 1}, {1, 0.65}, {1.5, 0.65}}) {
+                double insulinScale = k[0];
+                UserSettingsDTO scaled = scaledSettings(settings, k[0], k[1]);
                 HovorkaGlucosePredictionService h = hovorka(scaled, rapidIob(c, userId));
                 GlucoseCalculationsService s2 = service(userId, username, scaled, notes, h, rapidIob(c, userId));
                 for (boolean gamma : new boolean[]{false, true}) {
                     h.setGammaAbsorptionEnabled(gamma);
                     for (String kind : new String[]{"meal", "prebolus", "correction"}) {
-                        report(String.format("ins×%.2f %s %s", insulinScale, gamma ? "G" : "D", kind),
+                        report(String.format("isf×%.2f gpu×%.2f %s %s", insulinScale, k[1], gamma ? "G" : "D", kind),
                                 s2, username, snaps, cgm, kind);
                     }
                 }
@@ -137,19 +140,19 @@ class GammaSnapshotBacktestTest {
         }
     }
 
-    /** All ISFs × {@code k} and grams-per-unit × {@code k}: insulin weaker, a gram of carbs unchanged. */
-    private static UserSettingsDTO scaledInsulin(UserSettingsDTO s, double k) {
+    /** All ISFs × {@code isfK} and grams-per-unit × {@code gpuK} (a gram of carbs then adds ISF/ratio). */
+    private static UserSettingsDTO scaledSettings(UserSettingsDTO s, double isfK, double gpuK) {
         UserSettingsDTO o = new UserSettingsDTO();
         o.setUserId(s.getUserId());
-        o.setIsf(mul(s.getIsf(), k));
-        o.setIsfBreakfast(mul(s.getIsfBreakfast(), k));
-        o.setIsfLunch(mul(s.getIsfLunch(), k));
-        o.setIsfDinner(mul(s.getIsfDinner(), k));
-        o.setIsfNight(mul(s.getIsfNight(), k));
-        o.setGramsPerUnitBreakfast(mul(s.getGramsPerUnitBreakfast(), k));
-        o.setGramsPerUnitLunch(mul(s.getGramsPerUnitLunch(), k));
-        o.setGramsPerUnitDinner(mul(s.getGramsPerUnitDinner(), k));
-        o.setGramsPerUnitNight(mul(s.getGramsPerUnitNight(), k));
+        o.setIsf(mul(s.getIsf(), isfK));
+        o.setIsfBreakfast(mul(s.getIsfBreakfast(), isfK));
+        o.setIsfLunch(mul(s.getIsfLunch(), isfK));
+        o.setIsfDinner(mul(s.getIsfDinner(), isfK));
+        o.setIsfNight(mul(s.getIsfNight(), isfK));
+        o.setGramsPerUnitBreakfast(mul(s.getGramsPerUnitBreakfast(), gpuK));
+        o.setGramsPerUnitLunch(mul(s.getGramsPerUnitLunch(), gpuK));
+        o.setGramsPerUnitDinner(mul(s.getGramsPerUnitDinner(), gpuK));
+        o.setGramsPerUnitNight(mul(s.getGramsPerUnitNight(), gpuK));
         o.setBodyWeightKg(s.getBodyWeightKg());
         o.setCarbHalfLife(s.getCarbHalfLife());
         o.setMaxCOBDuration(s.getMaxCOBDuration());
