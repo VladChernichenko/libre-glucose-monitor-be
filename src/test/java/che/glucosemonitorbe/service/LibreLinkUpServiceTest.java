@@ -462,4 +462,39 @@ class LibreLinkUpServiceTest {
 
         verify(c, times(2)).authenticatedGet(eq(u), anyString());
     }
+
+    @Test
+    @DisplayName("graph cache: a new LibreLinkUp session (credential change, re-login) is not served the old graph")
+    void graphCache_newSessionInvalidatesEntry() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        when(c.authenticatedGet(eq(u), anyString())).thenReturn(new ObjectMapper().readTree(GOOD_GRAPH));
+        LibreLinkUpService svc = svcWith(c);
+
+        svc.getGlucoseData("p1", 1, u);
+        // UserDataSourceConfigService and authenticate() replace the session without calling logout().
+        sessionStore.clear(u);
+        sessionStore.saveLogin(u, "tok-account-b", null, null, null, null);
+        svc.getGlucoseData("p1", 1, u);
+
+        verify(c, times(2)).authenticatedGet(eq(u), anyString());
+    }
+
+    @Test
+    @DisplayName("graph cache: a fetch that completes after logout is not cached")
+    void graphCache_fetchCompletingAfterLogoutIsNotCached() throws Exception {
+        UUID u = loggedInUser();
+        LibreLinkUpClient c = mock(LibreLinkUpClient.class);
+        JsonNode body = new ObjectMapper().readTree(GOOD_GRAPH);
+        LibreLinkUpService svc = svcWith(c);
+        when(c.authenticatedGet(eq(u), anyString()))
+                .thenAnswer(inv -> { svc.logout(u); return body; })
+                .thenReturn(body);
+
+        svc.getGlucoseData("p1", 1, u);
+        sessionStore.saveLogin(u, "tok", null, null, null, null);
+        svc.getGlucoseData("p1", 1, u);
+
+        verify(c, times(2)).authenticatedGet(eq(u), anyString());
+    }
 }

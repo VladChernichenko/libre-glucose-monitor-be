@@ -43,7 +43,11 @@ A response is never reused after that.
   `sync-now`, watch reconnect). LibreView itself updates about once a minute, so a
   reading can be up to 2 min older than a direct call would give. Agreed with the user.
 - `logout(userId)` removes the user's graph entries, as it already does for the sensor cache.
-  Credential changes reach the cache through the same logout path.
+  Credential changes do **not** go through `logout`: `UserDataSourceConfigService` and
+  `authenticate` clear the session store directly. So each entry also stores the session token
+  it was fetched with, and is served only while that token is still the user's current one.
+  A body whose fetch finished after the session was cleared is not cached. (Found in the final
+  review.)
 - A debug log line on each cache hit, so the drop in upstream calls shows in the logs.
 
 ## Left to the builder

@@ -75,7 +75,8 @@ public class LibreLinkUpService {
     Clock sensorClock = Clock.systemUTC();
 
     private record CachedSensor(LibreSensorInfo info, long fetchedAtMs) {}
-    private record CachedGraph(JsonNode body, long fetchedAtMs) {}
+    /** {@code sessionToken} ties the body to the session that fetched it: any re-login or session clear invalidates it. */
+    private record CachedGraph(JsonNode body, String sessionToken, long fetchedAtMs) {}
 
     public LibreLinkUpService(CircuitBreakerManager circuitBreakerManager,
                               LibreLinkUpClient client,
@@ -438,7 +439,8 @@ public class LibreLinkUpService {
         CachedGraph cached = graphCache.get(key);
         if (cached != null) {
             long ageMs = sensorClock.millis() - cached.fetchedAtMs();
-            if (ageMs < graphCacheTtlSeconds * 1000) {
+            if (ageMs < graphCacheTtlSeconds * 1000
+                    && cached.sessionToken().equals(sessionStore.token(userId))) {
                 logger.debug("LibreLinkUp graph for patient {} served from cache ({} s old)", patientId, ageMs / 1000);
                 return cached.body();
             }
@@ -455,8 +457,11 @@ public class LibreLinkUpService {
             logger.info("Fetching LibreLinkUp graph for patient {} from {}", patientId, url);
             JsonNode json = authenticatedGet(userId, url);
             rememberSensor(userId, patientId, json);
-            if (json != null && !json.has("error")) {
-                graphCache.put(key, new CachedGraph(json, sensorClock.millis()));
+            // The token read after the call: a 401 retry may have renewed it, and a logout during the
+            // call leaves none, in which case the body is not cached.
+            String token = sessionStore.token(userId);
+            if (json != null && !json.has("error") && token != null) {
+                graphCache.put(key, new CachedGraph(json, token, sensorClock.millis()));
             }
             created.complete(json);
             return json;
