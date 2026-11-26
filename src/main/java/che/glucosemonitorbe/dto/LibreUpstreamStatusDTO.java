@@ -14,21 +14,37 @@ package che.glucosemonitorbe.dto;
  * @param readingsStale   true when there is no stored reading or the newest is older than
  *                        {@code CgmFreshnessService.MAX_AGE} (the same limit dose suggestions use);
  *                        null when not computed
+ * @param credentialsRejected true when LibreLinkUp rejected the stored email/password: the sync is
+ *                        paused until the user enters them again (the app should ask for that);
+ *                        null when not computed
  */
 public record LibreUpstreamStatusDTO(
         boolean available,
         String state,
         Long retryInSeconds,
         Long lastReadingAt,
-        Boolean readingsStale
+        Boolean readingsStale,
+        Boolean credentialsRejected
 ) {
     /** Breaker state only; the reading fields are filled in by {@link #withNewestReading}. */
     public LibreUpstreamStatusDTO(boolean available, String state, Long retryInSeconds) {
-        this(available, state, retryInSeconds, null, null);
+        this(available, state, retryInSeconds, null, null, null);
+    }
+
+    /** Breaker state and reading fields, credentials not computed. */
+    public LibreUpstreamStatusDTO(boolean available, String state, Long retryInSeconds,
+                                  Long lastReadingAt, Boolean readingsStale) {
+        this(available, state, retryInSeconds, lastReadingAt, readingsStale, null);
     }
 
     /** This status with the newest reading's time and staleness. */
     public LibreUpstreamStatusDTO withNewestReading(Long lastReadingAt, boolean readingsStale) {
-        return new LibreUpstreamStatusDTO(available, state, retryInSeconds, lastReadingAt, readingsStale);
+        return new LibreUpstreamStatusDTO(available, state, retryInSeconds, lastReadingAt, readingsStale,
+                credentialsRejected);
+    }
+
+    /** This status with whether LibreLinkUp rejected the stored credentials. */
+    public LibreUpstreamStatusDTO withCredentialsRejected(boolean rejected) {
+        return new LibreUpstreamStatusDTO(available, state, retryInSeconds, lastReadingAt, readingsStale, rejected);
     }
 }

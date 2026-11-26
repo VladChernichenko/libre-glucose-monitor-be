@@ -68,6 +68,21 @@ class LibreLinkUpSyncServiceCircuitTest {
     }
 
     @Test
+    @DisplayName("status reports credentialsRejected from the Libre config's flag")
+    void status_reportsCredentialsRejected() {
+        assertThat(sut.upstreamStatus(userId).credentialsRejected()).isFalse();
+
+        UserDataSourceConfig flagged = libreConfig();
+        flagged.setLibreCredentialsRejectedAt(java.time.Instant.now());
+        when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
+                eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)))
+                .thenReturn(Optional.of(flagged));
+
+        assertThat(sut.upstreamStatus(userId).credentialsRejected()).isTrue();
+        assertThat(sut.upstreamStatus(userId).withNewestReading(1L, true).credentialsRejected()).isTrue();
+    }
+
+    @Test
     @DisplayName("one failure reports LibreLinkUp unavailable while the circuit is still closed")
     void singleFailure_reportsUnavailable() throws Exception {
         when(libreLinkUpService.getGlucoseData(any(), anyInt(), eq(userId)))

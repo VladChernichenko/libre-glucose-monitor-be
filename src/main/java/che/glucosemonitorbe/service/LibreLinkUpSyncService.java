@@ -110,7 +110,11 @@ public class LibreLinkUpSyncService {
         LocalDateTime retryAt = breaker.getRetryAt();
         Long retryIn = retryAt == null ? null
                 : Math.max(0, Duration.between(LocalDateTime.now(), retryAt).getSeconds());
-        return new LibreUpstreamStatusDTO(available, state.name(), retryIn);
+        boolean credentialsRejected = configRepository
+                .findByUserIdAndDataSourceAndIsActiveTrue(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)
+                .map(c -> c.getLibreCredentialsRejectedAt() != null)
+                .orElse(false);
+        return new LibreUpstreamStatusDTO(available, state.name(), retryIn).withCredentialsRejected(credentialsRejected);
     }
 
     /**
