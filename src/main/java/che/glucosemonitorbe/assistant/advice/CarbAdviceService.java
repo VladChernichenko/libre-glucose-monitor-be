@@ -45,7 +45,7 @@ import java.util.UUID;
 @Service
 public class CarbAdviceService {
 
-    public static final double FALL_RATE = -0.1;
+    public static final double FALL_RATE = CarbAdviceTrigger.FALL_RATE;
     /** Rescue carbs [g] when the user has not set {@code rescueCarbsG}. */
     public static final int DEFAULT_RESCUE_CARBS_G = 15;
     public static final int LANDING_MINUTES = 15;
@@ -132,22 +132,13 @@ public class CarbAdviceService {
     }
 
     private static boolean triggered(LocalDateTime now, double trend, List<PredictionPointDTO> forecast) {
-        boolean hypoWithin60 = minimum(forecast, now, 60)
-                .map(p -> p.getPredictedGlucose() < HypoThresholds.HYPO_MMOL).orElse(false);
-        boolean fastFall = trend <= FALL_RATE && minimum(forecast, now, 90)
-                .map(p -> p.getPredictedGlucose() < HypoThresholds.HYPO_MMOL).orElse(false);
-        return hypoWithin60 || fastFall;
+        return CarbAdviceTrigger.fires(now, trend, forecast);
     }
 
     /** The lowest forecast point in (now, now + minutes]. */
     private static Optional<PredictionPointDTO> minimum(List<PredictionPointDTO> forecast,
                                                         LocalDateTime now, int minutes) {
-        if (forecast == null) return Optional.empty();
-        LocalDateTime until = now.plusMinutes(minutes);
-        return forecast.stream()
-                .filter(p -> p.getTimestamp() != null && p.getPredictedGlucose() != null)
-                .filter(p -> p.getTimestamp().isAfter(now) && !p.getTimestamp().isAfter(until))
-                .min(Comparator.comparingDouble(PredictionPointDTO::getPredictedGlucose));
+        return CarbAdviceTrigger.minimum(forecast, now, minutes);
     }
 
     /** Fast carbs (hypo_treatment notes) logged within the landing window: newest time and total grams. */
