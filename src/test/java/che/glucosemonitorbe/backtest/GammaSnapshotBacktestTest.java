@@ -124,7 +124,7 @@ class GammaSnapshotBacktestTest {
             // (all ISFs) while keeping the grams' effect (grams-per-unit shrunk by the same factor).
             // {ISF factor, grams-per-unit factor}: CGM-measured ISF ≈ 1.5× the settings and carb
             // ratio ≈ 0.65× for this user (clean corrections and isolated meals).
-            for (double[] k : new double[][]{{1, 1}, {1.5, 1}, {1, 0.65}, {1.5, 0.65}}) {
+            for (double[] k : new double[][]{{1, 1}, {1, 0.79}, {1, 0.65}}) {
                 double insulinScale = k[0];
                 UserSettingsDTO scaled = scaledSettings(settings, k[0], k[1]);
                 HovorkaGlucosePredictionService h = hovorka(scaled, rapidIob(c, userId));
