@@ -58,15 +58,17 @@ class CarbAdviceTriggerTest {
 
     @Test
     void mealContextNeedsConfirmation() {
-        assertThat(CarbAdviceTrigger.fires(NOW, 5.4, 0.0, toOneWithin60(5.4), true)).isFalse();
-        assertThat(CarbAdviceTrigger.fires(NOW, 5.4, 0.0, toOneWithin60(5.4), false)).isTrue();
+        assertThat(CarbAdviceTrigger.fires(NOW, 6.2, 0.0, toOneWithin60(6.2), true)).isFalse();
+        assertThat(CarbAdviceTrigger.fires(NOW, 6.2, 0.0, toOneWithin60(6.2), false)).isTrue();
     }
 
     @Test
     void confirmationBoundariesAreInclusive() {
-        assertThat(CarbAdviceTrigger.fires(NOW, 4.5, 0.0, toOneWithin60(4.5), true)).as("reading 4.5").isTrue();
+        assertThat(CarbAdviceTrigger.CONFIRM_READING_MMOL).isEqualTo(5.5);
+        assertThat(CarbAdviceTrigger.fires(NOW, 5.5, 0.0, toOneWithin60(5.5), true)).as("reading 5.5").isTrue();
         assertThat(CarbAdviceTrigger.fires(NOW, 6.0, -0.1, toOneWithin60(6.0), true)).as("trend -0.1").isTrue();
-        assertThat(CarbAdviceTrigger.fires(NOW, 4.6, 0.0, toOneWithin60(4.6), true)).as("4.6, flat").isFalse();
+        assertThat(CarbAdviceTrigger.fires(NOW, 5.6, 0.0, toOneWithin60(5.6), true)).as("5.6, flat").isFalse();
+        assertThat(CarbAdviceTrigger.fires(NOW, 5.6, -0.09, toOneWithin60(5.6), true)).as("5.6, slow fall").isFalse();
     }
 
     @Test

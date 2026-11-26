@@ -261,17 +261,32 @@ class CarbAdviceServiceTest {
         return pathAt(at, m -> m <= 55 ? start - (start - 1.0) * m / 55 : 1.0);
     }
 
-    @Test
-    void dinnerOf2026_11_19GetsNoAdvice() {
+    /** The 2026-11-19 dinner: 8 U pre-bolus, then a potato 14 min later. */
+    private void dinnerOf2026_11_19() {
         LocalDateTime bolus = LocalDateTime.of(2026, 11, 19, 19, 30);
-        LocalDateTime at = LocalDateTime.of(2026, 11, 19, 19, 53);
         when(notes.findByUserIdAndTimestampBetween(eq(USER), any(), any())).thenReturn(List.of(
                 new Note(USER, bolus, 0.0, 8.0, "Pre-bolus"),
                 new Note(USER, bolus.plusMinutes(14), 26.0, 0.0, "fried potato")));
+    }
+
+    @Test
+    void dinnerOf2026_11_19GetsNoAdviceWhileTheCgmHoldsUp() {
+        LocalDateTime at = LocalDateTime.of(2026, 11, 19, 20, 5);
+        dinnerOf2026_11_19();
+        freshReadingAt(READING_0, 6.2);
+
+        assertThat(service.evaluate(USER, at, 6.2, 0.0, toOneAt(at, 6.2))).isEmpty();
+        verify(calculations, never()).calculateGlucoseData(any());
+    }
+
+    @Test
+    void aMealContextLowAtOrUnder5_5IsStillAdvised() {
+        // The confirmation reading is 5.5 (tuned for safety), so the 19:53 forecast at 5.4 still fires.
+        LocalDateTime at = LocalDateTime.of(2026, 11, 19, 19, 53);
+        dinnerOf2026_11_19();
         freshReadingAt(READING_0, 5.4);
 
-        assertThat(service.evaluate(USER, at, 5.4, 0.0, toOneAt(at, 5.4))).isEmpty();
-        verify(calculations, never()).calculateGlucoseData(any());
+        assertThat(service.evaluate(USER, at, 5.4, 0.0, toOneAt(at, 5.4))).isPresent();
     }
 
     @Test

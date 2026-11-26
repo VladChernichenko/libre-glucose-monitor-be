@@ -24,8 +24,15 @@ public final class CarbAdviceTrigger {
     /**
      * In meal context a forecast-only low needs the CGM to confirm it: a reading at or below this
      * [mmol/L], or a trend at or below {@link #FALL_RATE}.
+     *
+     * <p>5.5, not the spec's 4.5: tuned on AZT1D (last 14 days of 22 subjects, Gamma absorption) and
+     * one user's notes before 2026-11-01 ({@code CarbAdviceGuardTuningTest}). At 4.5 the guard cut
+     * meal-anchor false advice by 66% but left 3 real lows without advice and pushed 19 inside 15
+     * min; at 5.0, -50% with 3 lows inside 15 min; at 5.5, -38% with no low losing its advice or its
+     * lead. Chosen for safety: a real low always keeps its warning. A forecast low at a reading of
+     * 5.0-5.5 after a meal (as on 2026-11-19 at 5.4) is still advised.</p>
      */
-    public static final double CONFIRM_READING_MMOL = 4.5;
+    public static final double CONFIRM_READING_MMOL = 5.5;
 
     /**
      * The guarded rule. Outside meal context it is {@link #fires(LocalDateTime, double, List)}. In
