@@ -42,17 +42,21 @@ public interface UserDataSourceConfigRepository extends JpaRepository<UserDataSo
     List<UserDataSourceConfig> findByUserIdAndIsActiveTrueOrderByCreatedAtDesc(UUID userId);
 
     /**
-     * User IDs that have an active Nightscout configuration (for background sync).
+     * User IDs that have an active configuration of {@code dataSource} and are themselves active
+     * ({@code users.is_active}) - the background sync membership. Inactive users are never polled.
      */
-    @Query("SELECT DISTINCT c.user.id FROM UserDataSourceConfig c WHERE c.dataSource = :dataSource AND c.isActive = true")
+    @Query("SELECT DISTINCT c.user.id FROM UserDataSourceConfig c WHERE c.dataSource = :dataSource AND c.isActive = true"
+            + " AND c.user.active = true")
     List<UUID> findDistinctUserIdsByDataSourceAndIsActiveTrue(@Param("dataSource") UserDataSourceConfig.DataSourceType dataSource);
 
     /**
      * User IDs with an active LibreLinkUp configuration that has email, password and a non-blank patientId
-     * (the Libre due-queue membership).
+     * whose user is active ({@code users.is_active}) - the Libre due-queue membership. Inactive users
+     * are never logged in to LibreLinkUp.
      */
     @Query("SELECT DISTINCT c.user.id FROM UserDataSourceConfig c WHERE c.dataSource = che.glucosemonitorbe.domain.UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP"
-            + " AND c.isActive = true AND c.libreEmail IS NOT NULL AND c.librePassword IS NOT NULL"
+            + " AND c.isActive = true AND c.user.active = true"
+            + " AND c.libreEmail IS NOT NULL AND c.librePassword IS NOT NULL"
             + " AND c.librePatientId IS NOT NULL AND TRIM(c.librePatientId) <> ''")
     List<UUID> findActiveLibreUserIdsWithCredentials();
 

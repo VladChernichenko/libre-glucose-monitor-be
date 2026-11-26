@@ -25,6 +25,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider tokenProvider;
     private final TokenBlacklistService tokenBlacklistService;
+    private final UserActivityService userActivityService;
 
     public AuthResponse login(AuthRequest request) {
         Authentication authentication = authenticationManager.authenticate(
@@ -33,6 +34,7 @@ public class AuthService {
 
         String accessToken = tokenProvider.generateToken(authentication);
         String refreshToken = tokenProvider.generateRefreshToken(request.getUsername());
+        recordActivity(request.getUsername());
 
         return AuthResponse.builder()
                 .accessToken(accessToken)
@@ -116,6 +118,7 @@ public class AuthService {
 
         String accessToken = tokenProvider.generateTokenFromUsername(username);
         String refreshToken = tokenProvider.generateRefreshToken(username);
+        recordActivity(username);
 
         return AuthResponse.builder()
                 .accessToken(accessToken)
@@ -123,6 +126,15 @@ public class AuthService {
                 .tokenType("Bearer")
                 .expiresIn(tokenProvider.getAccessTokenExpirySeconds())
                 .build();
+    }
+
+    /** Login and refresh are activity: they reactivate an inactive user. Never fails the auth call. */
+    private void recordActivity(String username) {
+        try {
+            userActivityService.recordActivity(username);
+        } catch (RuntimeException ex) {
+            log.warn("Could not record activity for {}: {}", username, ex.getMessage());
+        }
     }
     
     /**

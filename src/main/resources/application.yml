@@ -184,6 +184,14 @@ app:
     pump-interval-ms: 1000
     reconcile-interval-ms: 60000
 
+  # A user idle for inactive-after of daytime (local night-start..night-end excluded) gets
+  # users.is_active=false and is left out of the sync lanes; any request reactivates them.
+  user-activity:
+    inactive-after: PT10H
+    night-start: "22:00"
+    night-end: "07:00"
+    check-interval-ms: 300000
+
 management:
   endpoints:
     web:

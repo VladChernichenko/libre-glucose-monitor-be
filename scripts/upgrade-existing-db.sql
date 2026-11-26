@@ -45,6 +45,12 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- users: inactivity flag for the CGM sync lanes (V1 on this branch). Existing users start active,
+-- with "now" as their last activity, so nobody is dropped from sync by the upgrade itself.
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS is_active        BOOLEAN     NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 -- user_settings: correction target and rescue carbs (V1 on this branch).
 ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,

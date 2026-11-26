@@ -1,6 +1,8 @@
 package che.glucosemonitorbe.security;
 
+import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.service.TokenBlacklistService;
+import che.glucosemonitorbe.service.UserActivityService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,6 +31,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenProvider tokenProvider;
     private final UserDetailsService userDetailsService;
     private final TokenBlacklistService tokenBlacklistService;
+    private final UserActivityService userActivityService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -96,6 +99,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(authentication);
         MDC.put("userId", username);
         log.debug("Successfully authenticated user: {}", username);
+        recordActivity(userDetails);
+    }
+
+    /** Any authenticated request is activity (and reactivates an inactive user); never fails the request. */
+    private void recordActivity(UserDetails userDetails) {
+        if (!(userDetails instanceof User user)) {
+            return;
+        }
+        try {
+            userActivityService.recordActivity(user);
+        } catch (RuntimeException ex) {
+            log.warn("Could not record activity for user {}: {}", user.getId(), ex.getMessage());
+        }
     }
 
     private String getJwtFromRequest(HttpServletRequest request) {

@@ -49,7 +49,7 @@ class AuthServiceTest {
 
         authService = new AuthService(
                 authenticationManager, userRepository, passwordEncoder,
-                tokenProvider, tokenBlacklistService);
+                tokenProvider, tokenBlacklistService, org.mockito.Mockito.mock(UserActivityService.class));
 
         // Sensible defaults
         when(passwordEncoder.encode(anyString())).thenReturn("encoded-pw");
