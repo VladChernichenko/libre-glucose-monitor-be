@@ -55,7 +55,7 @@ class LibreLinkUpServiceReloginTest {
     @BeforeEach
     void setUp() throws Exception {
         userId = UUID.randomUUID();
-        sessionStore = new LibreLinkUpSessionStore();
+        sessionStore = new LibreLinkUpSessionStore(org.mockito.Mockito.mock(che.glucosemonitorbe.repository.LibreSessionRepository.class));
         client = mock(LibreLinkUpClient.class);
         configRepository = mock(UserDataSourceConfigRepository.class);
         service = new LibreLinkUpService(new CircuitBreakerManager(), client, sessionStore,
@@ -83,7 +83,7 @@ class LibreLinkUpServiceReloginTest {
     @DisplayName("token rejected (401): logs in again and retries the call once")
     void rejectedToken_logsInAgainAndRetries() throws Exception {
         storeCredentials();
-        sessionStore.putToken(userId, "expired-token");
+        sessionStore.saveLogin(userId, "expired-token", null, null, null, null);
         when(client.authenticatedGet(eq(userId), anyString()))
                 .thenThrow(HttpClientErrorException.create(HttpStatus.UNAUTHORIZED, "Unauthorized",
                         HttpHeaders.EMPTY, new byte[0], StandardCharsets.UTF_8))
@@ -100,7 +100,7 @@ class LibreLinkUpServiceReloginTest {
     @DisplayName("graph HTTP 429 propagates as LibreRateLimitedException")
     void graphHttp429_propagatesAsRateLimited() throws Exception {
         storeCredentials();
-        sessionStore.putToken(userId, "live-token");
+        sessionStore.saveLogin(userId, "live-token", null, null, null, null);
         when(client.authenticatedGet(eq(userId), anyString()))
                 .thenThrow(HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS, "Too Many Requests",
                         HttpHeaders.EMPTY, new byte[0], StandardCharsets.UTF_8));
@@ -114,7 +114,7 @@ class LibreLinkUpServiceReloginTest {
     @DisplayName("a live session is reused - no extra login")
     void liveSession_noLogin() throws Exception {
         storeCredentials();
-        sessionStore.putToken(userId, "live-token");
+        sessionStore.saveLogin(userId, "live-token", null, null, null, null);
         when(client.authenticatedGet(eq(userId), anyString())).thenReturn(json.readTree(CONNECTIONS));
 
         service.getConnections(userId);

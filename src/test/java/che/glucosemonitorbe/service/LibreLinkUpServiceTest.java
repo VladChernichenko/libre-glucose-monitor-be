@@ -57,7 +57,7 @@ class LibreLinkUpServiceTest {
     void setUp() {
         configRepository = mock(UserDataSourceConfigRepository.class);
         CircuitBreakerManager cbm = new CircuitBreakerManager();
-        sessionStore = new LibreLinkUpSessionStore();
+        sessionStore = new LibreLinkUpSessionStore(org.mockito.Mockito.mock(che.glucosemonitorbe.repository.LibreSessionRepository.class));
         responseParser = new LibreLinkUpResponseParser();
         LibreLinkUpClient client = new LibreLinkUpClient(new RestTemplate(), responseParser, sessionStore);
         service = new LibreLinkUpService(
@@ -76,8 +76,8 @@ class LibreLinkUpServiceTest {
         UUID userId1 = UUID.randomUUID();
         UUID userId2 = UUID.randomUUID();
 
-        sessionStore.putToken(userId1, "token-A");
-        sessionStore.putToken(userId2, "token-B");
+        sessionStore.saveLogin(userId1, "token-A", null, null, null, null);
+        sessionStore.saveLogin(userId2, "token-B", null, null, null, null);
 
         assertThat(sessionStore.token(userId1)).isEqualTo("token-A");
         assertThat(sessionStore.token(userId2)).isEqualTo("token-B");
@@ -88,7 +88,7 @@ class LibreLinkUpServiceTest {
         UUID userId1 = UUID.randomUUID();
         UUID userId2 = UUID.randomUUID();
 
-        sessionStore.putToken(userId1, "token-A");
+        sessionStore.saveLogin(userId1, "token-A", null, null, null, null);
 
         assertThat(service.isAuthenticated(userId1)).isTrue();
         assertThat(service.isAuthenticated(userId2)).isFalse();
@@ -99,8 +99,8 @@ class LibreLinkUpServiceTest {
         UUID userId1 = UUID.randomUUID();
         UUID userId2 = UUID.randomUUID();
 
-        sessionStore.putToken(userId1, "token-A");
-        sessionStore.putToken(userId2, "token-B");
+        sessionStore.saveLogin(userId1, "token-A", null, null, null, null);
+        sessionStore.saveLogin(userId2, "token-B", null, null, null, null);
 
         service.logout(userId1);
 
@@ -118,8 +118,8 @@ class LibreLinkUpServiceTest {
         UUID userId1 = UUID.randomUUID();
         UUID userId2 = UUID.randomUUID();
 
-        sessionStore.putToken(userId1, "token-A");
-        sessionStore.putToken(userId2, "token-B");
+        sessionStore.saveLogin(userId1, "token-A", null, null, null, null);
+        sessionStore.saveLogin(userId2, "token-B", null, null, null, null);
 
         service.logout(userId1);
         assertThat(service.isAuthenticated(userId1)).isFalse();
@@ -140,10 +140,7 @@ class LibreLinkUpServiceTest {
     @DisplayName("logout - clears all per-user session state")
     void logout_clearsAllStores() {
         UUID uid = UUID.randomUUID();
-        sessionStore.putToken(uid, "tok");
-        sessionStore.putAccountId(uid, "acct-hash");
-        sessionStore.putLocale(uid, "fr-FR");
-        sessionStore.putBaseUrl(uid, "https://api-fr.libreview.io");
+        sessionStore.saveLogin(uid, "tok", null, "fr-FR", "https://api-fr.libreview.io", "acct-hash");
 
         service.logout(uid);
 
@@ -173,7 +170,7 @@ class LibreLinkUpServiceTest {
     @Test
     void be2_getConnections_unwrapsDataEnvelopeAndMaps() throws Exception {
         UUID userId = UUID.randomUUID();
-        sessionStore.putToken(userId, "tok");
+        sessionStore.saveLogin(userId, "tok", null, null, null, null);
 
         LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
         JsonNode envelope = new ObjectMapper().readTree(
@@ -206,7 +203,7 @@ class LibreLinkUpServiceTest {
     @DisplayName("getSensorInfo calls LibreLinkUp once per day")
     void getSensorInfo_callsLibreOncePerDay() throws Exception {
         UUID userId = UUID.randomUUID();
-        sessionStore.putToken(userId, "tok");
+        sessionStore.saveLogin(userId, "tok", null, null, null, null);
         LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
         long activation = Instant.parse("2026-11-13T17:00:11Z").getEpochSecond();
         JsonNode graph = new ObjectMapper().readTree(
@@ -237,7 +234,7 @@ class LibreLinkUpServiceTest {
     @DisplayName("getSensorInfo does not cache a missing sensor")
     void getSensorInfo_unknownIsNotCached() throws Exception {
         UUID userId = UUID.randomUUID();
-        sessionStore.putToken(userId, "tok");
+        sessionStore.saveLogin(userId, "tok", null, null, null, null);
         LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
         when(mockClient.authenticatedGet(eq(userId), anyString()))
                 .thenReturn(new ObjectMapper().readTree("{\"data\":{\"activeSensors\":[]}}"));
@@ -255,7 +252,7 @@ class LibreLinkUpServiceTest {
     @DisplayName("glucose sync and sensor info share one graph download")
     void glucoseAndSensorShareOneGraphDownload() throws Exception {
         UUID userId = UUID.randomUUID();
-        sessionStore.putToken(userId, "tok");
+        sessionStore.saveLogin(userId, "tok", null, null, null, null);
         LibreLinkUpClient mockClient = mock(LibreLinkUpClient.class);
         long activation = Instant.parse("2026-11-13T17:00:11Z").getEpochSecond();
         JsonNode graph = new ObjectMapper().readTree(
@@ -313,5 +310,18 @@ class LibreLinkUpServiceTest {
         assertThatThrownBy(() -> service.getGlucoseData("patient-1", 1, userId))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Not authenticated");
+    }
+
+    @Test
+    @DisplayName("authTicket.expires is read as epoch seconds (or millis); absent/invalid -> null")
+    void ticketExpiry_parsesSecondsAndMillis() throws Exception {
+        ObjectMapper om = new ObjectMapper();
+        assertThat(LibreLinkUpService.ticketExpiry(om.readTree("{\"expires\":1795000000}")))
+                .isEqualTo(Instant.ofEpochSecond(1_795_000_000L));
+        assertThat(LibreLinkUpService.ticketExpiry(om.readTree("{\"expires\":1795000000000}")))
+                .isEqualTo(Instant.ofEpochMilli(1_795_000_000_000L));
+        assertThat(LibreLinkUpService.ticketExpiry(om.readTree("{\"token\":\"t\"}"))).isNull();
+        assertThat(LibreLinkUpService.ticketExpiry(om.readTree("{\"expires\":0}"))).isNull();
+        assertThat(LibreLinkUpService.ticketExpiry(null)).isNull();
     }
 }

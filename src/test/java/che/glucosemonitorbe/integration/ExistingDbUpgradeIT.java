@@ -67,7 +67,7 @@ class ExistingDbUpgradeIT {
         Flyway current = Flyway.configure()
                 .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                 .locations("classpath:db/migration").load();
-        assertThatThrownBy(current::validate).as("edited V1/V4/V5/V6 checksums (and pending V13-V23) fail validation before repair");
+        assertThatThrownBy(current::validate).as("edited V1/V4/V5/V6 checksums (and pending V13-V24) fail validation before repair");
 
         // 2. the script, twice
         String script = Files.readString(Path.of("scripts/upgrade-existing-db.sql"));
@@ -75,7 +75,7 @@ class ExistingDbUpgradeIT {
             st.execute(script);
             st.execute(script);
         }
-        // 3. flyway repair; 4. the app start below runs V13-V23 and validates the schema
+        // 3. flyway repair; 4. the app start below runs V13-V24 and validates the schema
         current.repair();
     }
 
@@ -93,10 +93,10 @@ class ExistingDbUpgradeIT {
     @Autowired private JdbcTemplate jdbc;
 
     @Test
-    @DisplayName("main's V12 database + script + repair: the app boots (Flyway V23, Hibernate validate) and keeps the data")
+    @DisplayName("main's V12 database + script + repair: the app boots (Flyway V24, Hibernate validate) and keeps the data")
     void legacyDatabaseUpgradesAndBoots() {
         assertThat(jdbc.queryForObject(
-                "SELECT max(version::int) FROM flyway_schema_history WHERE success", Integer.class)).isEqualTo(23);
+                "SELECT max(version::int) FROM flyway_schema_history WHERE success", Integer.class)).isEqualTo(24);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM insulin_catalog", Integer.class)).isEqualTo(10);
         assertThat(jdbc.queryForObject("SELECT dia_hours FROM insulin_catalog WHERE code = 'FIASP'", Double.class)).isEqualTo(5.0);
         assertThat(jdbc.queryForObject("SELECT dia_hours FROM insulin_catalog WHERE code = 'APIDRA'", Double.class)).isEqualTo(4.5);
@@ -166,7 +166,7 @@ class ExistingDbUpgradeIT {
      * to the V1 it was created from ({@code carb_ratio} and the single {@code grams_per_unit}, each
      * with its CHECK; the window
      * columns only when {@code withWindowColumns}, as on a database already upgraded for this branch).
-     * Then the script twice, flyway repair, and Flyway applies V23 as the app start would.
+     * Then the script twice, flyway repair, and Flyway applies V23-V24 as the app start would.
      */
     private static JdbcTemplate upgradedV22Database(String name, boolean withWindowColumns) throws Exception {
         try (Connection c = connection(); Statement st = c.createStatement()) {
@@ -212,7 +212,7 @@ class ExistingDbUpgradeIT {
         JdbcTemplate db = new JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
                 url, postgres.getUsername(), postgres.getPassword()));
         assertThat(db.queryForObject("SELECT max(version::int) FROM flyway_schema_history WHERE success",
-                Integer.class)).isEqualTo(23);
+                Integer.class)).isEqualTo(24);
         return db;
     }
 

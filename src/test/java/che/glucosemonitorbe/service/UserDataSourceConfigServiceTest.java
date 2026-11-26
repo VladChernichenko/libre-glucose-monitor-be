@@ -5,6 +5,7 @@ import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.DataSourceConfigRequestDto;
 import che.glucosemonitorbe.dto.UserDataSourceConfigDto;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
+import che.glucosemonitorbe.service.libre.LibreLinkUpSessionStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -43,8 +44,41 @@ class UserDataSourceConfigServiceTest {
     @Mock
     private UserService userService;
 
+    @Mock
+    private LibreLinkUpSessionStore libreSessionStore;
+
     @InjectMocks
     private UserDataSourceConfigService service;
+
+    @Test
+    void libreConfigChanges_dropPersistedLibreSession() {
+        UUID userId = UUID.randomUUID();
+        UUID configId = UUID.randomUUID();
+        UserDataSourceConfig config = new UserDataSourceConfig(user(userId), "libre@example.com", "pw", "patient", true);
+        config.setId(configId);
+        when(repository.findById(configId)).thenReturn(Optional.of(config));
+        when(repository.save(config)).thenReturn(config);
+
+        service.activateConfig(userId, configId);
+        service.deactivateConfig(userId, configId);
+        service.deleteConfig(userId, configId);
+
+        verify(libreSessionStore, times(3)).clear(userId);
+    }
+
+    @Test
+    void nightscoutConfigChanges_keepLibreSession() {
+        UUID userId = UUID.randomUUID();
+        UUID configId = UUID.randomUUID();
+        UserDataSourceConfig config = new UserDataSourceConfig(user(userId), NIGHTSCOUT_URL, "sec", "tok");
+        config.setId(configId);
+        when(repository.findById(configId)).thenReturn(Optional.of(config));
+
+        service.deactivateConfig(userId, configId);
+        service.deleteConfig(userId, configId);
+
+        verifyNoInteractions(libreSessionStore);
+    }
 
     @Test
     void saveConfigCreatesNightscoutConfig() {

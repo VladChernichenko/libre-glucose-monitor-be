@@ -31,8 +31,8 @@
 --      (the server must have the pgvector extension available; the role must be
 --      allowed to CREATE EXTENSION).
 --   4. flyway repair          (accepts the new checksums of the edited V1, V4, V5, V6).
---   5. Deploy or start this build. Flyway applies any pending migration (V13-V23
---      from V12, V23 from V22, none from V23), then Hibernate validates.
+--   5. Deploy or start this build. Flyway applies any pending migration (V13-V24
+--      from V12, V23-V24 from V22, V24 from V23), then Hibernate validates.
 --   6. Resume auto-deploy.
 --
 -- ROLLBACK: restore the step-2 backup and redeploy the previous build. The
