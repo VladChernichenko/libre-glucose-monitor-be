@@ -150,7 +150,7 @@ public class LibreLinkUpService {
 
                     if (token != null) {
                         if (userId != null) {
-                            storeSession(userId, token, authRequest.getLocale(), data, regionResolver.localeToBaseUrl(authRequest.getLocale()));
+                            storeSession(userId, token, authTicket, authRequest.getLocale(), data, regionResolver.localeToBaseUrl(authRequest.getLocale()));
                         }
                         logger.info("Successfully authenticated with LibreLinkUp for user {}, token expires: {}", userId, expires);
                         return new LibreAuthResponse(token, expires);
@@ -204,7 +204,7 @@ public class LibreLinkUpService {
                     if (token != null) {
                         if (userId != null) {
                             // Region login always pins the resolved region host.
-                            storeSession(userId, token, authRequest.getLocale(), data, regionBaseUrl);
+                            storeSession(userId, token, authTicket, authRequest.getLocale(), data, regionBaseUrl);
                             logger.info("Stored region {} base URL for user {}", region, userId);
                         }
                         logger.info("Successfully authenticated with region {} endpoint for user {}, token expires: {}", region, userId, expires);
@@ -235,22 +235,33 @@ public class LibreLinkUpService {
      * @param baseUrlOverride base URL to pin for this user, or {@code null} to leave it at the default
      *                        (used by locale-derived routing on the primary login path)
      */
-    private void storeSession(UUID userId, String token, String locale, JsonNode data, String baseUrlOverride) {
-        sessionStore.putToken(userId, token);
-        if (locale != null && !locale.isBlank()) {
-            sessionStore.putLocale(userId, locale);
-        }
-        if (baseUrlOverride != null) {
-            sessionStore.putBaseUrl(userId, baseUrlOverride);
-        }
+    private void storeSession(UUID userId, String token, JsonNode authTicket, String locale, JsonNode data,
+                              String baseUrlOverride) {
+        String accountId = null;
         JsonNode userNode = data != null ? data.get("user") : null;
         if (userNode != null && userNode.has("id")) {
             String libreUserId = userNode.get("id").asText();
             if (!libreUserId.isBlank()) {
-                sessionStore.putAccountId(userId, LibreLinkUpResponseParser.sha256Hex(libreUserId));
-                logger.info("Stored account-id hash for user {}", userId);
+                accountId = LibreLinkUpResponseParser.sha256Hex(libreUserId);
             }
         }
+        sessionStore.saveLogin(userId, token, ticketExpiry(authTicket), locale, baseUrlOverride, accountId);
+        logger.info("Stored LibreLinkUp session for user {} (account-id {})", userId, accountId != null ? "set" : "missing");
+    }
+
+    /**
+     * {@code authTicket.expires} as an instant: LibreLinkUp sends epoch seconds; a value that is
+     * already epoch millis is accepted too. Null when absent or not a positive number.
+     */
+    static Instant ticketExpiry(JsonNode authTicket) {
+        if (authTicket == null || !authTicket.hasNonNull("expires") || !authTicket.get("expires").canConvertToLong()) {
+            return null;
+        }
+        long v = authTicket.get("expires").asLong();
+        if (v <= 0) {
+            return null;
+        }
+        return v < 100_000_000_000L ? Instant.ofEpochSecond(v) : Instant.ofEpochMilli(v);
     }
 
     /**

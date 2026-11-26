@@ -8,6 +8,7 @@ import che.glucosemonitorbe.dto.DataSourceConfigStatusDto;
 import che.glucosemonitorbe.dto.NightscoutCredentials;
 import che.glucosemonitorbe.dto.UserDataSourceConfigDto;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
+import che.glucosemonitorbe.service.libre.LibreLinkUpSessionStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
@@ -27,6 +28,7 @@ public class UserDataSourceConfigService {
 
     private final UserDataSourceConfigRepository repository;
     private final UserService userService;
+    private final LibreLinkUpSessionStore libreSessionStore;
 
     /**
      * Save or update a data source configuration for a user
@@ -71,6 +73,7 @@ public class UserDataSourceConfigService {
         
         UserDataSourceConfig savedConfig = repository.save(config);
         log.info("Successfully saved data source configuration with ID: {}", savedConfig.getId());
+        forgetLibreSessionIfLibre(userId, savedConfig);
         
         return convertToDto(savedConfig);
     }
@@ -168,6 +171,7 @@ public class UserDataSourceConfigService {
         
         UserDataSourceConfig savedConfig = repository.save(config);
         log.info("Successfully activated configuration: {}", configId);
+        forgetLibreSessionIfLibre(userId, savedConfig);
         
         return convertToDto(savedConfig);
     }
@@ -190,6 +194,18 @@ public class UserDataSourceConfigService {
         config.setIsActive(false);
         repository.save(config);
         log.info("Successfully deactivated configuration: {}", configId);
+        forgetLibreSessionIfLibre(userId, config);
+    }
+
+    /**
+     * A persisted LibreLinkUp session belongs to the credentials it was issued for: when the Libre
+     * config is replaced, switched, deactivated or deleted, drop it so the next sync logs in with the
+     * current credentials instead of reading the previous account.
+     */
+    private void forgetLibreSessionIfLibre(UUID userId, UserDataSourceConfig config) {
+        if (config.getDataSource() == UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP) {
+            libreSessionStore.clear(userId);
+        }
     }
 
     /**
@@ -209,6 +225,7 @@ public class UserDataSourceConfigService {
         
         repository.delete(config);
         log.info("Successfully deleted configuration: {}", configId);
+        forgetLibreSessionIfLibre(userId, config);
     }
 
     /**
