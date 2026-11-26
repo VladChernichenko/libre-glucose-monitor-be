@@ -5,6 +5,7 @@ import che.glucosemonitorbe.config.FeatureToggleConfig;
 import che.glucosemonitorbe.dto.ClientTimeInfo;
 import che.glucosemonitorbe.dto.GlucoseCalculationsRequest;
 import che.glucosemonitorbe.dto.PredictionPointDTO;
+import che.glucosemonitorbe.dto.ProspectiveNoteDTO;
 import che.glucosemonitorbe.dto.RapidInsulinIobParameters;
 import che.glucosemonitorbe.dto.UserDto;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -60,45 +61,45 @@ import static org.mockito.Mockito.when;
  * 4 h after a ≥ 10 g carb note. In {@link Mode#AS_LOGGED} the forecaster sees the notes logged by the
  * anchor; in {@link Mode#FULL_KNOWLEDGE} also those of the next 120 min (a meal logged in parts).</p>
  */
-final class MealReplayHarness {
+public final class MealReplayHarness {
 
-    static final int[] HORIZONS = {30, 60, 90, 120, 180, 240};
+    public static final int[] HORIZONS = {30, 60, 90, 120, 180, 240};
     private static final long ALIGN_MS = 150_000L;        // ±2.5 min
     private static final double LOW_MMOL = 3.9, SAFE_MMOL = 4.5;
     private static final double MEAL_CARBS_G = 10.0;
 
     private MealReplayHarness() {}
 
-    record Data(List<BacktestHarness.CgmPoint> cgm, List<Note> notes, UserSettingsDTO settings,
+    public record Data(List<BacktestHarness.CgmPoint> cgm, List<Note> notes, UserSettingsDTO settings,
                 Map<String, RapidInsulinIobParameters> curves, double basalDurationHours, ZoneId zone) {}
 
-    enum Mode { AS_LOGGED, FULL_KNOWLEDGE }
+    public enum Mode { AS_LOGGED, FULL_KNOWLEDGE }
 
-    enum Bucket { MEAL, PRE_BOLUS, CORRECTION, FASTING }
+    public enum Bucket { MEAL, PRE_BOLUS, CORRECTION, FASTING }
 
-    record Metrics(int n, double bias, double mae) {
+    public record Metrics(int n, double bias, double mae) {
         static final Metrics EMPTY = new Metrics(0, Double.NaN, Double.NaN);
     }
 
     @FunctionalInterface
-    interface Forecaster {
+    public interface Forecaster {
         List<PredictionPointDTO> forecast(LocalDateTime now, double g0, double trend, List<Note> visible);
     }
 
     @FunctionalInterface
-    interface MealContextFn {
+    public interface MealContextFn {
         MealContextFn NONE = (n, v) -> false;
         boolean at(LocalDateTime now, List<Note> visible);
     }
 
-    record Options(Mode mode, LocalDate fromInclusive, LocalDate toExclusive, MealContextFn mealContext) {}
+    public record Options(Mode mode, LocalDate fromInclusive, LocalDate toExclusive, MealContextFn mealContext) {}
 
-    record LowOutcome(LocalDateTime lowAt, LocalDateTime firstFireAt, Integer leadMin) {}
+    public record LowOutcome(LocalDateTime lowAt, LocalDateTime firstFireAt, Integer leadMin) {}
 
     // -- Loading -------------------------------------------------------------------------------
 
     /** An export directory: {@code cgm.csv}, {@code notes.csv}, {@code settings.properties}. */
-    static Data load(Path dir) throws IOException {
+    public static Data load(Path dir) throws IOException {
         Properties p = new Properties();
         try (Reader r = Files.newBufferedReader(dir.resolve("settings.properties"))) {
             p.load(r);
@@ -186,7 +187,7 @@ final class MealReplayHarness {
      * repositories that hold only the {@code visible} notes, so inputs are built exactly as in
      * production (nutrition-aware mapper, delayed protein, per-dose insulin curves, basal notes).
      */
-    static Forecaster hovorka(Data d, boolean gamma) {
+    public static Forecaster hovorka(Data d, boolean gamma) {
         UUID userId = d.settings().getUserId();
         String username = "replay";
         UserSettingsService settings = mock(UserSettingsService.class);
@@ -222,10 +223,21 @@ final class MealReplayHarness {
         ReflectionTestUtils.setField(svc, "hovorkaService", model);
 
         return (now, g0, trend, notes) -> {
-            visible[0] = notes;
+            // The service reads logged notes up to "now" only; notes after it (FULL_KNOWLEDGE) go
+            // in as prospective notes at their own minute, as the what-if path takes them.
+            visible[0] = notes.stream().filter(n -> !n.getTimestamp().isAfter(now)).toList();
+            List<ProspectiveNoteDTO> ahead = notes.stream()
+                    .filter(n -> n.getTimestamp().isAfter(now) && !n.isLongActing())
+                    .map(n -> ProspectiveNoteDTO.builder()
+                            .carbs(n.getCarbs()).insulin(n.getInsulin()).meal(n.getMeal()).type(n.getType())
+                            .nutritionProfileJson(n.getNutritionProfile())
+                            .minutesAgo(-(int) Duration.between(now, n.getTimestamp()).toMinutes())
+                            .build())
+                    .toList();
             return svc.calculateGlucoseData(GlucoseCalculationsRequest.builder()
                     .userId(username).currentGlucose(g0).currentTrendMmolPerMin(trend)
                     .predictionHorizonMinutes(240)
+                    .prospectiveNotes(ahead.isEmpty() ? null : ahead)
                     .clientTimeInfo(ClientTimeInfo.builder().timestamp(now.toString()).build())
                     .build()).getPredictionPath();
         };
@@ -233,7 +245,7 @@ final class MealReplayHarness {
 
     // -- Replay --------------------------------------------------------------------------------
 
-    static Report run(Data d, Forecaster f, Options o) {
+    public static Report run(Data d, Forecaster f, Options o) {
         Report report = new Report();
         for (LocalDateTime t : anchors(d, o)) {
             Double g0 = cgmAt(d, t);
@@ -388,7 +400,7 @@ final class MealReplayHarness {
 
     // -- Report --------------------------------------------------------------------------------
 
-    static final class Report {
+    public static final class Report {
         private final Map<Bucket, TreeMap<Integer, double[]>> byBucket = new EnumMap<>(Bucket.class);
         private final TreeMap<Integer, double[]> rescue = new TreeMap<>();
         private int adviceAnchors, falseAdvice;
@@ -400,6 +412,21 @@ final class MealReplayHarness {
 
         private void addRescue(int h, double err) {
             acc(rescue, h, err);
+        }
+
+        /** Adds {@code other}'s samples, advice counts and lows to this report (pooling subjects). */
+        public void merge(Report other) {
+            other.byBucket.forEach((b, m) -> m.forEach((h, a) ->
+                    add3(byBucket.computeIfAbsent(b, k -> new TreeMap<>()), h, a)));
+            other.rescue.forEach((h, a) -> add3(rescue, h, a));
+            adviceAnchors += other.adviceAnchors;
+            falseAdvice += other.falseAdvice;
+            lows.addAll(other.lows);
+        }
+
+        private static void add3(TreeMap<Integer, double[]> m, int h, double[] a) {
+            double[] t = m.computeIfAbsent(h, k -> new double[3]);
+            for (int i = 0; i < 3; i++) t[i] += a[i];
         }
 
         private static void acc(TreeMap<Integer, double[]> m, int h, double err) {
@@ -415,13 +442,13 @@ final class MealReplayHarness {
         }
 
         /** Error = actual − predicted: a positive bias is a forecast that runs low. */
-        Metrics metrics(Bucket b, int horizonMin) { return metricsOf(byBucket.get(b), horizonMin); }
-        Metrics rescueMetrics(int horizonMin) { return metricsOf(rescue, horizonMin); }
-        int adviceAnchors() { return adviceAnchors; }
-        int falseAdvice() { return falseAdvice; }
-        List<LowOutcome> lows() { return List.copyOf(lows); }
+        public Metrics metrics(Bucket b, int horizonMin) { return metricsOf(byBucket.get(b), horizonMin); }
+        public Metrics rescueMetrics(int horizonMin) { return metricsOf(rescue, horizonMin); }
+        public int adviceAnchors() { return adviceAnchors; }
+        public int falseAdvice() { return falseAdvice; }
+        public List<LowOutcome> lows() { return List.copyOf(lows); }
 
-        String render() {
+        public String render() {
             StringBuilder sb = new StringBuilder();
             sb.append(String.format("%-11s", "bucket"));
             for (int h : HORIZONS) sb.append(String.format(" | %-20s", "+" + h + " n/bias/MAE"));
