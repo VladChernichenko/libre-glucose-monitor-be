@@ -161,7 +161,38 @@ class LibreLinkUpServiceReloginTest {
                 .hasMessageContaining("Not authenticated");
     }
 
-    private void storeCredentials() {
+    @Test
+    @DisplayName("stored credentials rejected (status 2): flags the config, then never logs in again")
+    void rejectedCredentials_flagConfigAndStopLoggingIn() throws Exception {
+        UserDataSourceConfig c = storeCredentials();
+        when(client.parse(any())).thenReturn(json.readTree(
+                "{\"status\":2,\"error\":{\"message\":\"incorrect username/password\"}}"));
+        when(configRepository.markLibreCredentialsRejected(eq(userId), any())).thenAnswer(inv -> {
+            c.setLibreCredentialsRejectedAt(inv.getArgument(1));
+            return 1;
+        });
+
+        assertThatThrownBy(() -> service.getConnections(userId))
+                .isInstanceOf(che.glucosemonitorbe.service.libre.LibreCredentialsRejectedException.class);
+        verify(configRepository).markLibreCredentialsRejected(eq(userId), any());
+
+        assertThatThrownBy(() -> service.getConnections(userId)).hasMessageContaining("Not authenticated");
+        verify(client, times(1)).postLogin(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("credentials-rejected detection: status 2 or the LLU message; other errors are not it")
+    void credentialsRejectedDetection() throws Exception {
+        assertThatThrownBy(() -> LibreLinkUpService.throwIfCredentialsRejected(json.readTree("{\"status\":2}")))
+                .isInstanceOf(che.glucosemonitorbe.service.libre.LibreCredentialsRejectedException.class);
+        assertThatThrownBy(() -> LibreLinkUpService.throwIfCredentialsRejected(
+                json.readTree("{\"status\":0,\"error\":{\"message\":\"Incorrect username/password\"}}")))
+                .isInstanceOf(che.glucosemonitorbe.service.libre.LibreCredentialsRejectedException.class);
+        LibreLinkUpService.throwIfCredentialsRejected(json.readTree("{\"status\":0,\"data\":{}}"));
+        LibreLinkUpService.throwIfCredentialsRejected(json.readTree("{\"status\":4,\"error\":{\"message\":\"accept terms\"}}"));
+    }
+
+    private UserDataSourceConfig storeCredentials() {
         UserDataSourceConfig c = new UserDataSourceConfig();
         c.setDataSource(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP);
         c.setLibreEmail("user@example.com");
@@ -170,5 +201,6 @@ class LibreLinkUpServiceReloginTest {
         c.setIsActive(true);
         when(configRepository.findByUserIdAndDataSourceAndIsActiveTrue(
                 eq(userId), eq(UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP))).thenReturn(Optional.of(c));
+        return c;
     }
 }

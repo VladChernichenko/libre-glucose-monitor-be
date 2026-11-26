@@ -51,6 +51,10 @@ ALTER TABLE users
     ADD COLUMN IF NOT EXISTS is_active        BOOLEAN     NOT NULL DEFAULT TRUE,
     ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+-- user_data_source_config: LibreLinkUp rejected the stored credentials (V1 on this branch).
+ALTER TABLE user_data_source_config
+    ADD COLUMN IF NOT EXISTS libre_credentials_rejected_at TIMESTAMPTZ;
+
 -- user_settings: correction target and rescue carbs (V1 on this branch).
 ALTER TABLE user_settings
     ADD COLUMN IF NOT EXISTS target_glucose_mmol DOUBLE PRECISION NOT NULL DEFAULT 5.55,

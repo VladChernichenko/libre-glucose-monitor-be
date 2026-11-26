@@ -6,6 +6,7 @@ import che.glucosemonitorbe.circuitbreaker.CircuitBreakerManager;
 import che.glucosemonitorbe.domain.UserDataSourceConfig;
 import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
+import che.glucosemonitorbe.service.libre.LibreCredentialsRejectedException;
 import che.glucosemonitorbe.service.libre.LibreLinkUpClient;
 import che.glucosemonitorbe.service.libre.LibreLinkUpRegionResolver;
 import che.glucosemonitorbe.service.libre.LibreLinkUpResponseParser;
@@ -126,6 +127,7 @@ public class LibreLinkUpService {
                     // Never log the body: it carries the live LibreLinkUp bearer token and account data.
                     logger.info("LibreLinkUp auth response received: status={}", jsonResponse.path("status").asText("n/a"));
 
+                    throwIfCredentialsRejected(jsonResponse);
                     throwIfApiError(jsonResponse, "LibreLinkUp authentication error: ");
 
                     JsonNode data = jsonResponse.get("data");
@@ -190,6 +192,7 @@ public class LibreLinkUpService {
 
                     JsonNode jsonResponse = client.parse(response);
                     logger.info("Region-specific auth response received: status={}", jsonResponse.path("status").asText("n/a"));
+                    throwIfCredentialsRejected(jsonResponse);
 
                     JsonNode data = jsonResponse.get("data");
                     JsonNode authTicket = data != null ? data.get("authTicket") : null;
@@ -524,7 +527,15 @@ public class LibreLinkUpService {
                 throw new RuntimeException("Not authenticated with LibreLinkUp");
             }
             logger.info("LibreLinkUp session missing for user {} - logging in again from stored credentials", userId);
-            authenticate(stored, userId);
+            try {
+                authenticate(stored, userId);
+            } catch (LibreCredentialsRejectedException e) {
+                // Same credentials will fail every time, and LLU rate-limits failed logins: stop
+                // using them until the user saves new ones (UserDataSourceConfigService clears it).
+                configRepository.markLibreCredentialsRejected(userId, Instant.now());
+                logger.warn("LibreLinkUp rejected the stored credentials for user {} - sync paused until they are updated", userId);
+                throw e;
+            }
         }
     }
 
@@ -554,6 +565,7 @@ public class LibreLinkUpService {
         return configRepository
                 .findByUserIdAndDataSourceAndIsActiveTrue(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)
                 .filter(c -> c.getLibreEmail() != null && c.getLibrePassword() != null)
+                .filter(c -> c.getLibreCredentialsRejectedAt() == null)
                 .map(c -> {
                     LibreAuthRequest request = new LibreAuthRequest();
                     request.setEmail(c.getLibreEmail());
@@ -562,6 +574,23 @@ public class LibreLinkUpService {
                     return request;
                 })
                 .orElse(null);
+    }
+
+    /**
+     * LibreLinkUp answers a wrong email/password with API status 2 ("incorrect username/password").
+     * Throws {@link LibreCredentialsRejectedException} for that, so callers can stop retrying.
+     */
+    static void throwIfCredentialsRejected(JsonNode json) {
+        if (json == null) {
+            return;
+        }
+        boolean status2 = json.path("status").asInt(-1) == 2;
+        String message = json.path("error").isObject() ? json.path("error").path("message").asText("")
+                : json.path("error").asText("");
+        if (status2 || message.toLowerCase().contains("incorrect username/password")) {
+            throw new LibreCredentialsRejectedException("LibreLinkUp authentication error: "
+                    + (message.isBlank() ? "incorrect username/password" : message));
+        }
     }
 
     /** Throw a RuntimeException prefixed with {@code prefix} if the response carries an {@code {"error":...}} node. */

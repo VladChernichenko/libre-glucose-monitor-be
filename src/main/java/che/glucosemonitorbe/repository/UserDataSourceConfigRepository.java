@@ -55,7 +55,7 @@ public interface UserDataSourceConfigRepository extends JpaRepository<UserDataSo
      * are never logged in to LibreLinkUp.
      */
     @Query("SELECT DISTINCT c.user.id FROM UserDataSourceConfig c WHERE c.dataSource = che.glucosemonitorbe.domain.UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP"
-            + " AND c.isActive = true AND c.user.active = true"
+            + " AND c.isActive = true AND c.user.active = true AND c.libreCredentialsRejectedAt IS NULL"
             + " AND c.libreEmail IS NOT NULL AND c.librePassword IS NOT NULL"
             + " AND c.librePatientId IS NOT NULL AND TRIM(c.librePatientId) <> ''")
     List<UUID> findActiveLibreUserIdsWithCredentials();
@@ -98,4 +98,23 @@ public interface UserDataSourceConfigRepository extends JpaRepository<UserDataSo
     @Transactional
     @Query("UPDATE UserDataSourceConfig c SET c.isActive = false WHERE c.user.id = :userId AND c.dataSource = :dataSource")
     void deactivateConfigsByUserIdAndDataSource(@Param("userId") UUID userId, @Param("dataSource") UserDataSourceConfig.DataSourceType dataSource);
+
+    /**
+     * Flags the user's active LibreLinkUp config as having credentials LibreLinkUp rejected; the
+     * sync then leaves it alone until {@link #clearLibreCredentialsRejected} (credentials saved).
+     */
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE UserDataSourceConfig c SET c.libreCredentialsRejectedAt = :at WHERE c.user.id = :userId"
+            + " AND c.dataSource = che.glucosemonitorbe.domain.UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP"
+            + " AND c.isActive = true AND c.libreCredentialsRejectedAt IS NULL")
+    int markLibreCredentialsRejected(@Param("userId") UUID userId, @Param("at") java.time.Instant at);
+
+    /** Clears the rejected-credentials flag on the user's LibreLinkUp configs. */
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("UPDATE UserDataSourceConfig c SET c.libreCredentialsRejectedAt = NULL WHERE c.user.id = :userId"
+            + " AND c.dataSource = che.glucosemonitorbe.domain.UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP"
+            + " AND c.libreCredentialsRejectedAt IS NOT NULL")
+    int clearLibreCredentialsRejected(@Param("userId") UUID userId);
 }
