@@ -33,8 +33,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * Each meal is forecast with the ratio of its own meal window, through the real HTTP stack. Every
  * comparison gives both users the same meal and the same dose, so the 4 h carb/insulin timing gap
  * (about 0.14 mmol/L per unit still to act at 4 h) is the same on both sides and cancels; absolute
- * flatness at 8 h is covered by HovorkaMealWindowRatioTest. Also pins what an older iPhone build
- * sends and expects from the settings endpoint.
+ * flatness at 8 h is covered by HovorkaMealWindowRatioTest. Also pins that the removed ratio keys an
+ * older client may still send are accepted and ignored.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
