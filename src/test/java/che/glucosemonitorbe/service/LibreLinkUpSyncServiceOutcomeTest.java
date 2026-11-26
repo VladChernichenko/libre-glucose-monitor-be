@@ -100,6 +100,23 @@ class LibreLinkUpSyncServiceOutcomeTest {
     }
 
     @Test
+    void credentialsRejected_returnsSkippedNoCreds() throws Exception {
+        doThrow(new che.glucosemonitorbe.service.libre.LibreCredentialsRejectedException("incorrect username/password"))
+                .when(libreLinkUpService).ensureSession(userId);
+
+        assertThat(sut.syncUser(userId, false).outcome()).isEqualTo(SyncOutcome.SKIPPED_NO_CREDS);
+    }
+
+    @Test
+    void flaggedConfig_skipsWithoutCallingLibre() throws Exception {
+        configRepository.findByUserIdAndDataSourceAndIsActiveTrue(userId, UserDataSourceConfig.DataSourceType.LIBRE_LINK_UP)
+                .orElseThrow().setLibreCredentialsRejectedAt(java.time.Instant.now());
+
+        assertThat(sut.syncUser(userId, false).outcome()).isEqualTo(SyncOutcome.SKIPPED_NO_CREDS);
+        verify(libreLinkUpService, never()).ensureSession(any());
+    }
+
+    @Test
     void authRateLimited_returnsRateLimited() throws Exception {
         doThrow(new LibreRateLimitedException("LibreLinkUp authentication failed: HTTP 429", null))
                 .when(libreLinkUpService).ensureSession(userId);

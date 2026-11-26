@@ -101,6 +101,19 @@ class UserActivityRepositoryIT {
     }
 
     @Test
+    void rejectedLibreCredentials_leaveTheLane_untilCleared() {
+        User u = user("badcreds");
+        libre(u);
+
+        assertThat(configRepository.markLibreCredentialsRejected(u.getId(), T)).isEqualTo(1);
+        assertThat(configRepository.markLibreCredentialsRejected(u.getId(), T.plusSeconds(1))).isZero();
+        assertThat(configRepository.findActiveLibreUserIdsWithCredentials()).doesNotContain(u.getId());
+
+        assertThat(configRepository.clearLibreCredentialsRejected(u.getId())).isEqualTo(1);
+        assertThat(configRepository.findActiveLibreUserIdsWithCredentials()).contains(u.getId());
+    }
+
+    @Test
     void idleCandidates_carryZoneAndRespectCutoff() {
         User old = user("old");
         User recent = user("recent");

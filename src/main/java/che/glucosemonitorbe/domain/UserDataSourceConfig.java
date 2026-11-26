@@ -6,6 +6,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -58,6 +59,14 @@ public class UserDataSourceConfig {
     /** IETF locale tag (e.g. "fr-FR") used as Accept-Language for this LLU account's regional endpoint. */
     @Column(name = "libre_locale", length = 20)
     private String libreLocale;
+
+    /**
+     * When LibreLinkUp rejected the stored email/password; null while they are believed good. A
+     * flagged config is left out of the Libre sync and never used to log in again until the user
+     * saves credentials (which clears it). See {@code UserDataSourceConfigRepository}.
+     */
+    @Column(name = "libre_credentials_rejected_at")
+    private Instant libreCredentialsRejectedAt;
 
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;

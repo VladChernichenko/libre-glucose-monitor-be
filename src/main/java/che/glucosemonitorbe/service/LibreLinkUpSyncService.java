@@ -11,6 +11,7 @@ import che.glucosemonitorbe.dto.LibreUpstreamStatusDTO;
 import che.glucosemonitorbe.dto.NightscoutEntryDto;
 import che.glucosemonitorbe.repository.UserDataSourceConfigRepository;
 import che.glucosemonitorbe.service.libre.LibreLinkUpTrend;
+import che.glucosemonitorbe.service.libre.LibreCredentialsRejectedException;
 import che.glucosemonitorbe.service.libre.LibreRateLimitedException;
 import che.glucosemonitorbe.sync.SyncOutcome;
 import che.glucosemonitorbe.sync.SyncResult;
@@ -172,6 +173,11 @@ public class LibreLinkUpSyncService {
                 log.warn("LibreLinkUp sync user={} skipped: missing credentials or patientId in config", userId);
                 return SyncResult.of(SyncOutcome.SKIPPED_NO_CREDS);
             }
+            if (cfg.getLibreCredentialsRejectedAt() != null) {
+                log.info("LibreLinkUp sync user={} skipped: stored credentials were rejected at {}",
+                        userId, cfg.getLibreCredentialsRejectedAt());
+                return SyncResult.of(SyncOutcome.SKIPPED_NO_CREDS);
+            }
 
             LibreGlucoseData glucoseData;
             try {
@@ -226,6 +232,11 @@ public class LibreLinkUpSyncService {
             return SyncResult.newData(newestTs);
 
         } catch (Exception e) {
+            if (isCredentialsRejected(e)) {
+                // Already flagged by LibreLinkUpService; the lane drops the user until new credentials.
+                log.warn("LibreLinkUp sync user={} stopped: stored credentials rejected", userId);
+                return SyncResult.of(SyncOutcome.SKIPPED_NO_CREDS);
+            }
             // If the LLU API rejected the token (401 / "not authenticated"), evict it so the next
             // sync re-authenticates cleanly.
             String msg = e.getMessage() != null ? e.getMessage() : "";
@@ -246,6 +257,13 @@ public class LibreLinkUpSyncService {
     private Instant retryAtInstant(UUID userId) {
         LocalDateTime retryAt = upstreamBreaker(userId).getRetryAt();
         return retryAt == null ? null : retryAt.atZone(ZoneId.systemDefault()).toInstant();
+    }
+
+    private static boolean isCredentialsRejected(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof LibreCredentialsRejectedException) return true;
+        }
+        return false;
     }
 
     private static boolean isRateLimited(Throwable e) {

@@ -180,6 +180,9 @@ CREATE TABLE IF NOT EXISTS user_data_source_config (
     libre_password          VARCHAR(255),
     libre_patient_id        VARCHAR(255),
     libre_locale            VARCHAR(20),
+    -- Set when LibreLinkUp rejected the stored email/password ("incorrect username/password"):
+    -- the sync stops logging in until the user saves credentials again (which clears it).
+    libre_credentials_rejected_at TIMESTAMPTZ,
     is_active               BOOLEAN      NOT NULL DEFAULT TRUE,
     last_used               TIMESTAMPTZ,
     created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),

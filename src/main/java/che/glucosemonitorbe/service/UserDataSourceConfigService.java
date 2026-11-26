@@ -165,8 +165,9 @@ public class UserDataSourceConfigService {
         // Deactivate other configs of the same type
         repository.deactivateConfigsByUserIdAndDataSource(userId, config.getDataSource());
         
-        // Activate this config
+        // Activate this config; re-activating Libre credentials gives them another login attempt.
         config.setIsActive(true);
+        config.setLibreCredentialsRejectedAt(null);
         config.updateLastUsed();
         
         UserDataSourceConfig savedConfig = repository.save(config);
@@ -265,6 +266,7 @@ public class UserDataSourceConfigService {
         if (locale  != null && !locale.isBlank())  config.setLibreLocale(locale);
         if (patientId != null && !patientId.isBlank()) config.setLibrePatientId(patientId);
         config.setIsActive(true);
+        config.setLibreCredentialsRejectedAt(null); // just logged in with these credentials
         config.updateLastUsed();
         repository.save(config);
     }
