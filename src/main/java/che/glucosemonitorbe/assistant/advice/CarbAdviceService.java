@@ -35,7 +35,8 @@ import java.util.UUID;
  *       {@link HypoThresholds#HYPO_MMOL} now, or an open hypo event).</li>
  *   <li>Trigger: forecast minimum within 60 min under {@link HypoThresholds#HYPO_MMOL}, or trend at
  *       or below {@link #FALL_RATE} and forecast minimum within 90 min under the same line. A landing
- *       above 3.9 mmol/L is not a low.</li>
+ *       above 3.9 mmol/L is not a low. In {@link MealContext meal context} the first path also needs
+ *       a CGM-confirmed fall ({@link CarbAdviceTrigger#fires(LocalDateTime, double, double, List, boolean)}).</li>
  *   <li>Fast carbs logged in the last {@link #LANDING_MINUTES} min: {@code STILL_LANDING}, no grams.</li>
  *   <li>Else one rescue dose, the user's {@code rescueCarbsG} (15 g when unset), forecast once with a
  *       {@code hypo_treatment} note taken now. Recheck in {@link #RECHECK_MINUTES} min.</li>
@@ -113,9 +114,13 @@ public class CarbAdviceService {
         }
 
         LocalDateTime readingTime = reading.get().timestamp();
-        Optional<CarbAdvice.Landing> landingSince = lastFastCarbs(userId, now);
+        List<Note> recent = notes.findByUserIdAndTimestampBetween(userId, now.minus(MealContext.MEAL_WINDOW), now);
+        Optional<CarbAdvice.Landing> landingSince = lastFastCarbs(recent, now);
+        // The guard decides new triggers only; a held card stays until readings clear it (below).
+        double confirmReading = Math.min(currentGlucose, reading.get().mmol());
+        boolean mealContext = MealContext.at(now, recent);
 
-        if (!triggered(now, trendMmolPerMin, forecast)) {
+        if (!CarbAdviceTrigger.fires(now, confirmReading, trendMmolPerMin, forecast, mealContext)) {
             return hold.notTriggered(userId, readingTime)
                     .map(held -> landingSince.map(held::stillLanding).orElse(held));
         }
@@ -131,10 +136,6 @@ public class CarbAdviceService {
         return Optional.of(hold.triggered(userId, readingTime, advice));
     }
 
-    private static boolean triggered(LocalDateTime now, double trend, List<PredictionPointDTO> forecast) {
-        return CarbAdviceTrigger.fires(now, trend, forecast);
-    }
-
     /** The lowest forecast point in (now, now + minutes]. */
     private static Optional<PredictionPointDTO> minimum(List<PredictionPointDTO> forecast,
                                                         LocalDateTime now, int minutes) {
@@ -142,10 +143,12 @@ public class CarbAdviceService {
     }
 
     /** Fast carbs (hypo_treatment notes) logged within the landing window: newest time and total grams. */
-    private Optional<CarbAdvice.Landing> lastFastCarbs(UUID userId, LocalDateTime now) {
-        List<Note> fast = notes.findByUserIdAndTimestampBetween(userId, now.minusMinutes(LANDING_MINUTES), now).stream()
+    private static Optional<CarbAdvice.Landing> lastFastCarbs(List<Note> recent, LocalDateTime now) {
+        LocalDateTime since = now.minusMinutes(LANDING_MINUTES);
+        List<Note> fast = recent.stream()
                 .filter(Note::isHypoTreatment)
                 .filter(n -> n.getTimestamp() != null)
+                .filter(n -> !n.getTimestamp().isBefore(since) && !n.getTimestamp().isAfter(now))
                 .toList();
         if (fast.isEmpty()) return Optional.empty();
         LocalDateTime newest = fast.stream().map(Note::getTimestamp).max(Comparator.naturalOrder()).orElseThrow();

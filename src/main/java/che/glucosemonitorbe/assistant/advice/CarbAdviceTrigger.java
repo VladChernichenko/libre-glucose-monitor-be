@@ -21,13 +21,38 @@ public final class CarbAdviceTrigger {
 
     private CarbAdviceTrigger() {}
 
+    /**
+     * In meal context a forecast-only low needs the CGM to confirm it: a reading at or below this
+     * [mmol/L], or a trend at or below {@link #FALL_RATE}.
+     */
+    public static final double CONFIRM_READING_MMOL = 4.5;
+
+    /**
+     * The guarded rule. Outside meal context it is {@link #fires(LocalDateTime, double, List)}. In
+     * meal context ({@link MealContext}) the hypo-within-60 path also needs a CGM-confirmed fall
+     * ({@code trend <= FALL_RATE} or {@code currentGlucose <= CONFIRM_READING_MMOL}, both inclusive):
+     * after a meal the forecast's timing is least reliable and can show a low the sensor never sees.
+     * The fast-fall path is its own confirmation and is unchanged.
+     */
+    public static boolean fires(LocalDateTime now, double currentGlucose, double trendMmolPerMin,
+                                List<PredictionPointDTO> forecast, boolean mealContext) {
+        if (!mealContext) return fires(now, trendMmolPerMin, forecast);
+        boolean confirmed = trendMmolPerMin <= FALL_RATE || currentGlucose <= CONFIRM_READING_MMOL;
+        boolean hypoWithin60 = confirmed && minimum(forecast, now, 60)
+                .map(p -> p.getPredictedGlucose() < HypoThresholds.HYPO_MMOL).orElse(false);
+        return hypoWithin60 || fastFall(now, trendMmolPerMin, forecast);
+    }
+
     /** Whether the advice fires for {@code forecast} made at {@code now} with CGM trend {@code trendMmolPerMin}. */
     public static boolean fires(LocalDateTime now, double trendMmolPerMin, List<PredictionPointDTO> forecast) {
         boolean hypoWithin60 = minimum(forecast, now, 60)
                 .map(p -> p.getPredictedGlucose() < HypoThresholds.HYPO_MMOL).orElse(false);
-        boolean fastFall = trendMmolPerMin <= FALL_RATE && minimum(forecast, now, 90)
+        return hypoWithin60 || fastFall(now, trendMmolPerMin, forecast);
+    }
+
+    private static boolean fastFall(LocalDateTime now, double trendMmolPerMin, List<PredictionPointDTO> forecast) {
+        return trendMmolPerMin <= FALL_RATE && minimum(forecast, now, 90)
                 .map(p -> p.getPredictedGlucose() < HypoThresholds.HYPO_MMOL).orElse(false);
-        return hypoWithin60 || fastFall;
     }
 
     /** The lowest forecast point in (now, now + minutes]. */
