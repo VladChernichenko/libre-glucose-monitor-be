@@ -74,6 +74,10 @@ public final class NumberGuard {
             + "|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\\p{L}*\\.?";
     private static final Pattern DAY_MONTH = Pattern.compile("(?iu)(?<![\\p{L}\\d])(\\d{1,2})\\s+" + MONTH);
     private static final Pattern MONTH_DAY = Pattern.compile("(?iu)(?<!\\p{L})" + MONTH + "\\s+(\\d{1,2})(?!\\d)");
+    /** "no new dose", "no additional insulin", "no dose adjustments"; "доза не нужна/требуется/предлагается". */
+    static final Pattern NO_DOSE = Pattern.compile("(?iu)\\bno\\s+(?:new\\s+|additional\\s+|further\\s+|extra\\s+)?"
+            + "(?:dose|doses|dosing|insulin|bolus)\\b(?:\\s+adjustments?)?"
+            + "|(?:новая\\s+|дополнительная\\s+)?доза\\s+не\\s+(?:нужна|требуется|предлагается)");
     private static final Pattern TIME = Pattern.compile("(?<!\\d)([01]?\\d|2[0-3]):([0-5]\\d)(?!\\d)");
     private static final Pattern NUMBER = Pattern.compile("(?<![\\p{L}\\d.,])\\d+(?:[.,]\\d+)?");
     private static final String MARKER = "\\[(\\d{1,2}(?:\\s*,\\s*\\d{1,2})*)]";
@@ -91,6 +95,22 @@ public final class NumberGuard {
             Map.entry("декабр", 12));
 
     private NumberGuard() {}
+
+    /**
+     * {@link #check}, plus, for the explanation of a plan card that carries a dose, any "no (new) dose"
+     * wording: the card's dose must never be explained away (2026-11-26: "no new dose adjustments are
+     * suggested" under a 1.5 U card). Only for that explanation: an answer to a later question may truly
+     * say a snack needs no insulin.
+     */
+    public static GuardResult checkPlanExplanation(String reply, FactsPayload facts) {
+        GuardResult base = check(reply, facts);
+        Double cardDose = facts != null && facts.plan() != null ? facts.plan().doseUnits() : null;
+        if (reply == null || cardDose == null || !(cardDose > 0)) return base;
+        Set<String> offending = new LinkedHashSet<>(base.offending());
+        Matcher no = NO_DOSE.matcher(reply);
+        while (no.find()) offending.add(no.group().strip());
+        return new GuardResult(offending.isEmpty(), List.copyOf(offending));
+    }
 
     public static GuardResult check(String reply, FactsPayload facts) {
         Allowed allowed = allowed(facts);

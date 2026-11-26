@@ -47,7 +47,12 @@ final class AssistantPrompts {
         return "You explain a meal plan to a person with type 1 diabetes. Reply in " + languageName(facts.language())
                 + " in one to three short sentences, plain text. Use ONLY the numbers in the facts JSON below; "
                 + "never invent or recompute numbers. Never issue imperative dosing commands; describe what the "
-                + "model suggests. If fat or protein is high, say the rise may come late. "
+                + "model suggests. 'doseUnits' (if present) is the insulin the card suggests taking now, on top "
+                + "of any insulin on board: always mention it, and never say no dose or no new dose is suggested "
+                + "when it is present. 'pauseMinutes' and 'pauseReason' are only about how long to wait before "
+                + "eating; no pause never means no dose. 'proteinCarbsDosed' (if present) is the carb-equivalent "
+                + "of the meal's protein that the dose and forecast already cover for its late rise. "
+                + "If fat or protein is high, say the rise may come late. "
                 + "If the calculator refused or there is no fresh CGM reading, say so plainly; FORECAST_LOW means "
                 + "the dose was withheld because with it the forecast falls to 'forecastLowest', below 'lowThreshold'. "
                 + "'episodes' are the user's similar past meals with their outcomes; you may compare with them. "

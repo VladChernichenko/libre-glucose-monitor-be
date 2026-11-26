@@ -435,5 +435,20 @@ class PreBolusPauseOptimizerTest {
         void mealBolusNoteIsNotInFlight() {
             assertThat(PreBolusPauseOptimizer.unlabeledBolus(List.of(note(10, 60, 4)), NOW)).isEmpty();
         }
+
+        /** 2026-11-26: a 1 U "Correction" 32 min before a meal was announced as that meal's pre-bolus. */
+        @Test
+        void correctionLabelledBolusIsNotInFlight() {
+            che.glucosemonitorbe.entity.Note correction = note(32, 0, 1);
+            correction.setMeal("Correction");
+            assertThat(PreBolusPauseOptimizer.unlabeledBolus(List.of(correction), NOW)).isEmpty();
+        }
+
+        @Test
+        void otherLabelledBolusStillCounts() {
+            che.glucosemonitorbe.entity.Note bolus = note(10, 0, 3);
+            bolus.setMeal("Bolus");
+            assertThat(PreBolusPauseOptimizer.unlabeledBolus(List.of(bolus), NOW)).isPresent();
+        }
     }
 }
