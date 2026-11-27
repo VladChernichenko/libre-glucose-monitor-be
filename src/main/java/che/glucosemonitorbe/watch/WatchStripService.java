@@ -206,7 +206,8 @@ public class WatchStripService {
         // is always target, so the green banner appears with the correction. Otherwise nothing.
         WatchStrip idle = calm(userId, forecast, now, reading, resp.getCurrentGlucose(), iob, cob);
         if (idle.reason() == Reason.WATCHING && idle.suggestion().kind() == Kind.INSULIN) {
-            return Optional.of(idle);
+            return Optional.of(new WatchStrip(idle.state(), Reason.ABOVE_TARGET, idle.suggestion(), idle.low(),
+                    idle.landing(), iob, cob, idle.nextCheckAt(), idle.activityEstimate()));
         }
         return Optional.empty();
     }

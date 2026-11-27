@@ -18,7 +18,9 @@ public record WatchStrip(State state, Reason reason, Suggestion suggestion,
     public enum State { CALM, URGENT_LOW, URGENT_HIGH }
 
     public enum Reason { LOW_NOW, TREATING_LOW, FORECAST_LOW, CARBS_LANDING,
-                         HIGH_FORECAST, INSULIN_LANDING, SMALL_RISE, WATCHING, DIP_AHEAD }
+                         HIGH_FORECAST, INSULIN_LANDING, SMALL_RISE, WATCHING, DIP_AHEAD,
+                         /** Nothing acting, but the forecast lands above target: green, with a correction. */
+                         ABOVE_TARGET }
 
     public enum Kind { CARBS, INSULIN, NO_ACTION, REFUSED }
 

@@ -68,7 +68,7 @@ class WatchStripJsonTest {
                 .containsExactlyInAnyOrder("CALM", "URGENT_LOW", "URGENT_HIGH");
         assertThat(List.of(Reason.values()).stream().map(Enum::name)).containsExactlyInAnyOrder(
                 "LOW_NOW", "TREATING_LOW", "FORECAST_LOW", "CARBS_LANDING", "HIGH_FORECAST",
-                "INSULIN_LANDING", "SMALL_RISE", "WATCHING", "DIP_AHEAD");
+                "INSULIN_LANDING", "SMALL_RISE", "WATCHING", "DIP_AHEAD", "ABOVE_TARGET");
         assertThat(List.of(Kind.values()).stream().map(Enum::name))
                 .containsExactlyInAnyOrder("CARBS", "INSULIN", "NO_ACTION", "REFUSED");
         assertThat(List.of(ActivityEstimate.values()).stream().map(Enum::name))

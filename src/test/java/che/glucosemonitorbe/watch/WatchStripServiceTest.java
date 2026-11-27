@@ -350,7 +350,8 @@ class WatchStripServiceTest {
         when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 9.8, 5.55, 2.0, 0.0, NOW)).thenReturn(1.7);
         WatchStrip strip = service.evaluate(USER, resp(path(m -> m == 240 ? 9.8 : 9.0), 0.0, 0.0)).orElseThrow();
         assertThat(strip.state()).isEqualTo(State.CALM);
-        assertThat(strip.reason()).isEqualTo(Reason.WATCHING);
+        assertThat(strip.reason()).isEqualTo(Reason.ABOVE_TARGET);
+        assertThat(strip.landing().mmol()).isEqualTo(9.8);
         assertThat(strip.suggestion().kind()).isEqualTo(Kind.INSULIN);
         assertThat(strip.suggestion().units()).isEqualTo(1.5);
         assertThat(strip.suggestion().takenUnits()).isNull();
