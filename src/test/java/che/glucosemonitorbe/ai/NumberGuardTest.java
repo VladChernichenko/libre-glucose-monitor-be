@@ -79,6 +79,23 @@ class NumberGuardTest {
                 NumberGuard.check("The history dose is 7.5 U.", noHistory).offending());
     }
 
+    /** 2026-11-26: the card offered 1.5 U, the reply said "no new dose adjustments are suggested". */
+    @Test
+    void noDoseWordingContradictingTheCardIsOffending() {
+        FactsPayload f = FactsPayload.builder()
+                .plan(FactsPayload.PlanFacts.builder().doseUnits(1.5).build()).build();
+        NumberGuard.GuardResult r = NumberGuard.checkPlanExplanation(
+                "A pre-bolus is already in effect, so no new dose adjustments are suggested.", f);
+        assertEquals(List.of("no new dose adjustments"), r.offending());
+        assertFalse(NumberGuard.checkPlanExplanation("Новая доза не требуется.", f).ok());
+        assertTrue(NumberGuard.checkPlanExplanation("The model suggests 1.5 U now; no pause is needed.", f).ok());
+        // Without a dose on the card, saying so is the truth.
+        assertTrue(NumberGuard.checkPlanExplanation("No dose is suggested.",
+                FactsPayload.builder().plan(FactsPayload.PlanFacts.builder().build()).build()).ok());
+        // A later question ("does an apple need insulin?") may truly be answered "no extra insulin".
+        assertTrue(NumberGuard.check("No extra insulin seems needed for the apple.", f).ok());
+    }
+
     @Test
     void planDoseInUnitsIsAllowed() {
         assertTrue(NumberGuard.check("The model suggests 4 U.", planFacts()).ok());

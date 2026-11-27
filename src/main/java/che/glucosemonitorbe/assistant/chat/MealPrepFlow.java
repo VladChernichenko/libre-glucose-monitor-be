@@ -136,7 +136,7 @@ public class MealPrepFlow {
                     .build();
             GuardedReplyService.Result r = guardedReply.reply(userId, facts,
                     offending -> AssistantPrompts.plan(facts, offending),
-                    () -> AssistantPrompts.planTemplate(facts), language, tracked::gone);
+                    () -> AssistantPrompts.planTemplate(facts), language, tracked::gone, true);
             modelId = r.modelId();
             tracked.accept(new AssistantEvent.Token(r.text()));
             seen.append(r.text());

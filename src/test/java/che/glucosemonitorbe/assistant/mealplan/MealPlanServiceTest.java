@@ -101,13 +101,33 @@ class MealPlanServiceTest {
         assertThat(req.getValue().getTargetGlucose()).isEqualTo(5.55);
         assertThat(req.getValue().getActiveInsulin()).isEqualTo(1.23);
         assertThat(req.getValue().getCurrentGlucose()).isEqualTo(8.0);
-        assertThat(req.getValue().getCarbs()).isEqualTo(40.0);
+        // 40 g carbs + the forecast's protein rise: 20 g × 0.5 glucogenic × 0.4 g/g = 4 g.
+        assertThat(req.getValue().getCarbs()).isCloseTo(44.0, within(1e-9));
         assertThat(req.getValue().getClientTimeInfo().toLocalDateTime()).isEqualTo(NOW);
         assertThat(plan.doseUnits()).isEqualTo(3.0);
         assertThat(plan.pause().pauseMinutes()).isEqualTo(10);
         assertThat(plan.patternLabel()).isEqualTo("Fast Spike");
         assertThat(plan.stale()).isFalse();
         assertThat(plan.carbs().low()).isCloseTo(36, within(1e-9));
+    }
+
+    /** 2026-11-26: chicken, egg, beet - 9.5 g carbs, 39.4 g protein; the dose covered only the carbs. */
+    @Test
+    void highProteinMealIsDosedForTheForecastsProteinRise() {
+        dose(1.5);
+        service.plan(USER, NutritionSnapshot.builder().totalCarbs(9.5).fat(11.8).protein(39.4).fiber(2.1)
+                .estimatedGi(42.3).confidence(0.9).patternName("Flat Plateau").build(), NOW);
+
+        ArgumentCaptor<InsulinCalculationRequest> req = ArgumentCaptor.forClass(InsulinCalculationRequest.class);
+        verify(calculator).calculateRecommendedInsulin(req.capture());
+        assertThat(req.getValue().getCarbs()).isCloseTo(9.5 + 7.88, within(1e-9));
+    }
+
+    @Test
+    void proteinEquivalentMatchesTheForecastsThresholds() {
+        assertThat(MealPlanService.proteinCarbEquivalent(0, 60)).isZero();   // no carbs: forecast has no meal
+        assertThat(MealPlanService.proteinCarbEquivalent(30, 9)).isZero();   // 1.8 g < 2 g minimum
+        assertThat(MealPlanService.proteinCarbEquivalent(30, 10)).isCloseTo(2.0, within(1e-9));
     }
 
     @Test

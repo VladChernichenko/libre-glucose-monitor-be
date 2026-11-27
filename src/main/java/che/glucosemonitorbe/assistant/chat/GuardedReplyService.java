@@ -62,13 +62,25 @@ public class GuardedReplyService {
      */
     public Result reply(UUID userId, FactsPayload facts, Function<List<String>, String> promptFor,
                         Supplier<String> template, String language, BooleanSupplier clientGone) {
+        return reply(userId, facts, promptFor, template, language, clientGone, false);
+    }
+
+    /**
+     * @param planExplanation true for the explanation of a plan card: also rejects "no (new) dose" wording
+     *                        under a card that carries a dose ({@link NumberGuard#checkPlanExplanation})
+     */
+    public Result reply(UUID userId, FactsPayload facts, Function<List<String>, String> promptFor,
+                        Supplier<String> template, String language, BooleanSupplier clientGone,
+                        boolean planExplanation) {
+        java.util.function.BiFunction<String, FactsPayload, NumberGuard.GuardResult> guard = planExplanation
+                ? NumberGuard::checkPlanExplanation : NumberGuard::check;
         long start = System.currentTimeMillis();
         if (clientGone.getAsBoolean()) throw new ClientGoneException();
         Attempt first = generate(promptFor.apply(List.of()), language);
         String modelId = first.modelId;
         String text;
         double confidence;
-        NumberGuard.GuardResult g = NumberGuard.check(first.text, facts);
+        NumberGuard.GuardResult g = guard.apply(first.text, facts);
         if (!first.text.isBlank() && g.ok()) {
             text = first.text;
             confidence = CONFIDENCE_FIRST;
@@ -78,7 +90,7 @@ public class GuardedReplyService {
             if (clientGone.getAsBoolean()) throw new ClientGoneException();
             Attempt second = generate(promptFor.apply(g.offending()), language);
             if (second.modelId != null) modelId = second.modelId;
-            NumberGuard.GuardResult g2 = NumberGuard.check(second.text, facts);
+            NumberGuard.GuardResult g2 = guard.apply(second.text, facts);
             if (!second.text.isBlank() && g2.ok()) {
                 text = second.text;
                 confidence = CONFIDENCE_REGENERATED;

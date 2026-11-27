@@ -45,7 +45,9 @@ import java.util.UUID;
 @Service
 public class PreBolusPauseOptimizer {
 
-    static final int[] CANDIDATES = {0, 5, 10, 15, 20, 25, 30};
+    /** Longest pre-bolus pause ever suggested [min]: 30 min was too long to wait in practice. */
+    static final int MAX_PAUSE_MINUTES = 15;
+    static final int[] CANDIDATES = {0, 5, 10, MAX_PAUSE_MINUTES};
     /** No candidate may forecast below this [mmol/L]. */
     static final double MIN_FLOOR = 4.5;
 
@@ -58,12 +60,17 @@ public class PreBolusPauseOptimizer {
     static final double LOW_SIDE_WEIGHT = 2.0;
     /** Every candidate is judged over this many minutes after its own meal (as the old engine did). */
     static final int POST_MEAL_MINUTES = 240;
-    /** Path asked of the dashboard forecast: long enough for the longest pause plus its window. */
+    /**
+     * Path asked of the dashboard forecast: past the longest pause plus its window. Beyond 4 h the
+     * forecast grid is 10 min, so an exact 255 would end at 250 and reject the 15-min pause as short.
+     */
     static final int PATH_MINUTES = POST_MEAL_MINUTES + 30;
     /** Notes searched for a pre-bolus in flight; the resolver itself caps its age at 2 h. */
     private static final int LOOKBACK_HOURS = 8;
     /** An unlabeled bolus this recent, with no meal after it, is the meal's bolus given first. */
     static final Duration UNLABELED_BOLUS_WINDOW = Duration.ofMinutes(60);
+    /** A bolus the user labelled a correction is plain IOB, never a pre-bolus. */
+    static final String CORRECTION_LABEL = "correction";
 
     private final GlucoseCalculationsService calculations;
     private final PreBolusResolver preBolusResolver;
@@ -108,7 +115,7 @@ public class PreBolusPauseOptimizer {
             List<PredictionPointDTO> curve = forecast(username, now, currentGlucose, dose, meal, nutritionJson, 0).curve();
             String topUp = dose == null ? "" : String.format(Locale.ROOT, " and the %.1f U top-up now", dose);
             return new PauseChoice(null, curve, finite(peak(curve)), finite(min(curve)), String.format(Locale.ROOT,
-                    "A pre-bolus of %.1f U is already in flight (%d min ago), so no new pause; the forecast has the meal now%s.",
+                    "A pre-bolus of %.1f U is already in flight (%d min ago), so no waiting before the meal; the forecast has the meal now%s.",
                     ctx.units(), ctx.elapsedMinutes(), topUp), true);
         }
 
@@ -151,8 +158,8 @@ public class PreBolusPauseOptimizer {
             String reason = dose == null
                     ? String.format(Locale.ROOT, "Eating now forecasts a low under %.1f mmol/L%s.", MIN_FLOOR, lowest)
                     : String.format(Locale.ROOT,
-                            "Every pause from 0 to 30 min forecasts a low under %.1f mmol/L%s, so no pre-bolus pause: eat now.",
-                            MIN_FLOOR, lowest);
+                            "Every pause from 0 to %d min forecasts a low under %.1f mmol/L%s, so no pre-bolus pause: eat now.",
+                            MAX_PAUSE_MINUTES, MIN_FLOOR, lowest);
             return choice(null, eatNow, reason);
         }
         PauseChoice chosen = choice(bestPause, bestCurve, null);
@@ -167,7 +174,7 @@ public class PreBolusPauseOptimizer {
     /**
      * Inverted flow: the user injected first (a plain insulin note, no carbs, no "pre-bolus" label)
      * and only then photographs the meal. That insulin is already counted in the calculator's IOB, so
-     * it is the pre-bolus: no new pause. Only a bolus within {@link #UNLABELED_BOLUS_WINDOW} with no
+     * it is the pre-bolus: no new pause. A note labelled "Correction" never counts. Only a bolus within {@link #UNLABELED_BOLUS_WINDOW} with no
      * meal logged at or after it counts; older insulin is plain IOB.
      */
     static Optional<PreBolusContext> unlabeledBolus(List<Note> recent, LocalDateTime now) {
@@ -176,6 +183,8 @@ public class PreBolusPauseOptimizer {
                 .filter(n -> n.getTimestamp() != null && !n.getTimestamp().isAfter(now))
                 .filter(n -> n.getInsulin() != null && n.getInsulin() > 0 && !n.isLongActing())
                 .filter(n -> n.getCarbs() == null || n.getCarbs() <= 0)
+                // The user said what it was: a correction for a high, not this meal's bolus.
+                .filter(n -> !CORRECTION_LABEL.equalsIgnoreCase(n.getMeal() == null ? "" : n.getMeal().strip()))
                 .filter(n -> Duration.between(n.getTimestamp(), now).compareTo(UNLABELED_BOLUS_WINDOW) <= 0)
                 .max(Comparator.comparing(Note::getTimestamp));
         if (latest.isEmpty()) return Optional.empty();

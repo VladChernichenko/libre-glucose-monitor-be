@@ -5,6 +5,7 @@ import che.glucosemonitorbe.ai.RagRetrieverService;
 import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
 import che.glucosemonitorbe.assistant.common.CgmReadingDTO;
 import che.glucosemonitorbe.assistant.mealplan.MealPlan;
+import che.glucosemonitorbe.assistant.mealplan.MealPlanService;
 import che.glucosemonitorbe.assistant.mealplan.PauseChoice;
 import che.glucosemonitorbe.domain.ClinicalKnowledgeChunk;
 import che.glucosemonitorbe.dto.AiAnalysisRequest;
@@ -138,6 +139,8 @@ public class FactsService {
             return b.build();
         }
         b.doseUnits(plan.doseUnits());
+        double proteinCarbs = MealPlanService.proteinCarbEquivalent(plan.carbs().mid(), plan.protein().mid());
+        if (proteinCarbs > 0) b.proteinCarbsDosed(round1(proteinCarbs));
         PauseChoice p = plan.pause();
         if (p != null) {
             b.pauseMinutes(p.pauseMinutes()).forecastPeak(round1(p.peak())).forecastLowest(round1(p.min()))
