@@ -68,7 +68,7 @@ class AssistantCitationsTest {
 
         ChatHistoryService history = new ChatHistoryService(repository, objectMapper);
         FactsService facts = new FactsService(calculations, insulinCalculator, mock(CarbsOnBoardService.class),
-                freshness, rag);
+                freshness, rag, mock(che.glucosemonitorbe.assistant.snapshot.HitRateService.class));
         service = new AssistantService(new QuickLogParser(), mock(AssistantNoteWriter.class), history,
                 calculations, insulinCalculator, freshness, mock(UserService.class), objectMapper,
                 new IntentClassifier(llm, objectMapper), mock(MealPrepFlow.class), facts, retrieval, mock(RecentPlanFacts.class), mock(NoteRemovalFlow.class),

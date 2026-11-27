@@ -97,6 +97,17 @@ class MealPrepFlowTest {
     }
 
     @Test
+    void explanationIsToldHowOftenTheForecastHits() {
+        when(facts.forecastAccuracy(user)).thenReturn(new FactsPayload.ForecastAccuracy(43, 30, 70, 14));
+        llmSays("4 U with a 15 min pause.");
+
+        flow.mealPrep(user, userMessage, new IncomingMessage("40 g rye bread", null, NOW, ZONE),
+                List.of(new IntentClassifier.FoodItem("rye bread", 40.0)), "en", events::add);
+
+        verify(llm).streamPromptReply(contains("\"forecastAccuracy\":{\"percent\":43"), eq("en"), any());
+    }
+
+    @Test
     void closedStreamAtEpisodesSkipsTheLlmButStillFinishesTheReply() {
         when(retrieval.forPlan(any(), any(), any(), any(), any(), anyDouble())).thenReturn(List.of(
                 FactsPayload.EpisodeFacts.builder().id("e1").kind("MEAL").build()));

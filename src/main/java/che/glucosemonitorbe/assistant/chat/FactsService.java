@@ -1,5 +1,7 @@
 package che.glucosemonitorbe.assistant.chat;
 
+import che.glucosemonitorbe.assistant.snapshot.HitRateService;
+
 import che.glucosemonitorbe.ai.AnalysisContext;
 import che.glucosemonitorbe.ai.RagRetrieverService;
 import che.glucosemonitorbe.assistant.common.CgmFreshnessService;
@@ -48,6 +50,15 @@ public class FactsService {
     private final CarbsOnBoardService carbsOnBoard;
     private final CgmFreshnessService freshness;
     private final RagRetrieverService rag;
+    private final HitRateService hitRates;
+
+    /** The twin forecast's hit rate (the "Twin N%" pill); null before any forecast was checked. */
+    public FactsPayload.ForecastAccuracy forecastAccuracy(UUID userId) {
+        HitRateService.HitRate r = hitRates.hitRate(userId, java.time.Instant.now());
+        if (r == null || r.percent() == null) return null;
+        return new FactsPayload.ForecastAccuracy((int) Math.round(r.percent()), r.hits(), r.checks(),
+                (int) HitRateService.WINDOW.toDays());
+    }
 
     public FactsPayload.State state(UUID userId, LocalDateTime userNow, ZoneId zone) {
         Optional<CgmReadingDTO> reading = freshness.freshReading(userId, userNow.atZone(zone).toInstant());

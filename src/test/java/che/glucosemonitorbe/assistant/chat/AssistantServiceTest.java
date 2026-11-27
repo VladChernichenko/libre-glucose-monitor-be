@@ -42,6 +42,8 @@ class AssistantServiceTest {
 
     private final LlmGatewayService llm = mock(LlmGatewayService.class);
     private final RagRetrieverService rag = mock(RagRetrieverService.class);
+    private final che.glucosemonitorbe.assistant.snapshot.HitRateService hitRate =
+            mock(che.glucosemonitorbe.assistant.snapshot.HitRateService.class);
     private final CarbsOnBoardService carbsOnBoard = mock(CarbsOnBoardService.class);
     private final AiAnalysisTraceRepository traces = mock(AiAnalysisTraceRepository.class);
     private final RecentPlanFacts recentPlan = mock(RecentPlanFacts.class);
@@ -81,7 +83,8 @@ class AssistantServiceTest {
         when(freshness.freshReading(eq(user), any(Instant.class))).thenReturn(Optional.empty());
 
         ChatHistoryService history = new ChatHistoryService(repository, objectMapper);
-        FactsService facts = new FactsService(calculations, insulinCalculator, carbsOnBoard, freshness, rag);
+        when(hitRate.hitRate(eq(user), any())).thenReturn(new che.glucosemonitorbe.assistant.snapshot.HitRateService.HitRate(30, 70, 42.857));
+        FactsService facts = new FactsService(calculations, insulinCalculator, carbsOnBoard, freshness, rag, hitRate);
         GuardedReplyService guarded = new GuardedReplyService(llm, traces, objectMapper);
         service = new AssistantService(new QuickLogParser(), writer, history,
                 calculations, insulinCalculator, freshness, userService, objectMapper,
@@ -182,6 +185,8 @@ class AssistantServiceTest {
 
         verify(llm).streamPromptReply(and(contains("\"forecastIn2h\":5.8"),
                 and(contains("\"forecastLowest4h\":5.6"), contains("\"forecastHighest4h\":6.1"))), eq("en"), any());
+        verify(llm).streamPromptReply(contains("\"forecastAccuracy\":{\"percent\":43,\"hits\":30,\"checks\":70"),
+                eq("en"), any());
     }
 
     @Test

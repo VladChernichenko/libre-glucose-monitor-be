@@ -15,7 +15,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class HitRateService {
 
-    static final Duration WINDOW = Duration.ofDays(14);
+    public static final Duration WINDOW = Duration.ofDays(14);
 
     private final ForecastSnapshotRepository repository;
 

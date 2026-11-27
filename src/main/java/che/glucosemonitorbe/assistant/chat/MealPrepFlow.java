@@ -113,9 +113,11 @@ public class MealPrepFlow {
         if (banner != null) sink.accept(new AssistantEvent.Banner(reply.getId(), banner));
 
         FactsPayload.State state = null;
+        FactsPayload.ForecastAccuracy accuracy = null;
         List<FactsPayload.EpisodeFacts> episodes = List.of();
         try {
             state = factsService.state(userId, msg.clientNow(), msg.zone());
+            accuracy = factsService.forecastAccuracy(userId);
             episodes = episodeRetrieval.forPlan(userId, description, macros, msg.clientNow(), state.glucose(),
                     state.iob() == null ? 0.0 : state.iob());
         } catch (RuntimeException e) {
@@ -131,6 +133,7 @@ public class MealPrepFlow {
                     .language(language)
                     .now(FactsService.wall(msg.clientNow()))
                     .state(state)
+                    .forecastAccuracy(accuracy)
                     .plan(FactsService.plan(plan, description))
                     .episodes(episodes)
                     .build();

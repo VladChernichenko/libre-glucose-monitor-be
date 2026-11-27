@@ -198,6 +198,7 @@ public class AssistantService {
                     .language(language)
                     .now(FactsService.wall(msg.clientNow()))
                     .state(state)
+                    .forecastAccuracy(forecastAccuracy(userId))
                     .plan(recentPlan == null ? null : recentPlan.plan())
                     .history(recentPlan == null ? null : recentPlan.history())
                     .episodes(episodes)
@@ -252,6 +253,16 @@ public class AssistantService {
     }
 
     /** Retrieval context is optional: a failure means "none", never a failed reply. */
+    /** The twin's forecast hit rate; context only, so a failure means none. */
+    private FactsPayload.ForecastAccuracy forecastAccuracy(UUID userId) {
+        try {
+            return factsService.forecastAccuracy(userId);
+        } catch (RuntimeException e) {
+            log.warn("Assistant forecastAccuracy unavailable for userId={}: {}", userId, e.toString());
+            return null;
+        }
+    }
+
     private static <T> List<T> optional(String what, UUID userId, java.util.function.Supplier<List<T>> s) {
         try {
             List<T> v = s.get();

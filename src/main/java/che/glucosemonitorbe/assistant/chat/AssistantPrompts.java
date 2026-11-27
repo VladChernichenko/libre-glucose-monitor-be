@@ -23,6 +23,9 @@ final class AssistantPrompts {
                 + "For a general 'how am I doing' question, give only the current glucose, IOB/COB and the "
                 + "forecast from 'state' (forecastIn2h, forecastLowest4h, forecastHighest4h); do not mention "
                 + "past or planned meals unless the user asks about them. "
+                + "'forecastAccuracy' (if present) is how often the twin's forecast was right: 'percent' of "
+                + "the +1 h/+2 h checks over the last 'windowDays' days. Whenever you give a forecast number, "
+                + "add how reliable it is, e.g. 'twin hit 43% of checks', and below 60% call it a rough guide. "
                 + "Quote numbers, times and dates ONLY from the facts JSON below (converting mmol/L to mg/dL is "
                 + "allowed); never invent, estimate or recompute numbers. 'citations' are clinical passages: you may "
                 + "use them for background and cite one by writing its marker, e.g. [1] for ref 1, at the end of "
@@ -60,6 +63,9 @@ final class AssistantPrompts {
                 + "If the calculator refused or there is no fresh CGM reading, say so plainly; FORECAST_LOW means "
                 + "the dose was withheld because with it the forecast falls to 'forecastLowest', below 'lowThreshold'. "
                 + "'episodes' are the user's similar past meals with their outcomes; you may compare with them. "
+                + "'forecastAccuracy' (if present) is how often the twin's forecast was right: 'percent' of "
+                + "the +1 h/+2 h checks over the last 'windowDays' days. Whenever you give a forecast number, "
+                + "add how reliable it is, e.g. 'twin hit 43% of checks', and below 60% call it a rough guide. "
                 + retry(offending)
                 + "\nFacts JSON:\n" + json(facts);
     }

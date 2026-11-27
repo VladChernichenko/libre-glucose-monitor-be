@@ -13,9 +13,18 @@ import lombok.Builder;
  */
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record FactsPayload(String language, String now, State state, PlanFacts plan, HistoryFacts history,
+public record FactsPayload(String language, String now, State state, ForecastAccuracy forecastAccuracy,
+                           PlanFacts plan, HistoryFacts history,
                            List<EpisodeFacts> episodes, BannerFacts banner, List<CitationFacts> citations,
                            List<TurnFacts> turns) {
+
+    /**
+     * How often the digital twin's forecast has been right (the "Twin N%" pill): {@code hits} of
+     * {@code checks} +1 h/+2 h forecast checks within 2 mmol/L-ish tolerance over the last
+     * {@code windowDays} days, as a rounded {@code percent}.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record ForecastAccuracy(Integer percent, Integer hits, Integer checks, Integer windowDays) {}
 
     /**
      * Current state on the assistant clock. {@code glucose} is null without a fresh CGM reading; the

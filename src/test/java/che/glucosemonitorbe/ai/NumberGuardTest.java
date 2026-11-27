@@ -25,6 +25,20 @@ class NumberGuardTest {
     }
 
     @Test
+    void forecastAndItsHitRateMayBeQuoted() {
+        // 2026-11-27: "6.0 mmol/L in 2 h" was rejected twice because forecastIn2h wasn't a glucose field.
+        FactsPayload f = FactsPayload.builder()
+                .state(FactsPayload.State.builder().glucose(6.3).forecastIn2h(6.0)
+                        .forecastLowest4h(5.6).forecastHighest4h(6.4).build())
+                .forecastAccuracy(new FactsPayload.ForecastAccuracy(43, 30, 70, 14))
+                .build();
+        NumberGuard.GuardResult r = NumberGuard.check(
+                "6.3 mmol/L now, about 6.0 mmol/L in 2 h, between 5.6 and 6.4 mmol/L over 4 h. "
+                        + "The forecast hit 43% of checks in the last 14 days.", f);
+        assertTrue(r.ok(), r.offending().toString());
+    }
+
+    @Test
     void allowsMgdlConversion() {
         FactsPayload f = FactsPayload.builder()
                 .state(FactsPayload.State.builder().glucose(10.0).build()).build();
