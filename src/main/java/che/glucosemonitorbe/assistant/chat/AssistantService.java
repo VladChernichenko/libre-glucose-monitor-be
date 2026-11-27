@@ -164,7 +164,8 @@ public class AssistantService {
         history.save(userMessage);
 
         double iob = currentIob(userId, clientNow);
-        Double forecastMin = forecastMin(userId, clientNow);
+        Forecast forecast = forecast(userId, clientNow);
+        Double forecastMin = forecast == null ? null : forecast.lowest();
         String summary = summary(cmd, clientNow, iob, forecastMin, language);
         AssistantEvent.Logged logged = new AssistantEvent.Logged(result.noteIds(), summary, iob, forecastMin);
 
@@ -188,7 +189,8 @@ public class AssistantService {
             List<FactsPayload.TurnFacts> turns = new ArrayList<>(FactsService.turns(
                     history.recentTurns(userId, userMessage.getCreatedAt(), RECENT_TURNS)));
             turns.add(new FactsPayload.TurnFacts("user", question)); // its numbers are the user's own facts
-            FactsPayload.State state = factsService.state(userId, msg.clientNow(), msg.zone());
+            FactsPayload.State state = withForecast(
+                    factsService.state(userId, msg.clientNow(), msg.zone()), forecast(userId, msg.clientNow()));
             List<FactsPayload.EpisodeFacts> episodes = optional("episodes", userId, () ->
                     episodeRetrieval.forQuestion(userId, question, filters, state, msg.clientNow(), msg.zone()));
             RecentPlanFacts.Context recentPlan = recentPlan(userId, userMessage.getCreatedAt());
@@ -232,6 +234,11 @@ public class AssistantService {
         ChatMessage reply = history.appendAssistant(userMessage, seen.toString(), INTENT_QUESTION, payload,
                 result.modelId(), System.currentTimeMillis() - start);
         sink.accept(new AssistantEvent.Done(userMessage.getId(), reply.getId(), INTENT_QUESTION));
+    }
+
+    private static FactsPayload.State withForecast(FactsPayload.State s, Forecast f) {
+        if (f == null) return s;
+        return s.toBuilder().forecastIn2h(f.in2h()).forecastLowest4h(f.lowest()).forecastHighest4h(f.highest()).build();
     }
 
     /** The recent meal plan the question may refer to; optional like the other retrieval context. */
@@ -315,26 +322,29 @@ public class AssistantService {
         return Math.round(iob * 100.0) / 100.0;
     }
 
-    /** Lowest value of the dashboard forecast over the next 4 h; null without a fresh CGM reading. */
-    private Double forecastMin(UUID userId, LocalDateTime clientNow) {
+    /** The dashboard forecast over the next 4 h: the value near +2 h, the lowest and the highest point. */
+    record Forecast(Double in2h, Double lowest, Double highest) {}
+
+    /** The dashboard forecast summary; null without a fresh CGM reading or when it is unavailable. */
+    private Forecast forecast(UUID userId, LocalDateTime clientNow) {
         Optional<CgmReadingDTO> reading = cgmFreshnessService.freshReading(userId, Instant.now());
         if (reading.isEmpty()) return null;
         try {
             return CompletableFuture
-                    .supplyAsync(() -> computeForecastMin(userId, clientNow, reading.get()), FORECAST_EXECUTOR)
+                    .supplyAsync(() -> computeForecast(userId, clientNow, reading.get()), FORECAST_EXECUTOR)
                     .completeOnTimeout(null, forecastBudget.toMillis(), TimeUnit.MILLISECONDS)
                     .exceptionally(e -> {
-                        log.warn("Assistant forecastMin unavailable for userId={}: {}", userId, e.getMessage());
+                        log.warn("Assistant forecast unavailable for userId={}: {}", userId, e.getMessage());
                         return null;
                     })
                     .join();
         } catch (RejectedExecutionException e) {
-            log.warn("Assistant forecastMin skipped for userId={}: forecast pool saturated", userId);
+            log.warn("Assistant forecast skipped for userId={}: forecast pool saturated", userId);
             return null;
         }
     }
 
-    private Double computeForecastMin(UUID userId, LocalDateTime clientNow, CgmReadingDTO reading) {
+    private Forecast computeForecast(UUID userId, LocalDateTime clientNow, CgmReadingDTO reading) {
         GlucoseCalculationsResponse resp = calculationsService.calculateGlucoseData(
                 GlucoseCalculationsRequest.builder()
                         // calculateGlucoseData resolves this field by username, not UUID.
@@ -347,14 +357,23 @@ public class AssistantService {
         List<PredictionPointDTO> path = resp.getPredictionPath();
         if (path == null) return null;
         LocalDateTime horizon = clientNow.plusHours(FORECAST_HOURS);
-        return path.stream()
+        List<PredictionPointDTO> within = path.stream()
                 .filter(p -> p.getPredictedGlucose() != null)
                 .filter(p -> p.getTimestamp() == null || !p.getTimestamp().isAfter(horizon))
-                .mapToDouble(PredictionPointDTO::getPredictedGlucose)
-                .min()
-                .stream().boxed().findFirst()
-                .map(v -> Math.round(v * 10.0) / 10.0)
-                .orElse(null);
+                .toList();
+        if (within.isEmpty()) return null;
+        LocalDateTime twoHours = clientNow.plusHours(2);
+        Double in2h = within.stream().filter(p -> p.getTimestamp() != null)
+                .min(java.util.Comparator.comparingLong(p ->
+                        Math.abs(java.time.Duration.between(twoHours, p.getTimestamp()).toMinutes())))
+                .map(p -> round1(p.getPredictedGlucose())).orElse(null);
+        java.util.DoubleSummaryStatistics stats = within.stream()
+                .mapToDouble(PredictionPointDTO::getPredictedGlucose).summaryStatistics();
+        return new Forecast(in2h, round1(stats.getMin()), round1(stats.getMax()));
+    }
+
+    private static double round1(double v) {
+        return Math.round(v * 10.0) / 10.0;
     }
 
     static String summary(QuickLogCommand cmd, LocalDateTime clientNow, double iob, Double forecastMin, String lang) {

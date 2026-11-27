@@ -17,10 +17,14 @@ public record FactsPayload(String language, String now, State state, PlanFacts p
                            List<EpisodeFacts> episodes, BannerFacts banner, List<CitationFacts> citations,
                            List<TurnFacts> turns) {
 
-    /** Current state on the assistant clock. {@code glucose} is null without a fresh CGM reading. */
-    @Builder
+    /**
+     * Current state on the assistant clock. {@code glucose} is null without a fresh CGM reading; the
+     * forecast fields (dashboard forecast: value near +2 h, lowest and highest over 4 h) are null too.
+     */
+    @Builder(toBuilder = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record State(Double glucose, String glucoseAt, Double iob, Double cob) {}
+    public record State(Double glucose, String glucoseAt, Double iob, Double cob,
+                        Double forecastIn2h, Double forecastLowest4h, Double forecastHighest4h) {}
 
     /** The meal plan being explained; dose/pause fields are null when stale or refused. */
     @Builder

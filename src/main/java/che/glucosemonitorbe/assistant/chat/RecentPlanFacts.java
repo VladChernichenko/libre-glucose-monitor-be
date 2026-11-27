@@ -30,7 +30,8 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class RecentPlanFacts {
 
-    static final Duration MAX_AGE = Duration.ofHours(3);
+    /** After this the card's dose and forecast are stale, and the meal is eaten, skipped or replanned. */
+    static final Duration MAX_AGE = Duration.ofMinutes(30);
 
     public record Context(FactsPayload.PlanFacts plan, FactsPayload.HistoryFacts history) {}
 

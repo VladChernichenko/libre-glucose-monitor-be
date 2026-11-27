@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.assistant.chat;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.AdditionalMatchers.and;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -156,6 +157,31 @@ class AssistantServiceTest {
     private List<String> tokens() {
         return events.stream().filter(e -> e instanceof AssistantEvent.Token)
                 .map(e -> ((AssistantEvent.Token) e).text()).toList();
+    }
+
+    @Test
+    void questionPromptCarriesTheCurrentForecast() {
+        // 2026-11-27 "How the things going?": the reply should be about now and the forecast.
+        llmReplies("ok");
+        when(freshness.freshReading(eq(user), any(Instant.class))).thenReturn(Optional.of(
+                new che.glucosemonitorbe.assistant.common.CgmReadingDTO(6.3, NOW, null, null)));
+        che.glucosemonitorbe.domain.User u = new che.glucosemonitorbe.domain.User();
+        u.setUsername("sergusson");
+        when(userService.getUserById(user)).thenReturn(u);
+        when(calculations.calculateGlucoseData(any()))
+                .thenReturn(che.glucosemonitorbe.dto.GlucoseCalculationsResponse.builder()
+                        .predictionPath(List.of(
+                                point(NOW.plusMinutes(60), 6.0),
+                                point(NOW.plusMinutes(120), 5.84),
+                                point(NOW.plusMinutes(180), 5.6),
+                                point(NOW.plusMinutes(240), 6.1),
+                                point(NOW.plusHours(5), 3.0)))  // beyond 4 h: ignored
+                        .build());
+
+        service.handle(user, text("How the things going?"), sink);
+
+        verify(llm).streamPromptReply(and(contains("\"forecastIn2h\":5.8"),
+                and(contains("\"forecastLowest4h\":5.6"), contains("\"forecastHighest4h\":6.1"))), eq("en"), any());
     }
 
     @Test

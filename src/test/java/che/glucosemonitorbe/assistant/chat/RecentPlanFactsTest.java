@@ -100,4 +100,14 @@ class RecentPlanFactsTest {
 
         assertEquals(Optional.empty(), recentPlan.load(user, NOW));
     }
+
+    @Test
+    void aPlanCardFromTwoHoursAgoIsIgnored() {
+        // 2026-11-27: a 13:30 ice-cream card (never eaten) made a 15:52 status reply say
+        // "You're about to have ice cream". After 30 min the card's dose and forecast are stale.
+        when(repository.findByUserIdAndCreatedAtBeforeOrderByCreatedAtDesc(eq(user), eq(NOW), any()))
+                .thenReturn(List.of(planReply(NOW.minus(Duration.ofMinutes(140)), List.of())));
+
+        assertEquals(Optional.empty(), recentPlan.load(user, NOW));
+    }
 }

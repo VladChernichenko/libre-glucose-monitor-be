@@ -63,7 +63,7 @@ class GuardedReplyServiceTest {
     }
 
     @Test
-    void longReplyIsCappedToFiftyWords() {
+    void longReplyIsCappedToMaxWords() {
         llmSays("IOB is 1 U. " + "Keep monitoring closely and consider your meal composition. ".repeat(8));
 
         GuardedReplyService.Result r = service.reply(UUID.randomUUID(), facts,

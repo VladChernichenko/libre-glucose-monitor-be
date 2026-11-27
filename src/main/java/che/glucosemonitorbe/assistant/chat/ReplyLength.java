@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
  */
 final class ReplyLength {
 
-    static final int MAX_WORDS = 50;
+    static final int MAX_WORDS = 40;
 
     /** A sentence ends at . ! ? or … followed by whitespace; decimals like 10.5 have no space after the dot. */
     private static final Pattern SENTENCE_END = Pattern.compile("(?<=[.!?…])\\s+");

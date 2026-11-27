@@ -17,7 +17,7 @@ class ReplyLengthTest {
     }
 
     @Test
-    void longReply_keepsWholeLeadingSentencesWithinFiftyWords() {
+    void longReply_keepsWholeLeadingSentencesWithinTheCap() {
         // 2026-11-27 reply in the chat: ~85 words of mostly generic advice.
         String r = "Your current glucose is 6.7 mmol/L, which is within the expected range. "
                 + "The forecast indicates a peak of 10.5 mmol/L and a lowest point of 8.4 mmol/L after your "
@@ -41,7 +41,7 @@ class ReplyLengthTest {
     }
 
     @Test
-    void oneOverlongSentence_isCutAtFiftyWordsWithEllipsis() {
+    void oneOverlongSentence_isCutAtTheCapWithEllipsis() {
         String r = "word ".repeat(80).trim() + ".";
         String capped = ReplyLength.cap(r);
         assertThat(words(capped)).isEqualTo(ReplyLength.MAX_WORDS);
