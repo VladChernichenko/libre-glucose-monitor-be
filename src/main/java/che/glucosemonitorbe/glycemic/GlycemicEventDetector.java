@@ -74,7 +74,7 @@ public final class GlycemicEventDetector {
                 .toList();
         if (window.size() < props.getMinReadings()) return List.of();
 
-        CgmPoint first = window.get(0);
+        CgmPoint first = anchor(window);
         LocalDateTime anchor = UserZones.toWallTime(first.epochMs(), in.zone());
         List<PredictionPointDTO> predicted = predict(in, anchor, first.mmol(), props.getWindowMinutes(), n -> false);
         List<ResidualPoint> aligned = align(predicted, window, in.zone(), props.getAlignToleranceMs());
@@ -94,6 +94,26 @@ public final class GlycemicEventDetector {
             out.add(new Detection(run, onsetIdx, onsetMs, f, series));
         }
         return out;
+    }
+
+    /** Readings at the start of the window the forecast's starting level is taken from. */
+    static final long ANCHOR_SPAN_MS = 15 * 60_000L;
+
+    /**
+     * Where the window's forecast starts: the median level of the readings in its first
+     * {@link #ANCHOR_SPAN_MS} (an odd count: the last one is dropped if needed), placed at the middle
+     * reading's time - a real CGM time, so the forecast stays on the readings' 5-minute grid for
+     * alignment, and a steady trend is not biased. A single
+     * reading used to set it, and one spike - e.g. the 11.5 rebound after a hot-shower dip on
+     * 2026-11-27 - shifted the whole 4 h forecast and raised a false "More insulin than logged".
+     */
+    static CgmPoint anchor(List<CgmPoint> sortedWindow) {
+        long until = sortedWindow.get(0).epochMs() + ANCHOR_SPAN_MS;
+        List<CgmPoint> head = sortedWindow.stream().filter(p -> p.epochMs() <= until).toList();
+        if (head.size() % 2 == 0) head = head.subList(0, head.size() - 1);
+        double[] levels = head.stream().mapToDouble(CgmPoint::mmol).sorted().toArray();
+        int mid = head.size() / 2;
+        return new CgmPoint(head.get(mid).epochMs(), levels[mid]);
     }
 
     /**

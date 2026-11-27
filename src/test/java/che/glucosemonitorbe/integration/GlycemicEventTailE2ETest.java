@@ -160,7 +160,9 @@ class GlycemicEventTailE2ETest extends AbstractGlycemicEventE2ETest {
     @DisplayName("a short spike followed by a prompt drop is ANAEROBIC_ACTIVITY with the drop linked")
     void anaerobic() {
         UUID u = userId();
-        seed(u, nowMs() - 47 * STEP, concat(repeat(14, 110), repeat(11, 200), repeat(12, 60), repeat(11, 110)));
+        // At least half the residuals stay exactly 0 now that the forecast starts at the window's median
+        // anchor (two leading readings are no longer scored); otherwise the flat synthetic MAD leaves its floor.
+        seed(u, nowMs() - 47 * STEP, concat(repeat(16, 110), repeat(11, 200), repeat(11, 60), repeat(10, 110)));
 
         scanService.scanUserEvents(u);
 
