@@ -119,6 +119,32 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
+        @DisplayName("the peak is the meal spike within 2 h after the meal, not the 4 h tail every pause shares")
+        void peakIsThePostMealSpikeNotTheLateTail() {
+            // Spike 9.0 at meal + 60 and a late tail of 10.0 from +200 on.
+            forecastByPause(p -> path(m -> m == p + 60 ? 9.0 : m >= 200 ? 10.0 : 7.0));
+
+            PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
+
+            assertThat(choice.pauseMinutes()).isNotNull();
+            assertThat(choice.peak()).isCloseTo(9.0, within(1e-9));
+            assertThat(choice.reason()).endsWith("and 9.0.");
+        }
+
+        @Test
+        @DisplayName("post-meal peak falls back to the whole curve when nothing lies in the window")
+        void postMealPeakFallsBack() {
+            List<PredictionPointDTO> curve = path(30, m -> 6.0 + m / 10.0);
+            assertThat(PreBolusPauseOptimizer.postMealPeak(curve, NOW.plusMinutes(5))).isCloseTo(9.0, within(1e-9));
+            assertThat(PreBolusPauseOptimizer.postMealPeak(curve, NOW.plusHours(10))).isCloseTo(9.0, within(1e-9));
+            assertThat(PreBolusPauseOptimizer.postMealPeak(path(270, m -> m == 250 ? 11.0 : 6.0), NOW))
+                    .isCloseTo(6.0, within(1e-9));
+            // Glucose before the meal is eaten (falling from a high during the pause) is not the meal's peak.
+            assertThat(PreBolusPauseOptimizer.postMealPeak(path(270, m -> m < 15 ? 12.0 : 7.5), NOW.plusMinutes(15)))
+                    .isCloseTo(7.5, within(1e-9));
+        }
+
+        @Test
         @DisplayName("every candidate under 4.5: no pause, reason says why, curve is eat-now")
         void allCandidatesLow_returnsNullWithReason() {
             forecastByPause(p -> levelWithDip(p, 4.0 + p * 0.001));

@@ -72,8 +72,8 @@ public class HistoryBannerService {
             return Optional.of(new HistoryBanner(h.modelUnits(), h.units(), h.deltaPct(), pause,
                     episodesLine(h.episodeIds()), h.pendingIsfNote(),
                     modelCurve, finite(PreBolusPauseOptimizer.min(modelCurve)),
-                    finite(PreBolusPauseOptimizer.peak(modelCurve)),
-                    curve, finite(min), finite(PreBolusPauseOptimizer.peak(curve)),
+                    finite(PreBolusPauseOptimizer.postMealPeak(modelCurve, now.plusMinutes(pause))),
+                    curve, finite(min), finite(PreBolusPauseOptimizer.postMealPeak(curve, now.plusMinutes(pause))),
                     Double.isNaN(min) ? null : DoseRecheck.level(min)));
         } catch (RuntimeException e) {
             log.warn("History banner skipped for userId={}: {}", userId, e.toString());

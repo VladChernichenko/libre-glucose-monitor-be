@@ -11,7 +11,7 @@ import java.util.List;
  *                     is already in flight or every candidate's forecast minimum is under 4.5 mmol/L
  *                     ({@link #reason} says which). The curve is then the eat-now forecast.
  * @param curve        the dashboard forecast for this dose and pause
- * @param peak         highest point of {@code curve} [mmol/L]; null when the curve is empty
+ * @param peak         highest point within 2 h after the meal (the meal spike; the whole curve without a meal) [mmol/L]; null when the curve is empty
  * @param min          lowest point of {@code curve} [mmol/L]; null when the curve is empty
  * @param reason       one sentence on why this pause (or none)
  * @param inFlight     true only when a pre-bolus is already in flight: the curve then has the meal now

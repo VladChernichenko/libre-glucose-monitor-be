@@ -60,6 +60,8 @@ public class PreBolusPauseOptimizer {
     static final double LOW_SIDE_WEIGHT = 2.0;
     /** Every candidate is judged over this many minutes after its own meal (as the old engine did). */
     static final int POST_MEAL_MINUTES = 240;
+    /** The card's peak is the highest point in this window after the meal (the meal spike) [min]. */
+    static final int POST_MEAL_PEAK_MINUTES = 120;
     /**
      * Path asked of the dashboard forecast: past the longest pause plus its window. Beyond 4 h the
      * forecast grid is 10 min, so an exact 255 would end at 250 and reject the 15-min pause as short.
@@ -103,7 +105,7 @@ public class PreBolusPauseOptimizer {
             // The forecast drops a prospective meal without carbs, so every candidate would be
             // "insulin, no meal": there is no pause to choose.
             List<PredictionPointDTO> curve = forecast(username, now, currentGlucose, dose, null, null, 0).curve();
-            return choice(null, curve, "No carbs, so no pre-bolus pause.");
+            return choice(null, curve, "No carbs, so no pre-bolus pause.", null);
         }
 
         List<Note> recent = notes.findByUserIdAndTimestampBetween(userId, now.minusHours(LOOKBACK_HOURS), now);
@@ -114,7 +116,7 @@ public class PreBolusPauseOptimizer {
             // A calculator top-up is shown in the curve it would produce (meal now, top-up now).
             List<PredictionPointDTO> curve = forecast(username, now, currentGlucose, dose, meal, nutritionJson, 0).curve();
             String topUp = dose == null ? "" : String.format(Locale.ROOT, " and the %.1f U top-up now", dose);
-            return new PauseChoice(null, curve, finite(peak(curve)), finite(min(curve)), String.format(Locale.ROOT,
+            return new PauseChoice(null, curve, finite(postMealPeak(curve, now)), finite(min(curve)), String.format(Locale.ROOT,
                     "A pre-bolus of %.1f U is already in flight (%d min ago), so no waiting before the meal; the forecast has the meal now%s.",
                     ctx.units(), ctx.elapsedMinutes(), topUp), true);
         }
@@ -150,7 +152,7 @@ public class PreBolusPauseOptimizer {
                     ? "The forecast does not reach %d min after the meal, so the %.1f mmol/L floor cannot be checked."
                     : "No forecast reaches %d min after the meal, so the %.1f mmol/L floor cannot be checked: no pre-bolus pause, eat now.",
                     POST_MEAL_MINUTES, MIN_FLOOR);
-            return choice(null, eatNow, reason);
+            return choice(null, eatNow, reason, now);
         }
         if (bestPause == null) {
             String lowest = lowestMin == Double.MAX_VALUE ? ""
@@ -160,9 +162,9 @@ public class PreBolusPauseOptimizer {
                     : String.format(Locale.ROOT,
                             "Every pause from 0 to %d min forecasts a low under %.1f mmol/L%s, so no pre-bolus pause: eat now.",
                             MAX_PAUSE_MINUTES, MIN_FLOOR, lowest);
-            return choice(null, eatNow, reason);
+            return choice(null, eatNow, reason, now);
         }
-        PauseChoice chosen = choice(bestPause, bestCurve, null);
+        PauseChoice chosen = choice(bestPause, bestCurve, null, now.plusMinutes(bestPause));
         String reason = dose == null
                 ? "No dose, so no pause."
                 : String.format(Locale.ROOT,
@@ -270,8 +272,11 @@ public class PreBolusPauseOptimizer {
         }
     }
 
-    private static PauseChoice choice(Integer pause, List<PredictionPointDTO> curve, String reason) {
-        return new PauseChoice(pause, curve, finite(peak(curve)), finite(min(curve)), reason);
+    /** {@code mealAt} null (no meal): the peak is the whole curve's. */
+    private static PauseChoice choice(Integer pause, List<PredictionPointDTO> curve, String reason,
+                                      LocalDateTime mealAt) {
+        double peak = mealAt == null ? peak(curve) : postMealPeak(curve, mealAt);
+        return new PauseChoice(pause, curve, finite(peak), finite(min(curve)), reason);
     }
 
     /** Null for NaN or infinity: the card's JSON must never carry "NaN". */
@@ -283,6 +288,21 @@ public class PreBolusPauseOptimizer {
     static double min(List<PredictionPointDTO> curve) {
         return curve.stream().map(PredictionPointDTO::getPredictedGlucose).filter(g -> g != null)
                 .mapToDouble(Double::doubleValue).min().orElse(Double.NaN);
+    }
+
+    /**
+     * Highest predicted point from the meal to {@link #POST_MEAL_PEAK_MINUTES} after it: the meal spike
+     * that a pre-bolus pause blunts. The 4 h maximum is usually the late tail, which every pause shares,
+     * so it hid the pause's effect (60 g GI 75: 0 vs 15 min moved the 1 h value 8.9 to 7.8, the 4 h max
+     * 9.6 to 9.5). Falls back to {@link #peak} when no point lies in that window.
+     */
+    static double postMealPeak(List<PredictionPointDTO> curve, LocalDateTime mealAt) {
+        LocalDateTime until = mealAt.plusMinutes(POST_MEAL_PEAK_MINUTES);
+        double windowed = curve.stream()
+                .filter(p -> p.getPredictedGlucose() != null && p.getTimestamp() != null
+                        && !p.getTimestamp().isBefore(mealAt) && !p.getTimestamp().isAfter(until))
+                .mapToDouble(PredictionPointDTO::getPredictedGlucose).max().orElse(Double.NaN);
+        return Double.isNaN(windowed) ? peak(curve) : windowed;
     }
 
     /** Highest predicted point; NaN for an empty curve. */
