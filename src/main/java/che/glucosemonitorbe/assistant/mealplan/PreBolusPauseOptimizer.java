@@ -38,7 +38,8 @@ import java.util.UUID;
  *   <li>Otherwise every candidate in {@link #CANDIDATES} is scored by {@link #timeWeightedMeanCost};
  *       a candidate whose forecast does not reach its meal + {@link #POST_MEAL_MINUTES} (the EMPIRICAL
  *       engine ignores the asked path length) or whose minimum is under {@link #MIN_FLOOR} is rejected;
- *       ties go to the shorter pause. If all are rejected: no pause (eat now), and the reason says why.</li>
+ *       ties go to the shorter pause, and so does a shorter pause whose meal peak is within
+ *       {@link #SIGNIFICANT_PEAK_GAIN} of the winner's (not worth the wait). If all are rejected: no pause (eat now), and the reason says why.</li>
  * </ul>
  * The cost moved here unchanged from the deleted {@code GlucosePredictService}.
  */
@@ -52,6 +53,12 @@ public class PreBolusPauseOptimizer {
     static final double MIN_FLOOR = 4.5;
 
     static final double TARGET_GLUCOSE = 5.5;
+    /**
+     * A longer pause must lower the meal peak ({@link #postMealPeak}) by at least this much against a
+     * shorter one to be worth the wait [mmol/L]; otherwise the shortest such pause wins, for convenience.
+     * 2026-11-27: 15 min was suggested for borsch at 5.4 mmol/L for a 0.2 mmol/L lower peak.
+     */
+    static final double SIGNIFICANT_PEAK_GAIN = 0.5;
     /** Predicted glucose below this [mmol/L] is treated as a hypo and penalised hard. */
     static final double HYPO_THRESHOLD = 3.9;
     /** Extra quadratic penalty weight applied per (3.9 − G)² below the hypo threshold. */
@@ -127,6 +134,8 @@ public class PreBolusPauseOptimizer {
         double bestCost = Double.MAX_VALUE;
         double lowestMin = Double.MAX_VALUE;
         boolean anyShort = false;
+        List<Integer> validPauses = new ArrayList<>();
+        List<List<PredictionPointDTO>> validCurves = new ArrayList<>();
         for (int pause : CANDIDATES) {
             if (dose == null && pause > 0) break;
             Forecast f = forecast(username, now, currentGlucose, dose, meal, nutritionJson, pause);
@@ -139,6 +148,8 @@ public class PreBolusPauseOptimizer {
             double min = min(curve);
             if (!Double.isNaN(min)) lowestMin = Math.min(lowestMin, min);
             if (Double.isNaN(min) || min < MIN_FLOOR) continue; // an empty forecast never wins
+            validPauses.add(pause);
+            validCurves.add(curve);
             double cost = timeWeightedMeanCost(curve, currentGlucose);
             if (cost < bestCost) { // strict: a tie keeps the shorter pause
                 bestCost = cost;
@@ -163,6 +174,16 @@ public class PreBolusPauseOptimizer {
                             "Every pause from 0 to %d min forecasts a low under %.1f mmol/L%s, so no pre-bolus pause: eat now.",
                             MAX_PAUSE_MINUTES, MIN_FLOOR, lowest);
             return choice(null, eatNow, reason, now);
+        }
+        // Convenience: the shortest pause whose meal peak is within SIGNIFICANT_PEAK_GAIN of the best one's.
+        double bestPeak = postMealPeak(bestCurve, now.plusMinutes(bestPause));
+        for (int i = 0; i < validPauses.size() && validPauses.get(i) < bestPause; i++) {
+            double peak = postMealPeak(validCurves.get(i), now.plusMinutes(validPauses.get(i)));
+            if (!Double.isNaN(peak) && peak - bestPeak < SIGNIFICANT_PEAK_GAIN) {
+                bestPause = validPauses.get(i);
+                bestCurve = validCurves.get(i);
+                break;
+            }
         }
         PauseChoice chosen = choice(bestPause, bestCurve, null, now.plusMinutes(bestPause));
         String reason = dose == null

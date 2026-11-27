@@ -97,7 +97,8 @@ class PreBolusPauseOptimizerTest {
         @Test
         @DisplayName("never picks a pause whose forecast minimum is under 4.5, even when its cost is lowest")
         void neverPicksPauseWithMinUnder4_5() {
-            forecastByPause(p -> levelWithDip(p, p >= 15 ? 4.4 : 5.6));
+            // Peaks fall 0.6 per 5 min, so each longer pause is a significant gain; 15 min dips under 4.5.
+            forecastByPause(p -> path(m -> m == 60 ? (p >= 15 ? 4.4 : 5.6) : 8.0 - p * 0.12));
 
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
@@ -112,9 +113,10 @@ class PreBolusPauseOptimizerTest {
 
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
-            assertThat(choice.pauseMinutes()).isEqualTo(15); // the cap: never longer than 15 min
+            // Peaks 8.0/7.6/7.2/6.8: 15 min has the lowest cost, but 10 min is within 0.5 of its peak.
+            assertThat(choice.pauseMinutes()).isEqualTo(10);
             assertThat(choice.inFlight()).isFalse();
-            assertThat(choice.peak()).isCloseTo(8.0 - 15 * 0.08, within(1e-9));
+            assertThat(choice.peak()).isCloseTo(8.0 - 10 * 0.08, within(1e-9));
             assertThat(choice.min()).isCloseTo(5.6, within(1e-9));
         }
 
@@ -158,6 +160,27 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
+        @DisplayName("a longer pause that lowers the meal peak by under 0.5 mmol/L is not worth the wait: shortest wins")
+        void insignificantPeakGainPrefersShortestPause() {
+            // 2026-11-27 borsch + white bread at 5.4: peaks 7.6/7.6/7.5/7.4 for 0/5/10/15 min. The cost
+            // still fell with every minute (the waiting minutes near 5.5 count as good), so 15 min won.
+            forecastByPause(p -> path(m -> m == p + 60 ? 7.6 - p * 0.0134 : m < p ? 5.4 : 6.0 - p * 0.02));
+
+            PauseChoice choice = optimizer.choose(USER, NOW, 5.4, 3.0, FAST_CARBS);
+
+            assertThat(choice.pauseMinutes()).isZero();
+            assertThat(choice.peak()).isCloseTo(7.6, within(1e-9));
+        }
+
+        @Test
+        @DisplayName("a pause that lowers the meal peak by 0.5 mmol/L or more is still suggested")
+        void significantPeakGainKeepsThePause() {
+            forecastByPause(p -> path(m -> m == p + 60 ? 10.0 - p * 0.1 : 7.0));
+
+            assertThat(optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS).pauseMinutes()).isEqualTo(15);
+        }
+
+        @Test
         @DisplayName("ties go to the shorter pause")
         void tiesGoToShorterPause() {
             forecastByPause(p -> path(m -> 7.0));
@@ -192,7 +215,7 @@ class PreBolusPauseOptimizerTest {
         @DisplayName("a low after now+240 but within pause+240 rejects that pause; each curve is cropped to pause+240")
         void lowAfterNowPlus240_rejectsLongPause() {
             // Cost prefers longer pauses; a dip at +250 lies inside the 10- and 15-min windows only.
-            forecastByPause(p -> path(270, m -> m == 250 ? 4.0 : 8.0 - p * 0.08));
+            forecastByPause(p -> path(270, m -> m == 250 ? 4.0 : 8.0 - p * 0.12));
 
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, 6.0, FAST_CARBS);
 
@@ -381,11 +404,12 @@ class PreBolusPauseOptimizerTest {
         }
 
         @Test
-        @DisplayName("60 g GI 75 at 7.0 mmol/L: the forecast asks for the longest pause, capped at 15 min")
+        @DisplayName("60 g GI 75 at 7.0 mmol/L: the forecast asks for a real pause (10-15 min), capped at 15 min")
         void prefersLongerPauseForFastCarbs() {
             PauseChoice choice = optimizer.choose(USER, NOW, 7.0, RealDashboardForecast.DOSE_FOR_60G, FAST_CARBS);
 
-            assertThat(choice.pauseMinutes()).isNotNull().isGreaterThanOrEqualTo(15);
+            // 2026-11-27: 10 min, as 15 min lowers the meal peak by under SIGNIFICANT_PEAK_GAIN more.
+            assertThat(choice.pauseMinutes()).isNotNull().isBetween(10, 15);
             assertThat(choice.min()).isGreaterThanOrEqualTo(4.5);
         }
 
