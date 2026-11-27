@@ -210,11 +210,6 @@ public class AssistantService {
                 payload.set("episodes", objectMapper.valueToTree(shown));
                 tracked.accept(new AssistantEvent.Episodes(shown));
             }
-            List<AssistantEvent.Citation> chips = FactsService.chips(facts.citations());
-            if (!chips.isEmpty()) {
-                payload.set("citations", objectMapper.valueToTree(chips));
-                tracked.accept(new AssistantEvent.Citations(chips));
-            }
             result = guardedReply.reply(userId, facts, offending -> AssistantPrompts.question(facts, question, offending),
                     () -> AssistantPrompts.questionTemplate(facts), language, tracked::gone);
             tracked.accept(new AssistantEvent.Token(result.text()));

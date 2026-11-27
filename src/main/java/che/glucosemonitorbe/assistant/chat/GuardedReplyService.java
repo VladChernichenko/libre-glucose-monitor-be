@@ -108,13 +108,21 @@ public class GuardedReplyService {
 
     private record Attempt(String text, String modelId) {}
 
+    private static final java.util.regex.Pattern REFERENCE_MARKER =
+            java.util.regex.Pattern.compile("\\s*\\[\\d{1,2}(?:\\s*,\\s*\\d{1,2})*]");
+
+    /** Replies carry no references (2026-11-27): a stray "[1]" or "[1, 2]" the model still writes is dropped. */
+    static String withoutReferenceMarkers(String text) {
+        return REFERENCE_MARKER.matcher(text).replaceAll("");
+    }
+
     private Attempt generate(String prompt, String language) {
         StringBuilder buffer = new StringBuilder();
         LlmGatewayService.GatewayResult r = llm.streamPromptReply(prompt, language, buffer::append);
         String text = buffer.length() > 0 ? buffer.toString()
                 : (r != null && r.getRawOutput() != null ? r.getRawOutput() : "");
         // Capped before the guard, so the guard checks exactly the text that is sent.
-        return new Attempt(ReplyLength.cap(text), r == null ? null : r.getModelId());
+        return new Attempt(ReplyLength.cap(withoutReferenceMarkers(text)), r == null ? null : r.getModelId());
     }
 
     private void record(UUID userId, String modelId, FactsPayload facts, long latencyMs, double confidence) {

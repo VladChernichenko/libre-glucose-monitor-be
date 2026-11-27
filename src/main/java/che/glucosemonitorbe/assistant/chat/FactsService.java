@@ -90,32 +90,18 @@ public class FactsService {
         List<ClinicalKnowledgeChunk> chunks = rag.retrieve(question, ctx);
         if (chunks == null) return List.of();
         List<FactsPayload.CitationFacts> out = new ArrayList<>();
-        int ref = 0;
         for (ClinicalKnowledgeChunk c : chunks) {
             if (out.size() >= MAX_CITATIONS) break;
-            boolean general = RagRetrieverService.GENERAL.equals(c.getConditionTag());
+            // Uncited background only (2026-11-27: no references or links in replies): no ref, no URL.
             out.add(FactsPayload.CitationFacts.builder()
                     .id(String.valueOf(c.getId()))
-                    .ref(general ? null : ++ref)
                     .title(c.getSourceTitle() == null || c.getSourceTitle().isBlank() ? c.getTitle() : c.getSourceTitle())
                     .source(c.getSourceName())
                     .year(c.getSourcePublishedAt() == null ? null : c.getSourcePublishedAt().getYear())
-                    .url(c.getSourceUrl())
-                    .citation(c.getCitation())
                     .excerpt(excerpt(c.getContent()))
                     .build());
         }
         return out;
-    }
-
-    /**
-     * The chips of the {@code citations} event: the citable payload passages with a source URL (library
-     * passages), without their text. The GENERAL disclaimer is never a chip.
-     */
-    public static List<AssistantEvent.Citation> chips(List<FactsPayload.CitationFacts> citations) {
-        if (citations == null) return List.of();
-        return citations.stream().filter(c -> c.ref() != null && c.url() != null && !c.url().isBlank()).map(c -> new AssistantEvent.Citation(c.ref(), c.id(), c.title(), c.source(),
-                c.year(), c.url(), c.citation())).toList();
     }
 
     public static List<FactsPayload.TurnFacts> turns(List<AiAnalysisRequest.AiChatTurnDto> turns) {
