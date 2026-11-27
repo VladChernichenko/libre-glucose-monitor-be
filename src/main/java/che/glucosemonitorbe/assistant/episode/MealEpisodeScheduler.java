@@ -4,6 +4,7 @@ import che.glucosemonitorbe.ai.embedding.EmbeddingGateway;
 import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshot;
 import che.glucosemonitorbe.assistant.snapshot.ForecastSnapshotRepository;
 import che.glucosemonitorbe.domain.CgmReading;
+import che.glucosemonitorbe.service.CgmArtifactFilter;
 import che.glucosemonitorbe.domain.User;
 import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -211,7 +212,8 @@ public class MealEpisodeScheduler {
 
         long fromMs = UserZones.toEpochMs(at.minus(CGM_BEFORE), zone);
         long toMs = UserZones.toEpochMs(at.plus(MealEpisodeBuilder.OUTCOME_WINDOW).plusMinutes(10), zone);
-        List<CgmReading> readings = cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, fromMs, toMs);
+        List<CgmReading> readings = CgmArtifactFilter.clean(
+                cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, fromMs, toMs));
         List<Note> others = around.stream().filter(n -> !n.getId().equals(meal.getId())).toList();
         MealLoad load = loadAt(userId, meal, others);
         Optional<MealEpisode> built = builder.build(meal, around, readings, settings, load);

@@ -147,8 +147,8 @@ public class DigitalTwinCalibrationService {
         LocalDateTime windowStart = nowUserWall.minusDays(LOOKBACK_DAYS);
 
         // -- Load CGM ----------------------------------------------------------
-        List<CgmReading> readings = cgmReadingRepository
-                .findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(userId, cutoffMs);
+        List<CgmReading> readings = CgmArtifactFilter.clean(cgmReadingRepository
+                .findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(userId, cutoffMs));
         if (readings.size() < MIN_CGM_READINGS) {
             log.debug("User {}: only {} CGM readings in last {}d - skipping calibration",
                     userId, readings.size(), LOOKBACK_DAYS);

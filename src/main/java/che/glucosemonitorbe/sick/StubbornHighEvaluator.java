@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.sick;
 
 import che.glucosemonitorbe.domain.CgmReading;
+import che.glucosemonitorbe.service.CgmArtifactFilter;
 import che.glucosemonitorbe.domain.GlucoseConversion;
 import che.glucosemonitorbe.domain.UserZones;
 import che.glucosemonitorbe.dto.UserSettingsDTO;
@@ -111,9 +112,11 @@ public class StubbornHighEvaluator {
         ZoneId zone = UserZones.resolve(settings.getTimezone(), settings.getUtcOffsetMinutes());
         long target = UserZones.toEpochMs(correction.getTimestamp(), zone);
         long window = CGM_MATCH_MINUTES * 60_000L;
-        return cgmReadings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                        userId, target - window, target + window).stream()
-                .filter(r -> r.getSgv() != null && r.getDateTimestamp() != null)
+        // Wider load so a sensor glitch at the match time is recognised and skipped.
+        long ctx = CgmArtifactFilter.RETURN_WINDOW_MS;
+        return CgmArtifactFilter.clean(cgmReadings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                        userId, target - window - ctx, target + window + ctx)).stream()
+                .filter(r -> Math.abs(r.getDateTimestamp() - target) <= window)
                 .min(Comparator.comparingLong((CgmReading r) -> Math.abs(r.getDateTimestamp() - target)))
                 .map(r -> r.getSgv() / GlucoseConversion.MGDL_PER_MMOL)
                 .orElse(null);

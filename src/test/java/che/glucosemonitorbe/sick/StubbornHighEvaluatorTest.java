@@ -174,7 +174,7 @@ class StubbornHighEvaluatorTest {
         assertThat(evaluate(SickSeverity.MODERATE, 14.5)).isEmpty();
 
         long at = c.getTimestamp().toInstant(ZoneOffset.UTC).toEpochMilli();
-        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, at - 900_000, at + 900_000))
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, at - 2_700_000, at + 2_700_000))
                 .thenReturn(List.of(CgmReading.builder().sgv(270).dateTimestamp(at).build()));
         assertThat(evaluate(SickSeverity.MODERATE, 14.2)).isPresent();
         assertThat(evaluate(SickSeverity.MODERATE, 13.9)).isEmpty();
@@ -231,7 +231,7 @@ class StubbornHighEvaluatorTest {
         long at = c.getTimestamp().toInstant(ZoneOffset.UTC).toEpochMilli();
         CgmReading far = CgmReading.builder().sgv(300).dateTimestamp(at - 600_000).build();
         CgmReading near = CgmReading.builder().sgv(270).dateTimestamp(at + 120_000).build();
-        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, at - 900_000, at + 900_000))
+        when(cgm.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(userId, at - 2_700_000, at + 2_700_000))
                 .thenReturn(List.of(far, near));
 
         // 270 mg/dL = 15.0 mmol/L: 14.2 now is a fall of 0.8 -> proposes; 13.9 is a fall of 1.1 -> silent

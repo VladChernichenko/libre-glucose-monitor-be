@@ -65,13 +65,28 @@ class SnapshotCheckSchedulerTest {
         when(snapshots.findByCompleteFalseAndExcludedFalse()).thenReturn(List.of(s));
         Instant t60 = MADE.plus(Duration.ofMinutes(60));
         when(readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                USER, t60.minus(Duration.ofMinutes(5)).toEpochMilli(), t60.plus(Duration.ofMinutes(5)).toEpochMilli()))
+                USER, t60.minus(Duration.ofMinutes(35)).toEpochMilli(), t60.plus(Duration.ofMinutes(35)).toEpochMilli()))
                 .thenReturn(List.of(reading(t60.plusSeconds(60), 144))); // 8.0 mmol
         at(MADE.plus(Duration.ofMinutes(70))).checkSnapshots();
         assertThat(s.getCheck60Actual()).isEqualTo(8.0);
         assertThat(s.getCheck60Hit()).isTrue();
         assertThat(s.getCheck120Hit()).isNull();
         assertThat(s.isComplete()).isFalse();
+    }
+
+    @Test
+    void sensorGlitchAtCheckTime_isNotTakenAsActual() {
+        // Hot-shower dip: 10.9 -> 7.8 -> 10.6 within 9 min. The 7.8 must not score the check.
+        ForecastSnapshot s = snapshot();
+        when(snapshots.findByCompleteFalseAndExcludedFalse()).thenReturn(List.of(s));
+        Instant t60 = MADE.plus(Duration.ofMinutes(60));
+        when(readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                USER, t60.minus(Duration.ofMinutes(35)).toEpochMilli(), t60.plus(Duration.ofMinutes(35)).toEpochMilli()))
+                .thenReturn(List.of(reading(t60.minus(Duration.ofMinutes(5)), 196),
+                        reading(t60, 141),
+                        reading(t60.plus(Duration.ofMinutes(4)), 191)));
+        at(MADE.plus(Duration.ofMinutes(70))).checkSnapshots();
+        assertThat(s.getCheck60Actual()).isCloseTo(10.6, org.assertj.core.data.Offset.offset(0.05));
     }
 
     @Test
@@ -99,7 +114,7 @@ class SnapshotCheckSchedulerTest {
         when(snapshots.findByCompleteFalseAndExcludedFalse()).thenReturn(List.of(s));
         Instant t240 = MADE.plus(Duration.ofMinutes(240));
         when(readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                USER, t240.minus(Duration.ofMinutes(5)).toEpochMilli(), t240.plus(Duration.ofMinutes(5)).toEpochMilli()))
+                USER, t240.minus(Duration.ofMinutes(35)).toEpochMilli(), t240.plus(Duration.ofMinutes(35)).toEpochMilli()))
                 .thenReturn(List.of(reading(t240, 180))); // 10 mmol vs 6 predicted -> miss
         at(MADE.plus(Duration.ofMinutes(246))).checkSnapshots();
         assertThat(s.getCheck240Hit()).isFalse();
@@ -113,7 +128,7 @@ class SnapshotCheckSchedulerTest {
         when(snapshots.findByCompleteFalseAndExcludedFalse()).thenReturn(List.of(s));
         Instant t60 = MADE.plus(Duration.ofMinutes(60));
         when(readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                USER, t60.minus(Duration.ofMinutes(5)).toEpochMilli(), t60.plus(Duration.ofMinutes(5)).toEpochMilli()))
+                USER, t60.minus(Duration.ofMinutes(35)).toEpochMilli(), t60.plus(Duration.ofMinutes(35)).toEpochMilli()))
                 .thenReturn(List.of(reading(t60, 252))); // 14 mmol: unlogged meal pushed glucose up
         at(MADE.plus(Duration.ofMinutes(70))).checkSnapshots();
         assertThat(s.getCheck60Actual()).isEqualTo(14.0);

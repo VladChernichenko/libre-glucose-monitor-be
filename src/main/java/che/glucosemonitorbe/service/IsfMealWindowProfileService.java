@@ -242,8 +242,8 @@ public class IsfMealWindowProfileService {
      */
     private List<CgmReading> loadCgmReadings(UUID userId, LocalDateTime since) {
         long sinceEpochMs = noteTimestampToEpochMs(since);
-        return cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
-                userId, sinceEpochMs);
+        return CgmArtifactFilter.clean(cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
+                userId, sinceEpochMs));
     }
 
     /**

@@ -158,8 +158,8 @@ public class GlycemicEventScanService {
 
     GlycemicEventDetector.Input loadInput(UUID userId, UserSettingsDTO settings, ZoneId zone, LocalDateTime end) {
         LocalDateTime start = end.minusMinutes(props.getWindowMinutes());
-        List<CgmReading> readings = cgmReadingRepository.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                userId, UserZones.toEpochMs(start, zone), UserZones.toEpochMs(end, zone));
+        List<CgmReading> readings = CgmArtifactFilter.clean(cgmReadingRepository.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                userId, UserZones.toEpochMs(start, zone), UserZones.toEpochMs(end, zone)));
         List<GlycemicEventDetector.CgmPoint> cgm = readings.stream()
                 .filter(r -> r.getSgv() != null && r.getDateTimestamp() != null)
                 .map(r -> new GlycemicEventDetector.CgmPoint(r.getDateTimestamp(), r.getSgv() / MGDL_PER_MMOL))

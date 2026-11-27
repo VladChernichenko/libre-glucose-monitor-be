@@ -122,8 +122,8 @@ public class CarbRatioMealWindowProfileService {
         LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
         LocalDateTime since = now.minusDays(HISTORY_DAYS);
         List<Note> notes = noteRepository.findByUserIdAndTimestampBetween(userId, since, now);
-        List<CgmReading> cgm = cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
-                userId, IsfMealWindowProfileService.noteTimestampToEpochMs(since));
+        List<CgmReading> cgm = CgmArtifactFilter.clean(cgmReadingRepository.findByUserIdAndDateTimestampGreaterThanOrderByDateTimestampAsc(
+                userId, IsfMealWindowProfileService.noteTimestampToEpochMs(since)));
 
         Map<MealWindow, List<Double>> ratios = new EnumMap<>(MealWindow.class);
         for (MealWindow w : MealWindow.values()) ratios.put(w, new ArrayList<>());

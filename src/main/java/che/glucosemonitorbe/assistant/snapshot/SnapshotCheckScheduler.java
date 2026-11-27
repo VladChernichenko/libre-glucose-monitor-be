@@ -1,6 +1,7 @@
 package che.glucosemonitorbe.assistant.snapshot;
 
 import che.glucosemonitorbe.domain.CgmReading;
+import che.glucosemonitorbe.service.CgmArtifactFilter;
 import che.glucosemonitorbe.empirical.EmpiricalTwinEngine;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -109,10 +110,13 @@ public class SnapshotCheckScheduler {
     private Optional<Double> actualNear(ForecastSnapshot s, Instant target) {
         long lo = target.minus(TOLERANCE).toEpochMilli();
         long hi = target.plus(TOLERANCE).toEpochMilli();
-        List<CgmReading> found = readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
-                s.getUserId(), lo, hi);
+        // Load the glitch filter's context on both sides, so a sensor dip at the check time is
+        // recognised (and skipped) rather than scored as the actual glucose.
+        long ctx = CgmArtifactFilter.RETURN_WINDOW_MS;
+        List<CgmReading> found = CgmArtifactFilter.clean(readings.findByUserIdAndDateTimestampBetweenOrderByDateTimestampAsc(
+                s.getUserId(), lo - ctx, hi + ctx));
         return found.stream()
-                .filter(r -> r.getDateTimestamp() != null && r.getSgv() != null)
+                .filter(r -> r.getDateTimestamp() >= lo && r.getDateTimestamp() <= hi)
                 .min(Comparator.comparingLong(r -> Math.abs(r.getDateTimestamp() - target.toEpochMilli())))
                 .map(r -> r.getSgv() / MGDL_PER_MMOL);
     }
