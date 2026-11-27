@@ -71,4 +71,38 @@ class QuickLogDeletionListenerTest {
 
         verify(messages, never()).save(any());
     }
+
+    private ChatMessage mealPlan(UUID... noteIds) {
+        ChatMessage m = quickLog(noteIds);
+        m.setRole(ChatMessage.Role.ASSISTANT);
+        m.setIntent("meal_plan");
+        m.setPayload("{\"state\":\"EATEN\"}");
+        return m;
+    }
+
+    @Test
+    void deletingEveryNoteOfAMealPlanMarksItNotesDeleted() {
+        // The app strikes the plan's text through once its dose and meal are gone (dashboard Del or chat Remove).
+        UUID dose = UUID.randomUUID();
+        UUID meal = UUID.randomUUID();
+        ChatMessage plan = mealPlan(dose, meal);
+
+        listener.onNoteDeleted(new NoteDeleted(user, meal, plan.getId()));
+
+        assertTrue(plan.getPayload().contains("\"notesDeleted\":true"), plan.getPayload());
+        assertTrue(plan.getPayload().contains("\"state\":\"EATEN\""), plan.getPayload());
+        assertFalse(plan.getPayload().contains("undone"), plan.getPayload());
+    }
+
+    @Test
+    void aMealPlanWithItsDoseLeftIsNotMarked() {
+        UUID dose = UUID.randomUUID();
+        UUID meal = UUID.randomUUID();
+        ChatMessage plan = mealPlan(dose, meal);
+        when(notes.findByIdAndUserId(dose, user)).thenReturn(Optional.of(mock(Note.class)));
+
+        listener.onNoteDeleted(new NoteDeleted(user, meal, plan.getId()));
+
+        verify(messages, never()).save(any());
+    }
 }
