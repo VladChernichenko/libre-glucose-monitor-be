@@ -18,7 +18,8 @@ final class AssistantPrompts {
         return "You are a personal type 1 diabetes assistant chatting with the user. "
                 + "Reply in " + languageName(facts.language())
                 + ", the language of the user's message, even though the facts are in English. "
-                + "Be brief: a few sentences, plain text. "
+                + "At most " + ReplyLength.MAX_WORDS + " words, plain text. Lead with the single most important "
+                + "fact for the question (usually a number); skip generic advice such as 'monitor closely'. "
                 + "Quote numbers, times and dates ONLY from the facts JSON below (converting mmol/L to mg/dL is "
                 + "allowed); never invent, estimate or recompute numbers. 'citations' are clinical passages: you may "
                 + "use them for background and cite one by writing its marker, e.g. [1] for ref 1, at the end of "
@@ -45,7 +46,7 @@ final class AssistantPrompts {
 
     static String plan(FactsPayload facts, List<String> offending) {
         return "You explain a meal plan to a person with type 1 diabetes. Reply in " + languageName(facts.language())
-                + " in one to three short sentences, plain text. Use ONLY the numbers in the facts JSON below; "
+                + " in at most " + ReplyLength.MAX_WORDS + " words, most important first, plain text. Use ONLY the numbers in the facts JSON below; "
                 + "never invent or recompute numbers. Never issue imperative dosing commands; describe what the "
                 + "model suggests. 'doseUnits' (if present) is the insulin the card suggests taking now, on top "
                 + "of any insulin on board: always mention it, and never say no dose or no new dose is suggested "

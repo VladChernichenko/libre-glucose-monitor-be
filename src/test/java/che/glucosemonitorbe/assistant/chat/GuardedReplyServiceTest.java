@@ -63,6 +63,17 @@ class GuardedReplyServiceTest {
     }
 
     @Test
+    void longReplyIsCappedToFiftyWords() {
+        llmSays("IOB is 1 U. " + "Keep monitoring closely and consider your meal composition. ".repeat(8));
+
+        GuardedReplyService.Result r = service.reply(UUID.randomUUID(), facts,
+                off -> "prompt", () -> "template", "en", () -> false);
+
+        assertTrue(r.text().split("\\s+").length <= ReplyLength.MAX_WORDS, r.text());
+        assertTrue(r.text().startsWith("IOB is 1 U."));
+    }
+
+    @Test
     void cleanReplyPassesFirstTime() {
         llmSays("IOB is 1 U.");
 

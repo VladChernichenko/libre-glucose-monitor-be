@@ -113,7 +113,8 @@ public class GuardedReplyService {
         LlmGatewayService.GatewayResult r = llm.streamPromptReply(prompt, language, buffer::append);
         String text = buffer.length() > 0 ? buffer.toString()
                 : (r != null && r.getRawOutput() != null ? r.getRawOutput() : "");
-        return new Attempt(text.strip(), r == null ? null : r.getModelId());
+        // Capped before the guard, so the guard checks exactly the text that is sent.
+        return new Attempt(ReplyLength.cap(text), r == null ? null : r.getModelId());
     }
 
     private void record(UUID userId, String modelId, FactsPayload facts, long latencyMs, double confidence) {
