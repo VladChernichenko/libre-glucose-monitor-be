@@ -5,7 +5,6 @@ import che.glucosemonitorbe.entity.UserDigitalTwin;
 import che.glucosemonitorbe.hovorka.AbsorptionModel;
 import che.glucosemonitorbe.hovorka.ActivityGains;
 import che.glucosemonitorbe.hovorka.learning.PredictionUncertaintyModel;
-import che.glucosemonitorbe.hovorka.learning.ResidualBiasModel;
 import che.glucosemonitorbe.hovorka.learning.TwinScales;
 import che.glucosemonitorbe.repository.UserDigitalTwinRepository;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +40,7 @@ public class DigitalTwinService {
 
     private final ConcurrentHashMap<UUID, Cached> cache = new ConcurrentHashMap<>();
 
-    private record Cached(TwinScales scales, ResidualBiasModel residual,
+    private record Cached(TwinScales scales,
                           PredictionUncertaintyModel uncertainty, boolean applied,
                           ActivityGains activity, long expiresAt) {
         boolean fresh() { return System.currentTimeMillis() < expiresAt; }
@@ -61,13 +60,6 @@ public class DigitalTwinService {
     public Optional<ActivityGains> activeActivityGains(UUID userId) {
         if (!featureToggleConfig.isDigitalTwinEnabled()) return Optional.empty();
         return Optional.ofNullable(resolve(userId).activity());
-    }
-
-    /** The residual correction grid to apply to predictions for this user (neutral if no active twin). */
-    public ResidualBiasModel activeResidual(UUID userId) {
-        if (!featureToggleConfig.isDigitalTwinEnabled()) return ResidualBiasModel.neutral();
-        Cached c = resolve(userId);
-        return c.applied() ? c.residual() : ResidualBiasModel.neutral();
     }
 
     /**
@@ -100,11 +92,11 @@ public class DigitalTwinService {
         UserDigitalTwin twin = repository.findByUserId(userId).orElse(null);
         long expiry = System.currentTimeMillis() + CACHE_TTL_MS;
         // A twin fitted under the other meal-absorption model corrects errors this forecast does not
-        // have (its meal scale, residual grid and activity gains were all fitted through replays of
+        // have (its meal scale and activity gains were all fitted through replays of
         // that model): treat it as no twin until the nightly refit under the current model.
         if (twin == null || AbsorptionModel.parse(twin.getAbsorptionModel())
                 != AbsorptionModel.of(featureToggleConfig.isGammaAbsorptionEnabled())) {
-            return new Cached(TwinScales.neutral(), ResidualBiasModel.neutral(),
+            return new Cached(TwinScales.neutral(),
                     PredictionUncertaintyModel.populationDefault(), false, null, expiry);
         }
         ActivityGains activity = Boolean.TRUE.equals(twin.getActivityApplied())
@@ -112,15 +104,14 @@ public class DigitalTwinService {
                         orDefault(twin.getActivityTailHalfLifeMin(), ActivityGains.NEUTRAL.tailHalfLifeMin())).clamped()
                 : null;
         if (!Boolean.TRUE.equals(twin.getApplied())) {
-            return new Cached(TwinScales.neutral(), ResidualBiasModel.neutral(),
+            return new Cached(TwinScales.neutral(),
                     PredictionUncertaintyModel.populationDefault(), false, activity, expiry);
         }
         TwinScales scales = new TwinScales(
                 orOne(twin.getIsfScale()), orOne(twin.getAgScale()),
                 orOne(twin.getTMaxGScale()), orOne(twin.getEgpScale())).clamped();
-        ResidualBiasModel residual = ResidualBiasModel.fromCsv(twin.getResidualGrid());
         PredictionUncertaintyModel uncertainty = PredictionUncertaintyModel.fromCsv(twin.getUncertaintySdGrid());
-        return new Cached(scales, residual, uncertainty, true, activity, expiry);
+        return new Cached(scales, uncertainty, true, activity, expiry);
     }
 
     private static double orOne(Double v) {

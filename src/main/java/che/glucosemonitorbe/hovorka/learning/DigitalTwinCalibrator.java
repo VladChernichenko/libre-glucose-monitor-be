@@ -39,8 +39,9 @@ import java.util.function.Predicate;
  *   <li><b>Meal fit</b> - {@code agScale} is then fitted over all anchors with the other two fixed.</li>
  * </ol>
  *
- * <p>Finally a {@link ResidualBiasModel} and {@link PredictionUncertaintyModel} are fitted on what the
- * calibrated physiology leaves behind, and baseline vs. calibrated MAE are scored on the held-out
+ * <p>Finally a {@link PredictionUncertaintyModel} is fitted on what the calibrated physiology leaves
+ * behind (no hourly {@link ResidualBiasModel}: it turned dinner-time misses into a clock-based rise
+ * added to every evening forecast, meal or not), and baseline vs. calibrated MAE are scored on the held-out
  * validation window - the twin only reports {@code improved} when it genuinely beats the un-calibrated
  * model out-of-sample, and never when a fitted scale rests on a clamp bound.</p>
  *
@@ -90,7 +91,7 @@ public final class DigitalTwinCalibrator {
             ResidualBiasModel residual,
             PredictionUncertaintyModel uncertainty, // per-horizon σ for the prediction band
             double maeBaseline,     // validation MAE of the un-calibrated model [mmol/L]
-            double maeCalibrated,   // validation MAE with scales + residual [mmol/L]
+            double maeCalibrated,   // validation MAE with the fitted scales [mmol/L]
             int trainSamples,
             int valSamples,
             boolean improved,
@@ -146,15 +147,16 @@ public final class DigitalTwinCalibrator {
                 null);
         TwinScales scales = new TwinScales(isfScale, ag[0], 1.0, egpScale).clamped();
 
-        // 4) Fit the residual grid on the calibrated model's leftover error (training set).
+        // 4) No hourly residual grid: a per-hour offset learned from meal misses was added to every
+        //    forecast at that clock hour, bending quiet forecasts (2026-11-27). Kept neutral.
         List<AnchorSample> trainCalibrated = train.replay(scales);
-        ResidualBiasModel residual = ResidualBiasModel.fit(trainCalibrated);
+        ResidualBiasModel residual = ResidualBiasModel.neutral();
 
-        // 5) Score out-of-sample: baseline (neutral, no residual) vs. calibrated (scales + residual).
+        // 5) Score out-of-sample: baseline (neutral scales) vs. calibrated scales.
         List<AnchorSample> valBaseline = val.replay(TwinScales.neutral());
         List<AnchorSample> valScaled   = val.replay(scales);
         double maeBaseline   = RobustLoss.mae(valBaseline);
-        double maeCalibrated = maeWithResidual(valScaled, residual);
+        double maeCalibrated = RobustLoss.mae(valScaled);
         int valSamples = valBaseline.size();
 
         // 6) Fit the prediction band's per-horizon σ from the out-of-sample calibrated residuals
@@ -475,17 +477,6 @@ public final class DigitalTwinCalibrator {
     }
 
     // -- Scoring helpers ----------------------------------------------------------
-
-    /** MAE with the residual correction applied to each predicted point. */
-    private static double maeWithResidual(List<AnchorSample> samples, ResidualBiasModel residual) {
-        if (samples.isEmpty()) return Double.NaN;
-        double sum = 0.0;
-        for (AnchorSample s : samples) {
-            double corrected = s.predicted() + residual.correctionAt(s.hourOfDay());
-            sum += Math.abs(corrected - s.actual());
-        }
-        return sum / samples.size();
-    }
 
     private static String confidence(int valSamples, double improvement) {
         if (valSamples >= 100 && improvement >= 0.10) return "HIGH";

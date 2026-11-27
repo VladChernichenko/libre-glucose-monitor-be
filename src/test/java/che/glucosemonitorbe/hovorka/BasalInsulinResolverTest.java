@@ -263,7 +263,6 @@ class BasalInsulinResolverTest {
 
     private static PredictionResidualProvider scale(double isfScale) {
         return new PredictionResidualProvider() {
-            @Override public double residualMmol(UUID userId, LocalDateTime pointTime) { return 0.0; }
             @Override public double uncertaintySdMmol(UUID userId, int horizonMin) { return 0.0; }
             @Override public double isfScale(UUID userId) { return isfScale; }
         };

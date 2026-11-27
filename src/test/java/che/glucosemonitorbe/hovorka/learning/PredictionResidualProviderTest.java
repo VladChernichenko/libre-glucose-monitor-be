@@ -2,8 +2,6 @@ package che.glucosemonitorbe.hovorka.learning;
 
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
-import java.time.Month;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,26 +20,8 @@ class PredictionResidualProviderTest {
     private static final double EPS = 1e-12;
 
     private static final UUID USER = UUID.fromString("11111111-2222-3333-4444-555555555555");
-    private static final LocalDateTime NOON = LocalDateTime.of(2026, Month.MARCH, 14, 12, 0);
 
     // -- NONE ------------------------------------------------------------------
-
-    @Test
-    void none_appliesNoCorrectionAtAnyHourOfDay() {
-        for (int hour = 0; hour < 24; hour++) {
-            assertThat(PredictionResidualProvider.NONE
-                    .residualMmol(USER, NOON.withHour(hour).withMinute(37)))
-                    .as("hour %d", hour)
-                    .isZero();
-        }
-    }
-
-    @Test
-    void none_appliesNoCorrectionForAnyUser() {
-        assertThat(PredictionResidualProvider.NONE.residualMmol(UUID.randomUUID(), NOON)).isZero();
-        assertThat(PredictionResidualProvider.NONE.residualMmol(null, NOON)).isZero();
-        assertThat(PredictionResidualProvider.NONE.residualMmol(USER, null)).isZero();
-    }
 
     @Test
     void none_reportsNoUncertainty_soReplayScoresTheRawModelWithNoBand() {
@@ -57,27 +37,25 @@ class PredictionResidualProviderTest {
 
     // -- the default band ------------------------------------------------------
 
-    /** A twin that has learned a correction but supplies no uncertainty of its own. */
-    private static final PredictionResidualProvider CORRECTION_ONLY =
-            (userId, pointTime) -> 0.4;
+    /** A provider that supplies no uncertainty of its own. */
+    private static final PredictionResidualProvider DEFAULT_ONLY = new PredictionResidualProvider() { };
 
     @Test
     void aProviderThatOnlySuppliesACorrection_stillGetsThePopulationBand() {
         PredictionUncertaintyModel prior = PredictionUncertaintyModel.populationDefault();
 
         for (int horizonMin : PredictionUncertaintyModel.HORIZONS) {
-            assertThat(CORRECTION_ONLY.uncertaintySdMmol(USER, horizonMin))
+            assertThat(DEFAULT_ONLY.uncertaintySdMmol(USER, horizonMin))
                     .as("horizon %d min", horizonMin)
                     .isCloseTo(prior.sdAtHorizon(horizonMin), within(EPS));
         }
-        assertThat(CORRECTION_ONLY.residualMmol(USER, NOON)).isCloseTo(0.4, within(EPS));
     }
 
     @Test
     void theDefaultBandIsAlwaysPositiveAndWidensWithHorizon() {
         double previous = 0.0;
         for (int horizonMin : new int[]{15, 30, 60, 90, 120, 180, 240, 480}) {
-            double sd = CORRECTION_ONLY.uncertaintySdMmol(USER, horizonMin);
+            double sd = DEFAULT_ONLY.uncertaintySdMmol(USER, horizonMin);
             assertThat(sd).as("horizon %d min", horizonMin)
                     .isGreaterThanOrEqualTo(PredictionUncertaintyModel.SD_FLOOR)
                     .isLessThanOrEqualTo(PredictionUncertaintyModel.SD_MAX)
@@ -85,25 +63,19 @@ class PredictionResidualProviderTest {
             previous = sd;
         }
         // a 4-hour forecast is meaningfully less certain than a half-hour one
-        assertThat(CORRECTION_ONLY.uncertaintySdMmol(USER, 240))
-                .isGreaterThan(CORRECTION_ONLY.uncertaintySdMmol(USER, 30));
+        assertThat(DEFAULT_ONLY.uncertaintySdMmol(USER, 240))
+                .isGreaterThan(DEFAULT_ONLY.uncertaintySdMmol(USER, 30));
     }
 
     @Test
     void anImplementationMayOverrideTheDefaultBand() {
         PredictionResidualProvider tightTwin = new PredictionResidualProvider() {
             @Override
-            public double residualMmol(UUID userId, LocalDateTime pointTime) {
-                return -0.25;
-            }
-
-            @Override
             public double uncertaintySdMmol(UUID userId, int horizonMin) {
                 return 0.5;
             }
         };
 
-        assertThat(tightTwin.residualMmol(USER, NOON)).isCloseTo(-0.25, within(EPS));
         assertThat(tightTwin.uncertaintySdMmol(USER, 120)).isCloseTo(0.5, within(EPS));
         assertThat(tightTwin.uncertaintySdMmol(USER, 120))
                 .isNotEqualTo(PredictionUncertaintyModel.populationDefault().sdAtHorizon(120));

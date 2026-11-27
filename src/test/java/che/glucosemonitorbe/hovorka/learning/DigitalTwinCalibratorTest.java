@@ -54,10 +54,24 @@ class DigitalTwinCalibratorTest {
     }
 
     @Test
+    void neverLearnsAnHourlyCorrection() {
+        // Unlogged meals leave a one-sided error at the hours they happen. The twin used to turn that
+        // into a per-hour offset added to every forecast - a "dinner rise" on evenings with no dinner.
+        AnchorSampleSource train = new SyntheticSource(240, 0.05, 3L);
+        AnchorSampleSource val   = new SyntheticSource(120, 0.0, 4L);
+
+        DigitalTwinCalibrator.Result r = new DigitalTwinCalibrator().calibrate(train, val);
+
+        assertThat(r.residual().isNeutral()).isTrue();
+    }
+
+    @Test
     void safelyDeclinesToApplyWhenDataIsTooContaminated() {
-        // At 18% one-sided contamination the fit is biased enough that the calibrated model does
+        // At 40% one-sided contamination the fit is biased enough that the calibrated model does
         // WORSE on the clean held-out window - the temporal-holdout gate must refuse to apply it.
-        AnchorSampleSource train = new SyntheticSource(240, 0.18, 3L);
+        // (Until 2026-11-27 this failed at 18%, but only because the hourly residual grid learned the
+        // contamination; the scales alone still help there.)
+        AnchorSampleSource train = new SyntheticSource(240, 0.40, 3L);
         AnchorSampleSource val   = new SyntheticSource(120, 0.0, 4L);
 
         DigitalTwinCalibrator.Result r = new DigitalTwinCalibrator().calibrate(train, val);

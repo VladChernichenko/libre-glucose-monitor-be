@@ -84,7 +84,6 @@ class DigitalTwinAbsorptionModelGuardTest {
         stored(appliedTwin("DALLA_MAN"));
 
         assertThat(twinService.activeScales(USER)).isEmpty();
-        assertThat(twinService.activeResidual(USER).isNeutral()).isTrue();
         assertThat(twinService.activeUncertainty(USER).sdAtHorizon(60))
                 .isEqualTo(PredictionUncertaintyModel.populationDefault().sdAtHorizon(60));
         assertThat(twinService.activeActivityGains(USER)).isEmpty();
