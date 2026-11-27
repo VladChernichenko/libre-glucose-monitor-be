@@ -345,6 +345,39 @@ class WatchStripServiceTest {
     }
 
     @Test
+    void idle_landingAboveTarget_greenBannerWithCorrection() {
+        // Nothing logged, nothing active: a steady 9.8 still has to be brought to target.
+        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 9.8, 5.55, 2.0, 0.0, NOW)).thenReturn(1.7);
+        WatchStrip strip = service.evaluate(USER, resp(path(m -> m == 240 ? 9.8 : 9.0), 0.0, 0.0)).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.CALM);
+        assertThat(strip.reason()).isEqualTo(Reason.WATCHING);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.INSULIN);
+        assertThat(strip.suggestion().units()).isEqualTo(1.5);
+        assertThat(strip.suggestion().takenUnits()).isNull();
+    }
+
+    @Test
+    void idle_correctionUnderHalfUnit_noBanner() {
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenReturn(0.3);
+        assertThat(service.evaluate(USER, resp(path(m -> 6.2), 0.0, 0.0))).isEmpty();
+    }
+
+    @Test
+    void idle_refusedCorrection_noBanner() {
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenThrow(new DosingRefusedException(DosingRefusalReason.SETTINGS_INVALID, "x"));
+        assertThat(service.evaluate(USER, resp(path(m -> 9.8), 0.0, 0.0))).isEmpty();
+    }
+
+    @Test
+    void idle_dipAhead_noBanner() {
+        assertThat(service.evaluate(USER, resp(path(m -> m == 90 ? 4.2 : 9.8), 0.0, 0.0))).isEmpty();
+        verify(calculator, never()).calculateForecastCorrection(anyString(), anyDouble(), anyDouble(),
+                anyDouble(), anyDouble(), anyDouble(), any());
+    }
+
+    @Test
     void calm_correctionUnderHalfUnit_noAction() {
         notesAre(note(24, 2.0, Note.TYPE_NORMAL, 50));
         when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
@@ -676,7 +709,8 @@ class WatchStripServiceTest {
 
     @Test
     void hold_doseStripNotKeptAfterForecastDrops() {
-        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+        // Priced only for the high landing; the flat 6.0 forecast afterwards needs no dose.
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), eq(11.0), anyDouble(), anyDouble(), anyDouble(), any()))
                 .thenReturn(2.75);
         assertThat(service.evaluate(USER, high(10.5, 11.0)).orElseThrow().suggestion().kind()).isEqualTo(Kind.INSULIN);
         readingStoredAt(6.0, -3);

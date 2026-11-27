@@ -202,7 +202,12 @@ public class WatchStripService {
             return Optional.of(calm(userId, forecast, now, reading, resp.getCurrentGlucose(), iob, cob));
         }
 
-        // 7.
+        // 7. Nothing acting, but the forecast still lands above target by a dose worth taking: the goal
+        // is always target, so the green banner appears with the correction. Otherwise nothing.
+        WatchStrip idle = calm(userId, forecast, now, reading, resp.getCurrentGlucose(), iob, cob);
+        if (idle.reason() == Reason.WATCHING && idle.suggestion().kind() == Kind.INSULIN) {
+            return Optional.of(idle);
+        }
         return Optional.empty();
     }
 
