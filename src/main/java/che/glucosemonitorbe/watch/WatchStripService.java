@@ -199,18 +199,29 @@ public class WatchStripService {
         // 6. Calm: a recent dose, meal or activity that is still acting.
         boolean acting = (iob != null && iob >= CALM_MIN_IOB) || (cob != null && cob >= CALM_MIN_COB);
         if (acting && hasRecentTrigger(userId, now)) {
-            return Optional.of(calm(forecast, now, reading, iob, cob));
+            return Optional.of(calm(userId, forecast, now, reading, resp.getCurrentGlucose(), iob, cob));
         }
 
         // 7.
         return Optional.empty();
     }
 
-    /** Correction priced from where the forecast lands; no trend term enters the dose. */
+    /** Red banner: forecast stays above 10. A correction too small to take reads "small rise". */
     private WatchStrip high(UUID userId, LocalDateTime now, double reading, Double clientReading,
                             double landing, Double iob, Double cob) {
         GlucosePoint landingPoint = new GlucosePoint(now.plusMinutes(HORIZON_MINUTES), landing);
         LocalDateTime next = now.plusMinutes(HIGH_CHECK_MINUTES);
+        Suggestion s = priceCorrection(userId, now, reading, clientReading, landing);
+        Reason reason = s.kind() == Kind.NO_ACTION ? Reason.SMALL_RISE : Reason.HIGH_FORECAST;
+        return highStrip(reason, s, landingPoint, next, iob, cob);
+    }
+
+    /**
+     * Correction priced from where the forecast lands; no trend term enters the dose. INSULIN with
+     * the units still missing to reach target, NO_ACTION when under 0.5 U, or REFUSED with its code.
+     */
+    private Suggestion priceCorrection(UUID userId, LocalDateTime now, double reading, Double clientReading,
+                                       double landing) {
         // Rapid insulin from the last 2 h is already in the forecast: the correction is what is still
         // missing on top of it, and the banner shows the sum (taken + new).
         double taken = notes.findByUserIdAndTimestampBetween(userId,
@@ -223,7 +234,7 @@ public class WatchStripService {
         // The forecast was run from the client's reading, the dose would be priced from the stored
         // one: when they disagree the landing is not trustworthy enough to dose from.
         if (clientReading != null && Math.abs(clientReading - reading) > READING_MISMATCH_MMOL) {
-            return highStrip(Reason.HIGH_FORECAST, refused(READING_MISMATCH), landingPoint, next, iob, cob);
+            return refused(READING_MISMATCH);
         }
         try {
             UserSettingsDTO s = settings.getUserSettings(userId);
@@ -237,13 +248,11 @@ public class WatchStripService {
             double raw = calculator.calculateForecastCorrection(userId.toString(), reading, landing, target, isf, taken, now);
             double units = Math.floor(raw * 2) / 2;
             if (units < MIN_DOSE_UNITS) {
-                return highStrip(Reason.SMALL_RISE, noAction(), landingPoint, next, iob, cob);
+                return noAction();
             }
-            return highStrip(Reason.HIGH_FORECAST,
-                    new Suggestion(Kind.INSULIN, null, units, null, target, isf, null, takenUnits),
-                    landingPoint, next, iob, cob);
+            return new Suggestion(Kind.INSULIN, null, units, null, target, isf, null, takenUnits);
         } catch (DosingRefusedException e) {
-            return highStrip(Reason.HIGH_FORECAST, refused(e.getReason().name()), landingPoint, next, iob, cob);
+            return refused(e.getReason().name());
         }
     }
 
@@ -292,8 +301,8 @@ public class WatchStripService {
         return confirmedWithoutNote ? Optional.of(now.plusMinutes(CHECK_MINUTES)) : Optional.empty();
     }
 
-    private WatchStrip calm(List<PredictionPointDTO> forecast, LocalDateTime now, double reading,
-                            Double iob, Double cob) {
+    private WatchStrip calm(UUID userId, List<PredictionPointDTO> forecast, LocalDateTime now, double reading,
+                            Double clientReading, Double iob, Double cob) {
         LocalDateTime hourAhead = now.plusMinutes(CALM_CHECK_MINUTES);
         List<PredictionPointDTO> valid = valid(forecast);
         GlucosePoint landing = valid.stream()
@@ -322,12 +331,24 @@ public class WatchStripService {
                 && !peak.get().getTimestamp().equals(window.get(0).getTimestamp())) {
             next = earlier(hourAhead, peak.get().getTimestamp());
         }
-        return calmStrip(Reason.WATCHING, null, landing, next, iob, cob);
+        // Landing above target but under the red threshold: the green banner quietly carries the
+        // correction. Refusals and sub-0.5 U stay off it; the red banner is where those are shown.
+        Suggestion suggestion = noAction();
+        if (landing != null) {
+            Suggestion priced = priceCorrection(userId, now, reading, clientReading, landing.mmol());
+            if (priced.kind() == Kind.INSULIN) suggestion = priced;
+        }
+        return calmStrip(Reason.WATCHING, suggestion, null, landing, next, iob, cob);
     }
 
     private static WatchStrip calmStrip(Reason reason, GlucosePoint low, GlucosePoint landing,
                                         LocalDateTime nextCheckAt, Double iob, Double cob) {
-        return new WatchStrip(State.CALM, reason, noAction(), low, landing, iob, cob,
+        return calmStrip(reason, noAction(), low, landing, nextCheckAt, iob, cob);
+    }
+
+    private static WatchStrip calmStrip(Reason reason, Suggestion suggestion, GlucosePoint low,
+                                        GlucosePoint landing, LocalDateTime nextCheckAt, Double iob, Double cob) {
+        return new WatchStrip(State.CALM, reason, suggestion, low, landing, iob, cob,
                 nextCheckAt, ActivityEstimate.DEFAULT);
     }
 

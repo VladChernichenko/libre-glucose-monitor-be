@@ -323,6 +323,66 @@ class WatchStripServiceTest {
         assertThat(strip.nextCheckAt()).isEqualTo(NOW.plusMinutes(60));
     }
 
+    // -- correction on the green (CALM / WATCHING) banner: landing above target, under 10 --------
+
+    private static GlucoseCalculationsResponse landsAt(double landing) {
+        return resp(path(m -> m == 240 ? landing : 8.0), 2.6, 11.0);
+    }
+
+    @Test
+    void calm_landingAboveTarget_suggestsCorrectionWithTaken() {
+        notesAre(note(24, 2.0, Note.TYPE_NORMAL, 50));
+        when(calculator.calculateForecastCorrection(USER.toString(), 6.0, 9.8, 5.55, 2.0, 2.0, NOW)).thenReturn(2.1);
+        WatchStrip strip = service.evaluate(USER, landsAt(9.8)).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.CALM);
+        assertThat(strip.reason()).isEqualTo(Reason.WATCHING);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.INSULIN);
+        assertThat(strip.suggestion().units()).isEqualTo(2.0);
+        assertThat(strip.suggestion().takenUnits()).isEqualTo(2.0);
+        assertThat(strip.suggestion().targetMmol()).isEqualTo(5.55);
+        assertThat(strip.suggestion().isf()).isEqualTo(2.0);
+        assertThat(strip.landing().mmol()).isEqualTo(9.8);
+    }
+
+    @Test
+    void calm_correctionUnderHalfUnit_noAction() {
+        notesAre(note(24, 2.0, Note.TYPE_NORMAL, 50));
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenReturn(0.4);
+        WatchStrip strip = service.evaluate(USER, landsAt(6.4)).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.WATCHING);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+    }
+
+    @Test
+    void calm_refusedCorrection_staysQuietNoAction() {
+        notesAre(note(24, 2.0, Note.TYPE_NORMAL, 50));
+        when(calculator.calculateForecastCorrection(anyString(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), anyDouble(), any()))
+                .thenThrow(new DosingRefusedException(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS, "total"));
+        WatchStrip strip = service.evaluate(USER, landsAt(9.8)).orElseThrow();
+        assertThat(strip.state()).isEqualTo(State.CALM);
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+    }
+
+    @Test
+    void calm_readingMismatch_noCorrectionPriced() {
+        notesAre(note(24, 2.0, Note.TYPE_NORMAL, 50));
+        readingStoredAt(9.7, 2);
+        WatchStrip strip = service.evaluate(USER, landsAt(9.8)).orElseThrow();
+        assertThat(strip.suggestion().kind()).isEqualTo(Kind.NO_ACTION);
+        verify(calculator, never()).calculateForecastCorrection(anyString(), anyDouble(), anyDouble(),
+                anyDouble(), anyDouble(), anyDouble(), any());
+    }
+
+    @Test
+    void calm_dipAhead_noCorrectionPriced() {
+        notesAre(note(0, 4.0, Note.TYPE_NORMAL, 60));
+        WatchStrip strip = service.evaluate(USER, resp(path(m -> m == 90 ? 4.2 : 9.0), 1.5, 0.0)).orElseThrow();
+        assertThat(strip.reason()).isEqualTo(Reason.DIP_AHEAD);
+        verify(calculator, never()).calculateForecastCorrection(anyString(), anyDouble(), anyDouble(),
+                anyDouble(), anyDouble(), anyDouble(), any());
+    }
+
     @Test
     void calm_watching_nextCheckIsPeakWhenSooner() {
         notesAre(note(0, 4.0, Note.TYPE_NORMAL, 30));
