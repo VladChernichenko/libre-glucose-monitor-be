@@ -39,6 +39,8 @@ public class GlycemicEvent {
         LIPODYSTROPHY(Direction.RISE),
         DAWN_PHENOMENON(Direction.RISE),
         ANAEROBIC_ACTIVITY(Direction.RISE),
+        /** Slow rise from protein/fat turning into glucose hours after a meal. */
+        GLUCONEOGENESIS(Direction.RISE),
         UNLOGGED_INSULIN(Direction.FALL),
         UNDER_ESTIMATED_INSULIN(Direction.FALL),
         /** Ate fewer carbs than logged: a label only, the logged meal is not edited. */

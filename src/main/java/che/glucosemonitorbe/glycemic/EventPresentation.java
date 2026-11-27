@@ -31,6 +31,7 @@ public final class EventPresentation {
             case LIPODYSTROPHY -> "Possible lipodystrophy / injection site issue";
             case DAWN_PHENOMENON -> "Dawn phenomenon";
             case ANAEROBIC_ACTIVITY -> "Strength exercise";
+            case GLUCONEOGENESIS -> "Gluconeogenesis (protein / fat)";
             case UNLOGGED_INSULIN -> "Unlogged insulin";
             case UNDER_ESTIMATED_INSULIN -> "More insulin than logged";
             case AEROBIC_ACTIVITY -> "Cardio exercise";
@@ -45,7 +46,7 @@ public final class EventPresentation {
             return List.of(Category.UNLOGGED_INSULIN, Category.AEROBIC_ACTIVITY, Category.OVER_ESTIMATED_FOOD);
         }
         if (e.getCategory() == Category.UNLOGGED_FOOD) {
-            return List.of(Category.UNLOGGED_FOOD, Category.STRESS, Category.ANAEROBIC_ACTIVITY);
+            return List.of(Category.UNLOGGED_FOOD, Category.GLUCONEOGENESIS, Category.STRESS, Category.ANAEROBIC_ACTIVITY);
         }
         if (e.getCategory() == Category.LIPODYSTROPHY) {
             return List.of(Category.LIPODYSTROPHY, Category.ABSORPTION_DELAY, Category.STRESS);

@@ -13,10 +13,11 @@ class CategoryTest {
         assertThat(Category.forDirection(Direction.RISE)).containsExactlyInAnyOrder(
                 Category.UNLOGGED_FOOD, Category.UNDER_ESTIMATED_FOOD, Category.STRESS,
                 Category.ABSORPTION_DELAY, Category.LIPODYSTROPHY, Category.DAWN_PHENOMENON,
-                Category.ANAEROBIC_ACTIVITY);
+                Category.ANAEROBIC_ACTIVITY, Category.GLUCONEOGENESIS);
         assertThat(Category.forDirection(Direction.FALL)).containsExactlyInAnyOrder(
-                Category.UNLOGGED_INSULIN, Category.UNDER_ESTIMATED_INSULIN, Category.AEROBIC_ACTIVITY);
-        assertThat(Category.values()).hasSize(10);
+                Category.UNLOGGED_INSULIN, Category.UNDER_ESTIMATED_INSULIN, Category.OVER_ESTIMATED_FOOD,
+                Category.AEROBIC_ACTIVITY);
+        assertThat(Category.values()).hasSize(12);
     }
 
     @Test

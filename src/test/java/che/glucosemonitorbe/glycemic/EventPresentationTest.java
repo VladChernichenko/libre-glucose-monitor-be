@@ -30,7 +30,7 @@ class EventPresentationTest {
         assertThat(EventPresentation.promptOptions(ev(Category.UNLOGGED_INSULIN, Direction.FALL, Phase.PROVISIONAL)))
                 .containsExactly(Category.UNLOGGED_INSULIN, Category.AEROBIC_ACTIVITY, Category.OVER_ESTIMATED_FOOD);
         assertThat(EventPresentation.promptOptions(ev(Category.UNLOGGED_FOOD, Direction.RISE, Phase.FINAL)))
-                .containsExactly(Category.UNLOGGED_FOOD, Category.STRESS, Category.ANAEROBIC_ACTIVITY);
+                .containsExactly(Category.UNLOGGED_FOOD, Category.GLUCONEOGENESIS, Category.STRESS, Category.ANAEROBIC_ACTIVITY);
         assertThat(EventPresentation.promptOptions(ev(Category.AEROBIC_ACTIVITY, Direction.FALL, Phase.FINAL)))
                 .startsWith(Category.AEROBIC_ACTIVITY).containsOnly(Category.forDirection(Direction.FALL).toArray(Category[]::new));
         assertThat(EventPresentation.promptOptions(ev(Category.UNDER_ESTIMATED_INSULIN, Direction.FALL, Phase.FINAL)))
