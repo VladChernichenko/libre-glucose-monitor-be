@@ -188,9 +188,11 @@ public class PreBolusPauseOptimizer {
         PauseChoice chosen = choice(bestPause, bestCurve, null, now.plusMinutes(bestPause));
         String reason = dose == null
                 ? "No dose, so no pause."
-                : String.format(Locale.ROOT,
-                        "A %d-min pause keeps the forecast closest to %.1f mmol/L, between %.1f and %.1f.",
-                        bestPause, TARGET_GLUCOSE, chosen.min(), chosen.peak());
+                : String.format(Locale.ROOT, (bestPause == 0
+                                ? "Eat now"
+                                : "Wait %1$d min before eating: it lowers the meal peak")
+                                + "; forecast %2$.1f to %3$.1f, %4$.1f at +4 h.",
+                        bestPause, chosen.min(), chosen.peak(), finite(landing(chosen.curve())));
         return new PauseChoice(chosen.pauseMinutes(), chosen.curve(), chosen.peak(), chosen.min(), reason);
     }
 
@@ -324,6 +326,13 @@ public class PreBolusPauseOptimizer {
                         && !p.getTimestamp().isBefore(mealAt) && !p.getTimestamp().isAfter(until))
                 .mapToDouble(PredictionPointDTO::getPredictedGlucose).max().orElse(Double.NaN);
         return Double.isNaN(windowed) ? peak(curve) : windowed;
+    }
+
+    /** The curve's last point (meal + 4 h); NaN for an empty curve. */
+    static double landing(List<PredictionPointDTO> curve) {
+        if (curve == null || curve.isEmpty()) return Double.NaN;
+        Double g = curve.get(curve.size() - 1).getPredictedGlucose();
+        return g == null ? Double.NaN : g;
     }
 
     /** Highest predicted point; NaN for an empty curve. */

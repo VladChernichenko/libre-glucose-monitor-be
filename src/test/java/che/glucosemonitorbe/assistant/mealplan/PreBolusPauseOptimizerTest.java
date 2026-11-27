@@ -130,7 +130,7 @@ class PreBolusPauseOptimizerTest {
 
             assertThat(choice.pauseMinutes()).isNotNull();
             assertThat(choice.peak()).isCloseTo(9.0, within(1e-9));
-            assertThat(choice.reason()).endsWith("and 9.0.");
+            assertThat(choice.reason()).contains("to 9.0, 10.0 at +4 h.");
         }
 
         @Test
@@ -170,6 +170,17 @@ class PreBolusPauseOptimizerTest {
 
             assertThat(choice.pauseMinutes()).isZero();
             assertThat(choice.peak()).isCloseTo(7.6, within(1e-9));
+        }
+
+        @Test
+        @DisplayName("the reason says where the forecast goes, not that it stays near 5.5")
+        void reasonStatesRangeAndLanding() {
+            // 2026-11-27: "A 0-min pause keeps the forecast closest to 5.5" under a curve ending at 10.6.
+            forecastByPause(p -> path(m -> m == p + 60 ? 10.7 : m == p + 240 ? 10.6 : 8.0));
+
+            PauseChoice choice = optimizer.choose(USER, NOW, 5.4, 2.0, FAST_CARBS);
+
+            assertThat(choice.reason()).isEqualTo("Eat now; forecast 8.0 to 10.7, 10.6 at +4 h.");
         }
 
         @Test

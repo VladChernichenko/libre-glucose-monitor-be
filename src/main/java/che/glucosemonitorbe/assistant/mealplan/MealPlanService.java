@@ -27,8 +27,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Builds the meal card: nutrition ranges, the calculator's dose (target and IOB from the user's
- * own settings and logged insulin) and the dashboard-forecast pause. Without a fresh CGM reading
+ * Builds the meal card: nutrition ranges, the dose (the calculator's, with target and IOB from the
+ * user's own settings and logged insulin, then re-aimed so the card's own forecast lands on target at
+ * meal + 4 h) and the dashboard-forecast pause. Without a fresh CGM reading
  * only the nutrition is returned. A calculator refusal surfaces as {@code refusalCode} with no pause.
  * A dose whose own forecast (insulin on board + the meal + this dose) goes below
  * {@link HypoThresholds#HYPO_MMOL} is withheld as {@link DosingRefusalReason#FORECAST_LOW}; the pause
@@ -40,6 +41,12 @@ public class MealPlanService {
 
     /** The dose is rounded DOWN to this step: never more insulin than the calculator asked for. */
     static final double DOSE_STEP = 0.5;
+    /**
+     * How many times the dose is re-aimed at its own forecast's 4 h landing. The calculator's dose is
+     * the first guess; the forecast (insulin and carbs on board, timing, the meal's absorption) moves it
+     * by (landing - target) / ISF, because the goal is always to land on target.
+     */
+    static final int LANDING_STEPS = 2;
 
     private final CgmFreshnessService freshness;
     private final GlucoseCalculationsService calculations;
@@ -130,6 +137,21 @@ public class MealPlanService {
 
         MealMacros macros = new MealMacros(carbs, fat, protein, fiber, n.getEstimatedGi());
         PauseChoice pause = optimizer.choose(userId, now, glucose, dose, macros);
+        Double isfNow = s == null ? null : s.getEffectiveIsf(now);
+        if (s != null && isfNow != null && Double.isFinite(isfNow) && isfNow > 0) {
+            for (int step = 0; step < LANDING_STEPS; step++) {
+                Double landing = landing(pause);
+                if (landing == null) break;
+                double aimed = Math.floor(Math.max(0.0, dose + (landing - target) / isfNow) / DOSE_STEP + 1e-9) * DOSE_STEP;
+                if (aimed == dose) break;
+                if (aimed > calculator.maxBolusUnits(s)) {
+                    return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, null,
+                            DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS.name(), null, false);
+                }
+                dose = aimed;
+                pause = optimizer.choose(userId, now, glucose, dose, macros);
+            }
+        }
         if (dose > 0 && pause != null && pause.min() != null && pause.min() < HypoThresholds.HYPO_MMOL) {
             // The calculator only sees carbs, glucose and IOB; the forecast also sees when they act.
             return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, null,
@@ -137,6 +159,12 @@ public class MealPlanService {
         }
         HistoryDose banner = historyDose(userId, n, macros, now, glucose, target, iob, dose, s);
         return new MealPlan(rc, rf, rp, rfi, n.getEstimatedGi(), label, dose, null, pause, false, banner);
+    }
+
+    /** Where the card's forecast ends (meal + 4 h); null without a curve. */
+    private static Double landing(PauseChoice pause) {
+        double g = pause == null ? Double.NaN : PreBolusPauseOptimizer.landing(pause.curve());
+        return Double.isFinite(g) ? g : null;
     }
 
     /**

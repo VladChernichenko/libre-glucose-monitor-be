@@ -11,7 +11,6 @@ import che.glucosemonitorbe.dto.*;
 import che.glucosemonitorbe.repository.CgmReadingRepository;
 import che.glucosemonitorbe.repository.UserRepository;
 import che.glucosemonitorbe.service.GlucoseCalculationsService;
-import che.glucosemonitorbe.service.InsulinCalculatorService;
 import che.glucosemonitorbe.service.UserSettingsService;
 import che.glucosemonitorbe.service.nutrition.FoodCompositionService;
 import che.glucosemonitorbe.service.nutrition.NutritionSnapshot;
@@ -72,7 +71,6 @@ class AssistantMealPrepE2ETest {
     @Autowired private UserRepository userRepository;
     @Autowired private CgmReadingRepository cgmReadingRepository;
     @Autowired private UserSettingsService userSettingsService;
-    @Autowired private InsulinCalculatorService insulinCalculator;
     @Autowired private GlucoseCalculationsService calculations;
     @Autowired private ForecastSnapshotRepository snapshots;
     @Autowired private ObjectMapper objectMapper;
@@ -176,7 +174,7 @@ class AssistantMealPrepE2ETest {
     }
 
     @Test
-    @DisplayName("prepare me for chicken soup with 40 g rye bread: plan = calculator dose + dashboard curve; Took, then Eating now")
+    @DisplayName("prepare me for chicken soup with 40 g rye bread: plan = dose landing on target + dashboard curve; Took, then Eating now")
     void mealPrepEndToEnd() throws Exception {
         when(llm.completeJson(anyString())).thenReturn("{\"intent\":\"MEAL_PREP\",\"items\":["
                 + "{\"name\":\"chicken soup\"},{\"name\":\"rye bread\",\"grams\":40}],\"tags\":[]}");
@@ -197,15 +195,10 @@ class AssistantMealPrepE2ETest {
         assertFalse(plan.get("stale").asBoolean());
         assertEquals(45.0, plan.get("carbs").get("mid").asDouble(), 1e-9);
 
-        // dose = the calculator for the same inputs, rounded down to 0.5 U
-        double raw = insulinCalculator.calculateRecommendedInsulin(InsulinCalculationRequest.builder()
-                .carbs(45.0).currentGlucose(GLUCOSE_MGDL / 18.0).targetGlucose(TARGET).activeInsulin(0.0)
-                .userId(userId.toString())
-                .clientTimeInfo(ClientTimeInfo.builder().timestamp(plannedAt.toString()).build())
-                .build()).getRecommendedInsulin();
-        double dose = Math.floor(Math.max(0, raw) / 0.5 + 1e-9) * 0.5;
+        // dose = aimed so the card's own forecast lands on target at meal + 4 h (2026-11-27), in 0.5 U steps
+        double dose = plan.get("doseUnits").asDouble();
         assertTrue(dose > 0, "test setup should produce a dose");
-        assertEquals(dose, plan.get("doseUnits").asDouble(), 1e-9);
+        assertEquals(0.0, dose % 0.5, 1e-9);
 
         // curve = the dashboard forecast with the dose now and the meal after the chosen pause
         JsonNode pause = plan.get("pause");
@@ -231,6 +224,9 @@ class AssistantMealPrepE2ETest {
             assertEquals(expected.get(i).getTimestamp(), LocalDateTime.parse(curve.get(i).get("timestamp").asText()));
             assertEquals(expected.get(i).getPredictedGlucose(), curve.get(i).get("predictedGlucose").asDouble(), 1e-9);
         }
+        // Rounded down to 0.5 U: lands at most half a step's worth (0.5 U x ISF 2.5) above target.
+        double landing = curve.get(curve.size() - 1).get("predictedGlucose").asDouble();
+        assertTrue(landing >= TARGET - 0.5 && landing <= TARGET + 0.5 * 2.5 + 0.3, "landing " + landing);
         assertTrue(notes().isEmpty(), "planning writes no note");
 
         // a phone clock 3 min fast is rejected before anything is written

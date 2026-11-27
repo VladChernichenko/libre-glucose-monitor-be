@@ -25,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import che.glucosemonitorbe.dto.PredictionPointDTO;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -153,6 +154,60 @@ class MealPlanServiceTest {
                 .thenReturn(new PauseChoice(0, List.of(), 9.0, 3.9, "ok"));
 
         assertThat(service.plan(USER, nutrition, NOW).doseUnits()).isEqualTo(2.0);
+    }
+
+    /** A curve from NOW to +240 min whose last point (the 4 h landing) is {@code landing}. */
+    private static List<PredictionPointDTO> curveLandingAt(double landing) {
+        return List.of(PredictionPointDTO.builder().timestamp(NOW.plusMinutes(5)).predictedGlucose(8.0).build(),
+                PredictionPointDTO.builder().timestamp(NOW.plusMinutes(240)).predictedGlucose(landing).build());
+    }
+
+    /** Forecast landing falls 2.0 mmol/L per unit (the settings' ISF) from 10.6 at 2.0 U. */
+    private void landingFallsWithDose() {
+        when(calculator.maxBolusUnits(any())).thenReturn(20.0);
+        when(optimizer.choose(any(), any(), anyDouble(), anyDouble(), any())).thenAnswer(inv -> {
+            double d = inv.getArgument(3);
+            return new PauseChoice(0, curveLandingAt(10.6 - 2.0 * (d - 2.0)), 9.0, 5.4, "ok");
+        });
+    }
+
+    /** 2026-11-27: the calculator's 2 U left the card's forecast at 10.6 at +4 h; the goal is always target. */
+    @Test
+    void doseIsAimedAtLandingOnTarget() {
+        dose(2.0);
+        landingFallsWithDose();
+
+        MealPlan plan = service.plan(USER, nutrition, NOW);
+
+        // 2 + (10.6 - 5.55) / 2 = 4.525 -> 4.5 U (rounded down), which lands at 5.6.
+        assertThat(plan.doseUnits()).isEqualTo(4.5);
+        assertThat(plan.pause().curve().get(1).getPredictedGlucose()).isCloseTo(5.6, within(1e-9));
+        verify(optimizer).choose(USER, NOW, 8.0, 4.5, new MealMacros(40, 10, 20, 5, 60.0));
+    }
+
+    @Test
+    void doseIsReducedWhenTheForecastLandsBelowTarget() {
+        dose(4.0);
+        when(calculator.maxBolusUnits(any())).thenReturn(20.0);
+        when(optimizer.choose(any(), any(), anyDouble(), anyDouble(), any())).thenAnswer(inv -> {
+            double d = inv.getArgument(3);
+            return new PauseChoice(0, curveLandingAt(4.55 - 2.0 * (d - 4.0)), 9.0, 4.6, "ok");
+        });
+
+        // 4 + (4.55 - 5.55) / 2 = 3.5 U, landing 5.55.
+        assertThat(service.plan(USER, nutrition, NOW).doseUnits()).isEqualTo(3.5);
+    }
+
+    @Test
+    void aLandingDoseAboveMaxBolusIsRefused() {
+        dose(2.0);
+        landingFallsWithDose();
+        when(calculator.maxBolusUnits(any())).thenReturn(3.0);
+
+        MealPlan plan = service.plan(USER, nutrition, NOW);
+
+        assertThat(plan.doseUnits()).isNull();
+        assertThat(plan.refusalCode()).isEqualTo(DosingRefusalReason.DOSE_EXCEEDS_MAX_BOLUS.name());
     }
 
     @Test
